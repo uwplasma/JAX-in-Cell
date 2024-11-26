@@ -2,9 +2,10 @@ from jax import jit
 import jax.numpy as jnp
 from sources import calculate_charge_density
 from boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
+from constants import epsilon_0, speed_of_light
 
 @jit
-def find_E0_by_matrix(xs_n, qs, dx, grid, part_BC_left, part_BC_right):
+def E_from_Poisson_equation(xs_n, qs, dx, grid, part_BC_left, part_BC_right):
     """
     Solve for the electric field at t=0 (E0) using the charge density distribution 
     and applying Gauss's law in a 1D system.
@@ -21,15 +22,14 @@ def find_E0_by_matrix(xs_n, qs, dx, grid, part_BC_left, part_BC_right):
         array: The electric field at each grid point due to the particles, shape (G,).
     """
     # Calculate charge density from particles
-    chargedens = calculate_charge_density(xs_n, qs, dx, grid, part_BC_left, part_BC_right)
+    charge_density = calculate_charge_density(xs_n, qs, dx, grid, part_BC_left, part_BC_right)
     
-    # Construct matrix for solving Poisson equation (Gauss's Law)
-    matrix = jnp.diag(jnp.ones(len(grid))) - jnp.diag(jnp.ones(len(grid)-1), k=-1)
-    matrix = matrix.at[0, -1].set(-1)  # Apply boundary condition (periodic or reflective)
+    # Construct divergence matrix for solving Poisson equation (Gauss's Law)
+    divergence_matrix = jnp.diag(jnp.ones(len(grid)))-jnp.diag(jnp.ones(len(grid)-1),k=-1)
     
     # Solve for the electric field using Poisson's equation in the 1D case
-    E_field_from_matrix = (dx / 8.85e-12) * jnp.linalg.solve(matrix, chargedens)
-    return E_field_from_matrix
+    E_field_from_Poisson = (dx / epsilon_0) * jnp.linalg.solve(divergence_matrix, charge_density)
+    return E_field_from_Poisson
 
 
 @jit
@@ -123,8 +123,8 @@ def field_update1(E_fields, B_fields, dx, dt_2, j, field_BC_left, field_BC_right
         tuple: Updated electric and magnetic fields, each of shape (G, 3).
     """
     # Update the magnetic field (Faraday's law)
-    curl_B = curlB(B_fields, E_fields, dx, dt_2, field_BC_left, field_BC_right, current_t, E0 / 3e8, k)
-    E_fields += dt_2*((3e8**2)*curl_B-(j/8.85e-12))
+    curl_B = curlB(B_fields, E_fields, dx, dt_2, field_BC_left, field_BC_right, current_t, E0 / speed_of_light, k)
+    E_fields += dt_2*((speed_of_light**2)*curl_B-(j/epsilon_0))
 
     # Update the electric field (Ampère's law with Maxwell's correction)
     curl_E = curlE(E_fields, B_fields, dx, dt_2, field_BC_left, field_BC_right, current_t, E0, k)
@@ -158,7 +158,7 @@ def field_update2(E_fields, B_fields, dx, dt_2, j, field_BC_left, field_BC_right
     B_fields -= dt_2*curl_E
 
     # Update the magnetic field (Faraday's law)
-    curl_B = curlB(B_fields, E_fields, dx, dt_2, field_BC_left, field_BC_right, current_t, E0 / 3e8, k)
-    E_fields += dt_2*((3e8**2)*curl_B-(j/8.85e-12))
+    curl_B = curlB(B_fields, E_fields, dx, dt_2, field_BC_left, field_BC_right, current_t, E0 / speed_of_light, k)
+    E_fields += dt_2*((speed_of_light**2)*curl_B-(j/epsilon_0))
 
     return E_fields, B_fields

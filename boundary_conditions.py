@@ -1,5 +1,6 @@
 from jax import jit, vmap
 import jax.numpy as jnp
+from constants import speed_of_light
 
 def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
     """
@@ -166,13 +167,13 @@ def field_ghost_cells_E(field_BC_left, field_BC_right, E_field, B_field, dx, cur
     """
     field_ghost_cell_L = jnp.where(field_BC_left == 0, E_field[-1],
                          jnp.where(field_BC_left == 1, E_field[0],
-                         jnp.where(field_BC_left == 2, jnp.array([0, -2*3e8*B_field[0, 2] - E_field[0, 1], 2*3e8*B_field[0, 1] - E_field[0, 2]]),
-                         jnp.where(field_BC_left == 3, jnp.array([0, E0 * jnp.sin(3e8 * k * current_t), 0]),
+                         jnp.where(field_BC_left == 2, jnp.array([0, -2*speed_of_light*B_field[0, 2] - E_field[0, 1], 2*speed_of_light*B_field[0, 1] - E_field[0, 2]]),
+                         jnp.where(field_BC_left == 3, jnp.array([0, E0 * jnp.sin(speed_of_light * k * current_t), 0]),
                                    jnp.array([0, 0, 0])))))
     field_ghost_cell_R = jnp.where(field_BC_right == 0, E_field[0],
                          jnp.where(field_BC_right == 1, E_field[-1],
-                         jnp.where(field_BC_right == 2, jnp.array([0, 3 * E_field[-1, 1] - 2 * 3e8 * B_field[-1, 2], 3 * E_field[-1, 2] + 2 * 3e8 * B_field[-1, 1]]),
-                         jnp.where(field_BC_right == 3, jnp.array([0, E0 * jnp.sin(3e8 * k * current_t), 0]),
+                         jnp.where(field_BC_right == 2, jnp.array([0, 3 * E_field[-1, 1] - 2 * speed_of_light * B_field[-1, 2], 3 * E_field[-1, 2] + 2 * speed_of_light * B_field[-1, 1]]),
+                         jnp.where(field_BC_right == 3, jnp.array([0, E0 * jnp.sin(speed_of_light * k * current_t), 0]),
                                    jnp.array([0, 0, 0])))))
     return field_ghost_cell_L, field_ghost_cell_R
 
@@ -201,13 +202,13 @@ def field_ghost_cells_B(field_BC_left, field_BC_right, B_field, E_field, dx, cur
     """
     field_ghost_cell_L = jnp.where(field_BC_left == 0, B_field[-1],
                          jnp.where(field_BC_left == 1, B_field[0],
-                         jnp.where(field_BC_left == 2, jnp.array([0, 3 * B_field[0, 1] - (2 / 3e8) * E_field[0, 2], 3 * B_field[0, 2] + (2 / 3e8) * E_field[0, 1]]),
-                         jnp.where(field_BC_left == 3, jnp.array([0, 0, B0 * jnp.sin(3e8 * k * current_t)]),
+                         jnp.where(field_BC_left == 2, jnp.array([0, 3 * B_field[0, 1] - (2 / speed_of_light) * E_field[0, 2], 3 * B_field[0, 2] + (2 / speed_of_light) * E_field[0, 1]]),
+                         jnp.where(field_BC_left == 3, jnp.array([0, 0, B0 * jnp.sin(speed_of_light * k * current_t)]),
                                    jnp.array([0, 0, 0])))))
     field_ghost_cell_R = jnp.where(field_BC_right == 0, B_field[0],
                          jnp.where(field_BC_right == 1, B_field[-1],
-                         jnp.where(field_BC_right == 2, jnp.array([0, -(2 / 3e8) * E_field[-1, 2] - B_field[-1, 1], (2 / 3e8) * E_field[-1, 1] - B_field[-1, 2]]),
-                         jnp.where(field_BC_right == 3, jnp.array([0, 0, -B0 * jnp.sin(3e8 * k * current_t)]),
+                         jnp.where(field_BC_right == 2, jnp.array([0, -(2 / speed_of_light) * E_field[-1, 2] - B_field[-1, 1], (2 / speed_of_light) * E_field[-1, 1] - B_field[-1, 2]]),
+                         jnp.where(field_BC_right == 3, jnp.array([0, 0, -B0 * jnp.sin(speed_of_light * k * current_t)]),
                                    jnp.array([0, 0, 0])))))
     return field_ghost_cell_L, field_ghost_cell_R
 
