@@ -4,7 +4,6 @@ from sources import current_density
 from boundary_conditions import set_BC_positions, set_BC_particles
 from particles import fields_to_particles_grid, boris_step
 from fields import field_update1, field_update2
-from jax.debug import print as jprint
 from jax import vmap
 
 # Constants and simulation parameters

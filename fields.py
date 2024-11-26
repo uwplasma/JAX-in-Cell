@@ -1,5 +1,4 @@
 from jax import jit
-import jax
 import jax.numpy as jnp
 from sources import calculate_charge_density
 from boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
