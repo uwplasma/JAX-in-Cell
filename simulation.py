@@ -1,4 +1,5 @@
 from jax import jit
+from jax import lax
 from jax import vmap
 from tqdm import tqdm
 import jax.numpy as jnp
@@ -176,6 +177,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
 
     # **Update parameters**
     parameters.update({
+        "weight": weight,
         "particle_positions": particle_positions,
         "particle_velocities": particle_velocities,
         "charges": charges,
@@ -193,6 +195,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     })
     
     return parameters
+
 
 @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps'])
 def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350):
@@ -256,19 +259,32 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
     E_energy_over_time = jnp.zeros((total_steps,))
     charge_density_over_time = jnp.zeros((total_steps, grid.size))
 
-    # **Main simulation loop**
-    for i in tqdm(range(total_steps), desc="Simulation Progress"):
-        # Compute current density J from particle positions and velocities
+    initial_carry = (
+        E_field, B_field, positions_minus1_2, positions,
+        positions_plus1_2, velocities, qs, ms, q_ms,  # Include particle properties
+        (E_field_over_time, E_energy_over_time, charge_density_over_time)
+    )
+
+    def simulation_step(carry, step_index):
+        # Unpack carry
+        (
+            E_field, B_field, positions_minus1_2, positions,
+            positions_plus1_2, velocities, qs, ms, q_ms,  # Unpack particle properties
+            diagnostics
+        ) = carry
+
+        # Compute current density
         J = current_density(
-            positions_minus1_2, positions, positions_plus1_2, velocities,
-            qs, dx, dt, grid, grid[0] - dx / 2,
-            particle_BC_left, particle_BC_right
+            positions_minus1_2, positions, positions_plus1_2, velocities, qs,
+            dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right
         )
 
-        # Half-step field update: E and B fields
-        E_field, B_field = field_update1(E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right)
+        # First half-step field update
+        E_field, B_field = field_update1(
+            E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right
+        )
 
-        # Add external fields (if any)
+        # Add external fields
         total_E = E_field + parameters["external_electric_field"]
         total_B = B_field + parameters["external_magnetic_field"]
 
@@ -285,40 +301,55 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
             dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x
         )
 
-        # Apply boundary conditions to particles
+        # Apply boundary conditions
         positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
             positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
             *box_size, particle_BC_left, particle_BC_right
         )
         positions_plus1 = set_BC_positions(
-            positions_plus3_2 - (dt / 2) * velocities_plus1,
-            qs, dx, grid, *box_size, particle_BC_left, particle_BC_right
-        )
-
-        # Update current density J at full step
-        J = current_density(
-            positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-            qs, dx, dt, grid, grid[0] - dx / 2,
+            positions_plus3_2 - (dt / 2) * velocities_plus1, qs, dx, grid, *box_size,
             particle_BC_left, particle_BC_right
         )
 
         # Second half-step field update
-        E_field, B_field = field_update2(E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right)
+        J = current_density(
+            positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
+            qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right
+        )
+        E_field, B_field = field_update2(
+            E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right
+        )
 
-        # Update positions and velocities for the next iteration
-        positions_minus1_2 = positions_plus1_2
-        positions_plus1_2  = positions_plus3_2
+        # Update positions and velocities
+        positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2
         velocities = velocities_plus1
-        positions  = positions_plus1
+        positions = positions_plus1
 
-        # **Diagnostics**
-        E_field_over_time = E_field_over_time.at[i].set(E_field)
-        E_energy_over_time = E_energy_over_time.at[i].set(
+        # Diagnostics
+        E_field_over_time, E_energy_over_time, charge_density_over_time = diagnostics
+        E_field_over_time = E_field_over_time.at[step_index].set(E_field)
+        E_energy_over_time = E_energy_over_time.at[step_index].set(
             jnp.sum(0.5 * epsilon_0 * vmap(jnp.dot)(E_field, E_field) / dx)
         )
-        charge_density_over_time = charge_density_over_time.at[i].set(
+        charge_density_over_time = charge_density_over_time.at[step_index].set(
             calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
         )
+
+        # Return updated carry
+        carry = (
+            E_field, B_field, positions_minus1_2, positions,
+            positions_plus1_2, velocities, qs, ms, q_ms,  # Update particle properties
+            (E_field_over_time, E_energy_over_time, charge_density_over_time)
+        )
+        return carry, None
+
+    # Run simulation using lax.scan
+    final_carry, _ = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
+
+    # Extract diagnostics
+    _, _, _, _, _, _, _, _, _, diagnostics = final_carry
+    E_field_over_time, E_energy_over_time, charge_density_over_time = diagnostics
+
 
     # **Output results**
     output = {
