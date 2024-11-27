@@ -73,7 +73,7 @@ def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, b
     )
 
     # Nullify charges and charge-to-mass ratio for absorbing BCs
-    q = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q)
+    q   = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q)
     q_m = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q_m)
 
     return jnp.array([x_n0, x_n1, x_n2]), v_n, q, q_m
@@ -144,7 +144,7 @@ def set_BC_positions(xs_n, qs, dx, grid, box_size_x, box_size_y, box_size_z, BC_
 
 
 @jit
-def field_ghost_cells_E(field_BC_left, field_BC_right, E_field, B_field, dx, current_t, E0, k):
+def field_ghost_cells_E(field_BC_left, field_BC_right, E_field, B_field):
     """
     Set the ghost cells for the electric field at the boundaries of the simulation grid. 
     The ghost cells are used to apply boundary conditions and extend the field in the 
@@ -168,18 +168,16 @@ def field_ghost_cells_E(field_BC_left, field_BC_right, E_field, B_field, dx, cur
     field_ghost_cell_L = jnp.where(field_BC_left == 0, E_field[-1],
                          jnp.where(field_BC_left == 1, E_field[0],
                          jnp.where(field_BC_left == 2, jnp.array([0, -2*speed_of_light*B_field[0, 2] - E_field[0, 1], 2*speed_of_light*B_field[0, 1] - E_field[0, 2]]),
-                         jnp.where(field_BC_left == 3, jnp.array([0, E0 * jnp.sin(speed_of_light * k * current_t), 0]),
-                                   jnp.array([0, 0, 0])))))
+                                   jnp.array([0, 0, 0]))))
     field_ghost_cell_R = jnp.where(field_BC_right == 0, E_field[0],
                          jnp.where(field_BC_right == 1, E_field[-1],
                          jnp.where(field_BC_right == 2, jnp.array([0, 3 * E_field[-1, 1] - 2 * speed_of_light * B_field[-1, 2], 3 * E_field[-1, 2] + 2 * speed_of_light * B_field[-1, 1]]),
-                         jnp.where(field_BC_right == 3, jnp.array([0, E0 * jnp.sin(speed_of_light * k * current_t), 0]),
-                                   jnp.array([0, 0, 0])))))
+                                   jnp.array([0, 0, 0]))))
     return field_ghost_cell_L, field_ghost_cell_R
 
 
 @jit
-def field_ghost_cells_B(field_BC_left, field_BC_right, B_field, E_field, dx, current_t, B0, k):
+def field_ghost_cells_B(field_BC_left, field_BC_right, B_field, E_field):
     """
     Set the ghost cells for the magnetic field at the boundaries of the simulation grid. 
     The ghost cells are used to apply boundary conditions and extend the magnetic field 
@@ -192,10 +190,6 @@ def field_ghost_cells_B(field_BC_left, field_BC_right, B_field, E_field, dx, cur
                               0: periodic, 1: reflective, 2: absorbing, 3: custom.
         B_field (array): Magnetic field values at each grid point, shape (G, 3).
         E_field (array): Electric field values at each grid point, shape (G, 3).
-        dx (float): Grid spacing in meters.
-        current_t (float): Current simulation time.
-        B0 (float): Amplitude of the magnetic field used in custom boundary conditions.
-        k (float): Wave number (related to the frequency of the wave).
 
     Returns:
         tuple: The magnetic field ghost cells at the left and right boundaries, each of shape (3,).
@@ -203,17 +197,15 @@ def field_ghost_cells_B(field_BC_left, field_BC_right, B_field, E_field, dx, cur
     field_ghost_cell_L = jnp.where(field_BC_left == 0, B_field[-1],
                          jnp.where(field_BC_left == 1, B_field[0],
                          jnp.where(field_BC_left == 2, jnp.array([0, 3 * B_field[0, 1] - (2 / speed_of_light) * E_field[0, 2], 3 * B_field[0, 2] + (2 / speed_of_light) * E_field[0, 1]]),
-                         jnp.where(field_BC_left == 3, jnp.array([0, 0, B0 * jnp.sin(speed_of_light * k * current_t)]),
-                                   jnp.array([0, 0, 0])))))
+                                   jnp.array([0, 0, 0]))))
     field_ghost_cell_R = jnp.where(field_BC_right == 0, B_field[0],
                          jnp.where(field_BC_right == 1, B_field[-1],
                          jnp.where(field_BC_right == 2, jnp.array([0, -(2 / speed_of_light) * E_field[-1, 2] - B_field[-1, 1], (2 / speed_of_light) * E_field[-1, 1] - B_field[-1, 2]]),
-                         jnp.where(field_BC_right == 3, jnp.array([0, 0, -B0 * jnp.sin(speed_of_light * k * current_t)]),
-                                   jnp.array([0, 0, 0])))))
+                                   jnp.array([0, 0, 0]))))
     return field_ghost_cell_L, field_ghost_cell_R
 
 @jit
-def field_2_ghost_cells(part_BC_left, part_BC_right, field):
+def field_2_ghost_cells(field_BC_left, field_BC_right, field):
     """
     This function adds ghost cells to the field array, which is used for interpolation when 
     accessing field values at particle positions. Ghost cells are added to the left and 
@@ -225,8 +217,8 @@ def field_2_ghost_cells(part_BC_left, part_BC_right, field):
     the simulation domain.
 
     Args:
-        part_BC_left (array): Boundary condition values for the left boundary of the particle grid, shape (N,).
-        part_BC_right (array): Boundary condition values for the right boundary of the particle grid, shape (N,).
+        field_BC_left  (array): Boundary condition values for the left boundary of the particle grid, shape (N,).
+        field_BC_right (array): Boundary condition values for the right boundary of the particle grid, shape (N,).
         field (array): The field values on the grid, shape (G, 3), where G is the number of grid points.
 
     Returns:
@@ -236,18 +228,18 @@ def field_2_ghost_cells(part_BC_left, part_BC_right, field):
             - field_ghost_cell_R (array): Ghost cell field values for the right boundary, shape (3,).
     """
 
-    field_ghost_cell_L2 = jnp.where(part_BC_left==0,field[-2],
-                          jnp.where(part_BC_left==1,field[1],
-                          jnp.where(part_BC_left==2,jnp.array([0,0,0]),
+    field_ghost_cell_L2 = jnp.where(field_BC_left==0,field[-2],
+                          jnp.where(field_BC_left==1,field[1],
+                          jnp.where(field_BC_left==2,jnp.array([0,0,0]),
                                     jnp.array([0,0,0]))))
-    field_ghost_cell_L1 = jnp.where(part_BC_left==0,field[-1],
-                          jnp.where(part_BC_left==1,field[0],
-                          jnp.where(part_BC_left==2,jnp.array([0,0,0]),
+    field_ghost_cell_L1 = jnp.where(field_BC_left==0,field[-1],
+                          jnp.where(field_BC_left==1,field[0],
+                          jnp.where(field_BC_left==2,jnp.array([0,0,0]),
                                     jnp.array([0,0,0]))))
     
-    field_ghost_cell_R = jnp.where(part_BC_right==0,field[0],
-                         jnp.where(part_BC_right==1,field[-1],
-                         jnp.where(part_BC_right==2,jnp.array([0,0,0]),
+    field_ghost_cell_R = jnp.where(field_BC_right==0,field[0],
+                         jnp.where(field_BC_right==1,field[-1],
+                         jnp.where(field_BC_right==2,jnp.array([0,0,0]),
                                    jnp.array([0,0,0]))))
 
     return field_ghost_cell_L2, field_ghost_cell_L1, field_ghost_cell_R
