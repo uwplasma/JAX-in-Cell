@@ -24,7 +24,7 @@ total_steps            = 100 # Total number of time steps
 for i in range(3):
     start = time.time()
     output = block_until_ready(simulation(parameters_float, number_grid_points=number_grid_points, number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps))
-    print(f"Simulation time: {time.time()-start} seconds has a mean E energy of {jnp.mean(output['E_energy'])}")
+    print(f"Run #{i+1}: Simulation time: {time.time()-start} seconds has a mean E energy of {jnp.mean(output['E_energy'])}")
 
 # Plot the results
 plot_results(output)
