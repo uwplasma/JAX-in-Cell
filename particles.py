@@ -4,7 +4,7 @@ from boundary_conditions import field_2_ghost_cells
 
 
 @jit
-def fields_to_particles_grid(x_n,field,dx,grid,grid_start,part_BC_left,part_BC_right):
+def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):
     """
     This function retrieves the electric or magnetic field values at particle positions 
     using a field interpolation scheme. The function first adds ghost cells to the field 
@@ -17,14 +17,14 @@ def fields_to_particles_grid(x_n,field,dx,grid,grid_start,part_BC_left,part_BC_r
         dx (float): The spatial grid spacing.
         grid (array): The grid positions where the field is defined, shape (G,).
         grid_start (float): The starting position of the grid (usually the left boundary).
-        part_BC_left (int): Boundary condition for the left side of the particle grid.
-        part_BC_right (int): Boundary condition for the right side of the particle grid.
+        field_BC_left  (int): Boundary condition for the left side of the particle grid.
+        field_BC_right (int): Boundary condition for the right side of the particle grid.
 
     Returns:
         array: The interpolated field values at the particle positions, shape (N,).
     """
     # Add ghost cells for the boundaries using provided boundary conditions
-    ghost_cell_L1, ghost_cell_L2, ghost_cell_R = field_2_ghost_cells(part_BC_left,part_BC_right,field)
+    ghost_cell_L1, ghost_cell_L2, ghost_cell_R = field_2_ghost_cells(field_BC_left,field_BC_right,field)
     field = jnp.insert(field,0,ghost_cell_L2,axis=0)
     field = jnp.insert(field,0,ghost_cell_L1,axis=0)
     field = jnp.append(field,jnp.array([ghost_cell_R]),axis=0)

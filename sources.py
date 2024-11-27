@@ -3,7 +3,7 @@ from jax import jit
 from jax.lax import fori_loop
 
 @jit
-def charge_density_BCs(BC_left, BC_right, position, dx, grid, charge):
+def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, charge):
     """
     Compute the charge contribution to the boundary points based on particle positions and boundary conditions.
 
@@ -32,18 +32,18 @@ def charge_density_BCs(BC_left, BC_right, position, dx, grid, charge):
 
     # Apply boundary conditions
     charge_left = jnp.select(
-        [BC_left == 0, BC_left == 1, BC_left == 2],
+        [particle_BC_left == 0, particle_BC_left == 1, particle_BC_left == 2],
         [extra_charge_right, extra_charge_left, 0]
     )
     charge_right = jnp.select(
-        [BC_right == 0, BC_right == 1, BC_right == 2],
+        [particle_BC_right == 0, particle_BC_right == 1, particle_BC_right == 2],
         [extra_charge_left, extra_charge_right, 0]
     )
 
     return charge_left, charge_right
 
 @jit
-def single_particle_charge_density(x, q, dx, grid, BC_left, BC_right):
+def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC_right):
     """
     Computes the charge density contribution of a single particle to the grid using a 
     quadratic particle shape function.
@@ -66,13 +66,13 @@ def single_particle_charge_density(x, q, dx, grid, BC_left, BC_right):
                                     jnp.zeros(len(grid))))
 
     # Handle boundary conditions
-    chargedens_for_L, chargedens_for_R = charge_density_BCs(BC_left, BC_right, x, dx, grid, q)
+    chargedens_for_L, chargedens_for_R = charge_density_BCs(particle_BC_left, particle_BC_right, x, dx, grid, q)
     grid_BCs = grid_noBCs.at[0].set(chargedens_for_L + grid_noBCs[0])
     grid_BCs = grid_BCs.at[-1].set(chargedens_for_R + grid_BCs[-1])
     return grid_BCs
 
 @jit
-def calculate_charge_density(xs_n, qs, dx, grid, BC_left, BC_right):
+def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right):
     """
     Computes the total charge density on the grid by summing contributions from all particles.
 
@@ -90,14 +90,14 @@ def calculate_charge_density(xs_n, qs, dx, grid, BC_left, BC_right):
     chargedens = jnp.zeros(len(grid))
 
     def chargedens_update(i, chargedens):
-        chargedens += single_particle_charge_density(xs_n[i, 0], qs[i, 0], dx, grid, BC_left, BC_right)
+        chargedens += single_particle_charge_density(xs_n[i, 0], qs[i, 0], dx, grid, particle_BC_left, particle_BC_right)
         return chargedens
 
     chargedens = fori_loop(0, len(xs_n), chargedens_update, chargedens)
     return chargedens
 
 @jit
-def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, grid_start, BC_left, BC_right):
+def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, grid_start, particle_BC_left, particle_BC_right):
     """
     Computes the current density `j` on the grid from particle motion.
 
@@ -129,8 +129,8 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
 
         # Compute the charge density difference over time
         diff_chargedens_1particle_whole = (
-            single_particle_charge_density(x_nplushalf, q, dx, grid, BC_left, BC_right) -
-            single_particle_charge_density(x_nminushalf, q, dx, grid, BC_left, BC_right)
+            single_particle_charge_density(x_nplushalf,  q, dx, grid, particle_BC_left, particle_BC_right) -
+            single_particle_charge_density(x_nminushalf, q, dx, grid, particle_BC_left, particle_BC_right)
         ) / dt
 
         #Sweep only cells -3 to 2 relative to particle's initial position. 
@@ -166,7 +166,7 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
         x_n = xs_n[i, 0]
         q = qs[i, 0]
         vy_n = vs_n[i, 1]
-        chargedens = single_particle_charge_density(x_n, q, dx, grid, BC_left, BC_right)
+        chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
         jy += chargedens * vy_n
         return jy
 
@@ -176,7 +176,7 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
         x_n = xs_n[i, 0]
         q = qs[i, 0]
         vz_n = vs_n[i, 2]
-        chargedens = single_particle_charge_density(x_n, q, dx, grid, BC_left, BC_right)
+        chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
         jz += chargedens * vz_n
         return jz
 
