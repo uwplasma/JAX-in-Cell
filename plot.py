@@ -10,8 +10,8 @@ def plot_results(output):
     box_size_x = output["length"]
     total_steps = output["total_steps"]
     sqrtmime = jnp.sqrt(mass_proton/mass_electron)
-    max_velocity_electrons = max(1.2*jnp.max(output['velocity_electrons']),                                       5 * jnp.abs(v_th) + jnp.abs(output["electron_drift_speed"]))
-    max_velocity_ions      = max(1.2*jnp.max(output['velocity_ions']     ), jnp.sqrt(mass_electron/mass_proton) * 5 * jnp.abs(v_th) + jnp.abs(output["ion_drift_speed"]))
+    max_velocity_electrons = max(1.2*jnp.max(output['velocity_electrons']),                                       5   * jnp.abs(v_th) + jnp.abs(output["electron_drift_speed"]))
+    max_velocity_ions      = max(1.0*jnp.max(output['velocity_ions']     ), jnp.sqrt(mass_electron/mass_proton) * 0.3 * jnp.abs(v_th) + jnp.abs(output["ion_drift_speed"]))
     
     fig, axes = plt.subplots(2, 4, figsize=(16, 7))
     plt.subplots_adjust(hspace=0.7, wspace=0.4)
@@ -32,10 +32,10 @@ def plot_results(output):
     axes[0, 1].set(title='Charge Density', xlabel='Position (m)', ylabel='Time (s)')
     fig.colorbar(im2, ax=axes[0, 1], label='Charge density (C/m³)')
     
-    # Mean charge density
+    # Mean charge density and energy error
     total_energy = output["electric_field_energy"] + output["magnetic_field_energy"] + output["kinetic_energy"]
-    axes[0, 2].plot(output["time_array"], jnp.abs(jnp.mean(output["charge_density"], axis=-1)), label='Mean charge density (C/m³)')
-    axes[0, 2].plot(output["time_array"], jnp.abs(total_energy-total_energy[0])/total_energy[0], label='Relative energy error')
+    axes[0, 2].plot(output["time_array"][3:], jnp.abs(jnp.mean(output["charge_density"], axis=-1))[3:], label='Mean charge density (C/m³)')
+    axes[0, 2].plot(output["time_array"][3:], jnp.abs(total_energy[3:]-total_energy[3])/total_energy[3], label='Relative energy error')
     axes[0, 2].set(title='Mean Charge Density and Energy Error', xlabel='Time (s)', ylabel='Charge density/Energy error', yscale='log')
     axes[0, 2].legend()
 
@@ -72,11 +72,12 @@ def plot_results(output):
         axes[1, 0].legend(loc='lower right')
         
         axes[1, 1].clear()
-        axes[1, 1].hist(         output['velocity_electrons'][frame, :, 0], jnp.linspace(-max_velocity_electrons    , max_velocity_electrons    , len(grid) + 1), color='red' , label='electrons'      , alpha=0.5)
-        axes[1, 1].hist(sqrtmime*output['velocity_ions'     ][frame, :, 0], jnp.linspace(-max_velocity_ions*sqrtmime, max_velocity_ions*sqrtmime, len(grid) + 1), color='blue', label='ions*mass_ratio', alpha=0.5)
+        me_over_mi = max_velocity_electrons / max_velocity_ions
+        axes[1, 1].hist(           output['velocity_electrons'][frame, :, 0], jnp.linspace(-max_velocity_electrons      , max_velocity_electrons      , len(grid) + 1), color='red' , label='electrons'      , alpha=0.5)
+        axes[1, 1].hist(me_over_mi*output['velocity_ions'     ][frame, :, 0], jnp.linspace(-max_velocity_ions*me_over_mi, max_velocity_ions*me_over_mi, len(grid) + 1), color='blue', label=f'ions*{me_over_mi:.1e}', alpha=0.5)
         axes[1, 1].set(title=f'Velocity Distribution at timestep {frame}/{total_steps}', xlabel='Velocity (m/s)', ylabel='Number of particles')
         axes[1, 1].set_ylim(0, max_y_all_frames_velocities)
-        axes[1, 1].set_xlim(-1.2*max(max_velocity_electrons, sqrtmime*max_velocity_ions), 1.2*max(max_velocity_electrons, sqrtmime*max_velocity_ions))
+        axes[1, 1].set_xlim(-max_velocity_electrons, max_velocity_electrons)
         axes[1, 1].legend(loc='upper right')
         
         axes[1, 2].clear()
