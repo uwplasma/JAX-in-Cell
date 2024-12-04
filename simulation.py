@@ -1,7 +1,8 @@
-from jax import lax, jit, vmap
 import jax.numpy as jnp
+from jax.lax import cond, select
 from jax.random import normal
 from functools import partial
+from jax import lax, jit, vmap
 from jax.debug import print as jprint
 from jax.random import PRNGKey, uniform
 from particles import fields_to_particles_grid, boris_step
@@ -50,6 +51,7 @@ def initialize_simulation_parameters(user_parameters):
         "ion_drift_speed":      0,              # Drift speed of ions
         "velocity_plus_minus_electrons": False,  # create two groups of electrons moving in opposite directions
         "velocity_plus_minus_ions": False,       # create two groups of electrons moving in opposite directions
+        "print_info": True,                     # Print information about the simulation
         
         # Boundary conditions
         "particle_BC_left":  0,                 # Left boundary condition for particles
@@ -72,7 +74,7 @@ def initialize_simulation_parameters(user_parameters):
 
     return parameters
 
-def initialize_particles_fields(parameters_float, number_grid_points=50, number_pseudoelectrons=500):
+def initialize_particles_fields(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
     
@@ -165,12 +167,33 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
         mass_proton   * weight * jnp.ones((number_pseudoelectrons, 1))
     ), axis=0)
     charge_to_mass_ratios = charges / masses
-    
-    # **Fields Initialization**
+
     # Grid setup
     dx = length / number_grid_points
     grid = jnp.linspace(-length / 2 + dx / 2, length / 2 - dx / 2, number_grid_points)
     dt = parameters["CFL_factor"] * dx / speed_of_light
+
+    # Print information about the simulation
+    plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electron**2)/jnp.sqrt(mass_electron)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
+
+    cond(parameters["print_info"],
+        lambda _: jprint((
+            # f"Number of pseudoelectrons: {number_pseudoelectrons}\n"
+            # f"Number of grid points: {number_grid_points}\n"
+            "Length of the simulation box: {:.2e} Debye lengths\n"
+            "Density of electrons: {:.2e} m^-3\n"
+            "Electron temperature: {:.2e} eV\n"
+            "Ion temperature: {:.2e} eV\n"
+            "Debye length: {:.2e}m\n"
+            "Pseudoparticles per cell: {:.2e}\n"
+            "Steps at each plasma frequency: {:.2e}\n"
+            "Total time: {:.2e} / plasma frequency\n"
+        ),length/(Debye_length_per_dx*dx),number_pseudoelectrons * weight / length,
+        -mass_electron * vth_electrons**2 / 2 / charge_electron, -mass_proton * vth_ions**2 / 2 / charge_electron,
+        Debye_length_per_dx*dx, number_pseudoelectrons / number_grid_points, 1/(plasma_frequency * dt), dt * plasma_frequency * total_steps
+        ), lambda _: None, operand=None)
+    
+    # **Fields Initialization**
     
     # Electric field initialized to same perturbation as particle positions
     # E_field = jnp.zeros((grid.size, 3))
@@ -205,6 +228,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
         "external_magnetic_field": parameters["external_magnetic_field_value"]*jnp.ones((number_grid_points, 3)),
         "number_pseudoelectrons": number_pseudoelectrons,
         "number_grid_points": number_grid_points,
+        "plasma_frequency": plasma_frequency,
     })
     
     return parameters
@@ -233,7 +257,8 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
     output : dict
     """
     # **Initialize simulation parameters**
-    parameters = initialize_particles_fields(parameters_float, number_grid_points=number_grid_points, number_pseudoelectrons=number_pseudoelectrons)
+    parameters = initialize_particles_fields(parameters_float, number_grid_points=number_grid_points,
+                                             number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps)
 
     # Extract parameters for convenience
     dx = parameters["dx"]

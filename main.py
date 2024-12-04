@@ -10,6 +10,8 @@ import jax.numpy as jnp
 parameters_float = {
 "length"                       : 1e-2, # dimensions of the simulation box in (x, y, z)
 "amplitude_perturbation_x"     : 1e-1, # amplitude of sinusoidal perturbation in x
+# "amplitude_perturbation_x"     : 1e-6, # Two-Stream (amplitude of sinusoidal perturbation in x)
+"wavenumber_perturbation_x_factor": 1,  # Wavenumber of sinusoidal perturbation in x (factor of 2pi/length)
 "grid_points_per_Debye_length" : 9,    # dx over Debye length
 "vth_electrons_over_c"         : 0.05, # thermal velocity of electrons over speed of light
 "ion_temperature_over_electron_temperature": 1, # Temperature of ions over temperature of electrons
@@ -18,11 +20,12 @@ parameters_float = {
 # "velocity_plus_minus_electrons"  : False, # create two groups of electrons moving in opposite directions
 "electron_drift_speed" : 1e8,            # Two-Stream (drift speed of electrons)
 "velocity_plus_minus_electrons"  : True, # Two-Stream (create two groups of electrons moving in opposite directions)
+"print_info"           : True, # print information about the simulation
 }
 
 number_grid_points     = 20  # Number of grid points
 number_pseudoelectrons = 2000 # Number of pseudoelectrons
-total_steps            = 400 # Total number of time steps
+total_steps            = 300 # Total number of time steps
 
 n_simulations = 1
 

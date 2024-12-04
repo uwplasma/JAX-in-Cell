@@ -14,7 +14,7 @@ def diagnostics(output):
     # array_to_do_fft_on = charge_density_over_time[:,len(grid)//2]
     array_to_do_fft_on = E_field_over_time[:,len(grid)//2,0]
     array_to_do_fft_on = (array_to_do_fft_on-jnp.mean(array_to_do_fft_on))/jnp.max(array_to_do_fft_on)
-    plasma_frequency = jnp.sqrt(output['number_pseudoelectrons'] * output['weight'] * charge_electron**2)/jnp.sqrt(mass_electron)/jnp.sqrt(epsilon_0)/jnp.sqrt(output['length'])
+    plasma_frequency = output['plasma_frequency']
 
     fft_values = fft(array_to_do_fft_on)[:total_steps//2]
     freqs = fftfreq(total_steps, d=dt)[:total_steps//2]*2*jnp.pi # d=dt specifies the time step
