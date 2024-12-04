@@ -1,7 +1,4 @@
-from jax import jit
-from jax import lax
-from jax import vmap
-from tqdm import tqdm
+from jax import lax, jit, vmap
 import jax.numpy as jnp
 from jax.random import normal
 from functools import partial
@@ -12,6 +9,7 @@ from sources import current_density, calculate_charge_density
 from boundary_conditions import set_BC_positions, set_BC_particles
 from fields import field_update1, field_update2, E_from_Poisson_equation
 from constants import speed_of_light, epsilon_0, charge_electron, charge_proton, mass_electron, mass_proton
+from jax_tqdm import scan_tqdm
 
 def initialize_simulation_parameters(user_parameters):
     """
@@ -40,24 +38,28 @@ def initialize_simulation_parameters(user_parameters):
     # Define all default parameters in a single dictionary
     default_parameters = {
         # Basic simulation settings
-        "length": 1e-2,                       # Dimensions of the simulation box
-        "amplitude_perturbation_x": 0.1,      # Amplitude of sinusoidal perturbation in x
-        "wavenumber_perturbation_x": lambda p: 2 * jnp.pi / p["length"], # Wavenumber of sinusoidal perturbation in x
-        "grid_points_per_Debye_length": 9,    # dx over Debye length
-        "vth_electrons_over_c": 0.05,         # Thermal velocity of electrons over speed of light
-        "CFL_factor": 0.5,                    # dt * speed_of_light / dx
-        "seed": 1701,                         # Random seed for reproducibility
+        "length": 1e-2,                         # Dimensions of the simulation box
+        "amplitude_perturbation_x": 0.1,        # Amplitude of sinusoidal perturbation in x
+        "wavenumber_perturbation_x_factor": 1,  # Wavenumber of sinusoidal perturbation in x (factor of 2pi/length)
+        "grid_points_per_Debye_length": 9,      # dx over Debye length
+        "vth_electrons_over_c": 0.05,           # Thermal velocity of electrons over speed of light
+        "ion_temperature_over_electron_temperature": 1, # Temperature ratio of ions to electrons
+        "CFL_factor": 0.5,                      # dt * speed_of_light / dx
+        "seed": 1701,                           # Random seed for reproducibility
+        "electron_drift_speed": 0,              # Drift speed of electrons
+        "ion_drift_speed":      0,              # Drift speed of ions
+        "velocity_plus_minus_electrons": False,  # create two groups of electrons moving in opposite directions
+        "velocity_plus_minus_ions": False,       # create two groups of electrons moving in opposite directions
         
         # Boundary conditions
-        "particle_BC_left": 0,                # Left boundary condition for particles
-        "particle_BC_right": 0,               # Right boundary condition for particles
-        "field_BC_left": 0,                   # Left boundary condition for fields
-        "field_BC_right": 0,                  # Right boundary condition for fields
+        "particle_BC_left":  0,                 # Left boundary condition for particles
+        "particle_BC_right": 0,                 # Right boundary condition for particles
+        "field_BC_left":     0,                 # Left boundary condition for fields
+        "field_BC_right":    0,                 # Right boundary condition for fields
         
         # External fields (initialized to zero)
         "external_electric_field_value": 0, 
         "external_magnetic_field_value": 0,
-        
     }
 
     # Merge user-provided parameters into the default dictionary
@@ -106,9 +108,11 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     
     # **Particle Positions**
     # Electron positions: Add random y, z positions to x initialized by perturbation
+    
+    wavenumber_perturbation_x = parameters["wavenumber_perturbation_x_factor"] * 2 * jnp.pi / length
 
     electron_xs = jnp.linspace(-length / 2, length / 2, number_pseudoelectrons)
-    electron_xs-= (parameters["amplitude_perturbation_x"] / parameters["wavenumber_perturbation_x"]) * jnp.sin(parameters["wavenumber_perturbation_x"] * electron_xs)
+    electron_xs-= (parameters["amplitude_perturbation_x"] / wavenumber_perturbation_x) * jnp.sin(wavenumber_perturbation_x * electron_xs)
     electron_ys = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2)
     electron_zs = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2)
     electron_positions = jnp.stack((electron_xs, electron_ys, electron_zs), axis=1)
@@ -119,15 +123,24 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     ion_zs = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2)
     ion_positions = jnp.stack((ion_xs, ion_ys, ion_zs), axis=1)
 
-    particle_positions = jnp.concatenate((electron_positions, ion_positions))
+    positions = jnp.concatenate((electron_positions, ion_positions))
     
     # **Particle Velocities**
     # Thermal velocities (Maxwell-Boltzmann distribution)
     vth_electrons = parameters["vth_electrons_over_c"] * speed_of_light
-    vth_ions = vth_electrons * jnp.sqrt(mass_electron / mass_proton)
-    v_electrons = vth_electrons / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, 3))
-    v_ions = vth_ions / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, 3))
-    particle_velocities = jnp.concatenate((v_electrons, v_ions))
+    v_electrons_x = vth_electrons / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed"]
+    v_electrons_x = jnp.where(parameters["velocity_plus_minus_electrons"], v_electrons_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_x)
+    v_electrons_y = jnp.zeros((number_pseudoelectrons, ))
+    v_electrons_z = jnp.zeros((number_pseudoelectrons, ))
+    electron_velocities = jnp.stack((v_electrons_x, v_electrons_y, v_electrons_z), axis=1)
+    vth_ions = jnp.sqrt(parameters["ion_temperature_over_electron_temperature"]) * vth_electrons * jnp.sqrt(mass_electron / mass_proton)
+    v_ions_x = vth_ions / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed"]
+    v_ions_x = jnp.where(parameters["velocity_plus_minus_ions"], v_ions_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_x)
+    v_ions_y = jnp.zeros((number_pseudoelectrons, ))
+    v_ions_z = jnp.zeros((number_pseudoelectrons, ))
+    ion_velocities = jnp.stack((v_ions_x, v_ions_y, v_ions_z), axis=1)
+    
+    velocities = jnp.concatenate((electron_velocities, ion_velocities))
 
     # **Particle Charges and Masses**
     # Pseudoparticle weights -> density of real particles = number_pseudoelectrons * weight / length, put in terms of Debye length
@@ -145,11 +158,11 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     )
     charges = jnp.concatenate((
         charge_electron * weight * jnp.ones((number_pseudoelectrons, 1)),
-        charge_proton * weight * jnp.ones((number_pseudoelectrons, 1))
+        charge_proton   * weight * jnp.ones((number_pseudoelectrons, 1))
     ), axis=0)
     masses = jnp.concatenate((
         mass_electron * weight * jnp.ones((number_pseudoelectrons, 1)),
-        mass_proton * weight * jnp.ones((number_pseudoelectrons, 1))
+        mass_proton   * weight * jnp.ones((number_pseudoelectrons, 1))
     ), axis=0)
     charge_to_mass_ratios = charges / masses
     
@@ -170,7 +183,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     B_field = jnp.zeros((grid.size, 3))
     
     # Electric field initialization using Poisson's equation
-    E_field_x = E_from_Poisson_equation(particle_positions, charges, dx, grid, 0, 0)
+    E_field_x = E_from_Poisson_equation(positions, charges, dx, grid, 0, 0)
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
     
     fields = (E_field, B_field)
@@ -178,8 +191,8 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     # **Update parameters**
     parameters.update({
         "weight": weight,
-        "particle_positions": particle_positions,
-        "particle_velocities": particle_velocities,
+        "initial_positions": positions,
+        "initial_velocities": velocities,
         "charges": charges,
         "masses": masses,
         "charge_to_mass_ratios": charge_to_mass_ratios,
@@ -218,12 +231,7 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
     Returns:
     -------
     output : dict
-        Contains the following simulation results:
-        - "E_field": Time evolution of the electric field on the grid.
-        - "E_energy": Time evolution of the total electric field energy.
-        - "charge_density": Time evolution of the charge density on the grid.
     """
-
     # **Initialize simulation parameters**
     parameters = initialize_particles_fields(parameters_float, number_grid_points=number_grid_points, number_pseudoelectrons=number_pseudoelectrons)
 
@@ -239,50 +247,36 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
     particle_BC_right = parameters["particle_BC_right"]
 
     # **Initialize particle positions and velocities**
-    positions = parameters["particle_positions"]
-    velocities = parameters["particle_velocities"]
+    positions  = parameters["initial_positions"]
+    velocities = parameters["initial_velocities"]
 
     # Leapfrog integration: positions at half-step before the start
     positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
         positions + (dt / 2) * velocities, velocities,
         parameters["charges"], parameters["masses"], parameters["charge_to_mass_ratios"],
-        dx, grid, *box_size, particle_BC_left, particle_BC_right
-    )
+        dx, grid, *box_size, particle_BC_left, particle_BC_right)
+    
     positions_minus1_2 = set_BC_positions(
         positions - (dt / 2) * velocities,
         parameters["charges"], dx, grid, *box_size,
-        particle_BC_left, particle_BC_right
-    )
-
-    # **Preallocate arrays for diagnostics**
-    E_field_over_time = jnp.zeros((total_steps, grid.size, 3))
-    E_energy_over_time = jnp.zeros((total_steps,))
-    charge_density_over_time = jnp.zeros((total_steps, grid.size))
+        particle_BC_left, particle_BC_right)
 
     initial_carry = (
         E_field, B_field, positions_minus1_2, positions,
-        positions_plus1_2, velocities, qs, ms, q_ms,  # Include particle properties
-        (E_field_over_time, E_energy_over_time, charge_density_over_time)
-    )
+        positions_plus1_2, velocities, qs, ms, q_ms,)
 
+    @scan_tqdm(total_steps)
     def simulation_step(carry, step_index):
-        # Unpack carry
-        (
-            E_field, B_field, positions_minus1_2, positions,
-            positions_plus1_2, velocities, qs, ms, q_ms,  # Unpack particle properties
-            diagnostics
-        ) = carry
+        (E_field, B_field, positions_minus1_2, positions,
+         positions_plus1_2, velocities, qs, ms, q_ms) = carry
 
         # Compute current density
         J = current_density(
             positions_minus1_2, positions, positions_plus1_2, velocities, qs,
-            dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right
-        )
+            dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
 
         # First half-step field update
-        E_field, B_field = field_update1(
-            E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right
-        )
+        E_field, B_field = field_update1(E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right)
 
         # Add external fields
         total_E = E_field + parameters["external_electric_field"]
@@ -290,76 +284,71 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
 
         # Interpolate fields to particle positions
         E_field_at_x = vmap(lambda x_n: fields_to_particles_grid(
-            x_n, total_E, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right
-        ))(positions_plus1_2)
+            x_n, total_E, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(positions_plus1_2)
+        
         B_field_at_x = vmap(lambda x_n: fields_to_particles_grid(
-            x_n, total_B, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right
-        ))(positions_plus1_2)
+            x_n, total_B, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(positions_plus1_2)
 
         # Particle update: Boris pusher
         positions_plus3_2, velocities_plus1 = boris_step(
-            dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x
-        )
+            dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x)
 
         # Apply boundary conditions
         positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
             positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
-            *box_size, particle_BC_left, particle_BC_right
-        )
-        positions_plus1 = set_BC_positions(
-            positions_plus3_2 - (dt / 2) * velocities_plus1, qs, dx, grid, *box_size,
-            particle_BC_left, particle_BC_right
-        )
+            *box_size, particle_BC_left, particle_BC_right)
+        
+        positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
+                                           qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
         # Second half-step field update
-        J = current_density(
-            positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-            qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right
-        )
-        E_field, B_field = field_update2(
-            E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right
-        )
+        J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
+                            qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+        
+        E_field, B_field = field_update2(E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right)
 
         # Update positions and velocities
         positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2
         velocities = velocities_plus1
         positions = positions_plus1
 
-        # Diagnostics
-        E_field_over_time, E_energy_over_time, charge_density_over_time = diagnostics
-        E_field_over_time = E_field_over_time.at[step_index].set(E_field)
-        E_energy_over_time = E_energy_over_time.at[step_index].set(
-            jnp.sum(0.5 * epsilon_0 * vmap(jnp.dot)(E_field, E_field) / dx)
-        )
-        charge_density_over_time = charge_density_over_time.at[step_index].set(
-            calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
-        )
+        # Prepare state for the next step
+        carry = (E_field, B_field, positions_minus1_2, positions,
+                 positions_plus1_2, velocities, qs, ms, q_ms)
 
-        # Return updated carry
-        carry = (
-            E_field, B_field, positions_minus1_2, positions,
-            positions_plus1_2, velocities, qs, ms, q_ms,  # Update particle properties
-            (E_field_over_time, E_energy_over_time, charge_density_over_time)
-        )
-        return carry, None
+        # Collect data for storage
+        charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
+        step_data = (positions, velocities, E_field, B_field, J, charge_density)
+        
+        return carry, step_data
 
-    # Run simulation using lax.scan
-    final_carry, _ = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
+    # Run simulation
+    _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
 
-    # Extract diagnostics
-    _, _, _, _, _, _, _, _, _, diagnostics = final_carry
-    E_field_over_time, E_energy_over_time, charge_density_over_time = diagnostics
-
-
+    # Unpack results
+    positions_over_time, velocities_over_time, electric_field_over_time, \
+    magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+    
     # **Output results**
     output = {
-        "E_field": E_field_over_time,
-        "E_energy": E_energy_over_time,
-        "charge_density": charge_density_over_time,
-        "time_array": jnp.linspace(0, total_steps*dt, total_steps),
-        "number_grid_points": number_grid_points,
+        # "all_positions":  positions_over_time,
+        # "all_velocities": velocities_over_time,
+        "position_electrons": positions_over_time[ :, :number_pseudoelectrons, :],
+        "velocity_electrons": velocities_over_time[:, :number_pseudoelectrons, :],
+        "mass_electrons":     parameters["masses"][   :number_pseudoelectrons],
+        "charge_electrons":   parameters["charges"][  :number_pseudoelectrons],
+        "position_ions":      positions_over_time[ :, number_pseudoelectrons:, :],
+        "velocity_ions":      velocities_over_time[:, number_pseudoelectrons:, :],
+        "mass_ions":          parameters["masses"][   number_pseudoelectrons:],
+        "charge_ions":        parameters["charges"][  number_pseudoelectrons:],
+        "electric_field":  electric_field_over_time,
+        "magnetic_field":  magnetic_field_over_time,
+        "current_density": current_density_over_time,
+        "charge_density":  charge_density_over_time,
+        "number_grid_points":     number_grid_points,
         "number_pseudoelectrons": number_pseudoelectrons,
         "total_steps": total_steps,
+        "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
     }
 
     return {**output, **parameters}
