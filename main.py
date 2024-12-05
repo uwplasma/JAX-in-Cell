@@ -32,6 +32,7 @@ n_simulations = 1
 
 # Run the simulation
 for i in range(n_simulations):
+    if i>0: parameters_float["print_info"] = False
     start = time.time()
     output = block_until_ready(simulation(parameters_float, number_grid_points=number_grid_points,
                                           number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps,
