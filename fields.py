@@ -54,7 +54,7 @@ def curlE(E_field, B_field, dx, dt, field_BC_left, field_BC_right):
     ghost_cell_L, ghost_cell_R = field_ghost_cells_E(field_BC_left, field_BC_right, E_field, B_field)
     E_field = jnp.insert(E_field, 0, ghost_cell_L, axis=0)
     E_field = jnp.append(E_field, jnp.array([ghost_cell_R]), axis=0)
-
+    
     # Compute the curl using the finite difference approximation for 1D (only d/dx)
     dFz_dx = (E_field[1:-1, 2] - E_field[0:-2, 2]) / dx
     dFy_dx = (E_field[1:-1, 1] - E_field[0:-2, 1]) / dx
@@ -85,7 +85,7 @@ def curlB(B_field, E_field, dx, dt, field_BC_left, field_BC_right):
     B_field = jnp.insert(B_field, 0, ghost_cell_L, axis=0)
     B_field = jnp.append(B_field, jnp.array([ghost_cell_R]), axis=0)
 
-    # Roll B-field to align with the correct grid positions for curl calculation
+    #If taking E_i = B_(i+1) - B_i (since B-fields defined on centers), roll by -1 first. 
     B_field = jnp.roll(B_field, -1, axis=0)
 
     # Compute the curl using the finite difference approximation for 1D (only d/dx)

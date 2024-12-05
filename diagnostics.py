@@ -24,7 +24,7 @@ def diagnostics(output):
 
     print(f"Dominant FFT frequency (f): {dominant_frequency} Hz")
     print(f"Plasma frequency (w_p):     {plasma_frequency} Hz")
-    print(f"Error: {jnp.abs(dominant_frequency - plasma_frequency) / plasma_frequency * 100:.2f}%")
+    # print(f"Error: {jnp.abs(dominant_frequency - plasma_frequency) / plasma_frequency * 100:.2f}%")
     
     abs_E_squared = jnp.sum(output['electric_field']**2, axis=-1)
     integral_E_squared = jnp.trapezoid(abs_E_squared, dx=output['dx'], axis=1)

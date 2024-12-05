@@ -1,8 +1,8 @@
 import jax.numpy as jnp
 from jax.lax import cond
 from functools import partial
-from jax import lax, jit, vmap
-from jax.random import normal, choice
+from jax.random import normal
+from jax import lax, jit, vmap, config
 from jax.debug import print as jprint
 from jax.random import PRNGKey, uniform
 from particles import fields_to_particles_grid, boris_step
@@ -11,6 +11,7 @@ from boundary_conditions import set_BC_positions, set_BC_particles
 from fields import field_update1, field_update2, E_from_Poisson_equation
 from constants import speed_of_light, epsilon_0, charge_electron, charge_proton, mass_electron, mass_proton
 from jax_tqdm import scan_tqdm
+config.update("jax_enable_x64", True)
 
 def initialize_simulation_parameters(user_parameters):
     """
