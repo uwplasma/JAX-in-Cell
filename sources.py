@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 from jax import jit, vmap
-from jax.lax import scan, dynamic_update_slice
+from jax.lax import dynamic_update_slice
 
 @jit
 def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, charge):
@@ -87,11 +87,8 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
     Returns:
         array: Total charge density on the grid.
     """
-    def single_particle_charge_density_fn(x, q, dx, grid, BC_left, BC_right):
-        return single_particle_charge_density(x, q, dx, grid, BC_left, BC_right)
-
     # Vectorize over particles
-    chargedens_contrib = vmap(single_particle_charge_density_fn, in_axes=(0, 0, None, None, None, None))
+    chargedens_contrib = vmap(single_particle_charge_density, in_axes=(0, 0, None, None, None, None))
     
     # Compute charge density for all particles
     chargedens = chargedens_contrib(xs_n[:, 0], qs[:, 0], dx, grid, particle_BC_left, particle_BC_right)
@@ -122,62 +119,43 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
     Returns:
         array: Current density on the grid, shape (G, 3), where G is the number of grid points.
     """
-    current_dens_x = jnp.zeros(len(grid))
-    current_dens_y = jnp.zeros(len(grid))
-    current_dens_z = jnp.zeros(len(grid))
 
-    def current_update_x(jx, i):
+    def compute_current_x(i):
         x_nminushalf = xs_nminushalf[i, 0]
         x_nplushalf = xs_nplushalf[i, 0]
         q = qs[i, 0]
         cell_no = ((x_nminushalf - grid_start) // dx).astype(int)
-
         # Compute the charge density difference over time
         diff_chargedens_1particle_whole = (
-            single_particle_charge_density(x_nplushalf,  q, dx, grid, particle_BC_left, particle_BC_right) -
+            single_particle_charge_density(x_nplushalf, q, dx, grid, particle_BC_left, particle_BC_right) -
             single_particle_charge_density(x_nminushalf, q, dx, grid, particle_BC_left, particle_BC_right)
         ) / dt
-
-        #Sweep only cells -3 to 2 relative to particle's initial position. 
-        #To do so, roll grid to front, perform current calculations, and roll back.
-        #Roll grid so that particle's initial position is on 4th cell, and select
-        #first 6 cells. See readme for diagram.
-        #Note 1st cell should always be 0.
-        diff_chargedens_1particle_short = jnp.roll(diff_chargedens_1particle_whole,3-cell_no)[:6]
-        
+        # Sweep only cells -3 to 2 relative to particle's initial position.
+        diff_chargedens_1particle_short = jnp.roll(diff_chargedens_1particle_whole, 3 - cell_no)[:6]
         j_grid_short = jnp.cumsum(-diff_chargedens_1particle_short * dx)
-
-        #Copy 6-cell grid back onto proper grid
+        # Copy 6-cell grid back onto proper grid
         j_grid = jnp.zeros(len(grid))
         j_grid = dynamic_update_slice(j_grid, j_grid_short, (0,))
-        
-        #Roll back to its correct position on grid
-        j_grid = jnp.roll(j_grid,cell_no-3)
+        # Roll back to its correct position on grid
+        j_grid = jnp.roll(j_grid, cell_no - 3)
+        return j_grid
 
-        jx += j_grid
-        return jx, None
-
-    current_dens_x, _ = scan(current_update_x, current_dens_x, jnp.arange(len(xs_nminushalf)))
-
-    # Update current densities for y and z directions
-    def current_update_y(jy, i):
+    def compute_current_y(i):
         x_n = xs_n[i, 0]
         q = qs[i, 0]
         vy_n = vs_n[i, 1]
         chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
-        jy += chargedens * vy_n
-        return jy, None
+        return chargedens * vy_n
 
-    current_dens_y, _ = scan(current_update_y, current_dens_y, jnp.arange(len(xs_nminushalf)))
-
-    def current_update_z(jz, i):
+    def compute_current_z(i):
         x_n = xs_n[i, 0]
         q = qs[i, 0]
         vz_n = vs_n[i, 2]
         chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
-        jz += chargedens * vz_n
-        return jz, None
-
-    current_dens_z, _ = scan(current_update_z, current_dens_z, jnp.arange(len(xs_nminushalf)))
+        return chargedens * vz_n
+    
+    current_dens_x = jnp.sum(vmap(compute_current_x)(jnp.arange(len(xs_nminushalf))), axis=0)
+    current_dens_y = jnp.sum(vmap(compute_current_y)(jnp.arange(len(xs_nminushalf))), axis=0)
+    current_dens_z = jnp.sum(vmap(compute_current_z)(jnp.arange(len(xs_nminushalf))), axis=0)
 
     return jnp.transpose(jnp.array([current_dens_x, current_dens_y, current_dens_z]))

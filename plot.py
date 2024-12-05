@@ -70,11 +70,11 @@ def plot_results(output):
     axes[0, 2].legend()
 
     # Energy plots
-    axes[0, 3].plot(time, output["electric_field_energy"]/output["electric_field_energy"][0], label="Electric field energy")
-    axes[0, 3].plot(time, output["kinetic_energy"]/output["kinetic_energy"][0], label="Kinetic energy")
-    axes[0, 3].plot(time, output["kinetic_energy_electrons"]/output["kinetic_energy_electrons"][0], label="Kinetic energy electrons")
-    axes[0, 3].plot(time, output["kinetic_energy_ions"]/output["kinetic_energy_ions"][0], label="Kinetic energy ions")
-    axes[0, 3].plot(time, total_energy/total_energy[0], label="Total energy")
+    axes[0, 3].plot(time, output["electric_field_energy"], label="Electric field energy")
+    axes[0, 3].plot(time, output["kinetic_energy"], label="Kinetic energy")
+    axes[0, 3].plot(time, output["kinetic_energy_electrons"], label="Kinetic energy electrons")
+    axes[0, 3].plot(time, output["kinetic_energy_ions"], label="Kinetic energy ions")
+    axes[0, 3].plot(time, total_energy, label="Total energy")
     axes[0, 3].set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)", ylabel="Energy (J)", yscale="log", ylim=[1e-2, None])
     axes[0, 3].legend()
 
