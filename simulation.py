@@ -1,8 +1,8 @@
 import jax.numpy as jnp
-from jax.lax import cond, select
-from jax.random import normal
+from jax.lax import cond
 from functools import partial
 from jax import lax, jit, vmap
+from jax.random import normal, choice
 from jax.debug import print as jprint
 from jax.random import PRNGKey, uniform
 from particles import fields_to_particles_grid, boris_step
@@ -40,8 +40,8 @@ def initialize_simulation_parameters(user_parameters):
     default_parameters = {
         # Basic simulation settings
         "length": 1e-2,                         # Dimensions of the simulation box
-        "amplitude_perturbation_x": 0.1,        # Amplitude of sinusoidal perturbation in x
-        "wavenumber_perturbation_x_factor": 1,  # Wavenumber of sinusoidal perturbation in x (factor of 2pi/length)
+        "amplitude_perturbation_x": 0.1,        # Amplitude of sinusoidal (sin) perturbation in x
+        "wavenumber_perturbation_x_factor": 1,  # Wavenumber of sinusoidal (sin) perturbation in x (factor of 2pi/length)
         "grid_points_per_Debye_length": 9,      # dx over Debye length
         "vth_electrons_over_c": 0.05,           # Thermal velocity of electrons over speed of light
         "ion_temperature_over_electron_temperature": 1, # Temperature ratio of ions to electrons
@@ -52,6 +52,7 @@ def initialize_simulation_parameters(user_parameters):
         "velocity_plus_minus_electrons": False,  # create two groups of electrons moving in opposite directions
         "velocity_plus_minus_ions": False,       # create two groups of electrons moving in opposite directions
         "print_info": True,                     # Print information about the simulation
+        "fraction_random_particles": 0.01,      # Fraction of particles to be randomly distributed
         
         # Boundary conditions
         "particle_BC_left":  0,                 # Left boundary condition for particles
@@ -60,8 +61,10 @@ def initialize_simulation_parameters(user_parameters):
         "field_BC_right":    0,                 # Right boundary condition for fields
         
         # External fields (initialized to zero)
-        "external_electric_field_value": 0, 
-        "external_magnetic_field_value": 0,
+        "external_electric_field_amplitude": 0, # Amplitude of sinusoidal (cos) perturbation in x
+        "external_electric_field_wavenumber_perturbation_x_factor": 0, # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
+        "external_magnetic_field_amplitude": 0, # Amplitude of sinusoidal (cos) perturbation in x
+        "external_magnetic_field_wavenumber_perturbation_x_factor": 0, # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
     }
 
     # Merge user-provided parameters into the default dictionary
@@ -74,7 +77,7 @@ def initialize_simulation_parameters(user_parameters):
 
     return parameters
 
-def initialize_particles_fields(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350):
+def initialize_particles_fields(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350, fraction_random_particles=0):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
     
@@ -111,10 +114,16 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     # **Particle Positions**
     # Electron positions: Add random y, z positions to x initialized by perturbation
     
+    num_random = int(number_pseudoelectrons * fraction_random_particles)
+    num_uniform = number_pseudoelectrons - num_random
+    random_positions = uniform(random_key, shape=(num_random,), minval=-length / 2, maxval=length / 2)
+    uniform_positions = jnp.linspace(-length / 2, length / 2, num_uniform)
+    
     wavenumber_perturbation_x = parameters["wavenumber_perturbation_x_factor"] * 2 * jnp.pi / length
-
-    electron_xs = jnp.linspace(-length / 2, length / 2, number_pseudoelectrons)
-    electron_xs-= (parameters["amplitude_perturbation_x"] / wavenumber_perturbation_x) * jnp.sin(wavenumber_perturbation_x * electron_xs)
+    uniform_positions+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x * uniform_positions)
+    
+    electron_xs = jnp.concatenate([uniform_positions, random_positions])
+    
     electron_ys = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2)
     electron_zs = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2)
     electron_positions = jnp.stack((electron_xs, electron_ys, electron_zs), axis=1)
@@ -188,28 +197,33 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
             "Pseudoparticles per cell: {:.2e}\n"
             "Steps at each plasma frequency: {:.2e}\n"
             "Total time: {:.2e} / plasma frequency\n"
+            "Number of particles on a Debye cube: {:.2e}\n"
+            "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
         ),length/(Debye_length_per_dx*dx),number_pseudoelectrons * weight / length,
         -mass_electron * vth_electrons**2 / 2 / charge_electron, -mass_proton * vth_ions**2 / 2 / charge_electron,
-        Debye_length_per_dx*dx, number_pseudoelectrons / number_grid_points, 1/(plasma_frequency * dt), dt * plasma_frequency * total_steps
+        Debye_length_per_dx*dx, number_pseudoelectrons / number_grid_points, 1/(plasma_frequency * dt), dt * plasma_frequency * total_steps,
+        number_pseudoelectrons * weight / length * (Debye_length_per_dx*dx)**3,
+        -charge_electron * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electron * vth_electrons**2 / 2),
         ), lambda _: None, operand=None)
     
     # **Fields Initialization**
-    
     # Electric field initialized to same perturbation as particle positions
     # E_field = jnp.zeros((grid.size, 3))
     # for i in range(grid.size):
     #     E_field = E_field.at[i, 0].set(
-    #         q_electron * number_pseudoelectrons * A * jnp.sin(k * (grid[i] + dx / 2)) / (k * L * epsilon_0)
+    #         -charge_electron * weight * number_pseudoelectrons * parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x * (grid[i] + dx / 2)) / (length * epsilon_0)
     #     )
-    
     # Magnetic field initialized to zero
     B_field = jnp.zeros((grid.size, 3))
     
     # Electric field initialization using Poisson's equation
-    E_field_x = E_from_Poisson_equation(positions, charges, dx, grid, 0, 0)
+    E_field_x = E_from_Poisson_equation(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
     
     fields = (E_field, B_field)
+    
+    external_E_field_x = parameters["external_electric_field_amplitude"] * jnp.cos(parameters["external_electric_field_wavenumber_perturbation_x_factor"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
+    external_B_field_x = parameters["external_magnetic_field_amplitude"] * jnp.cos(parameters["external_magnetic_field_wavenumber_perturbation_x_factor"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
 
     # **Update parameters**
     parameters.update({
@@ -224,8 +238,8 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
         "dx": dx,
         "dt": dt,
         "box_size": box_size,
-        "external_electric_field": parameters["external_electric_field_value"]*jnp.ones((number_grid_points, 3)),
-        "external_magnetic_field": parameters["external_magnetic_field_value"]*jnp.ones((number_grid_points, 3)),
+        "external_electric_field": jnp.array([external_E_field_x, jnp.zeros((number_grid_points,)), jnp.zeros((number_grid_points,))]).T,
+        "external_magnetic_field": jnp.array([external_B_field_x, jnp.zeros((number_grid_points,)), jnp.zeros((number_grid_points,))]).T,
         "number_pseudoelectrons": number_pseudoelectrons,
         "number_grid_points": number_grid_points,
         "plasma_frequency": plasma_frequency,
@@ -234,8 +248,8 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     return parameters
 
 
-@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps'])
-def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350):
+@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'fraction_random_particles'])
+def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350, fraction_random_particles=0):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
@@ -258,7 +272,8 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
     """
     # **Initialize simulation parameters**
     parameters = initialize_particles_fields(parameters_float, number_grid_points=number_grid_points,
-                                             number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps)
+                                             number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps,
+                                             fraction_random_particles=fraction_random_particles)
 
     # Extract parameters for convenience
     dx = parameters["dx"]

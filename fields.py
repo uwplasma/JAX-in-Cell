@@ -26,6 +26,7 @@ def E_from_Poisson_equation(xs_n, qs, dx, grid, particle_BC_left, particle_BC_ri
     
     # Construct divergence matrix for solving Poisson equation (Gauss's Law)
     divergence_matrix = jnp.diag(jnp.ones(len(grid)))-jnp.diag(jnp.ones(len(grid)-1),k=-1)
+    divergence_matrix.at[0,-1].set(-1)
     
     # Solve for the electric field using Poisson's equation in the 1D case
     E_field_from_Poisson = (dx / epsilon_0) * jnp.linalg.solve(divergence_matrix, charge_density)
