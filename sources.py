@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from jax import jit
+from jax import jit, vmap
 from jax.lax import fori_loop
 
 @jit
@@ -87,14 +87,19 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
     Returns:
         array: Total charge density on the grid.
     """
-    chargedens = jnp.zeros(len(grid))
+    def single_particle_charge_density_fn(x, q, dx, grid, BC_left, BC_right):
+        return single_particle_charge_density(x, q, dx, grid, BC_left, BC_right)
 
-    def chargedens_update(i, chargedens):
-        chargedens += single_particle_charge_density(xs_n[i, 0], qs[i, 0], dx, grid, particle_BC_left, particle_BC_right)
-        return chargedens
+    # Vectorize over particles
+    chargedens_contrib = vmap(single_particle_charge_density_fn, in_axes=(0, 0, None, None, None, None))
+    
+    # Compute charge density for all particles
+    chargedens = chargedens_contrib(xs_n[:, 0], qs[:, 0], dx, grid, particle_BC_left, particle_BC_right)
 
-    chargedens = fori_loop(0, len(xs_n), chargedens_update, chargedens)
-    return chargedens
+    # Sum the contributions across all particles
+    total_chargedens = jnp.sum(chargedens, axis=0)
+
+    return total_chargedens
 
 @jit
 def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, grid_start, particle_BC_left, particle_BC_right):
