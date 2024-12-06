@@ -18,7 +18,7 @@ def plot_results(output):
                             sqrtmemi * 0.3 * jnp.abs(v_th) * jnp.sqrt(output["ion_temperature_over_electron_temperature"]) + jnp.abs(output["ion_drift_speed"]))
     
     bins_position = len(grid)
-    bins_velocity = len(grid)*2
+    bins_velocity = len(grid)
     
     time = output["time_array"] * output["plasma_frequency"]
 
