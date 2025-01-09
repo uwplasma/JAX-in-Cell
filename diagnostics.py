@@ -26,11 +26,15 @@ def diagnostics(output):
     print(f"Plasma frequency (w_p):     {plasma_frequency} Hz")
     # print(f"Error: {jnp.abs(dominant_frequency - plasma_frequency) / plasma_frequency * 100:.2f}%")
     
-    abs_E_squared = jnp.sum(output['electric_field']**2, axis=-1)
-    integral_E_squared = jnp.trapezoid(abs_E_squared, dx=output['dx'], axis=1)
+    abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
+    abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
+    integral_E_squared         = jnp.trapezoid(abs_E_squared, dx=output['dx'], axis=-1)
+    integral_externalE_squared = jnp.trapezoid(abs_externalE_squared, dx=output['dx'], axis=-1)
     
-    abs_B_squared = jnp.sum(output['magnetic_field']**2, axis=-1)
-    integral_B_squared = jnp.trapezoid(abs_B_squared, dx=output['dx'], axis=1)
+    abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
+    abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
+    integral_B_squared         = jnp.trapezoid(abs_B_squared, dx=output['dx'], axis=-1)
+    integral_externalB_squared = jnp.trapezoid(abs_externalB_squared, dx=output['dx'], axis=-1)
     
     v_electrons_squared = jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1)
     v_ions_squared      = jnp.sum(jnp.sum(output['velocity_ions']**2     , axis=-1), axis=-1)
@@ -44,4 +48,8 @@ def diagnostics(output):
         'kinetic_energy':     (1/2) * mass_electron * output['weight'] * v_electrons_squared + (1/2) * mass_proton * output['weight'] * v_ions_squared,
         'kinetic_energy_electrons': (1/2) * mass_electron * output['weight'] * v_electrons_squared,
         'kinetic_energy_ions':      (1/2) * mass_proton   * output['weight'] * v_ions_squared,
+        'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
+        'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
+        'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
+        'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared
     })

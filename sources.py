@@ -67,8 +67,8 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
 
     # Handle boundary conditions
     chargedens_for_L, chargedens_for_R = charge_density_BCs(particle_BC_left, particle_BC_right, x, dx, grid, q)
-    grid_BCs = grid_noBCs.at[0].set(chargedens_for_L + grid_noBCs[0])
-    grid_BCs = grid_BCs.at[-1].set(chargedens_for_R + grid_BCs[-1])
+    grid_BCs = grid_noBCs.at[ 0].set(chargedens_for_L + grid_noBCs[ 0])
+    grid_BCs = grid_BCs  .at[-1].set(chargedens_for_R + grid_BCs  [-1])
     return grid_BCs
 
 @jit

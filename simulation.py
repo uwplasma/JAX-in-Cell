@@ -8,7 +8,7 @@ from jax.random import PRNGKey, uniform
 from particles import fields_to_particles_grid, boris_step
 from sources import current_density, calculate_charge_density
 from boundary_conditions import set_BC_positions, set_BC_particles
-from fields import field_update1, field_update2, E_from_Poisson_equation
+from fields import field_update1, field_update2, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT
 from constants import speed_of_light, epsilon_0, charge_electron, charge_proton, mass_electron, mass_proton
 from jax_tqdm import scan_tqdm
 config.update("jax_enable_x64", True)
@@ -50,9 +50,10 @@ def initialize_simulation_parameters(user_parameters):
         "seed": 1701,                           # Random seed for reproducibility
         "electron_drift_speed": 0,              # Drift speed of electrons
         "ion_drift_speed":      0,              # Drift speed of ions
-        "velocity_plus_minus_electrons": False,  # create two groups of electrons moving in opposite directions
-        "velocity_plus_minus_ions": False,       # create two groups of electrons moving in opposite directions
+        "velocity_plus_minus_electrons": False, # create two groups of electrons moving in opposite directions
+        "velocity_plus_minus_ions": False,      # create two groups of electrons moving in opposite directions
         "print_info": True,                     # Print information about the simulation
+        "field_solver": 'Poisson_1D_FFT',       # Algorithm to solve E and B fields - Gauss_1D_FFT, Gauss_1D_Cartesian, Poisson_1D_FFT, Curl_EB
         
         # Boundary conditions
         "particle_BC_left":  0,                 # Left boundary condition for particles
@@ -210,7 +211,10 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     B_field = jnp.zeros((grid.size, 3))
     
     # Electric field initialization using Poisson's equation
-    E_field_x = E_from_Poisson_equation(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
+    charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
+    # E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
+    E_field_x = E_from_Gauss_1D_FFT(charge_density, dx)
+    # E_field_x = E_from_Poisson_1D_FFT(charge_density, dx)
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
     
     fields = (E_field, B_field)
@@ -241,7 +245,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     return parameters
 
 
-@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps'])
+# @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps'])
 def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
@@ -301,14 +305,23 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
     def simulation_step(carry, step_index):
         (E_field, B_field, positions_minus1_2, positions,
          positions_plus1_2, velocities, qs, ms, q_ms) = carry
-
-        # Compute current density
-        J = current_density(
-            positions_minus1_2, positions, positions_plus1_2, velocities, qs,
-            dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-
-        # First half-step field update
-        E_field, B_field = field_update1(E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right)
+        
+        if parameters["field_solver"] != 'Curl_EB':
+            charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
+            switcher = {
+                'Gauss_1D_FFT': E_from_Gauss_1D_FFT,
+                'Gauss_1D_Cartesian': E_from_Gauss_1D_Cartesian,
+                'Poisson_1D_FFT': E_from_Poisson_1D_FFT,
+            }
+            E_field = E_field.at[:,0].set(switcher[parameters["field_solver"]](charge_density, dx))
+            J = 0
+        else:
+            # Compute current density
+            J = current_density(
+                positions_minus1_2, positions, positions_plus1_2, velocities, qs,
+                dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+            # First half-step field update
+            E_field, B_field = field_update1(E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right)
 
         # Add external fields
         total_E = E_field + parameters["external_electric_field"]
@@ -333,11 +346,12 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
         positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                            qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
-        # Second half-step field update
-        J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                            qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-        
-        E_field, B_field = field_update2(E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right)
+        if parameters["field_solver"] == 'Curl_EB':
+            # Second half-step field update
+            J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
+                                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+            
+            E_field, B_field = field_update2(E_field, B_field, dx, dt / 2, J, field_BC_left, field_BC_right)
 
         # Update positions and velocities
         positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2
