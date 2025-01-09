@@ -2,7 +2,6 @@ from jax import vmap, jit
 import jax.numpy as jnp
 from boundary_conditions import field_2_ghost_cells
 
-
 @jit
 def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):
     """
@@ -70,7 +69,6 @@ def rotation(dt, B, vsub, q_m):
     
     return vplus
 
-
 @jit
 def boris_step(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_fields_at_x):
     """
@@ -104,3 +102,6 @@ def boris_step(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_fields_at_x):
     xs_nplus3_2 = xs_nplushalf + dt * vs_nplus1
     
     return xs_nplus3_2, vs_nplus1
+    # vs_nplus1 = vs_n + (q_ms) * E_fields_at_x * dt
+    # xs_nplus1 = xs_nplushalf + dt * vs_nplus1
+    # return xs_nplus1, vs_nplus1

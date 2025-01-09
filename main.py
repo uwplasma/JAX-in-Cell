@@ -23,6 +23,7 @@ parameters_float = {
 # "electron_drift_speed"         : 1e8,   # Two-Stream (drift speed of electrons)
 # "velocity_plus_minus_electrons": True,  # Two-Stream (create two groups of electrons moving in opposite directions)
 # "wavenumber_perturbation_x_factor": 1,  # Plasma Oscillations (Wavenumber of sinusoidal (sin) perturbation in x (factor of 2pi/length))
+"field_solver": 'Poisson_1D_FFT',       # Algorithm to solve E and B fields - Gauss_1D_FFT, Gauss_1D_Cartesian, Poisson_1D_FFT, Curl_EB
 }
 
 number_grid_points     = 100  # Number of grid points

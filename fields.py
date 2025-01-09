@@ -5,32 +5,79 @@ from boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
 from constants import epsilon_0, speed_of_light
 
 @jit
-def E_from_Poisson_equation(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right):
+def E_from_Gauss_1D_FFT(charge_density, dx):
+    """
+    Solve for the electric field E = -d(phi)/dx using FFT, 
+    where phi is derived from the 1D Gauss' law equation.
+    Parameters:
+    charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
+    dx : float, grid spacing in the x-direction
+    Returns:
+    E : 1D numpy array, electric field
+    """
+    # Get the number of grid points
+    nx = len(charge_density)
+    # Create wavenumbers in Fourier space (k_x)
+    kx = jnp.fft.fftfreq(nx, d=dx) * 2 * jnp.pi
+    # Perform 1D FFT of the source term
+    charge_density_k = jnp.fft.fft(charge_density)
+    # Avoid division by zero for the k = 0 mode
+    kx = kx.at[0].set(1.0)  # Prevent division by zero
+    # Solve for the electric field in Fourier space
+    E_k = -1j * charge_density_k / kx / epsilon_0  # Electric field in Fourier space
+    # Inverse FFT to transform back to spatial domain
+    E = jnp.fft.ifft(E_k).real
+    return E
+
+@jit
+def E_from_Poisson_1D_FFT(charge_density, dx):
+    """
+    Solve for the electric field E = -d(phi)/dx using FFT, 
+    where phi is derived from the 1D Poisson equation.
+    Parameters:
+    charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
+    dx : float, grid spacing in the x-direction
+    Returns:
+    E : 1D numpy array, electric field
+    """
+    # Get the number of grid points
+    nx = len(charge_density)
+    # Create wavenumbers in Fourier space (k_x)
+    kx = jnp.fft.fftfreq(nx, d=dx) * 2 * jnp.pi
+    # Perform 1D FFT of the source term
+    charge_density_k = jnp.fft.fft(charge_density)
+    # Avoid division by zero for the k = 0 mode
+    kx = kx.at[0].set(1.0)  # Prevent division by zero
+    # Solve Poisson equation in Fourier space
+    phi_k = -charge_density_k / kx**2 / epsilon_0
+    # Set the k = 0 mode of phi_k to 0 to ensure a zero-average solution
+    phi_k = phi_k.at[0].set(0.0)
+    # Compute electric field from potential in Fourier space
+    E_k = 1j * kx * phi_k
+    # Inverse FFT to transform back to spatial domain
+    E = jnp.fft.ifft(E_k).real
+    return E
+
+@jit
+def E_from_Gauss_1D_Cartesian(charge_density, dx):
     """
     Solve for the electric field at t=0 (E0) using the charge density distribution 
     and applying Gauss's law in a 1D system.
 
     Args:
-        xs_n (array): Particle positions at a given time (t), shape (N,).
-        qs (array): Particle charges, shape (N,).
-        dx (float): Grid spacing in meters.
-        grid (array): Grid points in space, shape (G,).
-        particle_BC_left (int): Boundary condition at the left boundary (0: periodic, 1: reflective, 2: absorbing).
-        particle_BC_right (int): Boundary condition at the right boundary (0: periodic, 1: reflective, 2: absorbing).
+        charge_density : 1D numpy array, source term (right-hand side of Gauss equation)
+        dx : float, grid spacing in the x-direction
     
     Returns:
         array: The electric field at each grid point due to the particles, shape (G,).
     """
-    # Calculate charge density from particles
-    charge_density = calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right)
-    
-    # Construct divergence matrix for solving Poisson equation (Gauss's Law)
-    divergence_matrix = jnp.diag(jnp.ones(len(grid)))-jnp.diag(jnp.ones(len(grid)-1),k=-1)
+    # Construct divergence matrix for solving Gauss' Law
+    divergence_matrix = jnp.diag(jnp.ones(len(charge_density)))-jnp.diag(jnp.ones(len(charge_density)-1),k=-1)
     divergence_matrix.at[0,-1].set(-1)
     
-    # Solve for the electric field using Poisson's equation in the 1D case
-    E_field_from_Poisson = (dx / epsilon_0) * jnp.linalg.solve(divergence_matrix, charge_density)
-    return E_field_from_Poisson
+    # Solve for the electric field using Gauss' law in the 1D case
+    E_field_from_Gauss = (dx / epsilon_0) * jnp.linalg.solve(divergence_matrix, charge_density)
+    return E_field_from_Gauss
 
 
 @jit
