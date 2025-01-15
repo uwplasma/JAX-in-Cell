@@ -59,16 +59,20 @@ def plot_results(output):
     fig.colorbar(im2, ax=axes[0, 1], label="Charge density (C/m³)")
     
     # Different Electric Field Calculations
-    E_field_line_Gauss_1D_Cartesian, = axes[0, 2].plot([], [], lw=2, color="red",   label="Electron E from Gauss 1D Cartesian")
-    E_field_line_Gauss_1D_FFT,       = axes[0, 2].plot([], [], lw=2, color="blue",  label="Electron E from Gauss 1D FFT")
-    E_field_line_Poisson_1D_FFT,     = axes[0, 2].plot([], [], lw=2, color="green", label="Electron E from Poisson 1D FFT")
+    ## Precompute E fields with vmap
+    E_fields_Gauss_1D_Cartesian = vmap(lambda charge_density: E_from_Gauss_1D_Cartesian(charge_density, output["dx"]))(output["charge_density"])
+    E_fields_Gauss_1D_FFT = vmap(lambda charge_density: E_from_Gauss_1D_FFT(charge_density, output["dx"]))(output["charge_density"])    
+    E_fields_Poisson_1D_FFT = vmap(lambda charge_density: E_from_Poisson_1D_FFT(charge_density, output["dx"]))(output["charge_density"])
+
+    E_field_line_Gauss_1D_Cartesian, = axes[0, 2].plot([], [], lw=2, color="red",   linestyle='-',  label="E field from Gauss 1D Cartesian")
+    E_field_line_Gauss_1D_FFT,       = axes[0, 2].plot([], [], lw=2, color="blue",  linestyle='--', label="E field from Gauss 1D FFT")
+    E_field_line_Poisson_1D_FFT,     = axes[0, 2].plot([], [], lw=2, color="green", linestyle='-.', label="E field from Poisson 1D FFT")
     axes[0, 2].set_xlim(-box_size_x / 2, box_size_x / 2)
-    axes[0, 2].set_ylim(-3e7, 3e7)
+    # set y lim to min and max of all E fields
+    axes[0, 2].set_ylim(jnp.min(jnp.array([E_fields_Gauss_1D_Cartesian, E_fields_Gauss_1D_FFT, E_fields_Poisson_1D_FFT])),
+                        jnp.max(jnp.array([E_fields_Gauss_1D_Cartesian, E_fields_Gauss_1D_FFT, E_fields_Poisson_1D_FFT])))
     axes[0, 2].set(xlabel="Position (m)", ylabel="Electric Field (V/m)")
-    axes[0, 2].legend()
-    #!!!!!!!!
-    ### NEED to precompute all the E fields for each time step using VMAP
-    #!!!!!!!!
+    axes[0, 2].legend(loc='upper right')
 
     # Mean charge density and energy error
     total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
@@ -157,16 +161,16 @@ def plot_results(output):
         electron_phase_text.set_text(f"Time: {time[frame]:.1f} * ωₚ")
         
         # Update electric field lines
-        E_field_line_Gauss_1D_Cartesian.set_data(grid, E_from_Gauss_1D_Cartesian(output["charge_density"][frame], output["dx"]))
-        E_field_line_Gauss_1D_FFT.set_data(grid, E_from_Gauss_1D_FFT(output["charge_density"][frame], output["dx"]))
-        E_field_line_Poisson_1D_FFT.set_data(grid, E_from_Poisson_1D_FFT(output["charge_density"][frame], output["dx"]))
+        E_field_line_Gauss_1D_Cartesian.set_data(grid, E_fields_Gauss_1D_Cartesian[frame] )
+        E_field_line_Gauss_1D_FFT.set_data(grid, E_fields_Gauss_1D_FFT[frame])
+        E_field_line_Poisson_1D_FFT.set_data(grid, E_fields_Poisson_1D_FFT[frame])
 
         return (position_electron_line, position_ion_line, 
                 velocity_electron_line, velocity_ion_line,
                 electron_phase_plot, ion_phase_plot, electron_phase_text,
                 E_field_line_Gauss_1D_Cartesian, E_field_line_Gauss_1D_FFT, E_field_line_Poisson_1D_FFT)
 
-    ani = FuncAnimation(fig, update, frames=total_steps, blit=True, interval=1, repeat_delay=10000)
+    ani = FuncAnimation(fig, update, frames=total_steps, blit=True, interval=1, repeat_delay=1000)
 
     plt.tight_layout()
     plt.show()
