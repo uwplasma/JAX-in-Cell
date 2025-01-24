@@ -142,18 +142,16 @@ def curlB(B_field, E_field, dx, dt, field_BC_left, field_BC_right):
     # Return the curl in the 3D vector form (only z and y components are non-zero)
     return jnp.transpose(jnp.array([jnp.zeros(len(dFz_dx)), -dFz_dx, dFy_dx]))
 
-
 @jit
-def field_update1(E_fields, B_fields, dx, dt_2, j, field_BC_left, field_BC_right):
+def field_update(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
     """
-    Update the electric and magnetic fields based on Maxwell's equations using the
-    half-step field update algorithm. Update first the electric field and then the magnetic field.
+    Update the electric and magnetic fields based on Maxwell's equations
 
     Args:
         E_fields (array): Electric field at each grid point, shape (G, 3).
         B_fields (array): Magnetic field at each grid point, shape (G, 3).
         dx (float): Grid spacing.
-        dt_2 (float): Half time step.
+        dt (float): Time step.
         j (array): Current density at each grid point, shape (G, 3).
         field_BC_left (int): Left boundary condition for fields.
         field_BC_right (int): Right boundary condition for fields.
@@ -161,40 +159,14 @@ def field_update1(E_fields, B_fields, dx, dt_2, j, field_BC_left, field_BC_right
     Returns:
         tuple: Updated electric and magnetic fields, each of shape (G, 3).
     """
-    # Update the magnetic field (Faraday's law)
-    curl_B = curlB(B_fields, E_fields, dx, dt_2, field_BC_left, field_BC_right)
-    E_fields += dt_2*((speed_of_light**2)*curl_B-(j/epsilon_0))
+    # Ampère's law with Maxwell's correction
+    curl_E = curlE(E_fields, B_fields, dx, dt, field_BC_left, field_BC_right)
 
-    # Update the electric field (Ampère's law with Maxwell's correction)
-    curl_E = curlE(E_fields, B_fields, dx, dt_2, field_BC_left, field_BC_right)
-    B_fields -= dt_2*curl_E
-
-    return E_fields, B_fields
-
-@jit
-def field_update2(E_fields, B_fields, dx, dt_2, j, field_BC_left, field_BC_right):
-    """
-    Update the electric and magnetic fields based on Maxwell's equations using the
-    half-step field update algorithm. Update first the magnetic field and then the electric field.
-
-    Args:
-        E_fields (array): Electric field at each grid point, shape (G, 3).
-        B_fields (array): Magnetic field at each grid point, shape (G, 3).
-        dx (float): Grid spacing.
-        dt_2 (float): Half time step.
-        j (array): Current density at each grid point, shape (G, 3).
-        field_BC_left (int): Left boundary condition for fields.
-        field_BC_right (int): Right boundary condition for fields.
-
-    Returns:
-        tuple: Updated electric and magnetic fields, each of shape (G, 3).
-    """
-    # Update the electric field (Ampère's law with Maxwell's correction)
-    curl_E = curlE(E_fields, B_fields, dx, dt_2, field_BC_left, field_BC_right)
-    B_fields -= dt_2*curl_E
-
-    # Update the magnetic field (Faraday's law)
-    curl_B = curlB(B_fields, E_fields, dx, dt_2, field_BC_left, field_BC_right)
-    E_fields += dt_2*((speed_of_light**2)*curl_B-(j/epsilon_0))
+    # Faraday's law
+    curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
+    
+    # Update the Fields
+    B_fields -= dt*curl_E
+    E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
 
     return E_fields, B_fields
