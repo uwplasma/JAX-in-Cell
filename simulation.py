@@ -53,7 +53,6 @@ def initialize_simulation_parameters(user_parameters):
         "velocity_plus_minus_electrons": False, # create two groups of electrons moving in opposite directions
         "velocity_plus_minus_ions": False,      # create two groups of electrons moving in opposite directions
         "print_info": True,                     # Print information about the simulation
-        "field_solver": 'Poisson_1D_FFT',       # Algorithm to solve E and B fields - Gauss_1D_FFT, Gauss_1D_Cartesian, Poisson_1D_FFT, Curl_EB
         
         # Boundary conditions
         "particle_BC_left":  0,                 # Left boundary condition for particles
@@ -245,8 +244,8 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     return parameters
 
 
-# @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps'])
-def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350):
+@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver'])
+def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350, field_solver=0):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
@@ -329,14 +328,14 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
         positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                            qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
-        if parameters["field_solver"] != 'Curl_EB':
+        if field_solver != 0:
             charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
             switcher = {
-                'Gauss_1D_FFT': E_from_Gauss_1D_FFT,
-                'Gauss_1D_Cartesian': E_from_Gauss_1D_Cartesian,
-                'Poisson_1D_FFT': E_from_Poisson_1D_FFT,
+                1: E_from_Gauss_1D_FFT,
+                2: E_from_Gauss_1D_Cartesian,
+                3: E_from_Poisson_1D_FFT,
             }
-            E_field = E_field.at[:,0].set(switcher[parameters["field_solver"]](charge_density, dx))
+            E_field = E_field.at[:,0].set(switcher[field_solver](charge_density, dx))
             J = 0
         else:
             J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,

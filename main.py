@@ -23,9 +23,9 @@ parameters_float = {
 # "electron_drift_speed"         : 1e8,   # Two-Stream (drift speed of electrons)
 # "velocity_plus_minus_electrons": True,  # Two-Stream (create two groups of electrons moving in opposite directions)
 "wavenumber_perturbation_x_factor": 1,  # Plasma Oscillations (Wavenumber of sinusoidal (sin) perturbation in x (factor of 2pi/length))
-"field_solver": 'Curl_EB', # Algorithm to solve E and B fields - Gauss_1D_FFT, Gauss_1D_Cartesian, Poisson_1D_FFT, Curl_EB
 }
 
+field_solver           = 0    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
 number_grid_points     = 100  # Number of grid points
 number_pseudoelectrons = 2000 # Number of pseudoelectrons
 total_steps            = 1000 # Total number of time steps
@@ -36,7 +36,7 @@ n_simulations = 1
 for i in range(n_simulations):
     if i>0: parameters_float["print_info"] = False
     start = time.time()
-    output = block_until_ready(simulation(parameters_float, number_grid_points=number_grid_points,
+    output = block_until_ready(simulation(parameters_float, number_grid_points=number_grid_points, field_solver=field_solver,
                                           number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps))
     print(f"Run #{i+1}: Wall clock time: {time.time()-start}s")
 
