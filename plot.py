@@ -75,12 +75,9 @@ def plot_results(output):
     axes[0, 2].legend(loc='upper right')
 
     # Mean charge density and energy error
-    total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
-                    output["magnetic_field_energy"] + output["external_magnetic_field_energy"] +
-                    output["kinetic_energy"])
-    axes[2, 0].plot(time[3:], jnp.abs(jnp.mean(output["charge_density"], axis=-1))[3:]*1e12, 
+    axes[2, 0].plot(time, jnp.abs(jnp.mean(output["charge_density"], axis=-1))*1e12, 
                     label="Mean charge density (C/m³) x 1e12")
-    axes[2, 0].plot(time[3:], jnp.abs(total_energy[3:] - total_energy[1]) / total_energy[1], 
+    axes[2, 0].plot(time, jnp.abs(output["total_energy"] - output["total_energy"][0]) / output["total_energy"][0], 
                     label="Relative energy error")
     axes[2, 0].set(title="Mean Charge Density and Energy Error", xlabel=r"Time ($\omega_{pe}^{-1}$)", 
                    ylabel="Charge density/Energy error", yscale="log")
@@ -91,7 +88,7 @@ def plot_results(output):
     axes[1, 0].plot(time, output["kinetic_energy"], label="Kinetic energy")
     axes[1, 0].plot(time, output["kinetic_energy_electrons"], label="Kinetic energy electrons")
     axes[1, 0].plot(time, output["kinetic_energy_ions"], label="Kinetic energy ions")
-    axes[1, 0].plot(time, total_energy, label="Total energy")
+    axes[1, 0].plot(time, output["total_energy"], label="Total energy")
     axes[1, 0].set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)", ylabel="Energy (J)", yscale="log", ylim=[1e-3, None])
     axes[1, 0].legend()
 

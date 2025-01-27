@@ -5,7 +5,7 @@ from jax.numpy.fft import fft, fftfreq
 from constants import epsilon_0, charge_electron, mass_electron, mass_proton, speed_of_light, mu_0
 import matplotlib.pyplot as plt
 
-def diagnostics(output):
+def diagnostics(output, print_to_terminal=True):
     E_field_over_time = output['electric_field']
     grid = output['grid']
     dt = output['dt']
@@ -22,9 +22,10 @@ def diagnostics(output):
     peak_index = jnp.argmax(magnitude)
     dominant_frequency = jnp.abs(freqs[peak_index])
 
-    print(f"Dominant FFT frequency (f): {dominant_frequency} Hz")
-    print(f"Plasma frequency (w_p):     {plasma_frequency} Hz")
-    # print(f"Error: {jnp.abs(dominant_frequency - plasma_frequency) / plasma_frequency * 100:.2f}%")
+    if print_to_terminal:
+        print(f"Dominant FFT frequency (f): {dominant_frequency} Hz")
+        print(f"Plasma frequency (w_p):     {plasma_frequency} Hz")
+        # print(f"Error: {jnp.abs(dominant_frequency - plasma_frequency) / plasma_frequency * 100:.2f}%")
     
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
@@ -38,6 +39,7 @@ def diagnostics(output):
     
     v_electrons_squared = jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1)
     v_ions_squared      = jnp.sum(jnp.sum(output['velocity_ions']**2     , axis=-1), axis=-1)
+    
     output.update({
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
         'electric_field_energy':         (epsilon_0/2) * integral_E_squared,
@@ -53,3 +55,9 @@ def diagnostics(output):
         'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
         'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared
     })
+    
+    total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
+                    output["magnetic_field_energy"] + output["external_magnetic_field_energy"] +
+                    output["kinetic_energy"])
+    
+    output.update({'total_energy': total_energy})
