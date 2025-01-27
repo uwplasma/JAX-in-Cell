@@ -3,7 +3,7 @@
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from simulation import simulation
-from jax import jit, grad, lax, block_until_ready
+from jax import jit, grad, lax, block_until_ready, debug
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import time
@@ -53,8 +53,7 @@ time_JAX_derivative = time.time()-start
 derivative_analytical_array = []
 time_analytical_derivative = []
 for epsilon in epsilon_array:
-    print(f"Calculating derivative for epsilon = {epsilon}")
-    
+    debug.print("Calculating derivative for epsilon = {}",epsilon)
     start = time.time()
     E_field_plus_epsilon = mean_electric_field(electron_drift_speed+epsilon)
     time_analytical_derivative.append(time.time()-start)
