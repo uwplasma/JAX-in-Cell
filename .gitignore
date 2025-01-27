@@ -163,3 +163,4 @@ cython_debug/
 .DS_Store
 tests/scaling_energy_error.pdf
 tests/scaling_time.pdf
+tests/differentiability.png
