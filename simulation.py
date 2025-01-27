@@ -40,25 +40,25 @@ def initialize_simulation_parameters(user_parameters):
     # Define all default parameters in a single dictionary
     default_parameters = {
         # Basic simulation settings
-        "length": 1e-2,                         # Dimensions of the simulation box
-        "amplitude_perturbation_x": 0.1,        # Amplitude of sinusoidal (sin) perturbation in x
-        "wavenumber_perturbation_x_factor": 1,  # Wavenumber of sinusoidal (sin) perturbation in x (factor of 2pi/length)
-        "grid_points_per_Debye_length": 9,      # dx over Debye length
-        "vth_electrons_over_c": 0.05,           # Thermal velocity of electrons over speed of light
+        "length": 1e-2,                           # Dimensions of the simulation box
+        "amplitude_perturbation_x": 0.1,          # Amplitude of sinusoidal (sin) perturbation in x
+        "wavenumber_perturbation_x_factor": 1,    # Wavenumber of sinusoidal (sin) perturbation in x (factor of 2pi/length)
+        "grid_points_per_Debye_length": 9,        # dx over Debye length
+        "vth_electrons_over_c": 0.05,             # Thermal velocity of electrons over speed of light
         "ion_temperature_over_electron_temperature": 1, # Temperature ratio of ions to electrons
-        "CFL_factor": 0.5,                      # dt * speed_of_light / dx
-        "seed": 1701,                           # Random seed for reproducibility
-        "electron_drift_speed": 0,              # Drift speed of electrons
-        "ion_drift_speed":      0,              # Drift speed of ions
-        "velocity_plus_minus_electrons": False, # create two groups of electrons moving in opposite directions
-        "velocity_plus_minus_ions": False,      # create two groups of electrons moving in opposite directions
-        "print_info": True,                     # Print information about the simulation
+        "timestep_over_spatialstep_times_c": 0.5, # dt * speed_of_light / dx
+        "seed": 1701,                             # Random seed for reproducibility
+        "electron_drift_speed": 0,                # Drift speed of electrons
+        "ion_drift_speed":      0,                # Drift speed of ions
+        "velocity_plus_minus_electrons": False,   # create two groups of electrons moving in opposite directions
+        "velocity_plus_minus_ions": False,        # create two groups of electrons moving in opposite directions
+        "print_info": True,                       # Print information about the simulation
         
         # Boundary conditions
-        "particle_BC_left":  0,                 # Left boundary condition for particles
-        "particle_BC_right": 0,                 # Right boundary condition for particles
-        "field_BC_left":     0,                 # Left boundary condition for fields
-        "field_BC_right":    0,                 # Right boundary condition for fields
+        "particle_BC_left":  0,                   # Left boundary condition for particles
+        "particle_BC_right": 0,                   # Right boundary condition for particles
+        "field_BC_left":     0,                   # Left boundary condition for fields
+        "field_BC_right":    0,                   # Right boundary condition for fields
         
         # External fields (initialized to zero)
         "external_electric_field_amplitude": 0, # Amplitude of sinusoidal (cos) perturbation in x
@@ -90,7 +90,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     user_parameters : dict
         Dictionary of user-specified simulation parameters. Can include:
         - Physical parameters (e.g., box size, number of particles, thermal velocities).
-        - Numerical parameters (e.g., grid resolution, CFL factor).
+        - Numerical parameters (e.g., grid resolution, timestep).
         - Boundary conditions and random seed for reproducibility.
 
     Returns:
@@ -172,7 +172,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     # Grid setup
     dx = length / number_grid_points
     grid = jnp.linspace(-length / 2 + dx / 2, length / 2 - dx / 2, number_grid_points)
-    dt = parameters["CFL_factor"] * dx / speed_of_light
+    dt = parameters["timestep_over_spatialstep_times_c"] * dx / speed_of_light
 
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electron**2)/jnp.sqrt(mass_electron)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
@@ -258,7 +258,7 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
     user_parameters : dict
         User-defined parameters for the simulation. These can include:
         - Physical parameters: box size, number of particles, thermal velocities.
-        - Numerical parameters: grid resolution, CFL factor, time step size.
+        - Numerical parameters: grid resolution, time step size.
         - Boundary conditions for particles and fields.
         - Random seed for reproducibility.
 
