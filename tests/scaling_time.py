@@ -67,18 +67,18 @@ def measure_time_and_error(parameter_list, param_name):
             solver_parameters[param_name] = old_param
         if param_name in input_parameters:
             old_param = input_parameters[param_name]
-            if 'timestep_over_spatialstep_times_c' in param_name:
-                old_time_steps = solver_parameters['total_steps']
-                old_grid_points = solver_parameters['number_grid_points']
-                solver_parameters['total_steps'] = int(solver_parameters['total_steps'] * param / timestep_list[0])
-                solver_parameters['number_grid_points'] = int(solver_parameters['number_grid_points'] * param / input_parameters['timestep_over_spatialstep_times_c'])
+            # if 'timestep_over_spatialstep_times_c' in param_name:
+            #     old_time_steps = solver_parameters['total_steps']
+            #     old_grid_points = solver_parameters['number_grid_points']
+            #     solver_parameters['total_steps'] = int(solver_parameters['total_steps'] * param / timestep_list[0])
+            #     solver_parameters['number_grid_points'] = int(solver_parameters['number_grid_points'] * param / input_parameters['timestep_over_spatialstep_times_c'])
             input_parameters[param_name] = param
             solver_parameters['number_pseudoelectrons'] = int(solver_parameters['number_pseudoelectrons']+j)
             output = block_until_ready(simulation(input_parameters, **solver_parameters))
             input_parameters[param_name] = old_param
-            if 'timestep_over_spatialstep_times_c' in param_name:
-                solver_parameters['total_steps'] = old_time_steps
-                solver_parameters['number_grid_points'] = old_grid_points
+            # if 'timestep_over_spatialstep_times_c' in param_name:
+            #     solver_parameters['total_steps'] = old_time_steps
+            #     solver_parameters['number_grid_points'] = old_grid_points
         elapsed_time = time.time() - start
         times.append(elapsed_time)
         max_relative_errors.append(max_relative_energy_error(output))
