@@ -63,7 +63,7 @@ for epsilon in epsilon_array:
 # Plot the results
 plt.figure(figsize=(6, 4))
 plt.plot(epsilon_array, [derivative_JAX]*len(epsilon_array), label="JAX derivative")
-plt.plot(epsilon_array, derivative_analytical_array, '*-', label="Numerical derivative")
+plt.plot(epsilon_array, derivative_analytical_array, 'o-', label="Numerical derivative")
 plt.xlabel(r"$\epsilon$", fontsize=20)
 plt.ylabel(r"${d \left< E \right> }/{d v_{\text{drift}}}$", fontsize=20)
 plt.legend(fontsize=14)
