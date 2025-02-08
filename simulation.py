@@ -42,7 +42,8 @@ def initialize_simulation_parameters(user_parameters):
         # Basic simulation settings
         "length": 1e-2,                           # Dimensions of the simulation box
         "amplitude_perturbation_x": 0.1,          # Amplitude of sinusoidal (sin) perturbation in x
-        "wavenumber_perturbation_x_factor": 1,    # Wavenumber of sinusoidal (sin) perturbation in x (factor of 2pi/length)
+        "wavenumber_electrons": 1,    # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
+        "wavenumber_ions": 0,    # Wavenumber of sinusoidal ion density perturbation in x (factor of 2pi/length)
         "grid_points_per_Debye_length": 9,        # dx over Debye length
         "vth_electrons_over_c": 0.05,             # Thermal velocity of electrons over speed of light
         "ion_temperature_over_electron_temperature": 1, # Temperature ratio of ions to electrons
@@ -62,9 +63,9 @@ def initialize_simulation_parameters(user_parameters):
         
         # External fields (initialized to zero)
         "external_electric_field_amplitude": 0, # Amplitude of sinusoidal (cos) perturbation in x
-        "external_electric_field_wavenumber_perturbation_x_factor": 0, # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
+        "external_electric_field_wavenumber": 0, # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
         "external_magnetic_field_amplitude": 0, # Amplitude of sinusoidal (cos) perturbation in x
-        "external_magnetic_field_wavenumber_perturbation_x_factor": 0, # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
+        "external_magnetic_field_wavenumber": 0, # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
     }
 
     # Merge user-provided parameters into the default dictionary
@@ -112,16 +113,17 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     random_key = PRNGKey(parameters["seed"])
     
     # **Particle Positions**
-    wavenumber_perturbation_x = parameters["wavenumber_perturbation_x_factor"] * 2 * jnp.pi / length
-    
+    wavenumber_perturbation_x_electrons = parameters["wavenumber_electrons"] * 2 * jnp.pi / length
     electron_xs = jnp.linspace(-length / 2, length / 2, number_pseudoelectrons)
-    electron_xs+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x * electron_xs)
+    electron_xs+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x_electrons * electron_xs)
     electron_ys = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2)
     electron_zs = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2)
     electron_positions = jnp.stack((electron_xs, electron_ys, electron_zs), axis=1)
 
     # Ion positions: Add random y, z positions to uniform grid x positions
+    wavenumber_perturbation_x_ions = parameters["wavenumber_ions"] * 2 * jnp.pi / length
     ion_xs = jnp.linspace(-length / 2, length / 2, number_pseudoelectrons)
+    ion_xs+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x_ions * ion_xs)
     ion_ys = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2)
     ion_zs = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2)
     ion_positions = jnp.stack((ion_xs, ion_ys, ion_zs), axis=1)
@@ -194,7 +196,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
             "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
         ),length/(Debye_length_per_dx*dx),number_pseudoelectrons * weight / length,
         -mass_electron * vth_electrons**2 / 2 / charge_electron, -mass_proton * vth_ions**2 / 2 / charge_electron,
-        Debye_length_per_dx*dx, wavenumber_perturbation_x*Debye_length_per_dx*dx, number_pseudoelectrons / number_grid_points, 1/(plasma_frequency * dt), dt * plasma_frequency * total_steps,
+        Debye_length_per_dx*dx, wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx, number_pseudoelectrons / number_grid_points, 1/(plasma_frequency * dt), dt * plasma_frequency * total_steps,
         number_pseudoelectrons * weight / length * (Debye_length_per_dx*dx)**3,
         -charge_electron * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electron * vth_electrons**2 / 2),
         ), lambda _: None, operand=None)
@@ -218,8 +220,8 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
     
     fields = (E_field, B_field)
     
-    external_E_field_x = parameters["external_electric_field_amplitude"] * jnp.cos(parameters["external_electric_field_wavenumber_perturbation_x_factor"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
-    external_B_field_x = parameters["external_magnetic_field_amplitude"] * jnp.cos(parameters["external_magnetic_field_wavenumber_perturbation_x_factor"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
+    external_E_field_x = parameters["external_electric_field_amplitude"] * jnp.cos(parameters["external_electric_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
+    external_B_field_x = parameters["external_magnetic_field_amplitude"] * jnp.cos(parameters["external_magnetic_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
 
     # **Update parameters**
     parameters.update({
