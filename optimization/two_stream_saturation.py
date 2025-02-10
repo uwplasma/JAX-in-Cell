@@ -2,13 +2,13 @@
 # Optimize the non-linear saturation of the two_stream_instabiltity to be as small as possible
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from simulation import simulation
-from diagnostics import diagnostics
+from jaxincell.simulation import simulation
+from jaxincell.diagnostics import diagnostics
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
 from jax import jit, value_and_grad, grad
-from constants import epsilon_0
+from jaxincell.constants import epsilon_0
 import optax
 import time
 

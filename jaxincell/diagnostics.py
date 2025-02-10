@@ -1,8 +1,7 @@
 from jax import vmap, lax
-from constants import epsilon_0
 import jax.numpy as jnp
 from jax.numpy.fft import fft, fftfreq
-from constants import epsilon_0, charge_electron, mass_electron, mass_proton, speed_of_light, mu_0
+from .constants import epsilon_0, charge_electron, mass_electron, mass_proton, speed_of_light, mu_0
 import matplotlib.pyplot as plt
 
 def diagnostics(output, print_to_terminal=True):
