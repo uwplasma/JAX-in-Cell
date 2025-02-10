@@ -1,6 +1,6 @@
 from jax import jit, vmap
 import jax.numpy as jnp
-from constants import speed_of_light
+from .constants import speed_of_light
 
 def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
     """

@@ -2,9 +2,9 @@
 # Example of plasma oscillations of electrons
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from plot import plot_results
-from simulation import simulation
-from diagnostics import diagnostics
+from jaxincell.plot import plot_results
+from jaxincell.simulation import simulation
+from jaxincell.diagnostics import diagnostics
 import jax.numpy as jnp
 
 input_parameters = {

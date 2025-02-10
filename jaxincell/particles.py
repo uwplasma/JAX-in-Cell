@@ -1,6 +1,6 @@
 from jax import vmap, jit
 import jax.numpy as jnp
-from boundary_conditions import field_2_ghost_cells
+from .boundary_conditions import field_2_ghost_cells
 
 @jit
 def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):

@@ -1,9 +1,9 @@
 ## main.py
 # Main script to run the simulation, plot the results and compute the frequency of the charge density oscillations
 import time
-from plot import plot_results
-from simulation import simulation
-from diagnostics import diagnostics
+from jaxincell.plot import plot_results
+from jaxincell.simulation import simulation
+from jaxincell.diagnostics import diagnostics
 from jax import block_until_ready
 
 input_parameters = {

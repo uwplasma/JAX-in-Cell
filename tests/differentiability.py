@@ -2,7 +2,7 @@
 # Calculate derivatives of outputs with respect to inputs
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from simulation import simulation
+from jaxincell.simulation import simulation
 from jax import jit, grad, lax, block_until_ready, debug
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
