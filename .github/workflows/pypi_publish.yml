@@ -3,7 +3,9 @@ name: Upload Python Package
 on:
   push:
     branches:
-      - main  # Run only when pushing to the main branch
+      - main
+    tags:
+      - '**'
 
 permissions:
   contents: read
@@ -38,12 +40,27 @@ jobs:
           name: release-dists
           path: dist/
 
-  pypi-publish:
+  create-tag:
     runs-on: ubuntu-latest
     needs:
       - release-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Git tag based on version
+        run: |
+          # Fetch the latest commit version from setuptools_scm
+          VERSION=$(python -m setuptools_scm)
+          # Create a new tag with the version
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+        
+  pypi-publish:
+    runs-on: ubuntu-latest
+    needs:
+      - create-tag
     permissions:
-      id-token: write  # Required for OpenID Connect with Trusted Publisher
+      id-token: write
 
     steps:
       - name: Retrieve release distributions
