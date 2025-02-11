@@ -2,10 +2,10 @@
 # Example of plasma oscillations of electrons
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from jaxincell.plot import plot_results
+from jaxincell.plot import plot
 from jaxincell.simulation import simulation
-from jaxincell.diagnostics import diagnostics
 import jax.numpy as jnp
+from jax import block_until_ready
 
 input_parameters = {
 "length"                       : 1,  # dimensions of the simulation box in (x, y, z)
@@ -25,6 +25,10 @@ solver_parameters = {
     "total_steps"            : 1000, # Total number of time steps
 }
 
-output = simulation(input_parameters, **solver_parameters)
-diagnostics(output)
-plot_results(output)
+output = block_until_ready(simulation(input_parameters, **solver_parameters))
+
+print(f"Dominant FFT frequency (f): {output['dominant_frequency']} Hz")
+print(f"Plasma frequency (w_p):     {output['plasma_frequency']} Hz")
+print(f"Error: {jnp.abs(output['dominant_frequency'] - output['plasma_frequency']) / output['plasma_frequency'] * 100:.2f}%")
+
+plot(output)
