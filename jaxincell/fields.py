@@ -1,8 +1,8 @@
 from jax import jit
 import jax.numpy as jnp
-from .sources import calculate_charge_density
-from .boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
-from .constants import epsilon_0, speed_of_light
+from jaxincell.sources import calculate_charge_density
+from jaxincell.boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
+from jaxincell.constants import epsilon_0, speed_of_light
 
 @jit
 def E_from_Gauss_1D_FFT(charge_density, dx):
