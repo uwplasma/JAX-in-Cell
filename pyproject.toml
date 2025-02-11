@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["jaxincell"]
+
+[tool.setuptools_scm]
+write_to = "jaxincell/version.py"
+
+[project]
+name = "jaxincell"
+version = "0.0.1"
+description = "JAX-in-Cell: Particle-in-Cell code in JAX"
+readme = "README.md"
+authors = [{ name = "UWPlasma, UW-Madison group", email = "rogerio.jorge@wisc.edu" }]
+license = { file = "LICENSE" }
+ 
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+keywords = ["Plasma", 
+     "Physics", 
+     "Simulation",
+     "JAX",]
+ 
+dependencies = [ "jax", "jax_tqdm", "matplotlib"]
+ 
+requires-python = ">=3.5"
+
+[project.urls]
+Homepage = "https://github.com/uwplasma/JAX-in-Cell"

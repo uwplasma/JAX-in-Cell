@@ -13,7 +13,7 @@ from jaxincell.constants import speed_of_light, epsilon_0, charge_electron, char
 from jax_tqdm import scan_tqdm
 config.update("jax_enable_x64", True)
 
-def initialize_simulation_parameters(user_parameters):
+def initialize_simulation_parameters(user_parameters={}):
     """
     Initialize the simulation parameters for a particle-in-cell simulation, 
     combining user-provided values with predefined defaults. This function 
@@ -78,7 +78,7 @@ def initialize_simulation_parameters(user_parameters):
 
     return parameters
 
-def initialize_particles_fields(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350):
+def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500, total_steps=350):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
     
@@ -103,7 +103,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
         - Initial electric and magnetic fields.
     """
     # Merge user parameters with defaults
-    parameters = initialize_simulation_parameters(parameters_float)
+    parameters = initialize_simulation_parameters(input_parameters)
 
     # Simulation box dimensions
     length = parameters["length"]
@@ -247,7 +247,7 @@ def initialize_particles_fields(parameters_float, number_grid_points=50, number_
 
 
 @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver'])
-def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=500, total_steps=350, field_solver=0):
+def simulation(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500, total_steps=350, field_solver=0):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
@@ -269,7 +269,7 @@ def simulation(parameters_float, number_grid_points=50, number_pseudoelectrons=5
     output : dict
     """
     # **Initialize simulation parameters**
-    parameters = initialize_particles_fields(parameters_float, number_grid_points=number_grid_points,
+    parameters = initialize_particles_fields(input_parameters, number_grid_points=number_grid_points,
                                              number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps)
 
     # Extract parameters for convenience
