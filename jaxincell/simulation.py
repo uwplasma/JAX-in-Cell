@@ -5,11 +5,11 @@ from jax.random import normal
 from jax import lax, jit, vmap, config
 from jax.debug import print as jprint
 from jax.random import PRNGKey, uniform
-from .particles import fields_to_particles_grid, boris_step
-from .sources import current_density, calculate_charge_density
-from .boundary_conditions import set_BC_positions, set_BC_particles
-from .fields import field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT
-from .constants import speed_of_light, epsilon_0, charge_electron, charge_proton, mass_electron, mass_proton
+from jaxincell.particles import fields_to_particles_grid, boris_step
+from jaxincell.sources import current_density, calculate_charge_density
+from jaxincell.boundary_conditions import set_BC_positions, set_BC_particles
+from jaxincell.fields import field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT
+from jaxincell.constants import speed_of_light, epsilon_0, charge_electron, charge_proton, mass_electron, mass_proton
 from jax_tqdm import scan_tqdm
 config.update("jax_enable_x64", True)
 
