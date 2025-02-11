@@ -1,0 +1,3 @@
+jax
+jax_tqdm
+matplotlib
