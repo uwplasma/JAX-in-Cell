@@ -25,7 +25,7 @@ classifiers = [
 keywords = ["Plasma", 
      "Physics", 
      "Simulation",
-     "JAX",]
+     "JAX"]
  
 dependencies = [ "jax", "jax_tqdm", "matplotlib"]
  

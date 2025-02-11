@@ -4,7 +4,7 @@ from jax.numpy.fft import fft, fftfreq
 from jaxincell.constants import epsilon_0, charge_electron, mass_electron, mass_proton, speed_of_light, mu_0
 import matplotlib.pyplot as plt
 
-def diagnostics(output, print_to_terminal=True):
+def diagnostics(output):
     E_field_over_time = output['electric_field']
     grid = output['grid']
     dt = output['dt']
@@ -21,11 +21,6 @@ def diagnostics(output, print_to_terminal=True):
     peak_index = jnp.argmax(magnitude)
     dominant_frequency = jnp.abs(freqs[peak_index])
 
-    if print_to_terminal:
-        print(f"Dominant FFT frequency (f): {dominant_frequency} Hz")
-        print(f"Plasma frequency (w_p):     {plasma_frequency} Hz")
-        # print(f"Error: {jnp.abs(dominant_frequency - plasma_frequency) / plasma_frequency * 100:.2f}%")
-    
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
     integral_E_squared         = jnp.trapezoid(abs_E_squared, dx=output['dx'], axis=-1)

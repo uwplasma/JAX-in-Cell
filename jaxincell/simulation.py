@@ -10,6 +10,7 @@ from jaxincell.sources import current_density, calculate_charge_density
 from jaxincell.boundary_conditions import set_BC_positions, set_BC_particles
 from jaxincell.fields import field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT
 from jaxincell.constants import speed_of_light, epsilon_0, charge_electron, charge_proton, mass_electron, mass_proton
+from jaxincell.diagnostics import diagnostics
 from jax_tqdm import scan_tqdm
 config.update("jax_enable_x64", True)
 
@@ -367,7 +368,7 @@ def simulation(input_parameters={}, number_grid_points=50, number_pseudoelectron
     magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
     
     # **Output results**
-    output = {
+    temporary_output = {
         # "all_positions":  positions_over_time,
         # "all_velocities": velocities_over_time,
         "position_electrons": positions_over_time[ :, :number_pseudoelectrons, :],
@@ -387,5 +388,9 @@ def simulation(input_parameters={}, number_grid_points=50, number_pseudoelectron
         "total_steps": total_steps,
         "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
     }
+    
+    output = {**temporary_output, **parameters}
 
-    return {**output, **parameters}
+    diagnostics(output)
+    
+    return output

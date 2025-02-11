@@ -5,7 +5,7 @@ from matplotlib.animation import FuncAnimation
 from jaxincell.fields import E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT, E_from_Gauss_1D_Cartesian
 from jaxincell.constants import speed_of_light, mass_proton, mass_electron
 
-def plot_results(output):
+def plot(output):
     # Precompute constants
     v_th = output["vth_electrons_over_c"] * speed_of_light
     grid = output["grid"]
