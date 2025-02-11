@@ -27,7 +27,7 @@ jobs:
       - name: Update version dynamically
         run: |
           # Use setuptools_scm to manage versioning dynamically
-          echo "__version__ = '$(python -m setuptools_scm)'" > mypackage/version.py
+          echo "__version__ = '$(python -m setuptools_scm)'" > jaxincell/version.py
 
       - name: Build distributions
         run: python -m build
