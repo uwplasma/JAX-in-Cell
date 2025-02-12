@@ -48,13 +48,32 @@
 
 ##  Overview
 
-<code>❯ REPLACE-ME</code>
+JAX-in-Cell is an open-source project in Python that uses JAX to speedup simulations, leading to a simple to use, fast and concise code. It can be imported in a Python script using the **jaxincell** package, or run directly in python using its `simulation()` function. To install it, use
+
+   ```sh
+   pip install jaxincell
+   ```
+
+Alternatively, you can simple install the Python dependencies `jax`, `jax_tqdm` and `matplotlib`, and run the `main.py` script in the repository after downloading it as
+
+   ```sh
+   python main.py
+   ```
+
+This allows JAX-in-Cell to be run without any installation.
+
+The project can be downloaded in its [GitHub repository](https://github.com/uwplasma/JAX-in-Cell)
+</code>
 
 ---
 
 ##  Features
 
-<code>❯ REPLACE-ME</code>
+JAX-in-Cell can run in CPUs, GPUs and TPUs, has autodifferentiation and just-in-time compilation capabilities, is based on rigorous testing, uses CI/CD via GitHub actions and has detailed documentation.
+
+Currently, it evolves particles using the non-relativisic Lorentz force $\mathbf F = q (\mathbf E + \mathbf v \times \mathbf B)$, and evolves the electric $\mathbf E$ and magnetic $\mathbf B$ field using Maxwell's equations.
+
+Plenty of examples are provided in the `examples` folder, and the documentation can be found in [Read the Docs](https://jax-in-cell.readthedocs.io/).
 
 ---
 
@@ -64,15 +83,14 @@
 └── JAX-in-Cell/
     ├── LICENSE
     ├── docs
-    │   ├── Makefile
-    │   ├── conf.py
-    │   ├── index.rst
-    │   └── make.bat
     ├── examples
     │   ├── Landau_damping.py
     │   ├── Langmuir_wave.py
     │   ├── ion-acoustic_wave.py
-    │   └── two-stream_instability.py
+	│   ├── two-stream_instability.py
+	│   ├── auto-differentiability.py
+	│   ├── scaling_energy_time.py
+    │   └── optimize_two_stream_saturation.py
     ├── jaxincell
     │   ├── boundary_conditions.py
     │   ├── constants.py
@@ -83,149 +101,84 @@
     │   ├── simulation.py
     │   └── sources.py
     ├── main.py
-    ├── optimization
-    │   └── two_stream_saturation.py
     └── tests
-        ├── differentiability.py
-        └── scaling_time.py
+        └── test_simulation.py
 ```
-
-
-###  Project Index
-<details open>
-	<summary><b><code>JAX-IN-CELL/</code></b></summary>
-	<details> <!-- __root__ Submodule -->
-		<summary><b>__root__</b></summary>
-		<blockquote>
-			<table>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/main.py'>main.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			</table>
-		</blockquote>
-	</details>
-	<details> <!-- optimization Submodule -->
-		<summary><b>optimization</b></summary>
-		<blockquote>
-			<table>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/optimization/two_stream_saturation.py'>two_stream_saturation.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			</table>
-		</blockquote>
-	</details>
-	<details> <!-- jaxincell Submodule -->
-		<summary><b>jaxincell</b></summary>
-		<blockquote>
-			<table>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/jaxincell/simulation.py'>simulation.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/jaxincell/plot.py'>plot.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/jaxincell/fields.py'>fields.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/jaxincell/diagnostics.py'>diagnostics.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/jaxincell/constants.py'>constants.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/jaxincell/particles.py'>particles.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/jaxincell/sources.py'>sources.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/jaxincell/boundary_conditions.py'>boundary_conditions.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			</table>
-		</blockquote>
-	</details>
-	<details> <!-- examples Submodule -->
-		<summary><b>examples</b></summary>
-		<blockquote>
-			<table>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/examples/ion-acoustic_wave.py'>ion-acoustic_wave.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/examples/Landau_damping.py'>Landau_damping.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/examples/Langmuir_wave.py'>Langmuir_wave.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			<tr>
-				<td><b><a href='https://github.com/uwplasma/JAX-in-Cell/blob/master/examples/two-stream_instability.py'>two-stream_instability.py</a></b></td>
-				<td><code>❯ REPLACE-ME</code></td>
-			</tr>
-			</table>
-		</blockquote>
-	</details>
-</details>
 
 ---
 ##  Getting Started
 
 ###  Prerequisites
 
-Before getting started with JAX-in-Cell, ensure your runtime environment meets the following requirements:
-
 - **Programming Language:** Python
 
+Besides Python, JAX-in-Cell has minimum requirements. These are stated in [requirements.txt](requirements.txt), and consist of the Python libraries `jax`, `jax_tqdm` and `matplotlib`. These can be installed using
+
+   ```sh
+   pip install jax jax_tqdm matplotlib
+   ```
 
 ###  Installation
 
 Install JAX-in-Cell using one of the following methods:
 
+**Using PyPi:**
+
+1. Install JAX-in-Cell from anywhere in the terminal:
+```sh
+pip install jaxincell
+```
+
 **Build from source:**
 
 1. Clone the JAX-in-Cell repository:
 ```sh
-❯ git clone https://github.com/uwplasma/JAX-in-Cell
+git clone https://github.com/uwplasma/JAX-in-Cell
 ```
 
 2. Navigate to the project directory:
 ```sh
-❯ cd JAX-in-Cell
+cd JAX-in-Cell
 ```
 
 3. Install the project dependencies:
 
-echo 'INSERT-INSTALL-COMMAND-HERE'
+```sh
+pip install -r /path/to/requirements.txt
+```
 
+4. Install JAX-in-Cell:
 
+```sh
+pip install -e .
+```
 
 ###  Usage
-Run JAX-in-Cell using the following command:
-echo 'INSERT-RUN-COMMAND-HERE'
+To run a simple case of JAX-in-Cell, you can run the file [main.py](main.py) directly
+```sh
+python main.py
+```
+
+There, you can find most of the input parameters needed to run many test cases, as well as resolution parameters.
+The `jaxincell` package has a single function `simulation()` that takes as arguments a dictionary input_parameters, the number of grid points, number of pseudoelectrons, total number of time steps, and the field solver to use.
+
+In the [main.py](main.py) file we write as inline comments the meaning of each input parameter.
 
 ###  Testing
 Run the test suite using the following command:
-echo 'INSERT-TEST-COMMAND-HERE'
+```sh
+pytest .
+```
 
 ---
 ##  Project Roadmap
 
-- [X] **`Task 1`**: <strike>Implement feature one.</strike>
-- [ ] **`Task 2`**: Implement feature two.
-- [ ] **`Task 3`**: Implement feature three.
+- [X] **`Task 1`**: <strike>Run PIC simulation using several field solvers.</strike>
+- [ ] **`Task 2`**: Finalize example scripts and their documentation.
+- [ ] **`Task 3`**: Implement a relativistic equation of motion.
+- [ ] **`Task 4`**: Implement collisions to allow the plasma to relax to a Maxwellian.
+- [ ] **`Task 5`**: Implement guiding-center equations of motion.
+- [ ] **`Task 6`**: Implement an implicit time-stepping algorithm.
 
 ---
 
@@ -274,12 +227,13 @@ echo 'INSERT-TEST-COMMAND-HERE'
 
 ##  License
 
-This project is protected under the [SELECT-A-LICENSE](https://choosealicense.com/licenses) License. For more details, refer to the [LICENSE](https://choosealicense.com/licenses/) file.
+This project is protected under the MIT License. For more details, refer to the [LICENSE](LICENSE) file.
 
 ---
 
 ##  Acknowledgments
 
-- List any resources, contributors, inspiration, etc. here.
+- This code was inspired by a previous implementation of a PIC code in JAX by Sean Lim [here](https://github.com/SeanLim2101/PiC-Code-Jax).
+- We acknowledge the help of the whole [UWPlasma](https://rogerio.physics.wisc.edu/) plasma group.
 
 ---
