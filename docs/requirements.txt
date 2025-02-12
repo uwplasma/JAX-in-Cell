@@ -3,3 +3,4 @@ jax_tqdm
 matplotlib
 sphinx
 sphinx-autoapi
+piccolo_theme
