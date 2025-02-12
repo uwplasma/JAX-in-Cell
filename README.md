@@ -10,6 +10,7 @@
 	<img src="https://img.shields.io/github/last-commit/uwplasma/JAX-in-Cell?style=default&logo=git&logoColor=white&color=0080ff" alt="last-commit">
 	<img src="https://img.shields.io/github/languages/top/uwplasma/JAX-in-Cell?style=default&color=0080ff" alt="repo-top-language">
 	<img src="https://img.shields.io/github/languages/count/uwplasma/JAX-in-Cell?style=default&color=0080ff" alt="repo-language-count">
+	<img src="https://codecov.io/gh/uwplasma/JAX-in-Cell/branch/main/graph/badge.svg" alt="codecov">
 </p>
 <p align="center"><!-- default option, no dependency badges. -->
 </p>
