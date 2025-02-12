@@ -41,7 +41,7 @@ jobs:
       
     - name: Run tests with coverage
       run: |
-        pytest --cov-branch --cov-report=xml
+        pytest --cov-branch --cov-report=xml --cov=jaxincell
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
