@@ -47,6 +47,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install setuptools_scm
+        run: |
+          python -m pip install setuptools_scm
+
       - name: Create Git tag based on version
         run: |
           # Fetch the latest commit version from setuptools_scm
