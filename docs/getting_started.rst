@@ -11,9 +11,15 @@ You can simply clone the repository and install the dependencies using the follo
 
 .. code-block:: console
 
-    $ git clone
-    $ cd jax-in-cell
+    $ git clone https://github.com/uwplasma/JAX-in-Cell.git
+    $ cd JAX-in-Cell
     $ pip install -r requirements.txt
+
+these are
+
+    - jax
+    - jax_tqdm
+    - matplotlib
 
 Run an example
 --------------
@@ -22,6 +28,6 @@ To run the main example, use the following command:
 
 .. code-block:: console
 
-    (.venv) $ python main.py
+    python main.py
 
 More examples are in the `examples` folder.
