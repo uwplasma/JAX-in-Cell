@@ -6,6 +6,15 @@
 .. image:: JAX-in-Cell_logo.png
    :width: 200px
    :align: center
+   :target: https://github.com/uwplasma/JAX-in-Cell
+
+.. image:: https://img.shields.io/badge/GitHub-Repository-blue
+   :target: https://github.com/uwplasma/JAX-in-Cell
+   :alt: GitHub repository
+   :width: 100px
+   :align: center
+
+-------------------------
 
 JAX-in-Cell documentation
 =========================
