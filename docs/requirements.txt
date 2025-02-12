@@ -1,0 +1,5 @@
+jax
+jax_tqdm
+matplotlib
+sphinx
+sphinx-autoapi
