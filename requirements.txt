@@ -1,3 +1,4 @@
 jax
 jax_tqdm
 matplotlib
+sphinx-autoapi
