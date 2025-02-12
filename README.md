@@ -3,14 +3,22 @@
 </p>
 <p align="center"><h1 align="center">JAX-IN-CELL</h1></p>
 <p align="center">
-	<em><code>❯ REPLACE-ME</code></em>
+	<em><code>❯ Plasma Simulation - Particle-in-Cell code in JAX</code></em>
 </p>
 <p align="center">
 	<img src="https://img.shields.io/github/license/uwplasma/JAX-in-Cell?style=default&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
 	<img src="https://img.shields.io/github/last-commit/uwplasma/JAX-in-Cell?style=default&logo=git&logoColor=white&color=0080ff" alt="last-commit">
 	<img src="https://img.shields.io/github/languages/top/uwplasma/JAX-in-Cell?style=default&color=0080ff" alt="repo-top-language">
-	<img src="https://img.shields.io/github/languages/count/uwplasma/JAX-in-Cell?style=default&color=0080ff" alt="repo-language-count">
-	<img src="https://codecov.io/gh/uwplasma/JAX-in-Cell/branch/main/graph/badge.svg" alt="codecov">
+	<a href="https://github.com/uwplasma/JAX-in-Cell/actions/workflows/build_test.yml">
+		<img src="https://github.com/uwplasma/JAX-in-Cell/actions/workflows/build_test.yml/badge.svg" alt="Build Status">
+	</a>
+	<a href="https://codecov.io/gh/uwplasma/JAX-in-Cell">
+		<img src="https://codecov.io/gh/uwplasma/JAX-in-Cell/branch/main/graph/badge.svg" alt="Coverage">
+	</a>
+	<a href="https://jax-in-cell.readthedocs.io/en/latest/?badge=latest">
+		<img src="https://readthedocs.org/projects/jax-in-cell/badge/?version=latest" alt="Documentation Status">
+	</a>
+
 </p>
 <p align="center"><!-- default option, no dependency badges. -->
 </p>
@@ -18,6 +26,7 @@
 	<!-- default option, no dependency badges. -->
 </p>
 <br>
+
 
 ##  Table of Contents
 
