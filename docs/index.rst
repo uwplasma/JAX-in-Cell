@@ -3,6 +3,10 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
+.. image:: JAX-in-Cell_logo.png
+   :width: 200px
+   :align: center
+
 JAX-in-Cell documentation
 =========================
 

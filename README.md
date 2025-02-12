@@ -1,9 +1,9 @@
 <p align="center">
-    <img src="https://raw.githubusercontent.com/PKief/vscode-material-icon-theme/ec559a9f6bfd399b82bb44393651661b08aaf7ba/icons/folder-markdown-open.svg" align="center" width="30%">
+    <img src="docs/JAX-in-Cell_logo.png" align="center" width="30%">
 </p>
-<p align="center"><h1 align="center">JAX-IN-CELL</h1></p>
+<!-- <p align="center"><h3 align="center">JAX-IN-CELL</h1></p> -->
 <p align="center">
-	<em><code>❯ Plasma Simulation - Particle-in-Cell code in JAX</code></em>
+	<em><code>❯ jaxincell: 1D particle-in-cell code in JAX to perform simulation of plasmas</code></em>
 </p>
 <p align="center">
 	<img src="https://img.shields.io/github/license/uwplasma/JAX-in-Cell?style=default&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
