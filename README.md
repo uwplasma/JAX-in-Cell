@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="docs/JAX-in-Cell_logo.png" align="center" width="30%">
+    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/refs/heads/main/docs/JAX-in-Cell_logo.png" align="center" width="30%">
 </p>
 <!-- <p align="center"><h3 align="center">JAX-IN-CELL</h1></p> -->
 <p align="center">
