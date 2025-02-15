@@ -10,7 +10,6 @@ write_to = "jaxincell/version.py"
 
 [project]
 name = "jaxincell"
-version = "0.0.1"
 description = "JAX-in-Cell: Particle-in-Cell code in JAX"
 readme = "README.md"
 authors = [{ name = "UWPlasma, UW-Madison group", email = "rogerio.jorge@wisc.edu" }]
