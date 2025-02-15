@@ -48,16 +48,17 @@
 
 ##  Overview
 
-JAX-in-Cell is an open-source project in Python that uses JAX to speedup simulations, leading to a simple to use, fast and concise code. It can be imported in a Python script using the **jaxincell** package, or run directly in python using its `simulation()` function. To install it, use
+JAX-in-Cell is an open-source project in Python that uses JAX to speedup simulations, leading to a simple to use, fast and concise code. It can be imported in a Python script using the **jaxincell** package, or run directly in the command line as `jaxincell`. To install it, use
 
    ```sh
    pip install jaxincell
    ```
 
-Alternatively, you can simple install the Python dependencies `jax`, `jax_tqdm` and `matplotlib`, and run the `main.py` script in the repository after downloading it as
+Alternatively, you can install the Python dependencies `jax`, `jax_tqdm` and `matplotlib`, and run the [example script](example_script.py) in the repository after downloading it as
 
    ```sh
-   python main.py
+   git clone https://github.com/uwplasma/JAX-in-Cell
+   python example_script.py
    ```
 
 This allows JAX-in-Cell to be run without any installation.
@@ -159,7 +160,7 @@ To run a simple case of JAX-in-Cell, you can simply call `jaxincell` from the te
 jaxincell
 ```
 
-This runs JAX-in-Cell using standard input parameters of the two-stream instability. To change input parameters, use a TOML file similar to the [example input](example_input.toml) present in the repository as
+This runs JAX-in-Cell using standard input parameters of Landau damping. To change input parameters, use a TOML file similar to the [example input](example_input.toml) present in the repository as
 
 ```sh
 jaxincell example_input.toml
