@@ -6,7 +6,7 @@ from jaxincell.plot import plot
 from jaxincell.simulation import simulation
 
 # Read from input.toml
-parameters = tomllib.load(open('input.toml', "rb"))
+parameters = tomllib.load(open('example_input.toml', "rb"))
 input_parameters = parameters['input_parameters']
 solver_parameters = parameters['solver_parameters']
 

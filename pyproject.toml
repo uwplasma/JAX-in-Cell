@@ -15,7 +15,7 @@ description = "JAX-in-Cell: Particle-in-Cell code in JAX"
 readme = "README.md"
 authors = [{ name = "UWPlasma, UW-Madison group", email = "rogerio.jorge@wisc.edu" }]
 license = { file = "LICENSE" }
- 
+
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Operating System :: OS Independent",
@@ -33,3 +33,7 @@ requires-python = ">=3.5"
 
 [project.urls]
 Homepage = "https://github.com/uwplasma/JAX-in-Cell"
+
+[project.scripts]
+jaxincell = "jaxincell.__main__:main"
+ 
