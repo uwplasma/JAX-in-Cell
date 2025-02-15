@@ -14,6 +14,7 @@ description = "JAX-in-Cell: Particle-in-Cell code in JAX"
 readme = "README.md"
 authors = [{ name = "UWPlasma, UW-Madison group", email = "rogerio.jorge@wisc.edu" }]
 license = { file = "LICENSE" }
+dynamic = ["version"]
 
 classifiers = [
     "Development Status :: 3 - Alpha",
