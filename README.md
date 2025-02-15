@@ -154,15 +154,26 @@ pip install -e .
 ```
 
 ###  Usage
-To run a simple case of JAX-in-Cell, you can run the file [main.py](main.py) directly
+To run a simple case of JAX-in-Cell, you can simply call `jaxincell` from the terminal
 ```sh
-python main.py
+jaxincell
+```
+
+This runs JAX-in-Cell using standard input parameters of the two-stream instability. To change input parameters, use a TOML file similar to the [example input](example_input.toml) present in the repository as
+
+```sh
+jaxincell example_input.toml
+```
+
+Additionally, it can be run inside a script, as shown in the [example script](example_script.py) file
+```sh
+python example_script.py
 ```
 
 There, you can find most of the input parameters needed to run many test cases, as well as resolution parameters.
 The `jaxincell` package has a single function `simulation()` that takes as arguments a dictionary input_parameters, the number of grid points, number of pseudoelectrons, total number of time steps, and the field solver to use.
 
-In the [main.py](main.py) file we write as inline comments the meaning of each input parameter.
+In the [example script](example_script.py) file we write as inline comments the meaning of each input parameter.
 
 ###  Testing
 Run the test suite using the following command:

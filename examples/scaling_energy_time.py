@@ -1,5 +1,4 @@
 ## scaling_time.py
-# NOTE: run this script from the root directory with `python tests/scaling_time.py`
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import time
