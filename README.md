@@ -113,11 +113,7 @@ Plenty of examples are provided in the `examples` folder, and the documentation 
 
 - **Programming Language:** Python
 
-Besides Python, JAX-in-Cell has minimum requirements. These are stated in [requirements.txt](requirements.txt), and consist of the Python libraries `jax`, `jax_tqdm` and `matplotlib`. These can be installed using
-
-   ```sh
-   pip install jax jax_tqdm matplotlib
-   ```
+Besides Python, JAX-in-Cell has minimum requirements. These are stated in [requirements.txt](requirements.txt), and consist of the Python libraries `jax`, `jax_tqdm` and `matplotlib`.
 
 ###  Installation
 
