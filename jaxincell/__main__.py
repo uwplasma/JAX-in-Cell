@@ -1,8 +1,8 @@
 """Main command line interface to JAX-in-Cell."""
 import sys
 import tomllib
-from jaxincell.plot import plot
-from jaxincell.simulation import simulation
+from ._plot import plot
+from ._simulation import simulation
 
 def main(cl_args=sys.argv[1:]):
     """Run the main JAX-in-Cell code from the command line.

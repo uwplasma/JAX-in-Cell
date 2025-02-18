@@ -2,8 +2,10 @@ from jax import vmap
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from jaxincell.fields import E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT, E_from_Gauss_1D_Cartesian
-from jaxincell.constants import speed_of_light, mass_proton, mass_electron
+from ._fields import E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT, E_from_Gauss_1D_Cartesian
+from ._constants import speed_of_light, mass_proton, mass_electron
+
+__all__ = ['plot']
 
 def plot(output):
     # Precompute constants

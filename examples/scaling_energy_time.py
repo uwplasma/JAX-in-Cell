@@ -2,8 +2,8 @@
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import time
-from jaxincell.simulation import simulation
-from jaxincell.diagnostics import diagnostics
+from jaxincell import simulation
+from jaxincell import diagnostics
 from jax import block_until_ready
 import matplotlib.pyplot as plt
 import jax.numpy as jnp

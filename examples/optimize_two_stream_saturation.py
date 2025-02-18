@@ -3,13 +3,13 @@
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import tomllib
-from jaxincell.simulation import simulation
-from jaxincell.diagnostics import diagnostics
 import jax.numpy as jnp
+from jax import jit, grad
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
-from jax import jit, grad
-from jaxincell.constants import epsilon_0
+from jaxincell import simulation
+from jaxincell import diagnostics
+from jaxincell import epsilon_0
 
 # Read from input.toml
 parameters = tomllib.load(open('input.toml', "rb"))

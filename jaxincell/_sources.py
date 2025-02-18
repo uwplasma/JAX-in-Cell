@@ -2,6 +2,8 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from jax.lax import dynamic_update_slice
 
+__all__ = ['charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density']
+
 @jit
 def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, charge):
     """

@@ -1,6 +1,8 @@
 from jax import vmap, jit
 import jax.numpy as jnp
-from jaxincell.boundary_conditions import field_2_ghost_cells
+from ._boundary_conditions import field_2_ghost_cells
+
+__all__ = ['fields_to_particles_grid', 'rotation', 'boris_step']
 
 @jit
 def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):

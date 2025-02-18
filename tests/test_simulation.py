@@ -1,6 +1,6 @@
 import pytest
 import jax.numpy as jnp
-from jaxincell.simulation import simulation
+from jaxincell import simulation
 
 def test_simulation_runs():
     """Test if the simulation runs without errors with default parameters."""

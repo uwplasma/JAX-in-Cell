@@ -7,7 +7,7 @@ import tomllib
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from jax import jit, grad, lax, block_until_ready, debug
-from jaxincell.simulation import simulation
+from jaxincell import simulation
 
 # Read from input.toml
 parameters = tomllib.load(open('input.toml', "rb"))

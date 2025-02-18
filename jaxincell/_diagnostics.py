@@ -1,7 +1,9 @@
 from jax import vmap, lax
 import jax.numpy as jnp
 from jax.numpy.fft import fft, fftfreq
-from jaxincell.constants import epsilon_0, mass_electron, mass_proton, mu_0
+from ._constants import epsilon_0, mass_electron, mass_proton, mu_0
+
+__all__ = ['diagnostics']
 
 def diagnostics(output):
     E_field_over_time = output['electric_field']

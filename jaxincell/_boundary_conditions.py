@@ -1,6 +1,8 @@
 from jax import jit, vmap
 import jax.numpy as jnp
-from jaxincell.constants import speed_of_light
+from ._constants import speed_of_light
+
+__all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
 
 def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
     """

@@ -2,8 +2,8 @@
 import time
 import tomllib
 from jax import block_until_ready
-from jaxincell.plot import plot
-from jaxincell.simulation import simulation
+from jaxincell import plot
+from jaxincell import simulation
 
 # Read from input.toml
 parameters = tomllib.load(open('example_input.toml', "rb"))
