@@ -207,17 +207,17 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         lambda _: jprint((
             # f"Number of pseudoelectrons: {number_pseudoelectrons}\n"
             # f"Number of grid points: {number_grid_points}\n"
-            "Length of the simulation box: {:.2e} Debye lengths\n"
+            "Length of the simulation box: {:.1e} Debye lengths\n"
             "Density of electrons: {:.2e} m^-3\n"
-            "Electron temperature: {:.2e} eV\n"
-            "Ion temperature: {:.2e} eV\n"
-            "Debye length: {:.2e} m\n"
-            "Wavenumber * Debye length: {:.2e}\n"
-            "Pseudoparticles per cell: {:.2e}\n"
-            "Steps at each plasma frequency: {:.2e}\n"
-            "Total time: {:.2e} / plasma frequency\n"
-            "Number of particles on a Debye cube: {:.2e}\n"
-            "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
+            "Electron temperature: {:.3e} eV\n"
+            "Ion temperature: {:.4e} eV\n"
+            "Debye length: {:.5e} m\n"
+            "Wavenumber * Debye length: {:.6e}\n"
+            "Pseudoparticles per cell: {:.7e}\n"
+            "Steps at each plasma frequency: {:.8e}\n"
+            "Total time: {:.9e} / plasma frequency\n"
+            "Number of particles on a Debye cube: {:.10e}\n"
+            "Charge x External electric field x Debye Length / Temperature: {:.11e}\n"
         ),length/(Debye_length_per_dx*dx),number_pseudoelectrons * weight / length,
         -mass_electron * vth_electrons**2 / 2 / charge_electron, -mass_proton * vth_ions**2 / 2 / charge_electron,
         Debye_length_per_dx*dx, wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx, number_pseudoelectrons / number_grid_points, 1/(plasma_frequency * dt), dt * plasma_frequency * total_steps,
