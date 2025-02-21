@@ -203,13 +203,13 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electron**2)/jnp.sqrt(mass_electron)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
 
-    jprint("mass_proton {}", mass_proton)
-    jprint("vth_ions {}", vth_ions)
-    jprint("mass_electron {}", mass_electron)
-    jprint("vth_electrons {}", vth_electrons)
-    jprint("charge_electron {}", charge_electron)
-    jprint("charge_proton {}", charge_proton)
-    jprint("epsilon_0 {}", epsilon_0)
+    jprint("mass_proton {:.3e}", mass_proton)
+    jprint("vth_ions {:.3e}", vth_ions)
+    jprint("mass_electron {:.3e}", mass_electron)
+    jprint("vth_electrons {:.3e}", vth_electrons)
+    jprint("charge_electron {:.3e}", charge_electron)
+    jprint("charge_proton {:.3e}", charge_proton)
+    jprint("epsilon_0 {:.3e}", epsilon_0)
 
     cond(parameters["print_info"],
         lambda _: jprint((
@@ -217,8 +217,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             # f"Number of grid points: {number_grid_points}\n"
             "Length of the simulation box: {:.1e} Debye lengths\n"
             "Density of electrons: {:.2e} m^-3\n"
-            "Electron temperature: {:.3e} eV\n"
-            "Ion temperature: {:.4e} eV\n"
+            "Ion temperature: {:.3e} eV\n"
+            "Electron temperature: {:.4e} eV\n"
             "Debye length: {:.5e} m\n"
             "Wavenumber * Debye length: {:.6e}\n"
             "Pseudoparticles per cell: {:.7e}\n"
@@ -228,8 +228,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Charge x External electric field x Debye Length / Temperature: {:.11e}\n"
         ),length/(Debye_length_per_dx*dx),
           number_pseudoelectrons * weight / length,
-          -mass_electron * vth_electrons**2 / 2 / charge_electron,
           -mass_proton * vth_ions**2 / 2 / charge_electron,
+          -mass_electron * vth_electrons**2 / 2 / charge_electron,
           Debye_length_per_dx*dx,
           wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx,
           number_pseudoelectrons / number_grid_points,
