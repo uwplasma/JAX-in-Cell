@@ -214,8 +214,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Debye length: {:.2e} m\n"
             "Wavenumber * Debye length: {:.2e}\n"
             "Pseudoparticles per cell: {:.2e}\n"
-            "Steps at each plasma frequency: {:.3f}\n"
-            "Total time: {:.3f} / plasma frequency\n"
+            "Steps at each plasma frequency: {}\n"
+            "Total time: {} / plasma frequency\n"
             "Number of particles on a Debye cube: {:.2e}\n"
             "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
         ),length/(Debye_length_per_dx*dx),
