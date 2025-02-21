@@ -207,6 +207,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     jprint("vth_electrons {:.3e}", vth_electrons)
     jprint("mass_electron {:.3e}", mass_electron)
     jprint("mass_proton {:.3e}", mass_proton)
+    jprint("jnp.sqrt(parameters['ion_temperature_over_electron_temperature']) {:.3e}", jnp.sqrt(parameters["ion_temperature_over_electron_temperature"]))
+    jprint("jnp.sqrt(mass_electron / mass_proton) {:.3e}", jnp.sqrt(mass_electron / mass_proton))
     jprint("vth_ions {:.3e}", vth_ions)
 
     cond(parameters["print_info"],
