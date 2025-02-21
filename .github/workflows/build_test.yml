@@ -16,19 +16,16 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        python-version: [ '3.8', '3.9', '3.10', '3.11', '3.12']
+    name: Python ${{ matrix.python-version }} sample
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v2
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v1
       with:
-        python-version: |
-            3.8
-            3.9
-            3.10
-            3.11
-            3.12
-            3.13
+        python-version: ${{ matrix.python-version }}
     - name: Install jaxincell
       run: |
         python -m pip install --upgrade pip
