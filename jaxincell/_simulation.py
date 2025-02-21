@@ -203,13 +203,11 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electron**2)/jnp.sqrt(mass_electron)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
 
+    jprint("parameters[ion_temperature_over_electron_temperature] {:.3e}", parameters["ion_temperature_over_electron_temperature"])
+    jprint("vth_electrons {:.3e}", vth_electrons)
+    jprint("mass_electron {:.3e}", mass_electron)
     jprint("mass_proton {:.3e}", mass_proton)
     jprint("vth_ions {:.3e}", vth_ions)
-    jprint("mass_electron {:.3e}", mass_electron)
-    jprint("vth_electrons {:.3e}", vth_electrons)
-    jprint("charge_electron {:.3e}", charge_electron)
-    jprint("charge_proton {:.3e}", charge_proton)
-    jprint("epsilon_0 {:.3e}", epsilon_0)
 
     cond(parameters["print_info"],
         lambda _: jprint((
