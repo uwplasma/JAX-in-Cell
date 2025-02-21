@@ -1,6 +1,7 @@
-from jax import vmap, lax
+from jax import lax
 import jax.numpy as jnp
 from jax.numpy.fft import fft, fftfreq
+from jax.scipy.integrate import trapezoid
 from ._constants import epsilon_0, mass_electron, mass_proton, mu_0
 
 __all__ = ['diagnostics']
@@ -24,13 +25,13 @@ def diagnostics(output):
 
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
-    integral_E_squared         = jnp.trapezoid(abs_E_squared, dx=output['dx'], axis=-1)
-    integral_externalE_squared = jnp.trapezoid(abs_externalE_squared, dx=output['dx'], axis=-1)
+    integral_E_squared         = trapezoid(abs_E_squared, dx=output['dx'], axis=-1)
+    integral_externalE_squared = trapezoid(abs_externalE_squared, dx=output['dx'], axis=-1)
     
     abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
     abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
-    integral_B_squared         = jnp.trapezoid(abs_B_squared, dx=output['dx'], axis=-1)
-    integral_externalB_squared = jnp.trapezoid(abs_externalB_squared, dx=output['dx'], axis=-1)
+    integral_B_squared         = trapezoid(abs_B_squared, dx=output['dx'], axis=-1)
+    integral_externalB_squared = trapezoid(abs_externalB_squared, dx=output['dx'], axis=-1)
     
     v_electrons_squared = jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1)
     v_ions_squared      = jnp.sum(jnp.sum(output['velocity_ions']**2     , axis=-1), axis=-1)
