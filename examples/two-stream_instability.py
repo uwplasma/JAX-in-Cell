@@ -1,14 +1,10 @@
 # Example script to run the simulation and plot the results
 import time
-import tomllib
 from jax import block_until_ready
-from jaxincell import plot
-from jaxincell import simulation
+from jaxincell import plot, simulation, load_parameters
 
 # Read from input.toml
-parameters = tomllib.load(open('input.toml', "rb"))
-input_parameters = parameters['input_parameters']
-solver_parameters = parameters['solver_parameters']
+input_parameters, solver_parameters = load_parameters('input.toml')
 
 n_simulations = 3 # Check that first simulation takes longer due to JIT compilation
 

@@ -2,19 +2,14 @@
 # Optimize the non-linear saturation of the two_stream_instabiltity to be as small as possible
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-import tomllib
 import jax.numpy as jnp
 from jax import jit, grad
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
-from jaxincell import simulation
-from jaxincell import diagnostics
-from jaxincell import epsilon_0
+from jaxincell import simulation, diagnostics, epsilon_0, load_parameters
 
 # Read from input.toml
-parameters = tomllib.load(open('input.toml', "rb"))
-input_parameters = parameters['input_parameters']
-solver_parameters = parameters['solver_parameters']
+input_parameters, solver_parameters = load_parameters('input.toml')
 
 steps_to_average = 800 # only take the mean of these last steps
 minimum_Ti = -2

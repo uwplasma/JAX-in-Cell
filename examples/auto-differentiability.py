@@ -3,16 +3,13 @@
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import time
-import tomllib
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from jax import jit, grad, lax, block_until_ready, debug
-from jaxincell import simulation
+from jaxincell import simulation, load_parameters
 
 # Read from input.toml
-parameters = tomllib.load(open('input.toml', "rb"))
-input_parameters = parameters['input_parameters']
-solver_parameters = parameters['solver_parameters']
+input_parameters, solver_parameters = load_parameters('input.toml')
 
 @jit
 def mean_electric_field(electron_drift_speed):

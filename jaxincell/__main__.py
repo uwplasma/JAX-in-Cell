@@ -1,8 +1,7 @@
 """Main command line interface to JAX-in-Cell."""
 import sys
-import tomllib
 from ._plot import plot
-from ._simulation import simulation
+from ._simulation import simulation, load_parameters
 
 def main(cl_args=sys.argv[1:]):
     """Run the main JAX-in-Cell code from the command line.
@@ -15,9 +14,7 @@ def main(cl_args=sys.argv[1:]):
         print("Using standard input parameters instead of an input TOML file.")
         output = simulation()
     else:
-        parameters = tomllib.load(open(cl_args[0], "rb"))
-        input_parameters = parameters['input_parameters']
-        solver_parameters = parameters['solver_parameters']
+        input_parameters, solver_parameters = load_parameters('input.toml')
         output = simulation(input_parameters, **solver_parameters)
     plot(output)
 
