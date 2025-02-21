@@ -209,18 +209,18 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             # f"Number of grid points: {number_grid_points}\n"
             "Length of the simulation box: {:.1e} Debye lengths\n"
             "Density of electrons: {:.2e} m^-3\n"
-            "Ion temperature: {} eV\n"
+            "Ion temperature: {:.3e} eV\n"
             "Electron temperature: {:.4e} eV\n"
             "Debye length: {:.5e} m\n"
             "Wavenumber * Debye length: {:.6e}\n"
             "Pseudoparticles per cell: {:.7e}\n"
-            "Steps at each plasma frequency: {:.8e}\n"
-            "Total time: {:.9e} / plasma frequency\n"
+            "Steps at each plasma frequency: {}\n"
+            "Total time: {} / plasma frequency\n"
             "Number of particles on a Debye cube: {:.10e}\n"
             "Charge x External electric field x Debye Length / Temperature: {:.11e}\n"
         ),length/(Debye_length_per_dx*dx),
           number_pseudoelectrons * weight / length,
-          -mass_proton * vth_ions**2 / 2 / charge_electron,
+          -mass_proton * ( parameters["ion_temperature_over_electron_temperature"] * vth_electrons**2 * mass_electron / mass_proton) / 2 / charge_electron,
           -mass_electron * vth_electrons**2 / 2 / charge_electron,
           Debye_length_per_dx*dx,
           wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx,
