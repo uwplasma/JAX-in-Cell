@@ -209,7 +209,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             # f"Number of grid points: {number_grid_points}\n"
             "Length of the simulation box: {:.1e} Debye lengths\n"
             "Density of electrons: {:.2e} m^-3\n"
-            "Ion temperature: {:.3e} eV\n"
+            "Ion temperature: {} eV\n"
             "Electron temperature: {:.4e} eV\n"
             "Debye length: {:.5e} m\n"
             "Wavenumber * Debye length: {:.6e}\n"
