@@ -203,6 +203,14 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electron**2)/jnp.sqrt(mass_electron)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
 
+    jprint("mass_proton {}", mass_proton)
+    jprint("vth_ions {}", vth_ions)
+    jprint("mass_electron {}", mass_electron)
+    jprint("vth_electrons {}", vth_electrons)
+    jprint("charge_electron {}", charge_electron)
+    jprint("charge_proton {}", charge_proton)
+    jprint("epsilon_0 {}", epsilon_0)
+
     cond(parameters["print_info"],
         lambda _: jprint((
             # f"Number of pseudoelectrons: {number_pseudoelectrons}\n"
@@ -218,11 +226,17 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Total time: {:.9e} / plasma frequency\n"
             "Number of particles on a Debye cube: {:.10e}\n"
             "Charge x External electric field x Debye Length / Temperature: {:.11e}\n"
-        ),length/(Debye_length_per_dx*dx),number_pseudoelectrons * weight / length,
-        -mass_electron * vth_electrons**2 / 2 / charge_electron, -mass_proton * vth_ions**2 / 2 / charge_electron,
-        Debye_length_per_dx*dx, wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx, number_pseudoelectrons / number_grid_points, 1/(plasma_frequency * dt), dt * plasma_frequency * total_steps,
-        number_pseudoelectrons * weight / length * (Debye_length_per_dx*dx)**3,
-        -charge_electron * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electron * vth_electrons**2 / 2),
+        ),length/(Debye_length_per_dx*dx),
+          number_pseudoelectrons * weight / length,
+          -mass_electron * vth_electrons**2 / 2 / charge_electron,
+          -mass_proton * vth_ions**2 / 2 / charge_electron,
+          Debye_length_per_dx*dx,
+          wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx,
+          number_pseudoelectrons / number_grid_points,
+          1/(plasma_frequency * dt),
+          dt * plasma_frequency * total_steps,
+          number_pseudoelectrons * weight / length * (Debye_length_per_dx*dx)**3,
+          -charge_electron * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electron * vth_electrons**2 / 2),
         ), lambda _: None, operand=None)
     
     # **Fields Initialization**
