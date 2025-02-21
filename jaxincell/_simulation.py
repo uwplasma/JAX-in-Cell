@@ -162,7 +162,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     v_electrons_y = jnp.zeros((number_pseudoelectrons, ))
     v_electrons_z = jnp.zeros((number_pseudoelectrons, ))
     electron_velocities = jnp.stack((v_electrons_x, v_electrons_y, v_electrons_z), axis=1)
-    vth_ions = jnp.sqrt(parameters["ion_temperature_over_electron_temperature"]) * vth_electrons * jnp.sqrt(mass_electron / mass_proton)
+    vth_ions = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature"])) * vth_electrons * jnp.sqrt(jnp.abs(mass_electron / mass_proton))
     v_ions_x = vth_ions / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed"]
     v_ions_x = jnp.where(parameters["velocity_plus_minus_ions"], v_ions_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_x)
     v_ions_y = jnp.zeros((number_pseudoelectrons, ))
@@ -202,14 +202,6 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electron**2)/jnp.sqrt(mass_electron)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
-
-    jprint("parameters[ion_temperature_over_electron_temperature] {:.3e}", parameters["ion_temperature_over_electron_temperature"])
-    jprint("vth_electrons {:.3e}", vth_electrons)
-    jprint("mass_electron {:.3e}", mass_electron)
-    jprint("mass_proton {:.3e}", mass_proton)
-    jprint("jnp.sqrt(parameters['ion_temperature_over_electron_temperature']) {:.3e}", jnp.sqrt(parameters["ion_temperature_over_electron_temperature"]))
-    jprint("jnp.sqrt(mass_electron / mass_proton) {:.3e}", jnp.sqrt(mass_electron / mass_proton))
-    jprint("vth_ions {:.3e}", vth_ions)
 
     cond(parameters["print_info"],
         lambda _: jprint((
