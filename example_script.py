@@ -6,7 +6,7 @@ from jaxincell import simulation, plot, load_parameters
 # Read parameters from TOML file
 input_parameters, solver_parameters = load_parameters('example_input.toml')
 
-n_simulations = 3 # Check that first simulation takes longer due to JIT compilation
+n_simulations = 1 # Check that first simulation takes longer due to JIT compilation
 
 # Run the simulation
 for i in range(n_simulations):

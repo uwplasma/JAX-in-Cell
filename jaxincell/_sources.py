@@ -161,3 +161,52 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
     current_dens_z = jnp.sum(vmap(compute_current_z)(jnp.arange(len(xs_nminushalf))), axis=0)
 
     return jnp.transpose(jnp.array([current_dens_x, current_dens_y, current_dens_z]))
+
+@jit
+def current_density_CN( xs_n, vs_n, qs, dx, dt, grid, grid_start, particle_BC_left, particle_BC_right):
+    """
+    Computes the current density `j` on the grid from particle motion.
+
+    Args:
+        xs_nminushalf (array): Particle positions at the half timestep before the current one, shape (N, 1).
+        xs_n (array): Particle positions at the current timestep, shape (N, 1).
+        xs_nplushalf (array): Particle positions at the half timestep after the current one, shape (N, 1).
+        vs_n (array): Particle velocities at the current timestep, shape (N, 3).
+        qs (array): Particle charges, shape (N, 1).
+        dx (float): The grid spacing.
+        dt (float): The time step size.
+        grid (array): The grid points.
+        grid_start (float): The starting position of the grid.
+        BC_left (int): Left boundary condition type.
+        BC_right (int): Right boundary condition type.
+
+    Returns:
+        array: Current density on the grid, shape (G, 3), where G is the number of grid points.
+    """
+
+    def compute_current_x(i):
+        x_n = xs_n[i, 0]
+        q = qs[i, 0]
+        vx_n = vs_n[i, 0]
+        chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
+        return chargedens * vx_n
+
+    def compute_current_y(i):
+        x_n = xs_n[i, 0]
+        q = qs[i, 0]
+        vy_n = vs_n[i, 1]
+        chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
+        return chargedens * vy_n
+
+    def compute_current_z(i):
+        x_n = xs_n[i, 0]
+        q = qs[i, 0]
+        vz_n = vs_n[i, 2]
+        chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
+        return chargedens * vz_n
+    
+    current_dens_x = jnp.sum(vmap(compute_current_x)(jnp.arange(len(xs_n))), axis=0)
+    current_dens_y = jnp.sum(vmap(compute_current_y)(jnp.arange(len(xs_n))), axis=0)
+    current_dens_z = jnp.sum(vmap(compute_current_z)(jnp.arange(len(xs_n))), axis=0)
+
+    return jnp.transpose(jnp.array([current_dens_x, current_dens_y, current_dens_z]))

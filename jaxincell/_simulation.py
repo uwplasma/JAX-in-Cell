@@ -6,7 +6,7 @@ from jax import lax, jit, vmap, config
 from jax.debug import print as jprint
 from jax.random import PRNGKey, uniform
 from ._particles import fields_to_particles_grid, boris_step
-from ._sources import current_density, calculate_charge_density
+from ._sources import current_density, calculate_charge_density,current_density_CN
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._fields import field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT
 from ._constants import speed_of_light, epsilon_0, charge_electron, charge_proton, mass_electron, mass_proton
@@ -328,64 +328,262 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         parameters["charges"], dx, grid, *box_size,
         particle_BC_left, particle_BC_right)
 
+    # initial_carry = (
+    #     E_field, B_field, positions_minus1_2, positions,
+    #     positions_plus1_2, velocities, qs, ms, q_ms,)
+
     initial_carry = (
-        E_field, B_field, positions_minus1_2, positions,
-        positions_plus1_2, velocities, qs, ms, q_ms,)
+     E_field, B_field, positions,
+     velocities, qs, ms, q_ms,)
+
+    # @scan_tqdm(total_steps)
+    # def simulation_step(carry, step_index):
+    #     (E_field, B_field, positions_minus1_2, positions,
+    #      positions_plus1_2, velocities, qs, ms, q_ms) = carry
+        
+    #     # Add external fields
+    #     total_E = E_field + parameters["external_electric_field"]
+    #     total_B = B_field + parameters["external_magnetic_field"]
+
+    #     # Interpolate fields to particle positions
+    #     E_field_at_x = vmap(lambda x_n: fields_to_particles_grid(
+    #         x_n, total_E, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(positions_plus1_2)
+        
+    #     B_field_at_x = vmap(lambda x_n: fields_to_particles_grid(
+    #         x_n, total_B, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(positions_plus1_2)
+
+    #     # Particle update: Boris pusher
+    #     positions_plus3_2, velocities_plus1 = boris_step(
+    #         dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x)
+
+    #     # Apply boundary conditions
+    #     positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
+    #         positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
+    #         *box_size, particle_BC_left, particle_BC_right)
+        
+    #     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
+    #                                        qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
+
+    #     if field_solver != 0:
+    #         charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
+    #         switcher = {
+    #             1: E_from_Gauss_1D_FFT,
+    #             2: E_from_Gauss_1D_Cartesian,
+    #             3: E_from_Poisson_1D_FFT,
+    #         }
+    #         E_field = E_field.at[:,0].set(switcher[field_solver](charge_density, dx))
+    #         J = 0
+    #     else:
+    #         J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
+    #                             qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+    #         E_field, B_field = field_update(E_field, B_field, dx, dt, J, field_BC_left, field_BC_right)
+
+    #     # Update positions and velocities
+    #     positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2
+    #     velocities = velocities_plus1
+    #     positions = positions_plus1
+
+    #     # Prepare state for the next step
+    #     carry = (E_field, B_field, positions_minus1_2, positions,
+    #              positions_plus1_2, velocities, qs, ms, q_ms)
+
+    #     # Collect data for storage
+    #     charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
+    #     step_data = (positions, velocities, E_field, B_field, J, charge_density)
+        
+    #     return carry, step_data
+    
+    # @jit
+    # def current_density_CN(positions_half, velocities_half, qs, dx, dt, grid, grid_start, BC_left, BC_right):
+    #     def current_contribution(x_p, v_p, q):
+    #         contributions = jnp.zeros((len(grid), 3))
+    #         L = grid[-1] - grid[0] + dx  # Total grid length
+            
+    #         # Base contribution from the particle
+    #         for i in range(len(grid)):
+    #             x_i = grid[i]
+    #             distance = jnp.abs(x_p - x_i)
+    #             cond1 = distance <= dx/2
+    #             cond2 = (dx/2 < distance) & (distance <= 3*dx/2)
+    #             S = jnp.where(cond1, (0.75 - (x_p - x_i)**2 / dx**2),
+    #                         jnp.where(cond2, 0.5 * (1.5 - distance/dx)**2, 0.0))
+
+    #             contributions = contributions.at[i].add(q * v_p * S / dx)
+            
+    #         # Left boundary handling
+    #         distance_to_left = x_p - grid[0]
+    #         is_near_left = distance_to_left <= 3*dx/2
+            
+    #         # Periodic BC (wrap to right)
+    #         x_p_wrapped_left = x_p + L
+    #         contrib_left_periodic = jnp.zeros_like(grid)
+    #         for i in range(len(grid)):
+    #             x_i = grid[i]
+    #             distance = jnp.abs(x_p_wrapped_left - x_i)
+    #             cond1 = distance <= dx/2
+    #             cond2 = (dx/2 < distance) & (distance <= 3*dx/2)
+    #             S = jnp.where(cond1, (0.75 - (x_p_wrapped_left - x_i)**2 / dx**2),
+    #                         jnp.where(cond2, 0.5 * (1.5 - distance/dx)**2, 0.0))
+    #             contrib_left_periodic = contrib_left_periodic.at[i].add(q * v_p * S / dx)
+    #         contributions += jnp.where((BC_left == 0) & is_near_left, contrib_left_periodic, 0.0)
+            
+    #         # # Reflective BC (mirror position and reverse velocity)
+    #         # x_p_mirrored_left = 2 * grid[0] - x_p
+    #         # v_p_mirrored_left = -v_p
+    #         # contrib_left_reflective = jnp.zeros_like(grid)
+    #         # for i in range(len(grid)):
+    #         #     x_i = grid[i]
+    #         #     distance = jnp.abs(x_p_mirrored_left - x_i)
+    #         #     cond1 = distance <= dx/2
+    #         #     cond2 = (dx/2 < distance) & (distance <= 3*dx/2)
+    #         #     S = jnp.where(cond1, (0.75 - (x_p_mirrored_left - x_i)**2 / dx**2),
+    #         #                 jnp.where(cond2, 0.5 * (1.5 - distance/dx)**2, 0.0))
+    #         #     contrib_left_reflective = contrib_left_reflective.at[i].add(q * v_p_mirrored_left * S / dx)
+    #         # contributions += jnp.where((BC_left == 1) & is_near_left, contrib_left_reflective, 0.0)
+            
+    #         # Right boundary handling
+    #         distance_to_right = grid[-1] - x_p
+    #         is_near_right = distance_to_right <= 3*dx/2
+            
+    #         # Periodic BC (wrap to left)
+    #         x_p_wrapped_right = x_p - L
+    #         contrib_right_periodic = jnp.zeros_like(grid)
+    #         for i in range(len(grid)):
+    #             x_i = grid[i]
+    #             distance = jnp.abs(x_p_wrapped_right - x_i)
+    #             cond1 = distance <= dx/2
+    #             cond2 = (dx/2 < distance) & (distance <= 3*dx/2)
+    #             S = jnp.where(cond1, (0.75 - (x_p_wrapped_right - x_i)**2 / dx**2),
+    #                         jnp.where(cond2, 0.5 * (1.5 - distance/dx)**2, 0.0))
+    #             contrib_right_periodic = contrib_right_periodic.at[i].add(q * v_p * S / dx)
+    #         contributions += jnp.where((BC_right == 0) & is_near_right, contrib_right_periodic, 0.0)
+            
+    #         # # Reflective BC (mirror position and reverse velocity)
+    #         # x_p_mirrored_right = 2 * grid[-1] - x_p
+    #         # v_p_mirrored_right = -v_p
+    #         # contrib_right_reflective = jnp.zeros_like(grid)
+    #         # for i in range(len(grid)):
+    #         #     x_i = grid[i]
+    #         #     distance = jnp.abs(x_p_mirrored_right - x_i)
+    #         #     cond1 = distance <= dx/2
+    #         #     cond2 = (dx/2 < distance) & (distance <= 3*dx/2)
+    #         #     S = jnp.where(cond1, (0.75 - (x_p_mirrored_right - x_i)**2 / dx**2),
+    #         #                 jnp.where(cond2, 0.5 * (1.5 - distance/dx)**2, 0.0))
+    #         #     contrib_right_reflective = contrib_right_reflective.at[i].add(q * v_p_mirrored_right * S / dx)
+    #         # contributions += jnp.where((BC_right == 1) & is_near_right, contrib_right_reflective, 0.0)
+            
+    #         return contributions
+        
+    #     # Vectorize over particles
+    #     contributions = vmap(current_contribution)(positions_half, velocities_half, qs)
+    #     return jnp.sum(contributions, axis=0)
 
     @scan_tqdm(total_steps)
     def simulation_step(carry, step_index):
-        (E_field, B_field, positions_minus1_2, positions,
-         positions_plus1_2, velocities, qs, ms, q_ms) = carry
+        (E_field, B_field, positions,
+         velocities, qs, ms, q_ms) = carry
         
-        # Add external fields
-        total_E = E_field + parameters["external_electric_field"]
-        total_B = B_field + parameters["external_magnetic_field"]
+        dt = parameters["dt"]
+        max_iter = 200  # Number of iterations for implicit solve
+        tolerance = 1e-6  # Convergence tolerance
 
-        # Interpolate fields to particle positions
+        # Initial guess for E, B and position at n+1 (using previous step)
+        E_new = E_field
+        B_new = B_field
         E_field_at_x = vmap(lambda x_n: fields_to_particles_grid(
-            x_n, total_E, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(positions_plus1_2)
-        
+            x_n, E_new, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(positions)
         B_field_at_x = vmap(lambda x_n: fields_to_particles_grid(
-            x_n, total_B, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(positions_plus1_2)
-
-        # Particle update: Boris pusher
-        positions_plus3_2, velocities_plus1 = boris_step(
-            dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x)
-
-        # Apply boundary conditions
-        positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
-            positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
-            *box_size, particle_BC_left, particle_BC_right)
+            x_n, B_new, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(positions)
+        positions_new, velocities_new = boris_step(
+            dt, positions, velocities, q_ms, E_field_at_x , B_field_at_x)
         
-        positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
-                                           qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
+        # positions_new=.9*positions_new
+        # def objective_function(state):
+        # # def iteration_body(state):
+        #     E_new,B_new, positions_new,velocities_new = state
+            # Get the original shapes
+        E_shape = E_new.shape
+        B_shape = B_new.shape
+        pos_shape = positions_new.shape
+        vel_shape = velocities_new.shape
 
-        if field_solver != 0:
-            charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
-            switcher = {
-                1: E_from_Gauss_1D_FFT,
-                2: E_from_Gauss_1D_Cartesian,
-                3: E_from_Poisson_1D_FFT,
-            }
-            E_field = E_field.at[:,0].set(switcher[field_solver](charge_density, dx))
-            J = 0
-        else:
-            J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-            E_field, B_field = field_update(E_field, B_field, dx, dt, J, field_BC_left, field_BC_right)
+        # Get the number of elements in each array
+        E_size = E_new.size
+        B_size = B_new.size
+        pos_size = positions_new.size
+        vel_size = velocities_new.size
 
-        # Update positions and velocities
-        positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2
-        velocities = velocities_plus1
-        positions = positions_plus1
+        def objective_function(state, q_ms,qs, ms):
+            E_new = state[:E_size].reshape(E_shape)
+            B_new = state[E_size:E_size + B_size].reshape(B_shape)
+            positions_new = state[E_size + B_size:E_size + B_size + pos_size].reshape(pos_shape)
+            velocities_new = state[E_size + B_size + pos_size:].reshape(vel_shape)
+            E_avg = 0.5 * (E_field + E_new)
+            B_avg = 0.5 * (B_field + B_new)
+            
+            x_half = 0.5 * (positions_new + positions)
+            E_at_half = vmap(lambda x_n: fields_to_particles_grid(
+                x_n, E_avg, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(x_half)
+            B_at_half = vmap(lambda x_n: fields_to_particles_grid(
+                x_n, B_avg, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(x_half)
 
-        # Prepare state for the next step
-        carry = (E_field, B_field, positions_minus1_2, positions,
-                 positions_plus1_2, velocities, qs, ms, q_ms)
+            velocities_new = velocities + (q_ms * E_at_half) * dt
+            v_half = 0.5 * (velocities + velocities_new)
+            positions_new = positions + v_half * dt
 
-        # Collect data for storage
+            positions_new, velocities_new, qs, ms, q_ms = set_BC_particles(
+                positions_new, velocities_new, qs, ms, q_ms, dx, grid,
+                *box_size, particle_BC_left, particle_BC_right)
+
+            positions_plus1_2 = 0.5 * (positions + positions_new)
+            v_half = 0.5 * (velocities + velocities_new)
+            J = current_density_CN( positions_plus1_2, v_half,
+                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+
+            E_next = E_field - (dt / epsilon_0) * (J-jnp.sum(J)/len(J))
+            delta_E = jnp.max(jnp.abs(E_next - E_new))/jnp.max(jnp.abs(E_next))
+    
+            # converged = delta_E < tolerance
+            # return E_new,B_new, positions_new,velocities_new , qs, ms, q_ms ,iteration + 1, converged
+            return delta_E
+
+        # Initialize loop variables
+        E_new = E_field
+        iteration = 0
+        converged = False
+
+        # E_new,B_new, positions_new,velocities_new , _, _, _, _, _ = lax.while_loop(lambda state: jnp.logical_and(state[7] < max_iter, jnp.logical_not(state[8])),
+        #                                 iteration_body,
+        #                                 (E_new,B_new, positions_new,velocities_new , qs, ms, q_ms,iteration, converged))
+        from jax.scipy.optimize import minimize
+        initial_state_1 = jnp.ravel(jnp.array([jnp.ravel(E_new),jnp.ravel(B_new)]))
+        initial_state_2 = jnp.ravel(jnp.array([jnp.ravel(positions_new),jnp.ravel(velocities_new)]))
+        initial_state = jnp.ravel(jnp.concatenate([initial_state_1, initial_state_2]))
+        solution = minimize(objective_function, initial_state, method="BFGS", tol=1e-6, args=(q_ms,qs, ms), options={"maxiter":20})
+        E_new = solution.x[:E_size].reshape(E_shape)
+        B_new = solution.x[E_size:E_size + B_size].reshape(B_shape)
+        positions_new = solution.x[E_size + B_size:E_size + B_size + pos_size].reshape(pos_shape)
+        velocities_new = solution.x[E_size + B_size + pos_size:].reshape(vel_shape)
+
+        # Update fields after iteration
+        E_field = E_new
+        B_field = B_new  # Assuming B update is handled similarly if needed
+
+        # Final positions and velocities after convergence
+        positions_plus1= positions_new
+        velocities_plus1 = velocities_new
+        positions_plus1_2 = 0.5 * (positions + positions_plus1)
+        # Charge density with quadratic shape
         charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
-        step_data = (positions, velocities, E_field, B_field, J, charge_density)
+        J = current_density(positions, positions_plus1_2, positions_plus1, velocities_new,
+                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+        
+        # Prepare next state
+        carry = (E_field, B_field, positions_plus1,
+                velocities_plus1, qs, ms, q_ms)
+        
+        # Collect data
+        step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
         
         return carry, step_data
 
