@@ -65,7 +65,7 @@ def initialize_simulation_parameters(user_parameters={}):
     default_parameters = {
         # Basic simulation settings
         "length": 1e-2,                           # Dimensions of the simulation box
-        "amplitude_perturbation_x": 5e-4,          # Amplitude of sinusoidal (sin) perturbation in x
+        "amplitude_perturbation_x": 1e-7,          # Amplitude of sinusoidal (sin) perturbation in x
         "wavenumber_electrons": 8,    # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
         "wavenumber_ions": 0,    # Wavenumber of sinusoidal ion density perturbation in x (factor of 2pi/length)
         "grid_points_per_Debye_length": 2,        # dx over Debye length
@@ -73,9 +73,9 @@ def initialize_simulation_parameters(user_parameters={}):
         "ion_temperature_over_electron_temperature": 0.01, # Temperature ratio of ions to electrons
         "timestep_over_spatialstep_times_c": 1.0, # dt * speed_of_light / dx
         "seed": 1701,                             # Random seed for reproducibility
-        "electron_drift_speed": 0,                # Drift speed of electrons
+        "electron_drift_speed": 100000000.0,                # Drift speed of electrons
         "ion_drift_speed":      0,                # Drift speed of ions
-        "velocity_plus_minus_electrons": False,   # create two groups of electrons moving in opposite directions
+        "velocity_plus_minus_electrons": True,   # create two groups of electrons moving in opposite directions
         "velocity_plus_minus_ions": False,        # create two groups of electrons moving in opposite directions
         "print_info": True,                       # Print information about the simulation
         
