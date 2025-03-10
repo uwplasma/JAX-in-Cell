@@ -737,9 +737,9 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
             J = current_density_CN( positions_plus1_2, velocities_plus1_2,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
 
-            E_next = E_field - (dt / epsilon_0) * (J-jnp.sum(J)/len(J))
+            E_next = E_field - (dt / epsilon_0) * (J-jnp.sum(J, axis=0)/len(J))
             delta_E = jnp.abs(jnp.mean(E_next - E_new))/jnp.max(jnp.abs(E_next))
-            debug.print("delta_E: {}", delta_E)
+            # debug.print("delta_E: {}", delta_E)
             E_new=E_next
             positions_new=positions_new
 
