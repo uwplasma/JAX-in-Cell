@@ -335,7 +335,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     initial_carry = (
      E_field, B_field, positions,
      velocities, qs, ms, q_ms,)
-    #Add external fields
+    # Add external fields
     # total_E = E_field + parameters["external_electric_field"]
     # total_B = B_field + parameters["external_magnetic_field"]
     #  # Interpolate fields to particle positions
@@ -707,7 +707,8 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         #     velocities_new=velocities_new
 
         dt = parameters["dt"]
-        n_iterations = 1  # Number of iterations for Picard iteration
+        length = parameters["length"]
+        n_iterations = 7  # Number of iterations for Picard iteration
         E_new=E_field
         B_new=B_field
         positions_new=positions
@@ -726,24 +727,26 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
             velocities_new = velocities + (q_ms * E_at_half) * dt
             velocities_plus1_2 = 0.5 * (velocities + velocities_new)
             positions_new = positions + velocities_plus1_2 * dt
-            positions_plus1_2 = 0.5 * (positions + positions_new)
+
 
             positions_new, velocities_new, qs, ms, q_ms = set_BC_particles(
                 positions_new, velocities_new, qs, ms, q_ms, dx, grid,
                 *box_size, particle_BC_left, particle_BC_right)
-            
+            positions_plus1_2 = 0.5 * (positions + positions_new)
+            velocities_plus1_2 = 0.5 * (velocities + velocities_new)
             positions_plus1_2, velocities_plus1_2, qs, ms, q_ms = set_BC_particles(
                 positions_plus1_2, velocities_plus1_2, qs, ms, q_ms, dx, grid,
                 *box_size, particle_BC_left, particle_BC_right)
 
             
-            J = current_density_CN( positions_plus1_2, velocities_plus1_2,
+            J = current_density(positions, positions_plus1_2,positions_new, velocities_plus1_2,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-
-            mean_J = jnp.array([integrate(J[:,0], dx=dx), integrate(J[:,1], dx=dx), integrate(J[:,2], dx=dx)])
-            E_next = E_field - (dt / epsilon_0) * (J-mean_J)#/len(J))
+            
+            mean_J = jnp.array([integrate(J[:,0], dx=dx), integrate(J[:,1], dx=dx), integrate(J[:,2], dx=dx)])/length
+            E_next = E_field - (dt / epsilon_0) * (J-mean_J)
             delta_E = jnp.abs(jnp.mean(E_next - E_new))/jnp.max(jnp.abs(E_next))
-            # debug.print("delta_E: {}", delta_E)
+            #debug.print("mean_J: {}", mean_J)
+            debug.print("delta_E: {}", delta_E)
             E_new=E_next
             positions_new=positions_new
 
@@ -807,6 +810,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     #     (E_field, B_field, positions, positions_plus1_2, 
     #     velocities, velocities_plus1_2, qs, ms, q_ms) = carry
     #     dt = parameters["dt"]
+    #     length = parameters["length"]
     #     n_iterations = 1  # Number of iterations for Picard iteration
         
     #     # Start the iteration loop
@@ -814,7 +818,8 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     #         # First half step
     #         J_plus1_2 = current_density_CN(positions_plus1_2, velocities_plus1_2,
     #                                         qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-    #         E_plus_1 = E_field - (dt / epsilon_0) * (J_plus1_2 - jnp.sum(J_plus1_2) / len(J_plus1_2))
+    #         mean_J = jnp.array([integrate(J_plus1_2[:,0], dx=dx), integrate(J_plus1_2[:,1], dx=dx), integrate(J_plus1_2[:,2], dx=dx)])/length
+    #         E_plus_1 = E_field - (dt / epsilon_0) * (J_plus1_2-mean_J)
     #         B_plus_1 = B_field
     #         E_avg = 0.5 * (E_field + E_plus_1)
     #         B_avg = 0.5 * (B_field + B_plus_1)
@@ -833,47 +838,47 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     #             positions_plus1, velocities_plus1, qs, ms, q_ms, dx, grid,
     #             *box_size, particle_BC_left, particle_BC_right)
 
-    #         # # Second half step
-    #         # J = current_density_CN(positions_next, velocities_next,
-    #         #                         qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+    #         # Second half step
+    #         J = current_density_CN(positions_next, velocities_next,
+    #                                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
 
-    #         # if field_solver != 0:
-    #         #     charge_density = calculate_charge_density(positions_plus1_2, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
-    #         #     switcher = {
-    #         #         1: E_from_Gauss_1D_FFT,
-    #         #         2: E_from_Gauss_1D_Cartesian,
-    #         #         3: E_from_Poisson_1D_FFT,
-    #         #     }
-    #         #     E_half = E_field.at[:, 0].set(switcher[field_solver](charge_density, dx))
-    #         #     J_half = 0
-    #         # else:
-    #         #     J_half = J_plus1_2
-    #         #     E_half, B_half = field_update(E_field, B_field, dx, dt / 2, J_half, field_BC_left, field_BC_right)
+    #         if field_solver != 0:
+    #             charge_density = calculate_charge_density(positions_plus1_2, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
+    #             switcher = {
+    #                 1: E_from_Gauss_1D_FFT,
+    #                 2: E_from_Gauss_1D_Cartesian,
+    #                 3: E_from_Poisson_1D_FFT,
+    #             }
+    #             E_half = E_field.at[:, 0].set(switcher[field_solver](charge_density, dx))
+    #             J_half = 0
+    #         else:
+    #             J_half = J_plus1_2
+    #             E_half, B_half = field_update(E_field, B_field, dx, dt / 2, J_half, field_BC_left, field_BC_right)
 
-    #         # E_new = E_half - (dt / epsilon_0) * (J - jnp.sum(J) / len(J))
-    #         # B_new = B_avg
-    #         # E_avg = 0.5 * (E_field + E_new)
-    #         # B_avg = 0.5 * (B_field + B_new)
+    #         E_new = E_half - (dt / epsilon_0) * (J - jnp.sum(J) / len(J))
+    #         B_new = B_avg
+    #         E_avg = 0.5 * (E_field + E_new)
+    #         B_avg = 0.5 * (B_field + B_new)
 
-    #         # E_at_half = vmap(lambda x_n: fields_to_particles_grid(
-    #         #     x_n, E_avg, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(positions_next)
-    #         # B_at_half = vmap(lambda x_n: fields_to_particles_grid(
-    #         #     x_n, B_avg, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(positions_next)
+    #         E_at_half = vmap(lambda x_n: fields_to_particles_grid(
+    #             x_n, E_avg, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(positions_next)
+    #         B_at_half = vmap(lambda x_n: fields_to_particles_grid(
+    #             x_n, B_avg, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(positions_next)
             
-    #         # velocities_new = velocities_plus1_2 + (q_ms * E_at_half) * dt
-    #         # positions_new = positions_plus1_2 + velocities_new * dt
-
-    #         # positions_new, velocities_new, qs, ms, q_ms = set_BC_particles(
-    #         #     positions_new, velocities_new, qs, ms, q_ms, dx, grid,
-    #         #     *box_size, particle_BC_left, particle_BC_right)
-    #         #Second half step using boris
-    #         positions_plus2, velocities_plus3_2= boris_step(
-    #             dt, positions_next, velocities_plus1_2, q_ms, E_at_half, B_at_half)
-    #         positions_plus3_2=0.5*(positions_plus1+positions_plus2)
+    #         velocities_new = velocities_plus1_2 + (q_ms * E_at_half) * dt
+    #         positions_new = positions_plus1_2 + velocities_new * dt
 
     #         positions_new, velocities_new, qs, ms, q_ms = set_BC_particles(
-    #                 positions_plus3_2, velocities_plus3_2, qs, ms, q_ms, dx, grid,
-    #                 *box_size, particle_BC_left, particle_BC_right)            
+    #             positions_new, velocities_new, qs, ms, q_ms, dx, grid,
+    #             *box_size, particle_BC_left, particle_BC_right)
+    #         # Second half step using boris
+    #         # positions_plus2, velocities_plus3_2= boris_step(
+    #         #     dt, positions_next, velocities_plus1_2, q_ms, E_at_half, B_at_half)
+    #         # positions_plus3_2=0.5*(positions_plus1+positions_plus2)
+
+    #         # positions_new, velocities_new, qs, ms, q_ms = set_BC_particles(
+    #         #         positions_plus3_2, velocities_plus3_2, qs, ms, q_ms, dx, grid,
+    #         #         *box_size, particle_BC_left, particle_BC_right)            
 
     #         # Charge density with quadratic shape
     #         charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)

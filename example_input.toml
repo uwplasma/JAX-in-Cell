@@ -17,3 +17,4 @@ field_solver = 0
 number_grid_points = 100
 number_pseudoelectrons = 3000
 total_steps = 1000
+
