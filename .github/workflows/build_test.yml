@@ -43,11 +43,21 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
       
     - name: Run tests with coverage
+      if: matrix.python-version == '3.12'
       run: |
-        pytest --cov --junitxml=junit.xml -o junit_family=legacy
+        pip install coverage
+        coverage run --source=jaxincell -m pytest .
+        coverage report
+        coverage xml
 
     - name: Upload coverage reports to Codecov
-      if: ${{ !cancelled() }}
-      uses: codecov/test-results-action@v1
+      if: github.repository_owner == 'uwplasma' && matrix.python-version == '3.12'
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.xml
+        flags: unittests
+        env_vars: PYTHON
+        name: codecov-umbrella
+        fail_ci_if_error: true
+        verbose: true
