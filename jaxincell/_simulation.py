@@ -9,7 +9,7 @@ from ._particles import fields_to_particles_grid, boris_step
 from ._sources import current_density, calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._fields import field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT
-from ._constants import speed_of_light, epsilon_0, charge_electron, charge_proton, mass_electron, mass_proton
+from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
 from ._diagnostics import diagnostics
 from jax_tqdm import scan_tqdm
 try: import tomllib
@@ -65,9 +65,9 @@ def initialize_simulation_parameters(user_parameters={}):
     default_parameters = {
         # Basic simulation settings
         "length": 1e-2,                           # Dimensions of the simulation box
-        "amplitude_perturbation_x": 1e-7,          # Amplitude of sinusoidal (sin) perturbation in x
+        "amplitude_perturbation_x": 1e-7,         # Amplitude of sinusoidal (sin) perturbation in x
         "wavenumber_electrons": 8,    # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
-        "wavenumber_ions": 0,    # Wavenumber of sinusoidal ion density perturbation in x (factor of 2pi/length)
+        "wavenumber_ions": 0,         # Wavenumber of sinusoidal ion density perturbation in x (factor of 2pi/length)
         "grid_points_per_Debye_length": 2,        # dx over Debye length
         "vth_electrons_over_c": 0.05,             # Thermal velocity of electrons over speed of light
         "ion_temperature_over_electron_temperature": 0.01, # Temperature ratio of ions to electrons
@@ -75,10 +75,13 @@ def initialize_simulation_parameters(user_parameters={}):
         "seed": 1701,                             # Random seed for reproducibility
         "electron_drift_speed": 100000000.0,                # Drift speed of electrons
         "ion_drift_speed":      0,                # Drift speed of ions
-        "velocity_plus_minus_electrons": True,   # create two groups of electrons moving in opposite directions
+        "velocity_plus_minus_electrons": True,    # create two groups of electrons moving in opposite directions
         "velocity_plus_minus_ions": False,        # create two groups of electrons moving in opposite directions
         "print_info": True,                       # Print information about the simulation
-        
+        "electron_charge_over_elementary_charge": -1, # Electron charge in units of the elementary charge
+        "ion_charge_over_elementary_charge": 1,   # Ion charge in units of the elementary charge
+        "ion_mass_over_proton_mass": 1,           # Ion mass in units of the proton mass
+
         # Boundary conditions
         "particle_BC_left":  0,                   # Left boundary condition for particles
         "particle_BC_right": 0,                   # Right boundary condition for particles
@@ -86,10 +89,10 @@ def initialize_simulation_parameters(user_parameters={}):
         "field_BC_right":    0,                   # Right boundary condition for fields
         
         # External fields (initialized to zero)
-        "external_electric_field_amplitude": 0, # Amplitude of sinusoidal (cos) perturbation in x
-        "external_electric_field_wavenumber": 0, # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
-        "external_magnetic_field_amplitude": 0, # Amplitude of sinusoidal (cos) perturbation in x
-        "external_magnetic_field_wavenumber": 0, # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
+        "external_electric_field_amplitude": 0,   # Amplitude of sinusoidal (cos) perturbation in x
+        "external_electric_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
+        "external_magnetic_field_amplitude": 0,   # Amplitude of sinusoidal (cos) perturbation in x
+        "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
     }
 
     # Merge user-provided parameters into the default dictionary
@@ -153,7 +156,36 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     ion_positions = jnp.stack((ion_xs, ion_ys, ion_zs), axis=1)
 
     positions = jnp.concatenate((electron_positions, ion_positions))
-    
+
+    # **Particle Charges and Masses**
+    charge_electrons = parameters["electron_charge_over_elementary_charge"] * elementary_charge
+    charge_ions      = parameters["ion_charge_over_elementary_charge"]      * elementary_charge
+    mass_electrons   = mass_electron
+    mass_ions        = parameters["ion_mass_over_proton_mass"] * mass_proton
+
+    # Pseudoparticle weights -> density of real particles = number_pseudoelectrons * weight / length, put in terms of Debye length
+    Debye_length_per_dx = 1 / parameters["grid_points_per_Debye_length"]
+    weight = (
+        epsilon_0
+        * mass_electrons
+        * speed_of_light**2
+        / charge_electrons**2
+        * number_grid_points**2
+        / length
+        / (2 * number_pseudoelectrons)
+        * parameters["vth_electrons_over_c"]**2
+        / Debye_length_per_dx**2
+    )
+    charges = jnp.concatenate((
+        charge_electrons * weight * jnp.ones((number_pseudoelectrons, 1)),
+        charge_ions   * weight * jnp.ones((number_pseudoelectrons, 1))
+    ), axis=0)
+    masses = jnp.concatenate((
+        mass_electrons * weight * jnp.ones((number_pseudoelectrons, 1)),
+        mass_ions      * weight * jnp.ones((number_pseudoelectrons, 1))
+    ), axis=0)
+    charge_to_mass_ratios = charges / masses
+
     # **Particle Velocities**
     # Thermal velocities (Maxwell-Boltzmann distribution)
     vth_electrons = parameters["vth_electrons_over_c"] * speed_of_light
@@ -162,7 +194,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     v_electrons_y = jnp.zeros((number_pseudoelectrons, ))
     v_electrons_z = jnp.zeros((number_pseudoelectrons, ))
     electron_velocities = jnp.stack((v_electrons_x, v_electrons_y, v_electrons_z), axis=1)
-    vth_ions = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature"])) * vth_electrons * jnp.sqrt(jnp.abs(mass_electron / mass_proton))
+    vth_ions = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature"])) * vth_electrons * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
     v_ions_x = vth_ions / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed"]
     v_ions_x = jnp.where(parameters["velocity_plus_minus_ions"], v_ions_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_x)
     v_ions_y = jnp.zeros((number_pseudoelectrons, ))
@@ -171,37 +203,13 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     
     velocities = jnp.concatenate((electron_velocities, ion_velocities))
 
-    # **Particle Charges and Masses**
-    # Pseudoparticle weights -> density of real particles = number_pseudoelectrons * weight / length, put in terms of Debye length
-    Debye_length_per_dx = 1 / parameters["grid_points_per_Debye_length"]
-    weight = (
-        epsilon_0
-        * mass_electron
-        * speed_of_light**2
-        / charge_electron**2
-        * number_grid_points**2
-        / length
-        / (2 * number_pseudoelectrons)
-        * parameters["vth_electrons_over_c"]**2
-        / Debye_length_per_dx**2
-    )
-    charges = jnp.concatenate((
-        charge_electron * weight * jnp.ones((number_pseudoelectrons, 1)),
-        charge_proton   * weight * jnp.ones((number_pseudoelectrons, 1))
-    ), axis=0)
-    masses = jnp.concatenate((
-        mass_electron * weight * jnp.ones((number_pseudoelectrons, 1)),
-        mass_proton   * weight * jnp.ones((number_pseudoelectrons, 1))
-    ), axis=0)
-    charge_to_mass_ratios = charges / masses
-
     # Grid setup
     dx = length / number_grid_points
     grid = jnp.linspace(-length / 2 + dx / 2, length / 2 - dx / 2, number_grid_points)
     dt = parameters["timestep_over_spatialstep_times_c"] * dx / speed_of_light
 
     # Print information about the simulation
-    plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electron**2)/jnp.sqrt(mass_electron)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
+    plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electrons**2)/jnp.sqrt(mass_electrons)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
 
     cond(parameters["print_info"],
         lambda _: jprint((
@@ -220,15 +228,15 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
         ),length/(Debye_length_per_dx*dx),
           number_pseudoelectrons * weight / length,
-          -parameters["ion_temperature_over_electron_temperature"] * vth_electrons**2 * mass_electron / 2 / charge_electron,
-          -mass_electron * vth_electrons**2 / 2 / charge_electron,
+          -parameters["ion_temperature_over_electron_temperature"] * vth_electrons**2 * mass_electrons / 2 / charge_electrons,
+          -mass_electrons * vth_electrons**2 / 2 / charge_electrons,
           Debye_length_per_dx*dx,
           wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx,
           number_pseudoelectrons / number_grid_points,
           1/(plasma_frequency * dt),
           dt * plasma_frequency * total_steps,
           number_pseudoelectrons * weight / length * (Debye_length_per_dx*dx)**3,
-          -charge_electron * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electron * vth_electrons**2 / 2),
+          -charge_electrons * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electrons * vth_electrons**2 / 2),
         ), lambda _: None, operand=None)
     
     # **Fields Initialization**

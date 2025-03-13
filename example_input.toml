@@ -11,6 +11,9 @@ velocity_plus_minus_electrons = true
 print_info = true
 external_electric_field_amplitude = 0
 external_electric_field_wavenumber = 0
+electron_charge_over_fundamental_charge = -1
+ion_charge_over_fundamental_charge = 1
+ion_mass_over_proton_mass = 1
 
 [solver_parameters]
 field_solver = 0

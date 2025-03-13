@@ -1,15 +1,17 @@
 from jax import lax
 import jax.numpy as jnp
 from jax.numpy.fft import fft, fftfreq
-from ._constants import epsilon_0, mass_electron, mass_proton, mu_0
+from ._constants import epsilon_0, mu_0
 
 __all__ = ['diagnostics']
 
 def diagnostics(output):
     E_field_over_time = output['electric_field']
-    grid = output['grid']
-    dt = output['dt']
-    total_steps = output['total_steps']
+    grid              = output['grid']
+    dt                = output['dt']
+    total_steps       = output['total_steps']
+    mass_electrons    = output["mass_electrons"][0]
+    mass_ions         = output["mass_ions"][0]
     
     # array_to_do_fft_on = charge_density_over_time[:,len(grid)//2]
     array_to_do_fft_on = E_field_over_time[:,len(grid)//2,0]
@@ -45,9 +47,9 @@ def diagnostics(output):
         'magnetic_field_energy':         1/(2*mu_0)    * integral_B_squared,
         'dominant_frequency': dominant_frequency,
         'plasma_frequency':   plasma_frequency,
-        'kinetic_energy':     (1/2) * mass_electron * output['weight'] * v_electrons_squared + (1/2) * mass_proton * output['weight'] * v_ions_squared,
-        'kinetic_energy_electrons': (1/2) * mass_electron * output['weight'] * v_electrons_squared,
-        'kinetic_energy_ions':      (1/2) * mass_proton   * output['weight'] * v_ions_squared,
+        'kinetic_energy':     (1/2) * mass_electrons * v_electrons_squared + (1/2) * mass_ions * v_ions_squared,
+        'kinetic_energy_electrons': (1/2) * mass_electrons * v_electrons_squared,
+        'kinetic_energy_ions':      (1/2) * mass_ions      * v_ions_squared,
         'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
         'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
         'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,

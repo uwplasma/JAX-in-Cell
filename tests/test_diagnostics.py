@@ -1,7 +1,7 @@
 import pytest
 import jax.numpy as jnp
 from jaxincell._diagnostics import diagnostics
-from jaxincell._constants import epsilon_0, mass_electron, mass_proton, mu_0
+from jaxincell._constants import epsilon_0, mu_0
 
 def test_diagnostics():
     output = {
@@ -16,7 +16,9 @@ def test_diagnostics():
         'total_steps': 2,
         'plasma_frequency': 1.0,
         'dx': 0.1,
-        'weight': 1.0
+        'weight': 1.0,
+        'mass_electrons': jnp.array([1.0]),
+        'mass_ions': jnp.array([1.0])
     }
 
     diagnostics(output)
@@ -42,9 +44,9 @@ def test_diagnostics():
     assert jnp.allclose(output['magnetic_field_energy'], jnp.array([3978.87358184, 7957.74716369]))
     assert jnp.allclose(output['dominant_frequency'], 0.0)
     assert jnp.allclose(output['plasma_frequency'], 1.0)
-    assert jnp.allclose(output['kinetic_energy'], (1/2) * mass_electron * output['weight'] * jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1) + (1/2) * mass_proton * output['weight'] * jnp.sum(jnp.sum(output['velocity_ions']**2, axis=-1), axis=-1))
-    assert jnp.allclose(output['kinetic_energy_electrons'], (1/2) * mass_electron * output['weight'] * jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1))
-    assert jnp.allclose(output['kinetic_energy_ions'], (1/2) * mass_proton * output['weight'] * jnp.sum(jnp.sum(output['velocity_ions']**2, axis=-1), axis=-1))
+    assert jnp.allclose(output['kinetic_energy'], (1/2) * output['mass_electrons'][0] * output['weight'] * jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1) + (1/2) * output['mass_ions'][0] * output['weight'] * jnp.sum(jnp.sum(output['velocity_ions']**2, axis=-1), axis=-1))
+    assert jnp.allclose(output['kinetic_energy_electrons'], (1/2) * output['mass_electrons'][0] * output['weight'] * jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1))
+    assert jnp.allclose(output['kinetic_energy_ions'], (1/2) * output['mass_ions'][0] * output['weight'] * jnp.sum(jnp.sum(output['velocity_ions']**2, axis=-1), axis=-1))
     assert jnp.allclose(output['external_electric_field_energy_density'][0], (epsilon_0/2) * jnp.sum(output['external_electric_field'][0]**2))
     assert jnp.allclose(output['external_electric_field_energy'], jnp.array([1.10677348e-13, 2.21354696e-13]))
     assert jnp.allclose(output['external_magnetic_field_energy_density'], jnp.array([[ 9947.18395461,  9947.18395461],[ 9947.18395461, 29841.55186383]]))

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from ._fields import E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT, E_from_Gauss_1D_Cartesian
-from ._constants import speed_of_light, mass_proton, mass_electron
+from ._constants import speed_of_light
 
 __all__ = ['plot']
 
@@ -13,7 +13,7 @@ def plot(output):
     grid = output["grid"]
     box_size_x = output["length"]
     total_steps = output["total_steps"]
-    sqrtmemi = jnp.sqrt(mass_electron / mass_proton)
+    sqrtmemi = jnp.sqrt(output["mass_electrons"][0] / output["mass_ions"][0])
     
     max_velocity_electrons = max(1.2 * jnp.max(output["velocity_electrons"]), 
                                  5 * jnp.abs(v_th) + jnp.abs(output["electron_drift_speed"]))
