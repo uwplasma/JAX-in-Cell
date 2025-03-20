@@ -14,7 +14,7 @@ def main(cl_args=sys.argv[1:]):
         print("Using standard input parameters instead of an input TOML file.")
         output = simulation()
     else:
-        input_parameters, solver_parameters = load_parameters('input.toml')
+        input_parameters, solver_parameters = load_parameters(cl_args[0])
         output = simulation(input_parameters, **solver_parameters)
     plot(output)
 
