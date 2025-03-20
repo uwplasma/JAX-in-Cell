@@ -1,5 +1,6 @@
-import pytest
+import os
 import sys
+import pytest
 from unittest.mock import patch, MagicMock
 from jaxincell.__main__ import main
 
@@ -35,7 +36,9 @@ def test_main_no_args(mock_simulation, mock_plot):
 
 def test_main_with_args(mock_simulation, mock_load_parameters, mock_plot):
     """Test main function with command line arguments."""
-    test_args = ["__main__.py", "input.toml"]
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    input_toml_path = os.path.join(current_dir, '..', 'examples', 'input.toml')
+    test_args = ["__main__.py", input_toml_path]
     with patch.object(sys, 'argv', test_args):
         main()
         mock_load_parameters.assert_called_once_with('input.toml')
