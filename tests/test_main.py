@@ -30,18 +30,18 @@ def test_main_no_args(mock_simulation, mock_plot):
     """Test main function with no command line arguments."""
     test_args = ["__main__.py"]
     with patch.object(sys, 'argv', test_args):
-        main()
+        main(sys.argv[1:])
         mock_simulation.assert_called_once()
         mock_plot.assert_called_once()
 
 def test_main_with_args(mock_simulation, mock_load_parameters, mock_plot):
     """Test main function with command line arguments."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    input_toml_path = os.path.join(current_dir, '..', 'examples', 'input.toml')
-    test_args = ["__main__.py", input_toml_path]
+    input_toml_path = str(os.path.join(current_dir, '..', 'examples', 'input.toml'))
+    test_args = [input_toml_path]
     with patch.object(sys, 'argv', test_args):
-        main()
-        mock_load_parameters.assert_called_once_with('input.toml')
+        main(sys.argv)
+        mock_load_parameters.assert_called_once_with(input_toml_path)
         mock_simulation.assert_called_once()
         mock_plot.assert_called_once()
 
