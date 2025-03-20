@@ -47,6 +47,7 @@ jobs:
         pytest --cov-branch --cov-report=xml --cov=jaxincell
 
     - name: Upload coverage reports to Codecov
+      if: matrix.python-version == '3.12'
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
