@@ -1,7 +1,7 @@
 [input_parameters]
 length = 0.01
-amplitude_perturbation_x = 1e-7
-wavenumber_electrons = 8
+amplitude_perturbation_x = 1e1
+wavenumber_electrons = 4
 grid_points_per_Debye_length = 2
 vth_electrons_over_c = 0.05
 ion_temperature_over_electron_temperature = 0.01
@@ -13,10 +13,10 @@ external_electric_field_amplitude = 0
 external_electric_field_wavenumber = 0
 electron_charge_over_elementary_charge = -1
 ion_charge_over_elementary_charge = 1
-ion_mass_over_proton_mass = 1
+ion_mass_over_proton_mass = 10000
 
 [solver_parameters]
 field_solver = 0
-number_grid_points = 100
+number_grid_points = 40
 number_pseudoelectrons = 3000
-total_steps = 1000
+total_steps = 3000
