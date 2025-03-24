@@ -1,10 +1,9 @@
 import jax.numpy as jnp
 from jax.lax import cond
 from functools import partial
-from jax.random import normal
-from jax import lax, jit, vmap, config
 from jax.debug import print as jprint
-from jax.random import PRNGKey, uniform
+from jax import lax, jit, vmap, config
+from jax.random import PRNGKey, uniform, normal
 from ._particles import fields_to_particles_grid, boris_step
 from ._sources import current_density, calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
@@ -89,9 +88,9 @@ def initialize_simulation_parameters(user_parameters={}):
         "field_BC_right":    0,                   # Right boundary condition for fields
         
         # External fields (initialized to zero)
-        "external_electric_field_amplitude": 0,   # Amplitude of sinusoidal (cos) perturbation in x
+        "external_electric_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_electric_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
-        "external_magnetic_field_amplitude": 0,   # Amplitude of sinusoidal (cos) perturbation in x
+        "external_magnetic_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
     }
 
@@ -285,7 +284,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
 
 @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver'])
-def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000, field_solver=0):
+def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000, field_solver=0,
+               positions=None, velocities=None):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
@@ -321,9 +321,17 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     particle_BC_left = parameters["particle_BC_left"]
     particle_BC_right = parameters["particle_BC_right"]
 
-    # **Initialize particle positions and velocities**
-    positions  = parameters["initial_positions"]
-    velocities = parameters["initial_velocities"]
+    # **Use provided positions/velocities if given, otherwise use defaults**
+    if positions is None:
+        positions = parameters["initial_positions"]
+    if velocities is None:
+        velocities = parameters["initial_velocities"]
+
+    # Ensure the provided positions/velocities match the expected shape
+    if positions.shape != parameters["initial_positions"].shape:
+        raise ValueError(f"Expected positions shape {parameters['initial_positions'].shape}, got {positions.shape}")
+    if velocities.shape != parameters["initial_velocities"].shape:
+        raise ValueError(f"Expected velocities shape {parameters['initial_velocities'].shape}, got {velocities.shape}")
 
     # Leapfrog integration: positions at half-step before the start
     positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
@@ -340,7 +348,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         E_field, B_field, positions_minus1_2, positions,
         positions_plus1_2, velocities, qs, ms, q_ms,)
 
-    @scan_tqdm(total_steps)
+    # @scan_tqdm(total_steps)
     def simulation_step(carry, step_index):
         (E_field, B_field, positions_minus1_2, positions,
          positions_plus1_2, velocities, qs, ms, q_ms) = carry

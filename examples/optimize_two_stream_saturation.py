@@ -91,6 +91,3 @@ plt.yticks(fontsize = 18)
 plt.tight_layout()
 plt.savefig('objective_function_landscape_twostream.pdf', dpi=300)
 plt.show()
-
-
-

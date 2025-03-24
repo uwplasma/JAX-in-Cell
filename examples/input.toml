@@ -2,6 +2,7 @@
 length = 0.01
 amplitude_perturbation_x = 1e-7
 wavenumber_electrons = 8
+wavenumber_ions = 0
 grid_points_per_Debye_length = 2
 vth_electrons_over_c = 0.05
 ion_temperature_over_electron_temperature = 0.01
@@ -15,5 +16,5 @@ external_electric_field_wavenumber = 0
 [solver_parameters]
 field_solver = 0
 number_grid_points = 100
-number_pseudoelectrons = 3000
+number_pseudoelectrons = 2000
 total_steps = 1000
