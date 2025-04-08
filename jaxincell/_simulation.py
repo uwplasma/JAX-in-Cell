@@ -727,52 +727,67 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
             E_avg = 0.5 * (E_field + E_new)
             B_avg = 0.5 * (B_field + B_new)
             
-            x_half = 0.5 * (positions_new + positions)
-            E_at_half = vmap(lambda x_n: fields_to_particles_grid(
-                x_n, E_avg, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(x_half)
-            B_at_half = vmap(lambda x_n: fields_to_particles_grid(
-                x_n, B_avg, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(x_half)
+            # x_half = 0.5 * (positions_new + positions)
+            # E_at_half = vmap(lambda x_n: fields_to_particles_grid(
+            #     x_n, E_avg, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(x_half)
+            # B_at_half = vmap(lambda x_n: fields_to_particles_grid(
+            #     x_n, B_avg, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(x_half)
 
-            velocities_new = velocities + (q_ms * E_at_half) * dt
-            velocities_plus1_2 = 0.5 * (velocities + velocities_new)
-            positions_new = positions + velocities_plus1_2 * dt
+            # velocities_new = velocities + (q_ms * E_at_half) * dt
+            # velocities_plus1_2 = 0.5 * (velocities + velocities_new)
+            # positions_new = positions + velocities_plus1_2 * dt
 
+            # positions_new, velocities, qs, ms, q_ms = set_BC_particles(
+            #     positions_new, velocities, qs, ms, q_ms, dx, grid,
+            #     *box_size, particle_BC_left, particle_BC_right)
+            # positions_plus1_2 = 0.5 * (positions + positions_new)
 
-            positions_new, velocities, qs, ms, q_ms = set_BC_particles(
-                positions_new, velocities, qs, ms, q_ms, dx, grid,
-                *box_size, particle_BC_left, particle_BC_right)
-            positions_plus1_2 = 0.5 * (positions + positions_new)
-
-            J = current_density(positions, positions_plus1_2,positions_new, velocities_plus1_2,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+            # J = current_density(positions, positions_plus1_2,positions_new, velocities_plus1_2,
+            #     qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
             
             # # Loop through substeps
-            # num_substeps=2
-            # positions_sub=positions
-            # J = jnp.zeros((len(grid), 3))
-            # for step in range(num_substeps):
-            #     # Compute the substep positions and velocities
-            #     t_end = (step + 1) / num_substeps
+            num_substeps=2
+            positions_sub=positions
+            positions_subnew=positions
+            velocities_sub = velocities
+            positions_sub1_2=positions
+            J = jnp.zeros((len(grid), 3))
+            dtau = dt / num_substeps
+            for step in range(num_substeps):
+                # Compute the substep positions and velocities
+                t_end = (step + 1) / num_substeps
                 
-            #     # Interpolating the positions and velocities for the substep
-            #     positions_subnew = positions - t_end * (positions - positions_new)
-            #     velocities_subnew = velocities - t_end * (velocities - velocities_new)
-            #     positions_subnew, velocities, qs, ms, q_ms = set_BC_particles(
+                # Interpolating the positions and velocities for the substep
+                # positions_subnew = positions - t_end * (positions - positions_new)
+                # velocities_subnew = velocities - t_end * (velocities - velocities_new)
+
+                E_at_half = vmap(lambda x_n: fields_to_particles_grid(
+                    x_n, E_avg, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(positions_sub1_2)
+
+                velocities_subnew = velocities_sub + (q_ms * E_at_half) * dtau
+                velocities_plus1_2 = 0.5 * (velocities_sub + velocities_subnew)
+                positions_subnew = positions_sub + velocities_plus1_2 * dtau
+
+                positions_sub1_2=0.5*(positions_sub+positions_subnew)
+                
+                positions_subnew, velocities_plus1_2, qs, ms, q_ms = set_BC_particles(
+                positions_subnew, velocities_plus1_2, qs, ms, q_ms, dx, grid,
+                *box_size, particle_BC_left, particle_BC_right)
+                positions_sub1_2 = set_BC_positions(positions_subnew - (dtau / 2) * velocities_plus1_2,
+                                                qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
+                # Now call the current_density function for each substep
+                J_substep = current_density(positions_sub, positions_sub1_2,positions_subnew, velocities_plus1_2,
+                    qs, dx, dtau, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+
+                positions_sub=positions_subnew
+                velocities_sub=velocities_subnew
+
+                # Accumulate the result for each substep
+                J += J_substep*dtau
+            J=J/dt
+            # positions_new, velocities, qs, ms, q_ms = set_BC_particles(
             #     positions_subnew, velocities, qs, ms, q_ms, dx, grid,
             #     *box_size, particle_BC_left, particle_BC_right)
-            #     positions_sub1_2=0.5*(positions_sub+positions_subnew)
-            #     # Now call the current_density function for each substep
-            #     J_substep = current_density(positions_sub, positions_sub1_2,positions_subnew, velocities_subnew,
-            #         qs, dx, dt/ num_substeps, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-
-            #     positions_sub=positions_subnew
-
-            #     # Accumulate the result for each substep
-            #     J += J_substep*dt/ num_substeps
-            # J=J/dt
-            positions_new, velocities, qs, ms, q_ms = set_BC_particles(
-                positions_new, velocities, qs, ms, q_ms, dx, grid,
-                *box_size, particle_BC_left, particle_BC_right)
 
             # J = current_density_CN(positions_plus1_2, velocities_plus1_2,
             #     qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
@@ -784,7 +799,8 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
 
 
             E_new=E_next
-            positions_new=positions_new
+            positions_new=positions_subnew
+            velocities_new=velocities_subnew
 
         # Update fields after iteration
         E_field = E_new
