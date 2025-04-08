@@ -331,7 +331,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     # initial_carry = (
     #     E_field, B_field, positions_minus1_2, positions,
     #     positions_plus1_2, velocities, qs, ms, q_ms,)
-
+    initial_charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
     initial_carry = (
      E_field, B_field, positions,
      velocities, qs, ms, q_ms,)
@@ -665,6 +665,15 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
 
     def integrate(y, dx): return 0.5 * (jnp.asarray(dx) * (y[..., 1:] + y[..., :-1])).sum(-1)
     
+    def compute_divergence(E, dx):
+        div_E = jnp.zeros_like(E)  # Initialize array for divergence
+
+        # Use JAX's `.at[]` to modify the array
+        div_E = div_E.at[1:-1].set((E[2:] - E[:-2]) / (2 * dx))
+        div_E = div_E.at[0].set((E[1] - E[0]) / dx)
+        div_E = div_E.at[-1].set((E[-1] - E[-2]) / dx)
+
+        return div_E
 
     from jax import debug
     @scan_tqdm(total_steps)
@@ -729,24 +738,51 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
             positions_new = positions + velocities_plus1_2 * dt
 
 
-            positions_new, velocities_new, qs, ms, q_ms = set_BC_particles(
-                positions_new, velocities_new, qs, ms, q_ms, dx, grid,
+            positions_new, velocities, qs, ms, q_ms = set_BC_particles(
+                positions_new, velocities, qs, ms, q_ms, dx, grid,
                 *box_size, particle_BC_left, particle_BC_right)
             positions_plus1_2 = 0.5 * (positions + positions_new)
-            velocities_plus1_2 = 0.5 * (velocities + velocities_new)
-            positions_plus1_2, velocities_plus1_2, qs, ms, q_ms = set_BC_particles(
-                positions_plus1_2, velocities_plus1_2, qs, ms, q_ms, dx, grid,
-                *box_size, particle_BC_left, particle_BC_right)
 
-            
             J = current_density(positions, positions_plus1_2,positions_new, velocities_plus1_2,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
             
+            # # Loop through substeps
+            # num_substeps=2
+            # positions_sub=positions
+            # J = jnp.zeros((len(grid), 3))
+            # for step in range(num_substeps):
+            #     # Compute the substep positions and velocities
+            #     t_end = (step + 1) / num_substeps
+                
+            #     # Interpolating the positions and velocities for the substep
+            #     positions_subnew = positions - t_end * (positions - positions_new)
+            #     velocities_subnew = velocities - t_end * (velocities - velocities_new)
+            #     positions_subnew, velocities, qs, ms, q_ms = set_BC_particles(
+            #     positions_subnew, velocities, qs, ms, q_ms, dx, grid,
+            #     *box_size, particle_BC_left, particle_BC_right)
+            #     positions_sub1_2=0.5*(positions_sub+positions_subnew)
+            #     # Now call the current_density function for each substep
+            #     J_substep = current_density(positions_sub, positions_sub1_2,positions_subnew, velocities_subnew,
+            #         qs, dx, dt/ num_substeps, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+
+            #     positions_sub=positions_subnew
+
+            #     # Accumulate the result for each substep
+            #     J += J_substep*dt/ num_substeps
+            # J=J/dt
+            positions_new, velocities, qs, ms, q_ms = set_BC_particles(
+                positions_new, velocities, qs, ms, q_ms, dx, grid,
+                *box_size, particle_BC_left, particle_BC_right)
+
+            # J = current_density_CN(positions_plus1_2, velocities_plus1_2,
+            #     qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
             mean_J = jnp.array([integrate(J[:,0], dx=dx), integrate(J[:,1], dx=dx), integrate(J[:,2], dx=dx)])/length
             E_next = E_field - (dt / epsilon_0) * (J-mean_J)
             delta_E = jnp.abs(jnp.mean(E_next - E_new))/jnp.max(jnp.abs(E_next))
             #debug.print("mean_J: {}", mean_J)
-            debug.print("delta_E: {}", delta_E)
+            #debug.print("delta_E: {}", delta_E)
+
+
             E_new=E_next
             positions_new=positions_new
 
@@ -758,8 +794,12 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         positions_plus1= positions_new
         velocities_plus1 = velocities_new
         # Charge density with quadratic shape
-        charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
-        
+        charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)
+        # charge_err = jnp.max(compute_divergence(E_new[:,0], dx)* epsilon_0 - charge_density+initial_charge_density)
+        # debug.print("charge_err: {}", charge_err) 
+        #debug.print("charge_den: {}",  jnp.mean(jnp.abs(charge_density))) 
+
+
         # Prepare next state
         carry = (E_field, B_field, positions_plus1,
                 velocities_plus1, qs, ms, q_ms)

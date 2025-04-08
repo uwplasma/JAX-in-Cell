@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 from jax import jit, vmap
 from jax.lax import dynamic_update_slice
+from ._boundary_conditions import set_BC_positions, set_BC_particles
 
 __all__ = ['charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density']
 
@@ -142,6 +143,7 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
         j_grid = jnp.roll(j_grid, cell_no - 3)
         return j_grid
 
+
     def compute_current_y(i):
         x_n = xs_n[i, 0]
         q = qs[i, 0]
@@ -210,3 +212,5 @@ def current_density_CN( xs_n, vs_n, qs, dx, dt, grid, grid_start, particle_BC_le
     current_dens_z = jnp.sum(vmap(compute_current_z)(jnp.arange(len(xs_n))), axis=0)
 
     return jnp.transpose(jnp.array([current_dens_x, current_dens_y, current_dens_z]))
+
+
