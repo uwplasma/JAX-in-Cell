@@ -168,3 +168,4 @@ examples/objective_function_landscape_twostream.pdf
 examples/objective_function_onerun_twostream.pdf
 jaxincell/version.py
 *.xml
+.vscode/settings.json

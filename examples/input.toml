@@ -5,15 +5,16 @@ wavenumber_electrons = 8
 grid_points_per_Debye_length = 2
 vth_electrons_over_c = 0.05
 ion_temperature_over_electron_temperature = 0.01
-timestep_over_spatialstep_times_c = 1.0
-electron_drift_speed = 100000000.0
+timestep_over_spatialstep_times_c = 0.2
+electron_drift_speed = 250000000.0
 velocity_plus_minus_electrons = true
 print_info = true
 external_electric_field_amplitude = 0
 external_electric_field_wavenumber = 0
+relativistic = false
 
 [solver_parameters]
 field_solver = 0
 number_grid_points = 100
 number_pseudoelectrons = 3000
-total_steps = 1000
+total_steps = 3500

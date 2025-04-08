@@ -1,6 +1,7 @@
 from jax import vmap, jit
 import jax.numpy as jnp
 from ._boundary_conditions import field_2_ghost_cells
+from ._constants import speed_of_light
 
 __all__ = ['fields_to_particles_grid', 'rotation', 'boris_step']
 
@@ -107,3 +108,61 @@ def boris_step(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_fields_at_x):
     # vs_nplus1 = vs_n + (q_ms) * E_fields_at_x * dt
     # xs_nplus1 = xs_nplushalf + dt * vs_nplus1
     # return xs_nplus1, vs_nplus1
+
+@jit
+def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_fields_at_x):
+    """
+    This function performs one step of the relativistic Boris algorithm for particle motion. 
+    The particle velocity is updated using the electric and magnetic fields at its position, 
+    and the particle position is updated using the new velocity.
+
+    Args:
+        dt (float): Time step for the simulation.
+        xs_nplushalf (array): The particle positions at the half-time step n+1/2, shape (N, 3).
+        vs_n (array): The particle velocities at time step n, shape (N, 3).
+        q_ms (array): The charge-to-mass ratio of each particle, shape (N, 1).
+        E_fields_at_x (array): The interpolated electric field values at the particle positions, shape (N, 3).
+        B_fields_at_x (array): The magnetic field values at the particle positions, shape (N, 3).
+
+    Returns:
+        tuple: A tuple containing:
+            - xs_nplus3_2 (array): The updated particle positions at time step n+3/2, shape (N, 3).
+            - vs_nplus1 (array): The updated particle velocities at time step n+1, shape (N, 3).
+    """
+    # gamma = 1 / jnp.sqrt(1 - (jnp.linalg.norm(vs_n, axis=1, keepdims=True) / speed_of_light) ** 2)
+    # uvel = vs_n * gamma
+
+    # uvel_minus = uvel + q_ms * E_fields_at_x * dt / 2
+
+    # gamma1 = jnp.sqrt(1 + (jnp.linalg.norm(uvel_minus, axis=1, keepdims=True) / speed_of_light) ** 2)
+
+    # from jax.debug import print as jprint
+    # t = q_ms * dt * B_fields_at_x / (2 * gamma1)
+    # s = 2 * t / (1 + (t * t).sum(axis=1, keepdims=True))
+    
+    # jprint("B_fields_at_x shape {}", B_fields_at_x.shape)
+    # jprint("uvel_minus shape {}", uvel_minus.shape)
+    # jprint("gamma1 shape {}", gamma1.shape)
+    # jprint("q_ms shape {}", q_ms.shape)
+    # jprint("t shape {}", t.shape)
+    # jprint("s shape {}", s.shape)
+
+    # uvel_prime = uvel_minus + jnp.cross(uvel_minus, t)
+    # uvel_plus = uvel_minus + jnp.cross(uvel_prime, s)
+    # uvel_new = uvel_plus + q_ms * E_fields_at_x * dt / 2
+
+    # # You can show that this expression is equivalent to calculating
+    # # v_new  then calculating gammanew using the usual formula
+    # gamma2 = jnp.sqrt(
+    #     1 + (jnp.linalg.norm(uvel_new, axis=1, keepdims=True) / speed_of_light) ** 2
+    # )
+
+    # vs_nplus1 = uvel_new / gamma2
+    # xs_nplus3_2 = xs_nplushalf + dt * vs_nplus1
+
+    # return xs_nplus3_2, vs_nplus1
+
+    gamma = 1 / jnp.sqrt(1 - (jnp.linalg.norm(vs_n, axis=1, keepdims=True) / speed_of_light) ** 2)
+    vs_nplus1 = vs_n + (q_ms) * E_fields_at_x * dt / gamma
+    xs_nplus1 = xs_nplushalf + dt * vs_nplus1
+    return xs_nplus1, vs_nplus1

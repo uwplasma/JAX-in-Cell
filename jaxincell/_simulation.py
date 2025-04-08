@@ -5,7 +5,7 @@ from jax.random import normal
 from jax import lax, jit, vmap, config
 from jax.debug import print as jprint
 from jax.random import PRNGKey, uniform
-from ._particles import fields_to_particles_grid, boris_step
+from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic
 from ._sources import current_density, calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._fields import field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT
@@ -81,6 +81,7 @@ def initialize_simulation_parameters(user_parameters={}):
         "electron_charge_over_elementary_charge": -1, # Electron charge in units of the elementary charge
         "ion_charge_over_elementary_charge": 1,   # Ion charge in units of the elementary charge
         "ion_mass_over_proton_mass": 1,           # Ion mass in units of the proton mass
+        "relativistic": False,                    # Use relativistic Boris pusher
 
         # Boundary conditions
         "particle_BC_left":  0,                   # Left boundary condition for particles
@@ -202,6 +203,9 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     ion_velocities = jnp.stack((v_ions_x, v_ions_y, v_ions_z), axis=1)
     
     velocities = jnp.concatenate((electron_velocities, ion_velocities))
+    # Cap velocities at 99% the speed of light
+    speed_limit = 0.99 * speed_of_light
+    velocities = jnp.where(jnp.abs(velocities) >= speed_limit, jnp.sign(velocities) * speed_limit, velocities)
 
     # Grid setup
     dx = length / number_grid_points
@@ -357,8 +361,12 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
             x_n, total_B, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(positions_plus1_2)
 
         # Particle update: Boris pusher
-        positions_plus3_2, velocities_plus1 = boris_step(
-            dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x)
+        positions_plus3_2, velocities_plus1 = lax.cond(
+            parameters["relativistic"],
+            lambda _: boris_step_relativistic(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
+            lambda _: boris_step(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
+            operand=None
+        )
 
         # Apply boundary conditions
         positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
