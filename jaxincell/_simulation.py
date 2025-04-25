@@ -230,6 +230,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Total time: {} / plasma frequency\n"
             "Number of particles on a Debye cube: {:.2e}\n"
             "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
+            "Weight of particles: {:.2e}\n"
         ),length/(Debye_length_per_dx*dx),
           number_pseudoelectrons * weight / length,
           -parameters["ion_temperature_over_electron_temperature"] * vth_electrons**2 * mass_electrons / 2 / charge_electrons,
@@ -241,6 +242,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
           dt * plasma_frequency * total_steps,
           number_pseudoelectrons * weight / length * (Debye_length_per_dx*dx)**3,
           -charge_electrons * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electrons * vth_electrons**2 / 2),
+            weight,
         ), lambda _: None, operand=None)
     
     # **Fields Initialization**

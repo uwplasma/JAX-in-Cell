@@ -163,6 +163,6 @@ def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_field
     # return xs_nplus3_2, vs_nplus1
 
     gamma = 1 / jnp.sqrt(1 - (jnp.linalg.norm(vs_n, axis=1, keepdims=True) / speed_of_light) ** 2)
-    vs_nplus1 = vs_n + (q_ms) * E_fields_at_x * dt / gamma
-    xs_nplus1 = xs_nplushalf + dt * vs_nplus1
+    vs_nplus1 = vs_n + (q_ms) * E_fields_at_x * dt
+    xs_nplus1 = xs_nplushalf + dt * vs_nplus1 / gamma
     return xs_nplus1, vs_nplus1

@@ -91,7 +91,7 @@ def plot(output):
     axes[1, 0].plot(time, output["kinetic_energy_electrons"], label="Kinetic energy electrons")
     axes[1, 0].plot(time, output["kinetic_energy_ions"], label="Kinetic energy ions")
     axes[1, 0].plot(time, output["total_energy"], label="Total energy")
-    axes[1, 0].set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)", ylabel="Energy (J)", yscale="log", ylim=[1e-5, None])
+    axes[1, 0].set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)", ylabel="Energy (J)", yscale="log")#, ylim=[1e-5, None])
     axes[1, 0].legend()
 
     # Animated phase space
