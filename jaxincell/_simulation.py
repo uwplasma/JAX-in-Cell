@@ -216,8 +216,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             # f"Number of grid points: {number_grid_points}\n"
             "Length of the simulation box: {:.2e} Debye lengths\n"
             "Density of electrons: {:.2e} m^-3\n"
-            "Ion temperature: {:.2e} eV\n"
             "Electron temperature: {:.2e} eV\n"
+            "Ion temperature / Electron temperature: {}\n"
             "Debye length: {:.2e} m\n"
             "Wavenumber * Debye length: {:.2e}\n"
             "Pseudoparticles per cell: {:.2e}\n"
@@ -227,8 +227,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
         ),length/(Debye_length_per_dx*dx),
           number_pseudoelectrons * weight / length,
-          -parameters["ion_temperature_over_electron_temperature"] * vth_electrons**2 * mass_electrons / 2 / charge_electrons,
-          -mass_electrons * vth_electrons**2 / 2 / charge_electrons,
+          mass_electrons * vth_electrons**2 / 2 / (-charge_electrons),
+          parameters["ion_temperature_over_electron_temperature"],
           Debye_length_per_dx*dx,
           wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx,
           number_pseudoelectrons / number_grid_points,
@@ -348,7 +348,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         E_field, B_field, positions_minus1_2, positions,
         positions_plus1_2, velocities, qs, ms, q_ms,)
 
-    # @scan_tqdm(total_steps)
+    @scan_tqdm(total_steps)
     def simulation_step(carry, step_index):
         (E_field, B_field, positions_minus1_2, positions,
          positions_plus1_2, velocities, qs, ms, q_ms) = carry
