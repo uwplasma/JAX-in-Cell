@@ -1,6 +1,4 @@
 ## scaling_time.py
-import os, sys;
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import time
 from jaxincell import simulation
 from jaxincell import diagnostics
@@ -17,17 +15,16 @@ input_parameters = {
 "amplitude_perturbation_x"     : 5e-4,  # amplitude of sinusoidal perturbation in x
 "wavenumber_electrons": 8, # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
 "grid_points_per_Debye_length" : 2,     # dx over Debye length
-"vth_electrons_over_c"         : 0.05,  # thermal velocity of electrons over speed of light
-"ion_temperature_over_electron_temperature": 1e-2, # Temperature of ions over temperature of electrons
+"vth_electrons_over_c_x"         : 0.05,  # thermal velocity of electrons over speed of light
+"ion_temperature_over_electron_temperature_x": 1e-2, # Temperature of ions over temperature of electrons
 "timestep_over_spatialstep_times_c": 0.2, # dt * speed_of_light / dx
-"electron_drift_speed"         : 0,     # drift speed of electrons
-"velocity_plus_minus_electrons": False, # create two groups of electrons moving in opposite directions
+"velocity_plus_minus_electrons_x": False, # create two groups of electrons moving in opposite directions
 "print_info"                   : False,  # print information about the simulation
 "external_electric_field_amplitude": 0, # External electric field value (V/m)
 "external_electric_field_wavenumber": 0,  # External electric Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
 "amplitude_perturbation_x"     : 1e-7,  # Two-Stream (amplitude of sinusoidal perturbation in x)
-"electron_drift_speed"         : 1e8,   # Two-Stream (drift speed of electrons)
-"velocity_plus_minus_electrons": True,  # Two-Stream (create two groups of electrons moving in opposite directions)
+"electron_drift_speed_x"         : 1e8,   # Two-Stream (drift speed of electrons)
+"velocity_plus_minus_electrons_x": True,  # Two-Stream (create two groups of electrons moving in opposite directions)
 # "wavenumber_electrons": 1,  # Plasma Oscillations (Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length))
 }
 

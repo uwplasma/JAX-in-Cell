@@ -9,16 +9,16 @@ __all__ = ['plot']
 
 def plot(output):
     # Precompute constants
-    v_th = output["vth_electrons_over_c"] * speed_of_light
+    v_th = output["vth_electrons_over_c_x"] * speed_of_light
     grid = output["grid"]
     box_size_x = output["length"]
     total_steps = output["total_steps"]
     sqrtmemi = jnp.sqrt(output["mass_electrons"][0] / output["mass_ions"][0])
     
     max_velocity_electrons = max(1.2 * jnp.max(output["velocity_electrons"]), 
-                                 5 * jnp.abs(v_th) + jnp.abs(output["electron_drift_speed"]))
+                                 5 * jnp.abs(v_th) + jnp.abs(output["electron_drift_speed_x"]))
     max_velocity_ions = max(1.0 * jnp.max(output["velocity_ions"]),
-                            sqrtmemi * 0.3 * jnp.abs(v_th) * jnp.sqrt(output["ion_temperature_over_electron_temperature"]) + jnp.abs(output["ion_drift_speed"]))
+                            sqrtmemi * 0.3 * jnp.abs(v_th) * jnp.sqrt(output["ion_temperature_over_electron_temperature_x"]) + jnp.abs(output["ion_drift_speed_x"]))
     
     bins_position = min(len(grid), 101)
     bins_velocity = min(len(grid), 101)

@@ -13,9 +13,9 @@ input_parameters, solver_parameters = load_parameters('input.toml')
 
 @jit
 def mean_electric_field(electron_drift_speed):
-    input_parameters["electron_drift_speed"] = electron_drift_speed
+    input_parameters["electron_drift_speed_x"] = electron_drift_speed
     output = block_until_ready(simulation(input_parameters, **solver_parameters))
-    electric_field = jnp.mean(output['electric_field'][:, :, 0], axis=1)
+    electric_field = jnp.mean(output['electric_field_x'][:, :, 0], axis=1)
     mean_E = jnp.mean(lax.slice(electric_field, [solver_parameters["total_steps"]//2], [solver_parameters["total_steps"]]))
     return mean_E
 

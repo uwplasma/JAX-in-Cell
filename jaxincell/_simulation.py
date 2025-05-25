@@ -68,14 +68,26 @@ def initialize_simulation_parameters(user_parameters={}):
         "wavenumber_electrons": 8,    # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
         "wavenumber_ions": 0,         # Wavenumber of sinusoidal ion density perturbation in x (factor of 2pi/length)
         "grid_points_per_Debye_length": 2,        # dx over Debye length
-        "vth_electrons_over_c": 0.05,             # Thermal velocity of electrons over speed of light
-        "ion_temperature_over_electron_temperature": 0.01, # Temperature ratio of ions to electrons
-        "timestep_over_spatialstep_times_c": 1.0, # dt * speed_of_light / dx
-        "seed": 1701,                             # Random seed for reproducibility
-        "electron_drift_speed": 100000000.0,                # Drift speed of electrons
-        "ion_drift_speed":      0,                # Drift speed of ions
-        "velocity_plus_minus_electrons": True,    # create two groups of electrons moving in opposite directions
-        "velocity_plus_minus_ions": False,        # create two groups of electrons moving in opposite directions
+        "vth_electrons_over_c_x": 0.05,           # Thermal velocity of electrons over speed of light in the x direction
+        "vth_electrons_over_c_y": 0.0,            # Thermal velocity of electrons over speed of light in the y direction
+        "vth_electrons_over_c_z": 0.0,            # Thermal velocity of electrons over speed of light in the z direction
+        "ion_temperature_over_electron_temperature_x": 0.01, # Temperature ratio of ions to electrons in the x direction
+        "ion_temperature_over_electron_temperature_y": 0.01, # Temperature ratio of ions to electrons in the y direction
+        "ion_temperature_over_electron_temperature_z": 0.01, # Temperature ratio of ions to electrons in the z direction
+        "timestep_over_spatialstep_times_c": 1.0,   # dt * speed_of_light / dx
+        "seed": 1701,                               # Random seed for reproducibility
+        "electron_drift_speed_x": 1e8,              # Drift speed of electrons in the x direction
+        "electron_drift_speed_y": 0,              # Drift speed of electrons in the y direction
+        "electron_drift_speed_z": 0,              # Drift speed of electrons in the z direction
+        "ion_drift_speed_x":      0,                # Drift speed of ions in the x direction
+        "ion_drift_speed_y":      0,                # Drift speed of ions in the y direction
+        "ion_drift_speed_z":      0,                # Drift speed of ions in the z direction
+        "velocity_plus_minus_electrons_x": True,    # create two groups of electrons moving in opposite directions in the x direction
+        "velocity_plus_minus_electrons_y": False,   # create two groups of electrons moving in opposite directions in the y direction
+        "velocity_plus_minus_electrons_z": False,   # create two groups of electrons moving in opposite directions in the z direction
+        "velocity_plus_minus_ions_x": False,        # create two groups of electrons moving in opposite directions in the x direction
+        "velocity_plus_minus_ions_y": False,        # create two groups of electrons moving in opposite directions in the y direction
+        "velocity_plus_minus_ions_z": False,        # create two groups of electrons moving in opposite directions in the z direction
         "print_info": True,                       # Print information about the simulation
         "electron_charge_over_elementary_charge": -1, # Electron charge in units of the elementary charge
         "ion_charge_over_elementary_charge": 1,   # Ion charge in units of the elementary charge
@@ -163,6 +175,13 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     mass_ions        = parameters["ion_mass_over_proton_mass"] * mass_proton
 
     # Pseudoparticle weights -> density of real particles = number_pseudoelectrons * weight / length, put in terms of Debye length
+    vth_electrons_over_c = jnp.max(jnp.array([
+        parameters["vth_electrons_over_c_x"],
+        parameters["vth_electrons_over_c_y"],
+        parameters["vth_electrons_over_c_z"]])
+    )
+    vth_electrons = vth_electrons_over_c * speed_of_light
+
     Debye_length_per_dx = 1 / parameters["grid_points_per_Debye_length"]
     weight = (
         epsilon_0
@@ -172,7 +191,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         * number_grid_points**2
         / length
         / (2 * number_pseudoelectrons)
-        * parameters["vth_electrons_over_c"]**2
+        * vth_electrons_over_c**2
         / Debye_length_per_dx**2
     )
     charges = jnp.concatenate((
@@ -187,17 +206,22 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # **Particle Velocities**
     # Thermal velocities (Maxwell-Boltzmann distribution)
-    vth_electrons = parameters["vth_electrons_over_c"] * speed_of_light
-    v_electrons_x = vth_electrons / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed"]
-    v_electrons_x = jnp.where(parameters["velocity_plus_minus_electrons"], v_electrons_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_x)
-    v_electrons_y = jnp.zeros((number_pseudoelectrons, ))
-    v_electrons_z = jnp.zeros((number_pseudoelectrons, ))
+    v_electrons_x = parameters["vth_electrons_over_c_x"] * speed_of_light / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_x"]
+    v_electrons_x = jnp.where(parameters["velocity_plus_minus_electrons_x"], v_electrons_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_x)
+    v_electrons_y = parameters["vth_electrons_over_c_y"] * speed_of_light / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_y"]
+    v_electrons_y = jnp.where(parameters["velocity_plus_minus_electrons_y"], v_electrons_y * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_y)
+    v_electrons_z = parameters["vth_electrons_over_c_z"] * speed_of_light / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_z"]
+    v_electrons_z = jnp.where(parameters["velocity_plus_minus_electrons_z"], v_electrons_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_z)
     electron_velocities = jnp.stack((v_electrons_x, v_electrons_y, v_electrons_z), axis=1)
-    vth_ions = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature"])) * vth_electrons * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
-    v_ions_x = vth_ions / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed"]
-    v_ions_x = jnp.where(parameters["velocity_plus_minus_ions"], v_ions_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_x)
-    v_ions_y = jnp.zeros((number_pseudoelectrons, ))
-    v_ions_z = jnp.zeros((number_pseudoelectrons, ))
+    vth_ions_x = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_x"])) * parameters["vth_electrons_over_c_x"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
+    vth_ions_y = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_y"])) * parameters["vth_electrons_over_c_y"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
+    vth_ions_z = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_z"])) * parameters["vth_electrons_over_c_z"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
+    v_ions_x = vth_ions_x / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_x"]
+    v_ions_x = jnp.where(parameters["velocity_plus_minus_ions_x"], v_ions_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_x)
+    v_ions_y = vth_ions_y / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_y"]
+    v_ions_y = jnp.where(parameters["velocity_plus_minus_ions_y"], v_ions_y * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_y)
+    v_ions_z = vth_ions_z / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_z"]
+    v_ions_z = jnp.where(parameters["velocity_plus_minus_ions_z"], v_ions_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_z)
     ion_velocities = jnp.stack((v_ions_x, v_ions_y, v_ions_z), axis=1)
     
     velocities = jnp.concatenate((electron_velocities, ion_velocities))
@@ -225,10 +249,11 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Total time: {} / plasma frequency\n"
             "Number of particles on a Debye cube: {:.2e}\n"
             "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
+            "Pseudoparticle weight: {:.2e}\n"
         ),length/(Debye_length_per_dx*dx),
           number_pseudoelectrons * weight / length,
           mass_electrons * vth_electrons**2 / 2 / (-charge_electrons),
-          parameters["ion_temperature_over_electron_temperature"],
+          parameters["ion_temperature_over_electron_temperature_x"],
           Debye_length_per_dx*dx,
           wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx,
           number_pseudoelectrons / number_grid_points,
@@ -236,6 +261,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
           dt * plasma_frequency * total_steps,
           number_pseudoelectrons * weight / length * (Debye_length_per_dx*dx)**3,
           -charge_electrons * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electrons * vth_electrons**2 / 2),
+          weight,
         ), lambda _: None, operand=None)
     
     # **Fields Initialization**

@@ -1,7 +1,5 @@
 ## two_stream_saturation.py
 # Optimize the non-linear saturation of the two_stream_instabiltity to be as small as possible
-import os, sys;
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import jax.numpy as jnp
 from jax import jit, grad
 import matplotlib.pyplot as plt
@@ -24,7 +22,7 @@ learning_rate = 0.05
 def objective_function(Ti):
     params = input_parameters.copy()
     Ti = jnp.atleast_1d(Ti)[0]
-    params["ion_temperature_over_electron_temperature"] = Ti
+    params["ion_temperature_over_electron_temperature_x"] = Ti
     output = simulation(params, **solver_parameters)
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     integral_E_squared         = jnp.trapezoid(abs_E_squared, dx=output['dx'], axis=-1)
@@ -33,7 +31,7 @@ def objective_function(Ti):
 jac = jit(grad(objective_function))
 ############### -------- #################
 print(f'Perform a first run to see one objective function')
-input_parameters["ion_temperature_over_electron_temperature"] = x0_optimization
+input_parameters["ion_temperature_over_electron_temperature_x"] = x0_optimization
 output = simulation(input_parameters, **solver_parameters)
 objective = objective_function(x0_optimization)
 plt.figure(figsize=(8,6))

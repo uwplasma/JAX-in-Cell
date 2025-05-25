@@ -1,7 +1,5 @@
-## Langmuir_wave.py
-# Example of plasma oscillations of electrons
-import os, sys;
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+## Landau_damping.py
+# Example of electric field damping in a plasma
 from jaxincell import plot
 from jaxincell import simulation
 import jax.numpy as jnp
@@ -12,11 +10,11 @@ input_parameters = {
 "amplitude_perturbation_x"     : 1e-1,  # amplitude of sinusoidal perturbation in x
 "wavenumber_electrons": 1, # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
 "grid_points_per_Debye_length" : 0.3,     # dx over Debye length
-"velocity_plus_minus_electrons": False,    # create two groups of electrons moving in opposite directions
-"ion_temperature_over_electron_temperature": 1e-6, # Temperature of ions over temperature of electrons
+"velocity_plus_minus_electrons_x": False,    # create two groups of electrons moving in opposite directions
+"ion_temperature_over_electron_temperature_x": 1e-6, # Temperature of ions over temperature of electrons
 "print_info"                   : True,  # print information about the simulation
 "ion_mass_over_proton_mass": 1e6,           # Ion mass in units of the proton mass
-"vth_electrons_over_c": 1e-1,             # Thermal velocity of electrons over speed of light
+"vth_electrons_over_c_x": 1e-1,             # Thermal velocity of electrons over speed of light
 }
 
 solver_parameters = {
