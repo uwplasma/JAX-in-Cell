@@ -219,7 +219,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Electron temperature: {:.2e} eV\n"
             "Ion temperature / Electron temperature: {}\n"
             "Debye length: {:.2e} m\n"
-            "Wavenumber * Debye length: {:.2e}\n"
+            "Wavenumber * Debye length: {:.2e}\n" 
             "Pseudoparticles per cell: {:.2e}\n"
             "Steps at each plasma frequency: {}\n"
             "Total time: {} / plasma frequency\n"

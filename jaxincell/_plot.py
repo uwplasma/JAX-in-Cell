@@ -20,8 +20,8 @@ def plot(output):
     max_velocity_ions = max(1.0 * jnp.max(output["velocity_ions"]),
                             sqrtmemi * 0.3 * jnp.abs(v_th) * jnp.sqrt(output["ion_temperature_over_electron_temperature"]) + jnp.abs(output["ion_drift_speed"]))
     
-    bins_position = len(grid)
-    bins_velocity = len(grid)
+    bins_position = min(len(grid), 101)
+    bins_velocity = min(len(grid), 101)
     
     time = output["time_array"] * output["plasma_frequency"]
 

@@ -8,21 +8,22 @@ import jax.numpy as jnp
 from jax import block_until_ready
 
 input_parameters = {
-"length"                       : 1e-2,  # dimensions of the simulation box in (x, y, z)
-"amplitude_perturbation_x"     : 5e-4,  # amplitude of sinusoidal perturbation in x
-"wavenumber_electrons": 8, # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
-"grid_points_per_Debye_length" : 5,     # dx over Debye length
-"vth_electrons_over_c"         : 0.05,  # thermal velocity of electrons over speed of light
-"ion_temperature_over_electron_temperature": 1e-9, # Temperature of ions over temperature of electrons
-"timestep_over_spatialstep_times_c": 0.5, # dt * speed_of_light / dx
+"length"                       : 1e-1,  # dimensions of the simulation box in (x, y, z)
+"amplitude_perturbation_x"     : 1e-1,  # amplitude of sinusoidal perturbation in x
+"wavenumber_electrons": 1, # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
+"grid_points_per_Debye_length" : 0.3,     # dx over Debye length
+"velocity_plus_minus_electrons": False,    # create two groups of electrons moving in opposite directions
+"ion_temperature_over_electron_temperature": 1e-6, # Temperature of ions over temperature of electrons
 "print_info"                   : True,  # print information about the simulation
+"ion_mass_over_proton_mass": 1e6,           # Ion mass in units of the proton mass
+"vth_electrons_over_c": 1e-1,             # Thermal velocity of electrons over speed of light
 }
 
 solver_parameters = {
     "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
-    "number_grid_points"     : 33,  # Number of grid points
-    "number_pseudoelectrons" : 3000, # Number of pseudoelectrons
-    "total_steps"            : 1000, # Total number of time steps
+    "number_grid_points"     : 201,  # Number of grid points
+    "number_pseudoelectrons" : 5000, # Number of pseudoelectrons
+    "total_steps"            : 1500, # Total number of time steps
 }
 
 output = block_until_ready(simulation(input_parameters, **solver_parameters))
