@@ -287,17 +287,17 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             # f"Number of pseudoelectrons: {number_pseudoelectrons}\n"
             # f"Number of grid points: {number_grid_points}\n"
             "Length of the simulation box: {:.2e} Debye lengths\n"
-            "Density of electrons: {:.2e} m^-3\n"
-            "Electron temperature: {:.2e} eV\n"
+            "Density of electrons: {:.3e} m^-3\n"
+            "Electron temperature: {:.4e} eV\n"
             "Ion temperature / Electron temperature: {}\n"
-            "Debye length: {:.2e} m\n"
-            "Wavenumber * Debye length: {:.2e}\n" 
-            "Pseudoparticles per cell: {:.2e}\n"
+            "Debye length: {:.5e} m\n"
+            "Wavenumber * Debye length: {:.6e}\n" 
+            "Pseudoparticles per cell: {:.7e}\n"
             "Steps at each plasma frequency: {}\n"
             "Total time: {} / plasma frequency\n"
-            "Number of particles on a Debye cube: {:.2e}\n"
-            "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
-            "Pseudoparticle weight: {:.2e}\n"
+            "Number of particles on a Debye cube: {:.8e}\n"
+            "Charge x External electric field x Debye Length / Temperature: {:.9e}\n"
+            "Pseudoparticle weight: {:.10e}\n"
         ),length/(Debye_length_per_dx*dx),
           number_pseudoelectrons * weight / length,
           mass_electrons * vth_electrons**2 / 2 / (-charge_electrons),
@@ -313,22 +313,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         ), lambda _: None, operand=None)
     
     # **Fields Initialization**
-    # Electric field initialized to same perturbation as particle positions
-    # E_field = jnp.zeros((grid.size, 3))
-    # for i in range(grid.size):
-    #     E_field = E_field.at[i, 0].set(
-    #         -charge_electron * weight * number_pseudoelectrons * parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x * (grid[i] + dx / 2)) / (length * epsilon_0)
-    #     )
-    # Magnetic field initialized to zero
     B_field = jnp.zeros((grid.size, 3))
     E_field = jnp.zeros((grid.size, 3))
-    
-    # # Electric field initialization using Poisson's equation
-    # charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
-    # # E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
-    # E_field_x = E_from_Gauss_1D_FFT(charge_density, dx)
-    # # E_field_x = E_from_Poisson_1D_FFT(charge_density, dx)
-    # E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
     
     fields = (E_field, B_field)
     
@@ -492,8 +478,6 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     
     # **Output results**
     temporary_output = {
-        # "all_positions":  positions_over_time,
-        # "all_velocities": velocities_over_time,
         "position_electrons": positions_over_time[ :, :number_pseudoelectrons, :],
         "velocity_electrons": velocities_over_time[:, :number_pseudoelectrons, :],
         "mass_electrons":     parameters["masses"][   :number_pseudoelectrons],

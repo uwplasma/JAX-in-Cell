@@ -41,7 +41,7 @@ def test_diagnostics():
     assert jnp.allclose(output['electric_field_energy_density'], (epsilon_0/2) * jnp.sum(output['electric_field']**2))
     assert jnp.allclose(output['electric_field_energy'], (epsilon_0/2) * 0.5 * (jnp.sum(output['electric_field'][0]**2) + jnp.sum(output['electric_field'][1]**2)) * output['dx'])
     assert jnp.allclose(output['magnetic_field_energy_density'], 1/(2*mu_0) * jnp.sum(output['magnetic_field']**2, axis=-1))
-    assert jnp.allclose(output['magnetic_field_energy'], jnp.array([3978.87358184, 7957.74716369]))
+    assert jnp.allclose(output['magnetic_field_energy'], jnp.array([397.887358184, 795.774716369]))
     assert jnp.allclose(output['dominant_frequency'], 0.0)
     assert jnp.allclose(output['plasma_frequency'], 1.0)
     assert jnp.allclose(output['kinetic_energy'], (1/2) * output['mass_electrons'][0] * output['weight'] * jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1) + (1/2) * output['mass_ions'][0] * output['weight'] * jnp.sum(jnp.sum(output['velocity_ions']**2, axis=-1), axis=-1))
@@ -49,8 +49,8 @@ def test_diagnostics():
     assert jnp.allclose(output['kinetic_energy_ions'], (1/2) * output['mass_ions'][0] * output['weight'] * jnp.sum(jnp.sum(output['velocity_ions']**2, axis=-1), axis=-1))
     assert jnp.allclose(output['external_electric_field_energy_density'][0], (epsilon_0/2) * jnp.sum(output['external_electric_field'][0]**2))
     assert jnp.allclose(output['external_electric_field_energy'], jnp.array([1.10677348e-13, 2.21354696e-13]))
-    assert jnp.allclose(output['external_magnetic_field_energy_density'], jnp.array([[ 9947.18395461,  9947.18395461],[ 9947.18395461, 29841.55186383]]))
-    assert jnp.allclose(output['external_magnetic_field_energy'], jnp.array([ 994.71839546, 1989.43679092]))
+    assert jnp.allclose(output['external_magnetic_field_energy_density'], jnp.array([[ 994.718395461,  994.718395461],[ 994.718395461, 2984.155186383]]))
+    assert jnp.allclose(output['external_magnetic_field_energy'], jnp.array([ 99.471839546, 198.943679092]))
     assert jnp.allclose(output['total_energy'], output["electric_field_energy"] + output["external_electric_field_energy"] + output["magnetic_field_energy"] + output["external_magnetic_field_energy"] + output["kinetic_energy"])
 
 if __name__ == "__main__":
