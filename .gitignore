@@ -169,3 +169,4 @@ examples/objective_function_onerun_twostream.pdf
 jaxincell/version.py
 *.xml
 .vscode/settings.json
+examples/Weibel.ipynb

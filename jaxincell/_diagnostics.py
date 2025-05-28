@@ -24,11 +24,10 @@ def diagnostics(output):
     peak_index = jnp.argmax(magnitude)
     dominant_frequency = jnp.abs(freqs[peak_index])
 
-    abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
-    abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
-    
     def integrate(y, dx): return 0.5 * (jnp.asarray(dx) * (y[..., 1:] + y[..., :-1])).sum(-1)
     
+    abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
+    abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
     integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
     integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dx'])
     

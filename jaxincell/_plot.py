@@ -7,23 +7,25 @@ from ._constants import speed_of_light
 
 __all__ = ['plot']
 
-def plot(output):
+def plot(output, direction="x"):
     # Precompute constants
-    v_th = output["vth_electrons_over_c_x"] * speed_of_light
+    v_th = output[f"vth_electrons_over_c_{direction}"] * speed_of_light
     grid = output["grid"]
     box_size_x = output["length"]
     total_steps = output["total_steps"]
     sqrtmemi = jnp.sqrt(output["mass_electrons"][0] / output["mass_ions"][0])
     
     max_velocity_electrons = max(1.2 * jnp.max(output["velocity_electrons"]), 
-                                 5 * jnp.abs(v_th) + jnp.abs(output["electron_drift_speed_x"]))
+                                 5 * jnp.abs(v_th) + jnp.abs(output[f"electron_drift_speed_{direction}"]))
     max_velocity_ions = max(1.0 * jnp.max(output["velocity_ions"]),
-                            sqrtmemi * 0.3 * jnp.abs(v_th) * jnp.sqrt(output["ion_temperature_over_electron_temperature_x"]) + jnp.abs(output["ion_drift_speed_x"]))
+                            sqrtmemi * 0.3 * jnp.abs(v_th) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction}"]) + jnp.abs(output[f"ion_drift_speed_{direction}"]))
     
     bins_position = min(len(grid), 101)
     bins_velocity = min(len(grid), 101)
     
     time = output["time_array"] * output["plasma_frequency"]
+    
+    direction_index = 0 if direction == "x" else 1 if direction == "y" else 2
 
     # Precompute histograms
     ve_over_vi = max_velocity_electrons / max_velocity_ions
@@ -32,10 +34,10 @@ def plot(output):
     bins_velocity_ions = jnp.linspace(-max_velocity_ions*ve_over_vi, max_velocity_ions*ve_over_vi, len(grid) + 1)
     
     compute_histogram = lambda data, bins: vmap(lambda x: jnp.histogram(x, bins=bins)[0])(data)
-    position_hist_electrons = compute_histogram(output["position_electrons"][:, :, 0], bins_position)
-    position_hist_ions = compute_histogram(output["position_ions"][:, :, 0], bins_position)
-    velocity_hist_electrons = compute_histogram(output["velocity_electrons"][:, :, 0], bins_velocity_electrons)
-    velocity_hist_ions = compute_histogram(output["velocity_ions"][:, :, 0]*ve_over_vi, bins_velocity_ions)
+    position_hist_electrons = compute_histogram(output["position_electrons"][:, :, direction_index], bins_position)
+    position_hist_ions = compute_histogram(output["position_ions"][:, :, direction_index], bins_position)
+    velocity_hist_electrons = compute_histogram(output["velocity_electrons"][:, :, direction_index], bins_velocity_electrons)
+    velocity_hist_ions = compute_histogram(output["velocity_ions"][:, :, direction_index]*ve_over_vi, bins_velocity_ions)
 
     max_y_positions = max(jnp.max(position_hist_electrons), jnp.max(position_hist_ions))
     max_y_velocities = max(jnp.max(velocity_hist_electrons), jnp.max(velocity_hist_ions))
@@ -77,9 +79,9 @@ def plot(output):
     axes[0, 2].legend(loc='upper right')
 
     # Mean charge density and energy error
-    axes[2, 0].plot(time, jnp.abs(jnp.mean(output["charge_density"], axis=-1))*1e12, 
+    axes[2, 0].plot(time[2:], jnp.abs(jnp.mean(output["charge_density"][2:], axis=-1))*1e12, 
                     label="Mean charge density (C/m³) x 1e12")
-    axes[2, 0].plot(time, jnp.abs(output["total_energy"] - output["total_energy"][0]) / output["total_energy"][0], 
+    axes[2, 0].plot(time[2:], jnp.abs(output["total_energy"][2:] - output["total_energy"][2]) / output["total_energy"][2], 
                     label="Relative energy error")
     axes[2, 0].set(title="Mean Charge Density and Energy Error", xlabel=r"Time ($\omega_{pe}^{-1}$)", 
                    ylabel="Charge density/Energy error", yscale="log")
@@ -87,6 +89,7 @@ def plot(output):
 
     # Energy plots
     axes[1, 0].plot(time, output["electric_field_energy"], label="Electric field energy")
+    axes[1, 0].plot(time, output["magnetic_field_energy"], label="Magnetic field energy")
     axes[1, 0].plot(time, output["kinetic_energy"], label="Kinetic energy")
     axes[1, 0].plot(time, output["kinetic_energy_electrons"], label="Kinetic energy electrons")
     axes[1, 0].plot(time, output["kinetic_energy_ions"], label="Kinetic energy ions")
@@ -115,14 +118,14 @@ def plot(output):
             pos, vel, bins=[len(grid), bins_velocity],
             range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_electrons, max_velocity_electrons]]
         )[0]
-    )(output["position_electrons"][:, :, 0], output["velocity_electrons"][:, :, 0])
+    )(output["position_electrons"][:, :, direction_index], output["velocity_electrons"][:, :, direction_index])
 
     ion_phase_histograms = vmap(
         lambda pos, vel: jnp.histogram2d(
             pos, vel, bins=[len(grid), bins_velocity],
             range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_ions, max_velocity_ions]]
         )[0]
-    )(output["position_ions"][:, :, 0], output["velocity_ions"][:, :, 0])
+    )(output["position_ions"][:, :, direction_index], output["velocity_ions"][:, :, direction_index])
     
     # Initialize phase space plots
     electron_phase_plot = axes[2, 1].imshow(

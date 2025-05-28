@@ -7,7 +7,7 @@ from jax.random import PRNGKey, uniform, normal
 from ._particles import fields_to_particles_grid, boris_step
 from ._sources import current_density, calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
-from ._fields import field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT
+from ._fields import field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT, field_update1, field_update2
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
 from ._diagnostics import diagnostics
 from jax_tqdm import scan_tqdm
@@ -104,6 +104,8 @@ def initialize_simulation_parameters(user_parameters={}):
         "external_electric_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
         "external_magnetic_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
+        
+        "weight": 0,
     }
 
     # Merge user-provided parameters into the default dictionary
@@ -194,6 +196,19 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         * vth_electrons_over_c**2
         / Debye_length_per_dx**2
     )
+    weight = jnp.where(parameters["weight"]==0, weight, parameters["weight"])
+    Debye_length_per_dx = jnp.where(vth_electrons_over_c==0, 0, 1 / jnp.sqrt(
+                            weight
+                            / epsilon_0
+                            / mass_electrons
+                            / speed_of_light**2
+                            * charge_electrons**2
+                            / number_grid_points**2
+                            * length
+                            * (2 * number_pseudoelectrons)
+                            / (vth_electrons_over_c**2)
+    ))
+    
     charges = jnp.concatenate((
         charge_electrons * weight * jnp.ones((number_pseudoelectrons, 1)),
         charge_ions   * weight * jnp.ones((number_pseudoelectrons, 1))
@@ -205,7 +220,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     charge_to_mass_ratios = charges / masses
 
     # **Particle Velocities**
-    # Thermal velocities (Maxwell-Boltzmann distribution)
+    # Electron thermal velocities and drift speeds
     v_electrons_x = parameters["vth_electrons_over_c_x"] * speed_of_light / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_x"]
     v_electrons_x = jnp.where(parameters["velocity_plus_minus_electrons_x"], v_electrons_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_x)
     v_electrons_y = parameters["vth_electrons_over_c_y"] * speed_of_light / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_y"]
@@ -213,6 +228,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     v_electrons_z = parameters["vth_electrons_over_c_z"] * speed_of_light / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_z"]
     v_electrons_z = jnp.where(parameters["velocity_plus_minus_electrons_z"], v_electrons_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_z)
     electron_velocities = jnp.stack((v_electrons_x, v_electrons_y, v_electrons_z), axis=1)
+    
+    # Ion thermal velocities and drift speeds
     vth_ions_x = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_x"])) * parameters["vth_electrons_over_c_x"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
     vth_ions_y = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_y"])) * parameters["vth_electrons_over_c_y"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
     vth_ions_z = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_z"])) * parameters["vth_electrons_over_c_z"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
@@ -224,6 +241,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     v_ions_z = jnp.where(parameters["velocity_plus_minus_ions_z"], v_ions_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_z)
     ion_velocities = jnp.stack((v_ions_x, v_ions_y, v_ions_z), axis=1)
     
+    # Combine electron and ion velocities
     velocities = jnp.concatenate((electron_velocities, ion_velocities))
 
     # Grid setup
@@ -273,13 +291,14 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     #     )
     # Magnetic field initialized to zero
     B_field = jnp.zeros((grid.size, 3))
+    E_field = jnp.zeros((grid.size, 3))
     
-    # Electric field initialization using Poisson's equation
-    charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
-    # E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
-    E_field_x = E_from_Gauss_1D_FFT(charge_density, dx)
-    # E_field_x = E_from_Poisson_1D_FFT(charge_density, dx)
-    E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
+    # # Electric field initialization using Poisson's equation
+    # charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
+    # # E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
+    # E_field_x = E_from_Gauss_1D_FFT(charge_density, dx)
+    # # E_field_x = E_from_Poisson_1D_FFT(charge_density, dx)
+    # E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
     
     fields = (E_field, B_field)
     
@@ -379,6 +398,10 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         (E_field, B_field, positions_minus1_2, positions,
          positions_plus1_2, velocities, qs, ms, q_ms) = carry
         
+        J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
+                    qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+        E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+        
         # Add external fields
         total_E = E_field + parameters["external_electric_field"]
         total_B = B_field + parameters["external_magnetic_field"]
@@ -402,6 +425,10 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                            qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
+        J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
+                    qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+        E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+        
         if field_solver != 0:
             charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
             switcher = {
@@ -410,11 +437,6 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
                 3: E_from_Poisson_1D_FFT,
             }
             E_field = E_field.at[:,0].set(switcher[field_solver](charge_density, dx))
-            J = 0
-        else:
-            J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-            E_field, B_field = field_update(E_field, B_field, dx, dt, J, field_BC_left, field_BC_right)
 
         # Update positions and velocities
         positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2

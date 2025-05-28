@@ -4,7 +4,7 @@ from ._sources import calculate_charge_density
 from ._boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
 from ._constants import epsilon_0, speed_of_light
 
-__all__ = ['E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cartesian', 'curlE', 'curlB', 'field_update']
+__all__ = ['E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cartesian', 'curlE', 'curlB', 'field_update', 'field_update1', 'field_update2']
 
 @jit
 def E_from_Gauss_1D_FFT(charge_density, dx):
@@ -172,3 +172,23 @@ def field_update(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
     E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
 
     return E_fields, B_fields
+
+@jit
+def field_update1(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
+    #First, update E (Ampere's)
+    curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
+    E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
+    #Then, update B (Faraday's)
+    curl_E = curlE(E_fields, B_fields, dx, dt, field_BC_left, field_BC_right)
+    B_fields -= dt*curl_E
+    return E_fields,B_fields
+
+@jit
+def field_update2(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
+    #First, update B (Faraday's)
+    curl_E = curlE(E_fields, B_fields, dx, dt, field_BC_left, field_BC_right)
+    B_fields -= dt*curl_E
+    #Then, update E (Ampere's)
+    curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
+    E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
+    return E_fields,B_fields
