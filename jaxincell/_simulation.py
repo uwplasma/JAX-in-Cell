@@ -286,8 +286,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         lambda _: jprint((
             # f"Number of pseudoelectrons: {number_pseudoelectrons}\n"
             # f"Number of grid points: {number_grid_points}\n"
-            "Length of the simulation box: {:.2e} Debye lengths\n"
-            "Density of electrons: {:.3e} m^-3\n"
+            "Length of the simulation box: {} Debye lengths\n"
+            "Density of electrons: {} m^-3\n"
             "Electron temperature: {:.4e} eV\n"
             "Ion temperature / Electron temperature: {}\n"
             "Debye length: {:.5e} m\n"
