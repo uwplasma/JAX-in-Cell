@@ -231,13 +231,13 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
                             weight
                             / epsilon_0
                             / mass_electrons
-                            / speed_of_light**2
-                            * charge_electrons**2
-                            / number_grid_points**2
                             * length
-                            * (2 * number_pseudoelectrons)
-                            / (vth_electrons_over_c**2)
-    ))
+                            * (2 * number_pseudoelectrons))
+                            / speed_of_light
+                            * (-charge_electrons)
+                            / number_grid_points
+                            / (vth_electrons_over_c)
+    )
     
     charges = jnp.concatenate((
         charge_electrons * weight * jnp.ones((number_pseudoelectrons, 1)),
@@ -286,7 +286,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         lambda _: jprint((
             # f"Number of pseudoelectrons: {number_pseudoelectrons}\n"
             # f"Number of grid points: {number_grid_points}\n"
-            "Length of the simulation box: {:.1e} Debye lengths\n"
+            "Length of the simulation box: {} Debye lengths\n"
             "Density of electrons: {:.3e} m^-3\n"
             "Electron temperature: {:.4e} eV\n"
             "Ion temperature / Electron temperature: {}\n"
