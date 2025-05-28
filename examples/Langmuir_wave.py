@@ -8,9 +8,9 @@ from jax import block_until_ready
 input_parameters = {
 "length"                       : 1,  # dimensions of the simulation box in (x, y, z)
 "amplitude_perturbation_x"     : 0.01,  # amplitude of sinusoidal perturbation in x
-"wavenumber_electrons": 1, # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
+"wavenumber_electrons_x": 1, # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
 "grid_points_per_Debye_length" : 3,     # dx over Debye length
-"vth_electrons_over_c_x"         : 0.1,  # thermal velocity of electrons over speed of light
+"vth_electrons_over_c_x"         : 0.05,  # thermal velocity of electrons over speed of light
 "velocity_plus_minus_electrons_x": False,    # create two groups of electrons moving in opposite directions
 "ion_temperature_over_electron_temperature_x": 1e-9, # Temperature of ions over temperature of electrons
 "timestep_over_spatialstep_times_c": 0.5, # dt * speed_of_light / dx
