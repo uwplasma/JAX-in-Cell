@@ -64,16 +64,25 @@ def initialize_simulation_parameters(user_parameters={}):
     default_parameters = {
         # Basic simulation settings
         "length": 1e-2,                           # Dimensions of the simulation box
+        "random_positions_x": False,  # Use random positions in x for particles
+        "random_positions_y": True,  # Use random positions in y for particles
+        "random_positions_z": True,  # Use random positions in z for particles
         "amplitude_perturbation_x": 1e-7,         # Amplitude of sinusoidal (sin) perturbation in x
-        "wavenumber_electrons": 8,    # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
-        "wavenumber_ions": 0,         # Wavenumber of sinusoidal ion density perturbation in x (factor of 2pi/length)
+        "amplitude_perturbation_y": 0,            # Amplitude of sinusoidal (sin) perturbation in y
+        "amplitude_perturbation_z": 0,            # Amplitude of sinusoidal (sin) perturbation in z
+        "wavenumber_electrons_x": 8,    # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
+        "wavenumber_electrons_y": 0,    # Wavenumber of sinusoidal electron density perturbation in y (factor of 2pi/length)
+        "wavenumber_electrons_z": 0,    # Wavenumber of sinusoidal electron density perturbation in z (factor of 2pi/length)
+        "wavenumber_ions_x": 0,         # Wavenumber of sinusoidal ion density perturbation in x (factor of 2pi/length)
+        "wavenumber_ions_y": 0,         # Wavenumber of sinusoidal ion density perturbation in y (factor of 2pi/length)
+        "wavenumber_ions_z": 0,         # Wavenumber of sinusoidal ion density perturbation in z (factor of 2pi/length)
         "grid_points_per_Debye_length": 2,        # dx over Debye length
         "vth_electrons_over_c_x": 0.05,           # Thermal velocity of electrons over speed of light in the x direction
         "vth_electrons_over_c_y": 0.0,            # Thermal velocity of electrons over speed of light in the y direction
         "vth_electrons_over_c_z": 0.0,            # Thermal velocity of electrons over speed of light in the z direction
-        "ion_temperature_over_electron_temperature_x": 0.01, # Temperature ratio of ions to electrons in the x direction
-        "ion_temperature_over_electron_temperature_y": 0.01, # Temperature ratio of ions to electrons in the y direction
-        "ion_temperature_over_electron_temperature_z": 0.01, # Temperature ratio of ions to electrons in the z direction
+        "ion_temperature_over_electron_temperature_x": 1, # Temperature ratio of ions to electrons in the x direction
+        "ion_temperature_over_electron_temperature_y": 1, # Temperature ratio of ions to electrons in the y direction
+        "ion_temperature_over_electron_temperature_z": 1, # Temperature ratio of ions to electrons in the z direction
         "timestep_over_spatialstep_times_c": 1.0,   # dt * speed_of_light / dx
         "seed": 1701,                               # Random seed for reproducibility
         "electron_drift_speed_x": 1e8,              # Drift speed of electrons in the x direction
@@ -153,19 +162,40 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     random_key = PRNGKey(parameters["seed"])
     
     # **Particle Positions**
-    wavenumber_perturbation_x_electrons = parameters["wavenumber_electrons"] * 2 * jnp.pi / length
-    electron_xs = jnp.linspace(-length / 2, length / 2, number_pseudoelectrons)
+    # Use random positions in x if requested, otherwise linspace
+    electron_xs = lax.cond(parameters["random_positions_x"],
+        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
+        lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
+    wavenumber_perturbation_x_electrons = parameters["wavenumber_electrons_x"] * 2 * jnp.pi / length
     electron_xs+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x_electrons * electron_xs)
-    electron_ys = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2)
-    electron_zs = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2)
+    electron_ys = lax.cond(parameters["random_positions_y"],
+        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
+        lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
+    wavenumber_perturbation_y_electrons = parameters["wavenumber_electrons_y"] * 2 * jnp.pi / length
+    electron_ys+= parameters["amplitude_perturbation_y"] * jnp.sin(wavenumber_perturbation_y_electrons * electron_ys)
+    electron_zs = lax.cond(parameters["random_positions_z"],
+        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
+        lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
+    wavenumber_perturbation_z_electrons = parameters["wavenumber_electrons_z"] * 2 * jnp.pi / length
+    electron_zs+= parameters["amplitude_perturbation_z"] * jnp.sin(wavenumber_perturbation_z_electrons * electron_zs)
     electron_positions = jnp.stack((electron_xs, electron_ys, electron_zs), axis=1)
 
     # Ion positions: Add random y, z positions to uniform grid x positions
-    wavenumber_perturbation_x_ions = parameters["wavenumber_ions"] * 2 * jnp.pi / length
-    ion_xs = jnp.linspace(-length / 2, length / 2, number_pseudoelectrons)
+    ion_xs = lax.cond(parameters["random_positions_x"],
+        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
+        lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
+    wavenumber_perturbation_x_ions = parameters["wavenumber_ions_x"] * 2 * jnp.pi / length
     ion_xs+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x_ions * ion_xs)
-    ion_ys = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2)
-    ion_zs = uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2)
+    ion_ys = lax.cond(parameters["random_positions_y"],
+        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
+        lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
+    wavenumber_perturbation_y_ions = parameters["wavenumber_ions_y"] * 2 * jnp.pi / length
+    ion_ys+= parameters["amplitude_perturbation_y"] * jnp.sin(wavenumber_perturbation_y_ions * ion_ys)
+    ion_zs = lax.cond(parameters["random_positions_z"],
+        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
+        lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
+    wavenumber_perturbation_z_ions = parameters["wavenumber_ions_z"] * 2 * jnp.pi / length
+    ion_zs+= parameters["amplitude_perturbation_z"] * jnp.sin(wavenumber_perturbation_z_ions * ion_zs)
     ion_positions = jnp.stack((ion_xs, ion_ys, ion_zs), axis=1)
 
     positions = jnp.concatenate((electron_positions, ion_positions))

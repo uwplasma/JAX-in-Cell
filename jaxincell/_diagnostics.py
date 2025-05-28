@@ -39,6 +39,7 @@ def diagnostics(output):
     v_electrons_squared = jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1)
     v_ions_squared      = jnp.sum(jnp.sum(output['velocity_ions']**2     , axis=-1), axis=-1)
     
+
     output.update({
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
         'electric_field_energy':         (epsilon_0/2) * integral_E_squared,
