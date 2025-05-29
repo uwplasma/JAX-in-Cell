@@ -12,7 +12,7 @@ def test_epsilon_0():
     assert epsilon_0 == 8.85418782e-12, "Incorrect value for epsilon_0"
 
 def test_mu_0():
-    assert mu_0 == 1.25663706e-7, "Incorrect value for mu_0"
+    assert mu_0 == 1.25663706e-6, "Incorrect value for mu_0"
 
 def test_speed_of_light():
     assert speed_of_light == 2.99792458e8, "Incorrect value for speed_of_light"

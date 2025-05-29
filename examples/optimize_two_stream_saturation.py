@@ -1,12 +1,10 @@
 ## two_stream_saturation.py
 # Optimize the non-linear saturation of the two_stream_instabiltity to be as small as possible
-import os, sys;
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import jax.numpy as jnp
 from jax import jit, grad
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
-from jaxincell import simulation, diagnostics, epsilon_0, load_parameters
+from jaxincell import simulation, epsilon_0, load_parameters
 
 # Read from input.toml
 input_parameters, solver_parameters = load_parameters('input.toml')
@@ -14,7 +12,7 @@ input_parameters, solver_parameters = load_parameters('input.toml')
 steps_to_average = 800 # only take the mean of these last steps
 minimum_Ti = -2
 maximum_Ti = 3
-nTi = 15
+nTi = 10
 max_iterations_optimization = 20
 x0_optimization = 3.0
 learning_rate = 0.05
@@ -23,7 +21,8 @@ learning_rate = 0.05
 @jit
 def objective_function(Ti):
     params = input_parameters.copy()
-    params["ion_temperature_over_electron_temperature"] = Ti
+    Ti = jnp.atleast_1d(Ti)[0]
+    params["ion_temperature_over_electron_temperature_x"] = Ti
     output = simulation(params, **solver_parameters)
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     integral_E_squared         = jnp.trapezoid(abs_E_squared, dx=output['dx'], axis=-1)
@@ -32,9 +31,8 @@ def objective_function(Ti):
 jac = jit(grad(objective_function))
 ############### -------- #################
 print(f'Perform a first run to see one objective function')
-input_parameters["ion_temperature_over_electron_temperature"] = x0_optimization
+input_parameters["ion_temperature_over_electron_temperature_x"] = x0_optimization
 output = simulation(input_parameters, **solver_parameters)
-diagnostics(output, print_to_terminal=False)
 objective = objective_function(x0_optimization)
 plt.figure(figsize=(8,6))
 plt.plot(output['time_array']*output['plasma_frequency'],output['electric_field_energy'], label='Electric Field Energy')
@@ -51,6 +49,7 @@ plt.savefig('objective_function_onerun_twostream.pdf', dpi=300)
 plt.show()
 ############### -------- #################
 ion_temperature_over_electron_temperature = jnp.logspace(start=minimum_Ti,stop=maximum_Ti,num=nTi)
+input_parameters['print_info'] = False
 energy_array =[]
 print(f'Perform a parameter scan with {len(ion_temperature_over_electron_temperature)} values to see the variation of the objective function')
 for i, Ti in enumerate(ion_temperature_over_electron_temperature):
@@ -60,7 +59,7 @@ for i, Ti in enumerate(ion_temperature_over_electron_temperature):
 ############### -------- #################
 print(f'Perform a simple optimization with {max_iterations_optimization} iterations')
 ## Using Least Squares
-res = least_squares(objective_function, x0=x0_optimization, diff_step=learning_rate, verbose=2, max_nfev=max_iterations_optimization)
+res = least_squares(objective_function, x0=x0_optimization, jac=learning_rate, verbose=2, max_nfev=max_iterations_optimization)
 optimized_Ti = res.x[0]
 ## Using OPTAX
 # import optax
@@ -91,6 +90,3 @@ plt.yticks(fontsize = 18)
 plt.tight_layout()
 plt.savefig('objective_function_landscape_twostream.pdf', dpi=300)
 plt.show()
-
-
-
