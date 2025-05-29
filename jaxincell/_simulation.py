@@ -339,6 +339,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "number_pseudoelectrons": number_pseudoelectrons,
         "number_grid_points": number_grid_points,
         "plasma_frequency": plasma_frequency,
+        "max_initial_vth_electrons": vth_electrons,
     })
     
     return parameters

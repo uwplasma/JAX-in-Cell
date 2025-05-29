@@ -32,4 +32,4 @@ solver_parameters = {
 
 output = block_until_ready(simulation(input_parameters, **solver_parameters))
 
-plot(output, direction="z")  # Plot the results in z direction
+plot(output, direction="xz")  # Plot the results in x and z direction
