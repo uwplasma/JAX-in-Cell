@@ -1,8 +1,8 @@
 [input_parameters]
 length = 0.01
 amplitude_perturbation_x = 1e-7
-wavenumber_electrons = 8
-wavenumber_ions = 0
+wavenumber_electrons_x = 8
+wavenumber_ions_x = 0
 grid_points_per_Debye_length = 2
 vth_electrons_over_c_x = 0.05
 ion_temperature_over_electron_temperature_x = 0.01

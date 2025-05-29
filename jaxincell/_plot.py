@@ -1,203 +1,153 @@
-from jax import vmap
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from ._fields import E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT, E_from_Gauss_1D_Cartesian
+from jax import vmap
 from ._constants import speed_of_light
-from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
 
 __all__ = ['plot']
 
-def plot(output, direction="x"):
-    legend_fontsize = 10
-    # Precompute constants
+def plot(output, direction="x", threshold=1e-12):
+    def is_nonzero(field):
+        return jnp.max(jnp.abs(field)) > threshold
+
     v_th = output[f"vth_electrons_over_c_{direction}"] * speed_of_light
     grid = output["grid"]
-    box_size_x = output["length"]
+    time = output["time_array"] * output["plasma_frequency"]
     total_steps = output["total_steps"]
+    box_size_x = output["length"]
+
+    direction_index = {"x": 0, "y": 1, "z": 2}[direction]
+
+    # Determine which vector fields have nonzero components
+    def add_field_components(field, unit, label_prefix):
+        components = []
+        for i, axis in enumerate("xyz"):
+            data = output[field][:, :, i]
+            if is_nonzero(data):
+                components.append({
+                    "data": data,
+                    "title": f"{label_prefix} along {axis}",
+                    "xlabel": f"{axis} Position (m)",
+                    "ylabel": r"Time ($\omega_{pe}^{-1}$)",
+                    "cbar": f"{label_prefix} ({unit})"
+                })
+        return components
+
+    plots_to_make = []
+    plots_to_make += add_field_components("electric_field", "V/m", "Electric Field")
+    plots_to_make += add_field_components("magnetic_field", "T", "Magnetic Field")
+    plots_to_make += add_field_components("current_density", "A/m²", "Current Density")
+
+    # Charge density (always plotted)
+    plots_to_make.append({
+        "data": output["charge_density"],
+        "title": "Charge Density",
+        "xlabel": f"{direction} Position (m)",
+        "ylabel": r"Time ($\omega_{pe}^{-1}$)",
+        "cbar": "Charge density (C/m³)"
+    })
+
+    # Compute phase space histograms
     sqrtmemi = jnp.sqrt(output["mass_electrons"][0] / output["mass_ions"][0])
-    
-    max_velocity_electrons = max(1.2 * jnp.max(output["velocity_electrons"]), 
+    max_velocity_electrons = max(1.2 * jnp.max(output["velocity_electrons"]),
                                  5 * jnp.abs(v_th) + jnp.abs(output[f"electron_drift_speed_{direction}"]))
     max_velocity_ions = max(1.0 * jnp.max(output["velocity_ions"]),
-                            sqrtmemi * 0.3 * jnp.abs(v_th) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction}"]) + jnp.abs(output[f"ion_drift_speed_{direction}"]))
-    
-    bins_position = max(min(len(grid), 111), 71)
-    bins_velocity = max(min(len(grid), 111), 71)
-    
-    time = output["time_array"] * output["plasma_frequency"]
-    
-    direction_index = 0 if direction == "x" else 1 if direction == "y" else 2
-
-    # Precompute histograms
+                            sqrtmemi * 0.3 * jnp.abs(v_th) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction}"]) +
+                            jnp.abs(output[f"ion_drift_speed_{direction}"]))
     ve_over_vi = max_velocity_electrons / max_velocity_ions
-    bins_position = jnp.linspace(-box_size_x / 2, box_size_x / 2, len(grid) + 1)
-    bins_velocity_electrons = jnp.linspace(-max_velocity_electrons, max_velocity_electrons, len(grid) + 1)
-    bins_velocity_ions = jnp.linspace(-max_velocity_ions*ve_over_vi, max_velocity_ions*ve_over_vi, len(grid) + 1)
-    
-    compute_histogram = lambda data, bins: vmap(lambda x: jnp.histogram(x, bins=bins)[0])(data)
-    position_hist_electrons = compute_histogram(output["position_electrons"][:, :, direction_index], bins_position)
-    position_hist_ions = compute_histogram(output["position_ions"][:, :, direction_index], bins_position)
-    velocity_hist_electrons = compute_histogram(output["velocity_electrons"][:, :, direction_index], bins_velocity_electrons)
-    velocity_hist_ions = compute_histogram(output["velocity_ions"][:, :, direction_index]*ve_over_vi, bins_velocity_ions)
+    bins_velocity = max(min(len(grid), 111), 71)
 
-    max_y_positions = max(jnp.max(position_hist_electrons), jnp.max(position_hist_ions))
-    max_y_velocities = max(jnp.max(velocity_hist_electrons), jnp.max(velocity_hist_ions))
+    electron_phase_histograms = vmap(lambda pos, vel: jnp.histogram2d(
+        pos, vel, bins=[len(grid), bins_velocity],
+        range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_electrons, max_velocity_electrons]])[0]
+    )(output["position_electrons"][:, :, direction_index], output["velocity_electrons"][:, :, direction_index])
 
-    electron_phase_histograms = vmap(lambda pos, vel: jnp.histogram2d(pos, vel, bins=[len(grid), bins_velocity],
-            range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_electrons, max_velocity_electrons]])[0]
-        )(output["position_electrons"][:, :, direction_index], output["velocity_electrons"][:, :, direction_index])
+    ion_phase_histograms = vmap(lambda pos, vel: jnp.histogram2d(
+        pos, vel, bins=[len(grid), bins_velocity],
+        range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_ions, max_velocity_ions]])[0]
+    )(output["position_ions"][:, :, direction_index], output["velocity_ions"][:, :, direction_index])
 
-    ion_phase_histograms = vmap(lambda pos, vel: jnp.histogram2d(pos, vel, bins=[len(grid), bins_velocity],
-            range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_ions, max_velocity_ions]])[0]
-        )(output["position_ions"][:, :, direction_index], output["velocity_ions"][:, :, direction_index])
+    # Grid layout
+    ncols = 3
+    n_field_plots = len(plots_to_make)
+    n_total_plots = n_field_plots + 2  # add 2 for phase space
+    nrows = (n_total_plots + ncols - 1) // ncols
 
-    # Setup plots
-    fig, axes = plt.subplots(3, 5, figsize=(16, 9))
-    # plt.subplots_adjust(hspace=0.3, wspace=0.1)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 2.5 * nrows), squeeze=False)
 
-    def plot_field(ax, field_data, title, xlabel, ylabel, colorbar_label):
-        im = ax.imshow(field_data, aspect="auto", cmap="RdBu", origin="lower", extent=[grid[0], grid[-1], 0, time[-1]])
+    def plot_field(ax, field_data, title, xlabel, ylabel, cbar_label):
+        im = ax.imshow(field_data, aspect="auto", cmap="RdBu", origin="lower",
+                       extent=[grid[0], grid[-1], time[0], time[-1]])
         ax.set(title=title, xlabel=xlabel, ylabel=ylabel)
-        fig.colorbar(im, ax=ax, label=colorbar_label)
+        fig.colorbar(im, ax=ax, label=cbar_label)
         return im
 
-    # Electric field plots
-    Ex_plot = plot_field(axes[0, 0], output["electric_field"][:, :, 0],
-        f"Electric Field along x", "x Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Electric field (V/m)")
-    Ey_plot = plot_field(axes[1, 0], output["electric_field"][:, :, 1],
-        f"Electric Field along y", "y Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Electric field (V/m)")
-    Ez_plot = plot_field(axes[2, 0], output["electric_field"][:, :, 2],
-        f"Electric Field along z", "z Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Electric field (V/m)")
+    # Plot all field plots
+    for i, plot_info in enumerate(plots_to_make):
+        row, col = divmod(i, ncols)
+        plot_field(axes[row, col], plot_info["data"],
+                   plot_info["title"], plot_info["xlabel"],
+                   plot_info["ylabel"], plot_info["cbar"])
 
-    # Magnetic field plots
-    Bx_plot = plot_field(axes[0, 1], output["magnetic_field"][:, :, 0],
-        f"Magnetic Field along x", "x Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Magnetic field (T)")
-    By_plot = plot_field(axes[1, 1], output["magnetic_field"][:, :, 1],
-        f"Magnetic Field along y", "y Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Magnetic field (T)")
-    Bz_plot = plot_field(axes[2, 1], output["magnetic_field"][:, :, 2],
-        f"Magnetic Field along z", "z Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Magnetic field (T)")
-    
-    # Current density plots
-    Jx_plot = plot_field(axes[0, 2], output["current_density"][:, :, 0],
-        f"Current Density along x", "x Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Current density (A/m²)")
-    Jy_plot = plot_field(axes[1, 2], output["current_density"][:, :, 1],
-        f"Current Density along y", "y Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Current density (A/m²)")
-    Jz_plot = plot_field(axes[2, 2], output["current_density"][:, :, 2],
-        f"Current Density along z", "z Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Current density (A/m²)")
-
-    # Charge density plot
-    rho_plot = plot_field(axes[0, 3], output["charge_density"],
-        f"Charge Density", "x Position (m)", r"Time ($\omega_{pe}^{-1}$)", "Charge density (C/m³)")
-    
     # Phase space plots
-    electron_phase_plot = axes[1, 3].imshow(
-        jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight", interpolation="sinc",
+    phase_index = n_field_plots
+    electron_row, electron_col = divmod(phase_index, ncols)
+    ion_row, ion_col = divmod(phase_index + 1, ncols)
+
+    electron_ax = axes[electron_row, electron_col]
+    ion_ax = axes[ion_row, ion_col]
+
+    electron_plot = electron_ax.imshow(
+        jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight",
         extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_electrons, max_velocity_electrons],
-        vmin=jnp.min(electron_phase_histograms),vmax=jnp.max(electron_phase_histograms))
-    axes[1, 3].set(xlabel=f"Electron Position {direction} direction (m)", ylabel=f"Electron Velocity {direction} direction (m/s)")
+        vmin=jnp.min(electron_phase_histograms), vmax=jnp.max(electron_phase_histograms))
+    electron_ax.set(xlabel=f"Electron Position {direction} (m)",
+                    ylabel=f"Electron Velocity {direction} (m/s)",
+                    title="Electron Phase Space")
 
-    ion_phase_plot = axes[2, 3].imshow(
-        jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight", interpolation="sinc",
+    ion_plot = ion_ax.imshow(
+        jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight",
         extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_ions, max_velocity_ions],
-        vmin=jnp.min(ion_phase_histograms),vmax=jnp.max(ion_phase_histograms))
-    axes[2, 3].set(xlabel=f"Ion Position {direction} direction (m)", ylabel=f"Ion Velocity {direction} direction (m/s)")
-    
-    animated_time_text = axes[1, 3].text(0.5, 0.9, "", transform=axes[1, 3].transAxes,
-        ha="center", va="top", fontsize=12, bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
-    
-    # # Different Electric Field Calculations
-    # ## Precompute E fields with vmap
-    # E_fields_Gauss_1D_Cartesian = vmap(lambda charge_density: E_from_Gauss_1D_Cartesian(charge_density, output["dx"]))(output["charge_density"])
-    # E_fields_Gauss_1D_FFT = vmap(lambda charge_density: E_from_Gauss_1D_FFT(charge_density, output["dx"]))(output["charge_density"])    
-    # E_fields_Poisson_1D_FFT = vmap(lambda charge_density: E_from_Poisson_1D_FFT(charge_density, output["dx"]))(output["charge_density"])
-    # E_field_line_Gauss_1D_Cartesian, = axes[0, 2].plot([], [], lw=2, color="red",   linestyle='-',  label="E field from Gauss 1D Cartesian")
-    # E_field_line_Gauss_1D_FFT,       = axes[0, 2].plot([], [], lw=2, color="blue",  linestyle='--', label="E field from Gauss 1D FFT")
-    # E_field_line_Poisson_1D_FFT,     = axes[0, 2].plot([], [], lw=2, color="green", linestyle='-.', label="E field from Poisson 1D FFT")
-    # axes[0, 2].set_xlim(-box_size_x / 2, box_size_x / 2)
-    # # set y lim to min and max of all E fields
-    # axes[0, 2].set_ylim(jnp.min(jnp.array([E_fields_Gauss_1D_Cartesian, E_fields_Gauss_1D_FFT, E_fields_Poisson_1D_FFT])),
-    #                     jnp.max(jnp.array([E_fields_Gauss_1D_Cartesian, E_fields_Gauss_1D_FFT, E_fields_Poisson_1D_FFT])))
-    # axes[0, 2].set(xlabel="x Position (m)", ylabel="Electric Field along x (V/m)")
-    # axes[0, 2].legend(loc='upper right')
+        vmin=jnp.min(ion_phase_histograms), vmax=jnp.max(ion_phase_histograms))
+    ion_ax.set(xlabel=f"Ion Position {direction} (m)",
+               ylabel=f"Ion Velocity {direction} (m/s)",
+               title="Ion Phase Space")
 
-    # Energy plot
-    axes[0, 4].plot(time, output["electric_field_energy"], label="Electric field energy")
-    axes[0, 4].plot(time, output["magnetic_field_energy"], label="Magnetic field energy")
-    axes[0, 4].plot(time, output["kinetic_energy"],        label="Kinetic energy")
-    axes[0, 4].plot(time, output["kinetic_energy_electrons"], label="Kinetic energy electrons")
-    axes[0, 4].plot(time, output["kinetic_energy_ions"],   label="Kinetic energy ions")
-    axes[0, 4].plot(time, output["total_energy"],          label="Total energy")
-    axes[0, 4].set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)", ylabel="Energy (J)", yscale="log", ylim=[1e-5, None])
-    axes[0, 4].legend(fontsize=legend_fontsize)
+    # Time label
+    animated_time_text = electron_ax.text(0.5, 0.9, "", transform=electron_ax.transAxes,
+                                          ha="center", va="top", fontsize=12,
+                                          bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
 
-    # Mean charge density and energy error
-    axes[1, 4].plot(time[2:], jnp.abs(jnp.mean(output["charge_density"][2:], axis=-1))*1e12, label="Mean charge density (C/m³) x 1e12")
-    axes[1, 4].plot(time[2:], jnp.abs(output["total_energy"][2:] - output["total_energy"][2]) / output["total_energy"][2], label="Relative energy error")
-    axes[1, 4].set(title="Mean Charge Density and Energy Error", xlabel=r"Time ($\omega_{pe}^{-1}$)", ylabel="Charge density/Energy error", yscale="log")
-    axes[1, 4].legend(fontsize=legend_fontsize)
+    # Get flat list of axes
+    axes_flat = np.ravel(axes)
 
-    # # Animated phase space
-    # position_electron_line, = axes[1, 1].plot([], [], lw=2, color="red", label="Electron position")
-    # position_ion_line,      = axes[1, 1].plot([], [], lw=2, color="blue", label="Ion position")
-    # axes[1, 1].set_xlim(-box_size_x / 2, box_size_x / 2)
-    # axes[1, 1].set_ylim(0, max_y_positions)
-    # axes[1, 1].set(xlabel=f"Position {direction} direction (m)", ylabel="Number of particles")
-    # axes[1, 1].legend()
-
-    # velocity_electron_line, = axes[1, 2].plot([], [], lw=2, color="red", label="Electron velocity")
-    # velocity_ion_line,      = axes[1, 2].plot([], [], lw=2, color="blue", label=f"Ion velocity x {ve_over_vi:.2f}")
-    # axes[1, 2].set_xlim(-max_velocity_electrons, max_velocity_electrons)
-    # axes[1, 2].set_ylim(0, max_y_velocities)
-    # axes[1, 2].set(xlabel=f"Velocity {direction} direction (m/s)", ylabel="Number of particles")
-    # axes[1, 2].legend()
+    # Track index of next available subplot
+    used_axes = len(plots_to_make)+2
+    total_axes = len(axes_flat)
     
-    # Add a 3D subplot for electron positions
-    ax3d = fig.add_subplot(3, 5, 15, projection='3d')
-    electron_positions = output["position_electrons"]  # shape: (steps, particles, 3)
-    ion_positions = output["position_ions"]  # shape: (steps, particles, 3)
-    scat3d_electrons = ax3d.scatter([], [], [], s=1, c='red', alpha=0.5)
-    scat3d_ions = ax3d.scatter([], [], [], s=1, c='blue', alpha=0.5)
-    ax3d.set_title("Electron and Ion Positions (3D)")
-    ax3d.set_xlabel("x (m)")
-    ax3d.set_ylabel("y (m)")
-    ax3d.set_zlabel("z (m)")
-    ax3d.set_xlim(jnp.min(electron_positions[..., 0]), jnp.max(electron_positions[..., 0]))
-    ax3d.set_ylim(jnp.min(electron_positions[..., 1]), jnp.max(electron_positions[..., 1]))
-    ax3d.set_zlim(jnp.min(electron_positions[..., 2]), jnp.max(electron_positions[..., 2]))
-    
+    print(f"Total axes: {total_axes}, Used axes: {used_axes}")
+
+    if total_axes >= used_axes + 1:
+        energy_ax = axes_flat[used_axes]
+        energy_ax.plot(time, output["total_energy"],          label="Total energy")
+        energy_ax.plot(time, output["kinetic_energy_electrons"], label="Kinetic energy electrons")
+        energy_ax.plot(time, output["kinetic_energy_ions"],   label="Kinetic energy ions")
+        energy_ax.plot(time, output["electric_field_energy"], label="Electric field energy")
+        if jnp.max(output["magnetic_field_energy"]) > 1e-10:
+            energy_ax.plot(time, output["magnetic_field_energy"], label="Magnetic field energy")
+        energy_ax.plot(time[2:], jnp.abs(jnp.mean(output["charge_density"][2:], axis=-1))*1e12, label=r"Mean $\rho \times 10^{12}$")
+        energy_ax.plot(time[2:], jnp.abs(output["total_energy"][2:] - output["total_energy"][2]) / output["total_energy"][2], label="Relative energy error")
+        energy_ax.set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)",
+                    ylabel="Energy (J)", yscale="log", ylim=[1e-7, None])
+        energy_ax.legend(fontsize=7)
+        
+
     def update(frame):
-        # # Update position histograms
-        # position_electron_line.set_data(bins_position[:-1], position_hist_electrons[frame])
-        # position_ion_line.set_data(bins_position[:-1], position_hist_ions[frame])
-
-        # # Update velocity histograms
-        # velocity_electron_line.set_data(bins_velocity_electrons[:-1], velocity_hist_electrons[frame])
-        # velocity_ion_line.set_data(bins_velocity_ions[:-1], velocity_hist_ions[frame])
-
-        # Update phase space plots using precomputed histograms
-        electron_phase_plot.set_array(electron_phase_histograms[frame].T)
-        ion_phase_plot.set_array(ion_phase_histograms[frame].T)
-        
-        animated_time_text.set_text(f"Time: {time[frame]:.1f} * ωₚ")
-        
-        # # Update electric field lines
-        # E_field_line_Gauss_1D_Cartesian.set_data(grid, E_fields_Gauss_1D_Cartesian[frame] )
-        # E_field_line_Gauss_1D_FFT.set_data(grid, E_fields_Gauss_1D_FFT[frame])
-        # E_field_line_Poisson_1D_FFT.set_data(grid, E_fields_Poisson_1D_FFT[frame])
-
-        pos_electrons = electron_positions[frame]
-        scat3d_electrons._offsets3d = (pos_electrons[:, 0], pos_electrons[:, 1], pos_electrons[:, 2])
-        pos_ions = ion_positions[frame]
-        scat3d_ions._offsets3d = (pos_ions[:, 0], pos_ions[:, 1], pos_ions[:, 2])
-
-        return (
-                # position_electron_line, position_ion_line, 
-                # velocity_electron_line, velocity_ion_line,
-                electron_phase_plot, ion_phase_plot, animated_time_text,
-                #E_field_line_Gauss_1D_Cartesian, E_field_line_Gauss_1D_FFT, E_field_line_Poisson_1D_FFT,
-                scat3d_electrons, scat3d_ions,
-                )
+        electron_plot.set_array(electron_phase_histograms[frame].T)
+        ion_plot.set_array(ion_phase_histograms[frame].T)
+        animated_time_text.set_text(f"Time: {time[frame]:.2f} ωₚ")
+        return electron_plot, ion_plot, animated_time_text
 
     ani = FuncAnimation(fig, update, frames=total_steps, blit=True, interval=1, repeat_delay=1000)
 
