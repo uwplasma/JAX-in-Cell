@@ -159,22 +159,22 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     box_size = (length, length, length)
 
     # Random key generator for reproducibility
-    random_key = PRNGKey(parameters["seed"])
+    seed = parameters["seed"]
     
     # **Particle Positions**
     # Use random positions in x if requested, otherwise linspace
     electron_xs = lax.cond(parameters["random_positions_x"],
-        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
+        lambda _: uniform(PRNGKey(seed+1), shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_x_electrons = parameters["wavenumber_electrons_x"] * 2 * jnp.pi / length
     electron_xs+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x_electrons * electron_xs)
     electron_ys = lax.cond(parameters["random_positions_y"],
-        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
+        lambda _: uniform(PRNGKey(seed+2), shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_y_electrons = parameters["wavenumber_electrons_y"] * 2 * jnp.pi / length
     electron_ys+= parameters["amplitude_perturbation_y"] * jnp.sin(wavenumber_perturbation_y_electrons * electron_ys)
     electron_zs = lax.cond(parameters["random_positions_z"],
-        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
+        lambda _: uniform(PRNGKey(seed+3), shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_z_electrons = parameters["wavenumber_electrons_z"] * 2 * jnp.pi / length
     electron_zs+= parameters["amplitude_perturbation_z"] * jnp.sin(wavenumber_perturbation_z_electrons * electron_zs)
@@ -182,17 +182,17 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Ion positions: Add random y, z positions to uniform grid x positions
     ion_xs = lax.cond(parameters["random_positions_x"],
-        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
+        lambda _: uniform(PRNGKey(seed+4), shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_x_ions = parameters["wavenumber_ions_x"] * 2 * jnp.pi / length
     ion_xs+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x_ions * ion_xs)
     ion_ys = lax.cond(parameters["random_positions_y"],
-        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
+        lambda _: uniform(PRNGKey(seed+5), shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_y_ions = parameters["wavenumber_ions_y"] * 2 * jnp.pi / length
     ion_ys+= parameters["amplitude_perturbation_y"] * jnp.sin(wavenumber_perturbation_y_ions * ion_ys)
     ion_zs = lax.cond(parameters["random_positions_z"],
-        lambda _: uniform(random_key, shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
+        lambda _: uniform(PRNGKey(seed+6), shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_z_ions = parameters["wavenumber_ions_z"] * 2 * jnp.pi / length
     ion_zs+= parameters["amplitude_perturbation_z"] * jnp.sin(wavenumber_perturbation_z_ions * ion_zs)
@@ -251,11 +251,11 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # **Particle Velocities**
     # Electron thermal velocities and drift speeds
-    v_electrons_x = parameters["vth_electrons_over_c_x"] * speed_of_light / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_x"]
+    v_electrons_x = parameters["vth_electrons_over_c_x"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+7), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_x"]
     v_electrons_x = jnp.where(parameters["velocity_plus_minus_electrons_x"], v_electrons_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_x)
-    v_electrons_y = parameters["vth_electrons_over_c_y"] * speed_of_light / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_y"]
+    v_electrons_y = parameters["vth_electrons_over_c_y"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+8), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_y"]
     v_electrons_y = jnp.where(parameters["velocity_plus_minus_electrons_y"], v_electrons_y * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_y)
-    v_electrons_z = parameters["vth_electrons_over_c_z"] * speed_of_light / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_z"]
+    v_electrons_z = parameters["vth_electrons_over_c_z"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+9), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_z"]
     v_electrons_z = jnp.where(parameters["velocity_plus_minus_electrons_z"], v_electrons_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_z)
     electron_velocities = jnp.stack((v_electrons_x, v_electrons_y, v_electrons_z), axis=1)
     
@@ -263,11 +263,11 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     vth_ions_x = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_x"])) * parameters["vth_electrons_over_c_x"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
     vth_ions_y = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_y"])) * parameters["vth_electrons_over_c_y"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
     vth_ions_z = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_z"])) * parameters["vth_electrons_over_c_z"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
-    v_ions_x = vth_ions_x / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_x"]
+    v_ions_x = vth_ions_x / jnp.sqrt(2) * normal(PRNGKey(seed+10), shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_x"]
     v_ions_x = jnp.where(parameters["velocity_plus_minus_ions_x"], v_ions_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_x)
-    v_ions_y = vth_ions_y / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_y"]
+    v_ions_y = vth_ions_y / jnp.sqrt(2) * normal(PRNGKey(seed+11), shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_y"]
     v_ions_y = jnp.where(parameters["velocity_plus_minus_ions_y"], v_ions_y * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_y)
-    v_ions_z = vth_ions_z / jnp.sqrt(2) * normal(random_key, shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_z"]
+    v_ions_z = vth_ions_z / jnp.sqrt(2) * normal(PRNGKey(seed+12), shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_z"]
     v_ions_z = jnp.where(parameters["velocity_plus_minus_ions_z"], v_ions_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_z)
     ion_velocities = jnp.stack((v_ions_x, v_ions_y, v_ions_z), axis=1)
     
@@ -286,11 +286,12 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         lambda _: jprint((
             # f"Number of pseudoelectrons: {number_pseudoelectrons}\n"
             # f"Number of grid points: {number_grid_points}\n"
-            "Length of the simulation box: {} Debye lengths\n"
+            "Length of the simulation box: {} Debye lengths or {} Skin Depths\n"
             "Density of electrons: {} m^-3\n"
             "Electron temperature: {} eV\n"
             "Ion temperature / Electron temperature: {}\n"
             "Debye length: {} m\n"
+            "Skin depth: {} m\n"
             "Wavenumber * Debye length: {}\n" 
             "Pseudoparticles per cell: {}\n"
             "Steps at each plasma frequency: {}\n"
@@ -299,10 +300,12 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Charge x External electric field x Debye Length / Temperature: {}\n"
             "Pseudoparticle weight: {}\n"
         ),length/(Debye_length_per_dx*dx),
+          length/(speed_of_light/plasma_frequency),
           number_pseudoelectrons * weight / length,
           mass_electrons * vth_electrons**2 / 2 / (-charge_electrons),
           parameters["ion_temperature_over_electron_temperature_x"],
           Debye_length_per_dx*dx,
+          speed_of_light/plasma_frequency,
           wavenumber_perturbation_x_electrons*Debye_length_per_dx*dx,
           number_pseudoelectrons / number_grid_points,
           1/(plasma_frequency * dt),

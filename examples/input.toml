@@ -1,9 +1,9 @@
 [input_parameters]
 length = 0.01
 amplitude_perturbation_x = 1e-7
-wavenumber_electrons_x = 8
+wavenumber_electrons_x = 1
 wavenumber_ions_x = 0
-grid_points_per_Debye_length = 2
+grid_points_per_Debye_length = 1.5
 vth_electrons_over_c_x = 0.05
 ion_temperature_over_electron_temperature_x = 0.01
 timestep_over_spatialstep_times_c = 1.0
@@ -17,4 +17,4 @@ external_electric_field_wavenumber = 0
 field_solver = 0
 number_grid_points = 51
 number_pseudoelectrons = 2500
-total_steps = 1000
+total_steps = 1500
