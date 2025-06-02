@@ -14,6 +14,7 @@ external_electric_field_wavenumber = 0
 electron_charge_over_elementary_charge = -1
 ion_charge_over_elementary_charge = 1
 ion_mass_over_proton_mass = 1
+relativistic = false
 
 [solver_parameters]
 field_solver = 0
