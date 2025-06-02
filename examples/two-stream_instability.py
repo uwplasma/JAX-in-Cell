@@ -2,6 +2,9 @@
 import time
 from jax import block_until_ready
 from jaxincell import plot, simulation, load_parameters
+import numpy as np
+import pickle
+import json
 
 # Read from input.toml
 input_parameters, solver_parameters = load_parameters('input.toml')
@@ -17,3 +20,10 @@ for i in range(n_simulations):
 
 # Plot the results
 plot(output)
+
+# # Save the output to a file
+# np.savez("simulation_output.npz", **output)
+
+# # Load the output from the file
+# data = np.load("simulation_output.npz", allow_pickle=True)
+# output2 = dict(data)
