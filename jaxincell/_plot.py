@@ -1,9 +1,10 @@
+import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 from jax import vmap
+from jax.debug import print as jprint
 from ._constants import speed_of_light
-import numpy as np
+from matplotlib.animation import FuncAnimation
 
 __all__ = ['plot']
 
@@ -122,7 +123,7 @@ def plot(output, direction="x", threshold=1e-12):
 
     electron_plot = electron_ax.imshow(
         jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight",
-        extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_ions_1, max_velocity_ions_1],
+        extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_electrons_1, max_velocity_electrons_1],
         vmin=jnp.min(electron_phase_histograms), vmax=jnp.max(electron_phase_histograms))
     electron_ax.set(xlabel=f"Electron Position {direction1} (m)",
                     ylabel=f"Electron Velocity {direction1} (m/s)",
