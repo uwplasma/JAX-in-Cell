@@ -11,7 +11,6 @@ def plot(output, direction="x", threshold=1e-12):
     def is_nonzero(field):
         return jnp.max(jnp.abs(field)) > threshold
 
-    v_th = output[f"max_initial_vth_electrons"]
     grid = output["grid"]
     time = output["time_array"] * output["plasma_frequency"]
     total_steps = output["total_steps"]
@@ -24,11 +23,17 @@ def plot(output, direction="x", threshold=1e-12):
         direction_index1 = {"x": 0, "y": 1, "z": 2}[direction]
         second_direction = False
         direction_index2 = None
+        vth_e_1 = output["vth_electrons_over_c_" + direction1] * speed_of_light
+        vth_i_1 = jnp.sqrt(jnp.abs(output["ion_temperature_over_electron_temperature_" + direction1])) * output["vth_electrons_over_c_" + direction1] * speed_of_light
     elif len(direction) == 2 and all(c in "xyz" for c in direction):
         direction1, direction2 = direction
         direction_index1 = {"x": 0, "y": 1, "z": 2}[direction[0]]
         direction_index2 = {"x": 0, "y": 1, "z": 2}[direction[1]]
         second_direction = True
+        vth_e_1 = output["vth_electrons_over_c_" + direction1] * speed_of_light
+        vth_i_1 = jnp.sqrt(jnp.abs(output["ion_temperature_over_electron_temperature_" + direction1])) * output["vth_electrons_over_c_" + direction1] * speed_of_light
+        vth_e_2 = output["vth_electrons_over_c_" + direction2] * speed_of_light
+        vth_i_2 = jnp.sqrt(jnp.abs(output["ion_temperature_over_electron_temperature_" + direction2])) * output["vth_electrons_over_c_" + direction2] * speed_of_light
     else:
         raise ValueError("direction must be one or two of 'x', 'y', or 'z'")
     # direction_index = {"x": 0, "y": 1, "z": 2}[direction]
@@ -64,22 +69,23 @@ def plot(output, direction="x", threshold=1e-12):
 
     # Compute phase space histograms
     sqrtmemi = jnp.sqrt(output["mass_electrons"][0] / output["mass_ions"][0])
-    max_velocity_electrons = max(1.2 * jnp.max(output["velocity_electrons"]),
-                                 5 * jnp.abs(v_th) + jnp.abs(output[f"electron_drift_speed_{direction1}"]))
-    max_velocity_ions = max(1.0 * jnp.max(output["velocity_ions"]),
-                            sqrtmemi * 0.3 * jnp.abs(v_th) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction1}"]) +
-                            jnp.abs(output[f"ion_drift_speed_{direction1}"]))
-    ve_over_vi = max_velocity_electrons / max_velocity_ions
+    max_velocity_electrons_1 = max(1.0 * jnp.max(output["velocity_electrons"][:, :, direction_index1]),
+                                 2.5 * jnp.abs(vth_e_1)
+                                 + jnp.abs(output[f"electron_drift_speed_{direction1}"]))
+    max_velocity_ions_1      = max(1.0 * jnp.max(output["velocity_ions"][:, :, direction_index1]),
+                                 sqrtmemi * 0.3 * jnp.abs(vth_i_1) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction1}"])
+                                 + jnp.abs(output[f"ion_drift_speed_{direction1}"]))
+    max_velocity_ions_1 = float(jnp.asarray(max_velocity_ions_1))
     bins_velocity = max(min(len(grid), 111), 71)
 
     electron_phase_histograms = vmap(lambda pos, vel: jnp.histogram2d(
         pos, vel, bins=[len(grid), bins_velocity],
-        range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_electrons, max_velocity_electrons]])[0]
+        range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_electrons_1, max_velocity_electrons_1]])[0]
     )(output["position_electrons"][:, :, direction_index1], output["velocity_electrons"][:, :, direction_index1])
 
     ion_phase_histograms = vmap(lambda pos, vel: jnp.histogram2d(
         pos, vel, bins=[len(grid), bins_velocity],
-        range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_ions, max_velocity_ions]])[0]
+        range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_ions_1, max_velocity_ions_1]])[0]
     )(output["position_ions"][:, :, direction_index1], output["velocity_ions"][:, :, direction_index1])
 
     # Grid layout
@@ -116,19 +122,21 @@ def plot(output, direction="x", threshold=1e-12):
 
     electron_plot = electron_ax.imshow(
         jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight",
-        extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_electrons, max_velocity_electrons],
+        extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_ions_1, max_velocity_ions_1],
         vmin=jnp.min(electron_phase_histograms), vmax=jnp.max(electron_phase_histograms))
     electron_ax.set(xlabel=f"Electron Position {direction1} (m)",
                     ylabel=f"Electron Velocity {direction1} (m/s)",
                     title=f"Electron Phase Space {direction1}")
+    fig.colorbar(electron_plot, ax=electron_ax, label="Electron count")
 
     ion_plot = ion_ax.imshow(
         jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight",
-        extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_ions, max_velocity_ions],
+        extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_ions_1, max_velocity_ions_1],
         vmin=jnp.min(ion_phase_histograms), vmax=jnp.max(ion_phase_histograms))
     ion_ax.set(xlabel=f"Ion Position {direction1} (m)",
                ylabel=f"Ion Velocity {direction1} (m/s)",
                title=f"Ion Phase Space {direction1}")
+    fig.colorbar(ion_plot, ax=ion_ax, label="Ion count")
 
     # Time label
     animated_time_text = electron_ax.text(0.5, 0.9, "", transform=electron_ax.transAxes,
@@ -162,38 +170,46 @@ def plot(output, direction="x", threshold=1e-12):
         positions_ax = axes_flat[used_axes + 3]
         
         # Phase space in second direction
+        max_velocity_electrons_2 = max(1.0 * jnp.max(output["velocity_electrons"][:, :, direction_index2]),
+                                    2.5 * jnp.abs(vth_e_2) + jnp.abs(output[f"electron_drift_speed_{direction2}"]))
+        max_velocity_ions_2 = max(1.0 * jnp.max(output["velocity_ions"][:, :, direction_index2]),
+                                sqrtmemi * 0.3 * jnp.abs(vth_i_2) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction2}"]) +
+                                jnp.abs(output[f"ion_drift_speed_{direction2}"]))
+        
+        max_velocity_electrons_12 = max(max_velocity_electrons_1, max_velocity_electrons_2)
+        max_velocity_ions_12      = max(max_velocity_ions_1, max_velocity_ions_2)
         electron_phase_histograms2 = vmap(lambda pos, vel: jnp.histogram2d(
             pos, vel, bins=[len(grid), bins_velocity],
-            range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_electrons, max_velocity_electrons]])[0]
-        )(output["position_electrons"][:, :, direction_index2], output["velocity_electrons"][:, :, direction_index2])
+            range=[[-max_velocity_electrons_12, max_velocity_electrons_12], [-max_velocity_electrons_12, max_velocity_electrons_12]])[0]
+        )(output["velocity_electrons"][:, :, direction_index1], output["velocity_electrons"][:, :, direction_index2])
 
         ion_phase_histograms2 = vmap(lambda pos, vel: jnp.histogram2d(
             pos, vel, bins=[len(grid), bins_velocity],
-            range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_ions, max_velocity_ions]])[0]
-        )(output["position_ions"][:, :, direction_index2], output["velocity_ions"][:, :, direction_index2])
+            range=[[-max_velocity_ions_12, max_velocity_ions_12], [-max_velocity_ions_12, max_velocity_ions_12]])[0]
+        )(output["velocity_ions"][:, :, direction_index1], output["velocity_ions"][:, :, direction_index2])
 
         electron_plot2 = electron_ax2.imshow(
             jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight",
-            extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_electrons, max_velocity_electrons],
+            extent=[-max_velocity_electrons_12, max_velocity_electrons_12, -max_velocity_electrons_12, max_velocity_electrons_12],
             vmin=jnp.min(electron_phase_histograms2), vmax=jnp.max(electron_phase_histograms2))
-        electron_ax2.set(xlabel=f"Electron Position {direction2} (m)",
+        electron_ax2.set(xlabel=f"Electron Velocity {direction1} (m/s)",
                          ylabel=f"Electron Velocity {direction2} (m/s)",
-                         title=f"Electron Phase Space {direction2}")
+                         title=f"Electron Phase Space v{direction1} vs v{direction2}")
 
         ion_plot2 = ion_ax2.imshow(
             jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight",
-            extent=[-box_size_x / 2, box_size_x / 2, -max_velocity_ions, max_velocity_ions],
+            extent=[-max_velocity_ions_12, max_velocity_ions_12, -max_velocity_ions_12, max_velocity_ions_12],
             vmin=jnp.min(ion_phase_histograms2), vmax=jnp.max(ion_phase_histograms2))
-        ion_ax2.set(xlabel=f"Ion Position {direction2} (m)",
+        ion_ax2.set(xlabel=f"Ion Velocity {direction1} (m/s)",
                     ylabel=f"Ion Velocity {direction2} (m/s)",
-                    title=f"Ion Phase Space {direction2}")
+                    title=f"Ion Phase Space v{direction1} vs v{direction2}")
         
         B_field_densities = output["magnetic_field_energy_density"]
         B0 = np.asarray(B_field_densities[0])
         global_max = np.asarray(B_field_densities).max()
         if B0.ndim != 2: B0 = np.tile(B0, reps=(10, 1))
-        scat_r = positions_ax.scatter([], [], marker='<', color='red', label='Electrons')
-        scat_b = positions_ax.scatter([], [], marker='>', color='blue', label='Ions')
+        scat_r = positions_ax.scatter([0], [0], marker='<', color='red', label='Electrons')
+        scat_b = positions_ax.scatter([0], [0], marker='>', color='blue', label='Ions')
         im = positions_ax.imshow(B0.T, extent=[-box_size_x/2, box_size_x/2, -box_size_x/2, box_size_x/2],
                     origin='lower', interpolation='bilinear', vmin=0, vmax=global_max, aspect='auto')
         cb = fig.colorbar(im, ax=positions_ax, label='B-field density')
@@ -201,12 +217,27 @@ def plot(output, direction="x", threshold=1e-12):
         positions_ax.set_ylim([-box_size_x/2, box_size_x/2])
         positions_ax.set_xlabel(direction2)
         positions_ax.set_ylabel(direction1)
-        plt.legend(loc='upper right', fontsize=7)
-        subset_ions = slice(0, number_pseudoelectrons, min(100, number_pseudoelectrons))
-        n_electrons_to_plot = min(100, number_pseudoelectrons)
+        positions_ax.legend(loc='upper right', fontsize=7)
+        rng = np.random.default_rng(42)
+        n_particles_to_plot = min(100, number_pseudoelectrons)
+        subset_ions      = rng.choice(number_pseudoelectrons, size=n_particles_to_plot, replace=False)
+        subset_electrons = rng.choice(number_pseudoelectrons, size=n_particles_to_plot, replace=False)
         scat_r.set_animated(True)
         scat_b.set_animated(True)
         im.set_animated(True)
+        
+        # Time label
+        animated_time_text2 = positions_ax.text(0.5, 0.9, "", transform=positions_ax.transAxes,
+                                            ha="center", va="top", fontsize=12,
+                                            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+        
+        # Add marker explanation text
+        positions_ax.text(0.02, 0.98, "Electrons: '<'", color="red",
+                  transform=positions_ax.transAxes, ha="left", va="top",
+                  fontsize=10, bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+        positions_ax.text(0.02, 0.92, "Ions: '>'", color="blue",
+                  transform=positions_ax.transAxes, ha="left", va="top",
+                  fontsize=10, bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
         
     def update(frame):
         electron_plot.set_array(electron_phase_histograms[frame].T)
@@ -216,8 +247,8 @@ def plot(output, direction="x", threshold=1e-12):
             electron_plot2.set_array(electron_phase_histograms2[frame].T)
             ion_plot2.set_array(ion_phase_histograms2[frame].T)
             
-            x_electrons = np.asarray(output["position_electrons"][frame, :n_electrons_to_plot, direction_index2])
-            z_electrons = np.asarray(output["position_electrons"][frame, :n_electrons_to_plot, direction_index1])
+            x_electrons = np.asarray(output["position_electrons"][frame, subset_electrons, direction_index2])
+            z_electrons = np.asarray(output["position_electrons"][frame, subset_electrons, direction_index1])
             x_ions = np.asarray(output["position_ions"][frame, subset_ions, direction_index2])
             z_ions = np.asarray(output["position_ions"][frame, subset_ions, direction_index1])
             scat_r.set_offsets(np.stack([x_electrons, z_electrons], axis=-1))
@@ -225,8 +256,9 @@ def plot(output, direction="x", threshold=1e-12):
             B = np.asarray(B_field_densities[frame])
             if B.ndim != 2: B = np.tile(B, reps=(10, 1))
             im.set_array(B.T)
+            animated_time_text2.set_text(f"Time: {time[frame]:.2f} ωₚ")
 
-            return (electron_plot, ion_plot, electron_plot2, ion_plot2, animated_time_text, scat_r, scat_b, im)
+            return (electron_plot, ion_plot, electron_plot2, ion_plot2, animated_time_text, scat_r, scat_b, im, animated_time_text2)
         else:
             return (electron_plot, ion_plot, animated_time_text)
 
