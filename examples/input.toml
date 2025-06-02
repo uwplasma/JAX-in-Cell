@@ -1,5 +1,5 @@
 [input_parameters]
-length = 0.01
+length = 1.0
 amplitude_perturbation_x = 0
 wavenumber_electrons_x = 0
 wavenumber_ions_x = 0

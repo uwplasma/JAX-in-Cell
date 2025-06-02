@@ -285,7 +285,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electrons**2)/jnp.sqrt(mass_electrons)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
-    relativistic_gamma_factor = 1/jnp.sqrt(1 - velocities / speed_of_light)**2
+    relativistic_gamma_factor = 1 / jnp.sqrt(1 - jnp.sum(velocities**2, axis=1) / speed_of_light**2)
 
     cond(parameters["print_info"],
         lambda _: jprint((
