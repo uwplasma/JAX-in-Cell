@@ -215,6 +215,9 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electrons**2)/jnp.sqrt(mass_electrons)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
 
+    max_relativistic_gamma_factor = jnp.max(1/jnp.sqrt(1 - velocities / speed_of_light)**2)
+    average_relativistic_gamma_factor = jnp.mean(1/jnp.sqrt(1 - (velocities / speed_of_light)**2))
+
     cond(parameters["print_info"],
         lambda _: jprint((
             # f"Number of pseudoelectrons: {number_pseudoelectrons}\n"
@@ -231,6 +234,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Number of particles on a Debye cube: {:.2e}\n"
             "Charge x External electric field x Debye Length / Temperature: {:.2e}\n"
             "Weight of particles: {:.2e}\n"
+            "Relativistic gamma factor: Maximum {:.2f}, Average {:.2f}\n"
         ),length/(Debye_length_per_dx*dx),
           number_pseudoelectrons * weight / length,
           -parameters["ion_temperature_over_electron_temperature"] * vth_electrons**2 * mass_electrons / 2 / charge_electrons,
@@ -241,8 +245,9 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
           1/(plasma_frequency * dt),
           dt * plasma_frequency * total_steps,
           number_pseudoelectrons * weight / length * (Debye_length_per_dx*dx)**3,
-          -charge_electrons * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electrons * vth_electrons**2 / 2),
-            weight,
+          -charge_electrons * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electrons * vth_electrons**2 / 2), 
+          weight,
+          max_relativistic_gamma_factor, average_relativistic_gamma_factor,
         ), lambda _: None, operand=None)
     
     # **Fields Initialization**
@@ -356,16 +361,18 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         total_B = B_field + parameters["external_magnetic_field"]
 
         # Interpolate fields to particle positions
-        E_field_at_x = vmap(lambda x_n: fields_to_particles_grid(
-            x_n, total_E, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(positions_plus1_2)
-        
-        B_field_at_x = vmap(lambda x_n: fields_to_particles_grid(
-            x_n, total_B, dx, grid, grid[0] - dx / 2, field_BC_left, field_BC_right))(positions_plus1_2)
+        def interpolate_fields(x_n):
+            E = fields_to_particles_grid(x_n, total_E, dx, grid + dx/2, grid[0], field_BC_left, field_BC_right)
+            B = fields_to_particles_grid(x_n, total_B, dx, grid, grid[0] - dx/2, field_BC_left, field_BC_right)
+            return E, B
+
+        E_field_at_x, B_field_at_x = vmap(interpolate_fields)(positions_plus1_2)
+
 
         # Particle update: Boris pusher
         positions_plus3_2, velocities_plus1 = lax.cond(
             parameters["relativistic"],
-            lambda _: boris_step_relativistic(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
+            lambda _: boris_step_relativistic(dt, positions_plus1_2, velocities, qs, ms, E_field_at_x, B_field_at_x),
             lambda _: boris_step(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
             operand=None
         )

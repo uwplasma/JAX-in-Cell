@@ -1,7 +1,8 @@
 from jax import vmap, jit
 import jax.numpy as jnp
 from ._boundary_conditions import field_2_ghost_cells
-from ._constants import speed_of_light
+from ._constants import speed_of_light as c
+from jax.debug import print as jprint
 
 __all__ = ['fields_to_particles_grid', 'rotation', 'boris_step']
 
@@ -110,59 +111,72 @@ def boris_step(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_fields_at_x):
     # return xs_nplus1, vs_nplus1
 
 @jit
-def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_fields_at_x):
+def relativistic_rotation(dt, B, p_minus, q, m):
     """
-    This function performs one step of the relativistic Boris algorithm for particle motion. 
-    The particle velocity is updated using the electric and magnetic fields at its position, 
-    and the particle position is updated using the new velocity.
+    Rotate momentum vector in magnetic field (relativistic Boris step).
+    """
+    # gamma_minus from p_minus
+    gamma_minus = jnp.sqrt(1 + jnp.sum(p_minus ** 2) / (m ** 2 * c ** 2))
+    
+    # t vector (rotation vector)
+    t = (q * dt) / (2 * m * gamma_minus) * B
+    p_dot_t = jnp.dot(p_minus, t)
+    p_cross_t = jnp.cross(p_minus, t)
+    t_squared = jnp.dot(t, t)
+    
+    p_plus = (p_minus*(1-t_squared) + 2*(p_dot_t * t + p_cross_t)) / (1 + t_squared)
+    
+    return p_plus
 
+@jit
+def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_s, m_s, E_fields_at_x, B_fields_at_x):
+    """
+    Relativistic Boris pusher for N particles.
+    
     Args:
-        dt (float): Time step for the simulation.
-        xs_nplushalf (array): The particle positions at the half-time step n+1/2, shape (N, 3).
-        vs_n (array): The particle velocities at time step n, shape (N, 3).
-        q_ms (array): The charge-to-mass ratio of each particle, shape (N, 1).
-        E_fields_at_x (array): The interpolated electric field values at the particle positions, shape (N, 3).
-        B_fields_at_x (array): The magnetic field values at the particle positions, shape (N, 3).
+        dt: Time step
+        xs_nplushalf: Particle positions at t = n + 1/2, shape (N, 3)
+        vs_n: Velocities at time t = n, shape (N, 3)
+        q_s: Charges, shape (N,)
+        m_s: Masses, shape (N,)
+        E_fields_at_x: Electric fields at particle positions, shape (N, 3)
+        B_fields_at_x: Magnetic fields at particle positions, shape (N, 3)
+        c: Speed of light (default = 1.0 for normalized units)
 
     Returns:
-        tuple: A tuple containing:
-            - xs_nplus3_2 (array): The updated particle positions at time step n+3/2, shape (N, 3).
-            - vs_nplus1 (array): The updated particle velocities at time step n+1, shape (N, 3).
+        xs_nplus3_2: Updated positions at t = n + 3/2, shape (N, 3)
+        vs_nplus1: Updated velocities at t = n + 1, shape (N, 3)
     """
-    # gamma = 1 / jnp.sqrt(1 - (jnp.linalg.norm(vs_n, axis=1, keepdims=True) / speed_of_light) ** 2)
-    # uvel = vs_n * gamma
 
-    # uvel_minus = uvel + q_ms * E_fields_at_x * dt / 2
+    def single_particle_step(x, v, q, m, E, B):
+        # Compute initial momentum
+        gamma_n = 1/jnp.sqrt(1.0 - jnp.sum((v / c) ** 2))
+        
+        p_n = gamma_n * m * v
 
-    # gamma1 = jnp.sqrt(1 + (jnp.linalg.norm(uvel_minus, axis=1, keepdims=True) / speed_of_light) ** 2)
+        # Half electric field acceleration
+        p_minus = p_n + q * E * dt / 2
 
-    # from jax.debug import print as jprint
-    # t = q_ms * dt * B_fields_at_x / (2 * gamma1)
-    # s = 2 * t / (1 + (t * t).sum(axis=1, keepdims=True))
-    
-    # jprint("B_fields_at_x shape {}", B_fields_at_x.shape)
-    # jprint("uvel_minus shape {}", uvel_minus.shape)
-    # jprint("gamma1 shape {}", gamma1.shape)
-    # jprint("q_ms shape {}", q_ms.shape)
-    # jprint("t shape {}", t.shape)
-    # jprint("s shape {}", s.shape)
+        # Magnetic rotation
+        p_plus = relativistic_rotation(dt, B, p_minus, q, m)
 
-    # uvel_prime = uvel_minus + jnp.cross(uvel_minus, t)
-    # uvel_plus = uvel_minus + jnp.cross(uvel_prime, s)
-    # uvel_new = uvel_plus + q_ms * E_fields_at_x * dt / 2
+        # Second half electric field acceleration
+        p_nplus1 = p_plus + q * E * dt / 2
 
-    # # You can show that this expression is equivalent to calculating
-    # # v_new  then calculating gammanew using the usual formula
-    # gamma2 = jnp.sqrt(
-    #     1 + (jnp.linalg.norm(uvel_new, axis=1, keepdims=True) / speed_of_light) ** 2
-    # )
+        # Compute new gamma
+        gamma_nplus1 = jnp.sqrt(1.0 + jnp.sum((p_nplus1 / (m * c)) ** 2))
 
-    # vs_nplus1 = uvel_new / gamma2
-    # xs_nplus3_2 = xs_nplushalf + dt * vs_nplus1
+        # Recover new velocity
+        v_nplus1 = p_nplus1 / (gamma_nplus1 * m)
 
-    # return xs_nplus3_2, vs_nplus1
+        # Update position using new velocity
+        x_nplus3_2 = x + dt * v_nplus1
 
-    gamma = 1 / jnp.sqrt(1 - (jnp.linalg.norm(vs_n, axis=1, keepdims=True) / speed_of_light) ** 2)
-    vs_nplus1 = vs_n + (q_ms) * E_fields_at_x * dt
-    xs_nplus1 = xs_nplushalf + dt * vs_nplus1 / gamma
-    return xs_nplus1, vs_nplus1
+        return x_nplus3_2, v_nplus1
+
+    # Vectorize over particles
+    xs_nplus3_2, vs_nplus1 = vmap(single_particle_step)(
+        xs_nplushalf, vs_n, q_s, m_s, E_fields_at_x, B_fields_at_x
+    )
+
+    return xs_nplus3_2, vs_nplus1
