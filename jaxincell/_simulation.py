@@ -14,6 +14,7 @@ from ._diagnostics import diagnostics
 from jax_tqdm import scan_tqdm
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
+import sys
 config.update("jax_enable_x64", True)
 
 __all__ = ["initialize_simulation_parameters", "initialize_particles_fields", "simulation", "load_parameters"]
@@ -185,6 +186,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         * parameters["vth_electrons_over_c"]**2
         / Debye_length_per_dx**2
     )
+    jprint("Weight of pseudoparticles: {}", weight)
     charges = jnp.concatenate((
         charge_electron * weight * jnp.ones((number_pseudoelectrons, 1)),
         charge_proton   * weight * jnp.ones((number_pseudoelectrons, 1))
@@ -198,7 +200,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     # Grid setup
     dx = length / number_grid_points
     grid = jnp.linspace(-length / 2 + dx / 2, length / 2 - dx / 2, number_grid_points)
-    dt = parameters["timestep_over_spatialstep_times_c"] * dx / speed_of_light
+    dt = parameters["timestep_over_spatialstep_times_c"] * dx *5 / speed_of_light
 
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electron**2)/jnp.sqrt(mass_electron)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
@@ -360,19 +362,23 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
 
     #     dt = parameters["dt"]
     #     length = parameters["length"]
-    #     n_iterations = 10  # Number of iterations for Picard iteration
+    #     n_iterations = 7  # Number of iterations for Picard iteration
     #     num_substeps=1
     #     E_new=E_field
     #     B_new=B_field
     #     positions_new=positions
     #     velocities_new=velocities
     #     # positions_sub1=positions
-    #     positions_sub1_2_all = jnp.zeros((num_substeps,) + positions.shape)
+    #     # positions_sub1_2_all = jnp.zeros((num_substeps,) + positions.shape)
+    #     positions_sub1_2_all = jnp.tile(positions[None, ...], (num_substeps, 1, 1))
+    #     debug.print(" positions = {}",  positions[0:5])
+    #     debug.print(" velocities = {}",  velocities[0:5])
+    #     debug.print(" E_field = {}",  E_field[0:5])
     #     # Start the iteration loop
     #     for iteration in range(n_iterations):
     #         E_avg = 0.5 * (E_field + E_new)
     #         B_avg = 0.5 * (B_field + B_new)
-            
+   
     #         # # Loop through substeps
     #         positions_sub=positions
     #         velocities_sub = velocities
@@ -385,23 +391,29 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     #             # t_end = (step + 1) / num_substeps
     #             E_at_half = vmap(lambda x_n: fields_to_particles_grid(
     #                 x_n, E_avg, dx, grid + dx / 2, grid[0], field_BC_left, field_BC_right))(positions_sub1_2_all[step])
-
+    #             # debug.print(" pos_stag_prev[0] = {}", positions_sub1_2_all[step][0:5])
     #             velocities_subnew = velocities_sub + (q_ms * E_at_half) * dtau
+    #             # debug.print("  substep {}: E_mid[0] = {}", step, E_at_half[0:5])
+
+    #             # debug.print("  substep {}: velocities_subnew[0] = {}", step, velocities_subnew[0:5])
+
+    #             # debug.print("  substep {}: velocities_sub[0] = {}", step, velocities_sub[0:5])
     #             velocities_plus1_2 = 0.5 * (velocities_sub + velocities_subnew)
     #             positions_subnew = positions_sub + velocities_plus1_2 * dtau
-                
+    #             # debug.print("  substep {}: positions_subnew[0] = {}", step, positions_subnew[0:5])
     #             positions_subnew, velocities_plus1_2, qs, ms, q_ms = set_BC_particles(
     #             positions_subnew, velocities_plus1_2, qs, ms, q_ms, dx, grid,
     #             *box_size, particle_BC_left, particle_BC_right)
     #             positions_sub1_2 = set_BC_positions(positions_subnew - (dtau / 2) * velocities_plus1_2,
     #                                             qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
     #             positions_sub1_2_all = positions_sub1_2_all.at[step].set(positions_sub1_2)
+    #             # debug.print("  pos_stag_new[0] = {}",  positions_sub1_2[0:5])
     #             # Now call the current_density function for each substep
     #             J_substep = current_density(positions_sub, positions_sub1_2,positions_subnew, velocities_plus1_2,
     #                 qs, dx, dtau, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
     #             # J_substep = current_density_CN(positions_sub1_2, velocities_plus1_2,
     #             # qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-
+    #             # debug.print("  substep {}: J_substep sum = {}", step, jnp.sum(J_substep))
     #             positions_sub=positions_subnew
     #             velocities_sub=velocities_subnew
 
@@ -412,9 +424,12 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     #         # J = current_density_CN(positions_plus1_2, velocities_plus1_2,
     #         #     qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
     #         mean_J = jnp.array([integrate(J[:,0], dx=dx), integrate(J[:,1], dx=dx), integrate(J[:,2], dx=dx)])/length
+    #         # debug.print("Picard it {}: mean_J = {}", iteration, mean_J)
     #         E_next = E_field - (dt / epsilon_0) * (J-mean_J)
+            
     #         delta_E = jnp.abs(jnp.mean(E_next - E_new))/jnp.max(jnp.abs(E_next))
-    #         #debug.print("mean_J: {}", mean_J)
+    #         # debug.print("mean_J: {}", mean_J)
+    #         # debug.print("Picard it {}: E_next[0] = {}", iteration, E_next[0:5])
     #         # debug.print("delta_E: {}", delta_E)
 
 
@@ -494,23 +509,27 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         dt = parameters["dt"]
         length = parameters["length"]
         n_iterations = 7  # Number of iterations for Picard iteration
-        num_substeps=1
+        num_substeps=2
         E_new=E_field
         B_new=B_field
-        positions_new=positions
+        # positions_new=positions
+        positions_new=positions+ (dt) * velocities
         velocities_new=velocities
+        # debug.print(" positions = {}",  positions[0:5])
+        # debug.print(" velocities = {}",  velocities[0:5])
+        # debug.print(" E_field = {}",  E_field[0:5])
         # one substep of your leapfrog+current‐deposit
 
         # --- before your Picard scan, initialize the array of half-step positions ---
-        positions_sub1_2_all_init = jnp.zeros((num_substeps,) + positions.shape)
-
+        positions_sub1_2_all_init = jnp.tile(positions[None, ...], (num_substeps, 1, 1))
+        # debug.print(" positions = {}",  positions[0:5])
         # one micro‐step: reads & writes the per-step pos_stag array
         def picard_step(pic_carry, _):
-            E_prev, pos_prev, vel_prev, qs_prev, ms_prev, q_ms_prev = pic_carry
+            E_new, pos_fix, pos_prev, vel_fix, vel_prev, qs_prev, ms_prev, q_ms_prev, pos_stag_arr = pic_carry
             
             # recompute midpoint field for *this* Picard iteration
-            E_avg = 0.5 * (E_field + E_prev)
-
+            E_avg = 0.5 * (E_field + E_new)
+            # debug.print("  E_avg[0] = {}" , E_avg[0:5])
             dtau  = dt / num_substeps
 
             # now define substep_loop so it captures THIS E_avg
@@ -519,19 +538,23 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
 
                 # grab the staggered pos for this substep
                 pos_stag_prev = pos_stag_arr[step_idx]
-
+                # debug.print("  substep {}:pos_stag_prev[0] = {}", step_idx, pos_stag_prev[0:5])
                 # field at half‑step uses this iteration’s E_avg
                 E_mid = vmap(lambda x:
                     fields_to_particles_grid(
                         x, E_avg, dx, grid + dx/2, grid[0],
                         field_BC_left, field_BC_right)
                 )(pos_stag_prev)
-
+                
                 # leapfrog update
                 vel_new = vel_sub + (q_ms_sub * E_mid) * dtau
+                # debug.print("  substep {}: E_mid[0] = {}" ,step_idx, E_mid[0:5])
+                # debug.print("  substep {}: velocities_subnew[0] = {}", step_idx, vel_new[0:5])
+                # debug.print("  substep {}: velocities_sub[0] = {}", step_idx, vel_sub[0:5])
+
                 vel_mid = 0.5 * (vel_sub + vel_new)
                 pos_new = pos_sub + vel_mid * dtau
-
+                # debug.print("  substep {}: positions_subnew[0] = {}", step_idx, pos_new[0:5])
                 # enforce BCs
                 pos_new, vel_mid, qs_new, ms_new, q_ms_new = set_BC_particles(
                     pos_new, vel_mid, qs_sub, ms_sub, q_ms_sub,
@@ -544,25 +567,26 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
                     qs_new, dx, grid,
                     *box_size, particle_BC_left, particle_BC_right
                 )
+                # debug.print("  substep {}: pos_stag_new[0] = {}", step_idx, pos_stag_new[0:5])
                 pos_stag_arr = pos_stag_arr.at[step_idx].set(pos_stag_new)
 
                 # deposit current
                 J_sub = current_density(
-                    pos_sub, pos_stag_new, pos_new, vel_mid, qs_new, dx, dt, grid,
+                    pos_sub, pos_stag_new, pos_new, vel_mid, qs_new, dx, dtau, grid,
                     grid[0] - dx/2, particle_BC_left, particle_BC_right
                 )
-
+                # debug.print("  substep {}: J_substep sum = {}", step_idx, jnp.sum(J_sub))
                 return (pos_new, vel_new, qs_new, ms_new, q_ms_new, pos_stag_arr), J_sub * dtau
 
             # pack initial substep carry (including full pos_stag array)
             sub_init = (
-                pos_prev, vel_prev,
+                pos_fix, vel_fix,
                 qs_prev, ms_prev, q_ms_prev,
-                positions_sub1_2_all_init
+                pos_stag_arr
             )
 
             # run through all substeps
-            (pos_final, vel_final, qs_final, ms_final, q_ms_final, _), J_accs = lax.scan(
+            (pos_final, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr), J_accs = lax.scan(
                 substep_loop,
                 sub_init,
                 jnp.arange(num_substeps)
@@ -570,25 +594,31 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
             # debug.print("J_accs: {}",J_accs) 
             # assemble J and update E
             J_iter = jnp.sum(J_accs, axis=0) / dt
-            # debug.print("J_iter: {}",J_iter) 
-            mean_J = jnp.array([
-                integrate(J_iter[:,0], dx=dx),
-                integrate(J_iter[:,1], dx=dx),
-                integrate(J_iter[:,2], dx=dx),
-            ]) / length
-            # debug.print("mean_J: {}",mean_J) 
+            # debug.print("J_accs0: {}",J_accs[0][0]) 
+            # debug.print("J_accs1: {}",J_accs[1][25]) 
+            # debug.print("J_iter: {}",J_iter.shape) 
+            mean_J = jnp.mean(J_iter, axis=0)
+            # mean_J = jnp.array([
+            #     integrate(J_iter[:,0], dx=dx),
+            #     integrate(J_iter[:,1], dx=dx),
+            #     integrate(J_iter[:,2], dx=dx),
+            # ]) / length
+            # debug.print("length: {}",length)
+            # debug.print(" mean_J = {}", mean_J)
+
             E_next = E_field - (dt / epsilon_0) * (J_iter - mean_J)
+            # debug.print("E_next[0] = {}", E_next[0:5])
             delta_E = jnp.abs(jnp.mean(E_next - E_new))/jnp.max(jnp.abs(E_next))
-            debug.print("delta_E: {}", delta_E)
+            # debug.print("delta_E: {}", delta_E)
             return (
-                (E_next, pos_final, vel_final, qs_final, ms_final, q_ms_final),
+                (E_next,pos_fix, pos_final, vel_fix, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr),
                 J_iter
             )
 
 
         # run n_iterations Picard sweeps and grab the last J
-        picard_init = (E_field, positions, velocities, qs, ms, q_ms)
-        (E_new, positions_new, velocities_new, qs_new, ms_new, q_ms_new), J_all = lax.scan(
+        picard_init = (E_new, positions, positions_new, velocities,velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
+        (E_new, pos_fix, positions_new, vel_fix,velocities_new, qs_new, ms_new, q_ms_new,_), J_all = lax.scan(
             picard_step,
             picard_init,
             None,
@@ -609,7 +639,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         # debug.print("charge_err: {}", charge_err) 
         #debug.print("charge_den: {}",  jnp.mean(jnp.abs(charge_density))) 
 
-
+        # debug.print("  E[0] = {}" , E_field[0:5])
         # Prepare next state
         carry = (E_field, B_field, positions_plus1,
                 velocities_plus1, qs, ms, q_ms)
