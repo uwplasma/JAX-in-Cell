@@ -1,18 +1,23 @@
 import jax.numpy as jnp
+
 from jax.lax import cond
 from functools import partial
+from jax_tqdm import scan_tqdm
 from jax.debug import print as jprint
 from jax import lax, jit, vmap, config
 from jax.random import PRNGKey, uniform, normal
+
+from ._diagnostics import diagnostics
 from ._sources import current_density, calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic
-from ._fields import field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, E_from_Poisson_1D_FFT, field_update1, field_update2
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
-from ._diagnostics import diagnostics
-from jax_tqdm import scan_tqdm
+from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
+                      E_from_Poisson_1D_FFT, field_update1, field_update2)
+
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
+
 config.update("jax_enable_x64", True)
 
 __all__ = ["initialize_simulation_parameters", "initialize_particles_fields", "simulation", "load_parameters"]
