@@ -188,17 +188,17 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Ion positions: Add random y, z positions to uniform grid x positions
     ion_xs = lax.cond(parameters["random_positions_x"],
-        lambda _: uniform(PRNGKey(seed+4), shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
+        lambda _: uniform(PRNGKey(seed+1), shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_x_ions = parameters["wavenumber_ions_x"] * 2 * jnp.pi / length
     ion_xs+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x_ions * ion_xs)
     ion_ys = lax.cond(parameters["random_positions_y"],
-        lambda _: uniform(PRNGKey(seed+5), shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
+        lambda _: uniform(PRNGKey(seed+2), shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_y_ions = parameters["wavenumber_ions_y"] * 2 * jnp.pi / length
     ion_ys+= parameters["amplitude_perturbation_y"] * jnp.sin(wavenumber_perturbation_y_ions * ion_ys)
     ion_zs = lax.cond(parameters["random_positions_z"],
-        lambda _: uniform(PRNGKey(seed+6), shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
+        lambda _: uniform(PRNGKey(seed+3), shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_z_ions = parameters["wavenumber_ions_z"] * 2 * jnp.pi / length
     ion_zs+= parameters["amplitude_perturbation_z"] * jnp.sin(wavenumber_perturbation_z_ions * ion_zs)
