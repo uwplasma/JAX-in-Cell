@@ -5,7 +5,7 @@ wavenumber_electrons = 8
 grid_points_per_Debye_length = 2
 vth_electrons_over_c_x = 0.05
 ion_temperature_over_electron_temperature = 0.01
-timestep_over_spatialstep_times_c = 1.0
+timestep_over_spatialstep_times_c = 5.0
 electron_drift_speed_x = 100000000.0
 velocity_plus_minus_electrons_x = true
 print_info = true
@@ -18,6 +18,9 @@ relativistic = false
 
 [solver_parameters]
 field_solver = 0
+time_evolution_algorithm = 1
 number_grid_points = 100
 number_pseudoelectrons = 3000
-total_steps = 1000
+total_steps = 200
+number_of_Picard_iterations_implicit_CN = 7
+number_of_particle_substeps_implicit_CN = 2
