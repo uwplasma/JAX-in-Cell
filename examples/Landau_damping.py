@@ -12,15 +12,15 @@ input_parameters = {
 "grid_points_per_Debye_length" : 10,     # dx over Debye length
 "vth_electrons_over_c"         : 0.05,  # thermal velocity of electrons over speed of light
 "ion_temperature_over_electron_temperature": 1e-9, # Temperature of ions over temperature of electrons
-"timestep_over_spatialstep_times_c": 1, # dt * speed_of_light / dx
+"timestep_over_spatialstep_times_c": 2, # dt * speed_of_light / dx
 "print_info"                   : True,  # print information about the simulation
 }
 
 solver_parameters = {
     "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
     "time_evolution_algorithm": 1,  # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson
-    "number_grid_points"     : 100,  # Number of grid points
-    "number_pseudoelectrons" : 1000, # Number of pseudoelectrons
+    "number_grid_points"     : 81,  # Number of grid points
+    "number_pseudoelectrons" : 3000, # Number of pseudoelectrons
     "total_steps"            : 200, # Total number of time steps
     "number_of_Picard_iterations_implicit_CN": 7, # Number of iterations for Picard iteration converging
     "number_of_particle_substeps_implicit_CN": 2, # The number of substep for one time eletric field update
