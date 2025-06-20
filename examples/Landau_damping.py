@@ -18,10 +18,10 @@ input_parameters = {
 
 solver_parameters = {
     "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
-    "time_evolution_algorithm": 1,  # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson
     "number_grid_points"     : 81,  # Number of grid points
     "number_pseudoelectrons" : 3000, # Number of pseudoelectrons
     "total_steps"            : 200, # Total number of time steps
+    "time_evolution_algorithm": 1,  # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson
     "number_of_Picard_iterations_implicit_CN": 7, # Number of iterations for Picard iteration converging
     "number_of_particle_substeps_implicit_CN": 2, # The number of substep for one time eletric field update
 }

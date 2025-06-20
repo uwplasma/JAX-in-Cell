@@ -180,9 +180,9 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     # Update carrys for next step
     E_field = E_new
-    B_field = B_field
+    B_field = B_new
     positions_plus1= positions_new
-    velocities_plus1 = velocities_new
+    velocities_plus1 = velocities_new    
     charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)
 
     carry = (E_field, B_field, positions_plus1,

@@ -29,6 +29,7 @@ solver_parameters = {
     "number_grid_points"     : 71,  # Number of grid points
     "number_pseudoelectrons" : 3000, # Number of pseudoelectrons
     "total_steps"            : 6000, # Total number of time steps
+    "time_evolution_algorithm": 0,  # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson (electrostatic)
 }
 
 output = block_until_ready(simulation(input_parameters, **solver_parameters))
