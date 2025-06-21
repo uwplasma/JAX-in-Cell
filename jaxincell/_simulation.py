@@ -445,7 +445,8 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         )
         step_func = lambda carry, step_index: CN_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
-            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right
+            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right,
+            parameters["number_of_particle_substeps_implicit_CN"]
         )
 
     @scan_tqdm(total_steps)

@@ -1,7 +1,6 @@
 import jax.numpy as jnp
-from jax.debug import print as jprint
-from jax import lax,  vmap, config
-from jax.debug import print as jprint
+from jax import lax,  vmap, jit
+from functools import partial
 
 from ._sources import current_density, calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
@@ -85,37 +84,36 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     return carry, step_data
 
 # Implicit Crank-Nicolson step
+@partial(jit, static_argnames=('num_substeps', 'particle_BC_left', 'particle_BC_right', 'field_BC_left', 'field_BC_right'))
 def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
                                   particle_BC_left, particle_BC_right,
-                                  field_BC_left, field_BC_right):
+                                  field_BC_left, field_BC_right, num_substeps):
     (E_field, B_field, positions,
     velocities, qs, ms, q_ms) = carry
 
-    num_substeps=parameters["number_of_particle_substeps_implicit_CN"]
     E_new=E_field
     B_new=B_field
     positions_new=positions+ (dt) * velocities
     velocities_new=velocities
     # initialize the array of half-substep positions for Picard iterations
-    positions_sub1_2_all_init = jnp.tile(positions[None, ...], (num_substeps, 1, 1))
+    positions_sub1_2_all_init = jnp.repeat(positions[None, ...], num_substeps, axis=0)
 
     # Picard iteration of solution for next step
+    substep_indices = jnp.arange(num_substeps)
     def picard_step(pic_carry, _):
         _, E_new, pos_fix, _, vel_fix, _, qs_prev, ms_prev, q_ms_prev, pos_stag_arr = pic_carry
         E_avg = 0.5 * (E_field + E_new)
         dtau  = dt / num_substeps
 
+
+        interp_E = partial(fields_to_particles_grid, dx=dx, grid=grid + dx/2, grid_start=grid[0],
+                        field_BC_left=field_BC_left, field_BC_right=field_BC_right)
         # substepping
         def substep_loop(sub_carry, step_idx):
             pos_sub, vel_sub, qs_sub, ms_sub, q_ms_sub, pos_stag_arr = sub_carry
             pos_stag_prev = pos_stag_arr[step_idx]
 
-            # field at half‑step
-            E_mid = vmap(lambda x:
-                fields_to_particles_grid(
-                    x, E_avg, dx, grid + dx/2, grid[0],
-                    field_BC_left, field_BC_right)
-            )(pos_stag_prev)
+            E_mid = vmap(interp_E, in_axes=(0, None))(pos_stag_prev, E_avg)
 
             vel_new = vel_sub + (q_ms_sub * E_mid) * dtau
             vel_mid = 0.5 * (vel_sub + vel_new)
@@ -154,7 +152,7 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
         (pos_final, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr), J_accs = lax.scan(
             substep_loop,
             sub_init,
-            jnp.arange(num_substeps)
+            substep_indices
         )
 
         # Sum over substep to get next step current with eletric field
@@ -195,7 +193,6 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
         delta_E = jnp.abs(jnp.max(E_next - E_old)) / (jnp.max(jnp.abs(E_next)))
         return (new_carry, J_iter, delta_E, i + 1)
-
 
     final_carry, J, _, _ = lax.while_loop(cond_fn, body_fn, state0)
     (E_old, E_new, _, positions_new, _, velocities_new, _, _, _, _) = final_carry
