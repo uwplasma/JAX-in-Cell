@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 from jax.debug import print as jprint
 from jax import lax,  vmap, config
+from jax.debug import print as jprint
 
 from ._sources import current_density, calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
@@ -90,7 +91,6 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     (E_field, B_field, positions,
     velocities, qs, ms, q_ms) = carry
 
-    n_iterations = parameters["number_of_Picard_iterations_implicit_CN"]
     num_substeps=parameters["number_of_particle_substeps_implicit_CN"]
     E_new=E_field
     B_new=B_field
@@ -101,7 +101,7 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     # Picard iteration of solution for next step
     def picard_step(pic_carry, _):
-        E_new, pos_fix, pos_prev, vel_fix, vel_prev, qs_prev, ms_prev, q_ms_prev, pos_stag_arr = pic_carry
+        _, E_new, pos_fix, _, vel_fix, _, qs_prev, ms_prev, q_ms_prev, pos_stag_arr = pic_carry
         E_avg = 0.5 * (E_field + E_new)
         dtau  = dt / num_substeps
 
@@ -163,30 +163,52 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
         E_next = E_field - (dt / epsilon_0) * (J_iter - mean_J)
 
         return (
-            (E_next,pos_fix, pos_final, vel_fix, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr),
+            (E_new, E_next, pos_fix, pos_final, vel_fix, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr),
             J_iter
         )
 
 
     # Picard iteration
     picard_init = (E_new, positions, positions_new, velocities,velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
-    (E_new, pos_fix, positions_new, vel_fix,velocities_new, qs_new, ms_new, q_ms_new,_), J_all = lax.scan(
-        picard_step,
-        picard_init,
-        None,
-        length=n_iterations
-    )
-    J = J_all[-1]
+    tol = parameters["tolerance_Picard_iterations_implicit_CN"]
+    max_iter = parameters["max_number_of_Picard_iterations_implicit_CN"]
+
+    positions_sub1_2_all_init = jnp.tile(positions[None, ...], (num_substeps, 1, 1))
+    E_old = E_new
+    delta_E0 = jnp.array(jnp.inf)
+    iter_idx0 = jnp.array(0)
+
+    picard_init = (E_old, E_new, positions, positions_new, velocities, velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
+    state0 = (picard_init, jnp.zeros_like(E_new), delta_E0, iter_idx0)
+    
+    def cond_fn(state):
+        _, _, delta_E, i = state
+        return jnp.logical_and(delta_E > tol, i < max_iter)
+
+    def body_fn(state):
+        carry, _, _, i = state
+        
+        E_old = carry[0]
+
+        new_carry, J_iter = picard_step(carry, None)
+        E_next = new_carry[1]
+
+        delta_E = jnp.abs(jnp.max(E_next - E_old)) / (jnp.max(jnp.abs(E_next)))
+        return (new_carry, J_iter, delta_E, i + 1)
+
+
+    final_carry, J, _, _ = lax.while_loop(cond_fn, body_fn, state0)
+    (E_old, E_new, _, positions_new, _, velocities_new, _, _, _, _) = final_carry
 
     # Update carrys for next step
     E_field = E_new
     B_field = B_new
     positions_plus1= positions_new
-    velocities_plus1 = velocities_new    
+    velocities_plus1 = velocities_new
+    
     charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)
 
-    carry = (E_field, B_field, positions_plus1,
-            velocities_plus1, qs, ms, q_ms)
+    carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
     
     # Collect data
     step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)

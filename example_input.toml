@@ -22,5 +22,5 @@ time_evolution_algorithm = 1
 number_grid_points = 100
 number_pseudoelectrons = 3000
 total_steps = 200
-number_of_Picard_iterations_implicit_CN = 7
+max_number_of_Picard_iterations_implicit_CN = 7
 number_of_particle_substeps_implicit_CN = 2

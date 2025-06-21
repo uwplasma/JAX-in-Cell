@@ -108,6 +108,7 @@ def initialize_simulation_parameters(user_parameters={}):
         "ion_charge_over_elementary_charge": 1,   # Ion charge in units of the elementary charge
         "ion_mass_over_proton_mass": 1,           # Ion mass in units of the proton mass
         "relativistic": False,                    # Use relativistic Boris pusher
+        "tolerance_Picard_iterations_implicit_CN": 1e-6, # Tolerance for Picard iterations in implicit Crank-Nicholson method
 
         # Boundary conditions
         "particle_BC_left":  0,                   # Left boundary condition for particles
@@ -135,7 +136,7 @@ def initialize_simulation_parameters(user_parameters={}):
     return parameters
 
 def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500, total_steps=350
-                                ,number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
+                                ,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
     
@@ -357,7 +358,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "number_grid_points": number_grid_points,
         "plasma_frequency": plasma_frequency,
         "max_initial_vth_electrons": vth_electrons,
-        "number_of_Picard_iterations_implicit_CN": number_of_Picard_iterations_implicit_CN, 
+        "max_number_of_Picard_iterations_implicit_CN": max_number_of_Picard_iterations_implicit_CN, 
         "number_of_particle_substeps_implicit_CN": number_of_particle_substeps_implicit_CN,
     })
     
@@ -365,9 +366,9 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
 
 @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver', "time_evolution_algorithm",
-                               "number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
+                               "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
 def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000, 
-               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
+               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
@@ -391,7 +392,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     # **Initialize simulation parameters**
     parameters = initialize_particles_fields(input_parameters, number_grid_points=number_grid_points,
                                              number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps,
-                                             number_of_Picard_iterations_implicit_CN=number_of_Picard_iterations_implicit_CN,
+                                             max_number_of_Picard_iterations_implicit_CN=max_number_of_Picard_iterations_implicit_CN,
                                              number_of_particle_substeps_implicit_CN=number_of_particle_substeps_implicit_CN)
 
     # Extract parameters for convenience
