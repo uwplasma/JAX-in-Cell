@@ -14,7 +14,7 @@ input_parameters = {
 "ion_temperature_over_electron_temperature": 1e-9, # Temperature of ions over temperature of electrons
 "timestep_over_spatialstep_times_c": 3, # dt * speed_of_light / dx
 "print_info"                   : True,  # print information about the simulation
-"tolerance_Picard_iterations_implicit_CN": 1e-4, # Tolerance for Picard iterations
+"tolerance_Picard_iterations_implicit_CN": 1e-5, # Tolerance for Picard iterations
 }
 
 solver_parameters = {
