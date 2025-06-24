@@ -59,7 +59,7 @@ for i, Ti in enumerate(ion_temperature_over_electron_temperature):
 ############### -------- #################
 print(f'Perform a simple optimization with {max_iterations_optimization} iterations')
 ## Using Least Squares
-res = least_squares(objective_function, x0=x0_optimization, jac=learning_rate, verbose=2, max_nfev=max_iterations_optimization)
+res = least_squares(objective_function, x0=x0_optimization, verbose=2, max_nfev=max_iterations_optimization)
 optimized_Ti = res.x[0]
 ## Using OPTAX
 # import optax
