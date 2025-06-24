@@ -15,6 +15,7 @@ electron_charge_over_elementary_charge = -1
 ion_charge_over_elementary_charge = 1
 ion_mass_over_proton_mass = 1
 relativistic = false
+tolerance_Picard_iterations_implicit_CN = 1e-5
 
 [solver_parameters]
 field_solver = 0
@@ -22,5 +23,5 @@ time_evolution_algorithm = 1
 number_grid_points = 100
 number_pseudoelectrons = 3000
 total_steps = 200
-max_number_of_Picard_iterations_implicit_CN = 7
+max_number_of_Picard_iterations_implicit_CN = 30
 number_of_particle_substeps_implicit_CN = 2
