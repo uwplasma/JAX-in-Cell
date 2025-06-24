@@ -28,7 +28,8 @@ solver_parameters = {
     "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
     "number_grid_points"     : 201,  # Number of grid points
     "number_pseudoelectrons" : 3000, # Number of pseudoelectrons
-    "total_steps"            : 8000, # Total number of time steps
+    "total_steps"            : 6000, # Total number of time steps
+    "time_evolution_algorithm": 0,  # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson (electrostatic)
 }
 
 output = block_until_ready(simulation(input_parameters, **solver_parameters))

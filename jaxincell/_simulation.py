@@ -14,6 +14,7 @@ from ._particles import fields_to_particles_grid, boris_step, boris_step_relativ
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
 from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
                       E_from_Poisson_1D_FFT, field_update1, field_update2)
+from ._algorithms import Boris_step, CN_step
 
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
@@ -107,6 +108,7 @@ def initialize_simulation_parameters(user_parameters={}):
         "ion_charge_over_elementary_charge": 1,   # Ion charge in units of the elementary charge
         "ion_mass_over_proton_mass": 1,           # Ion mass in units of the proton mass
         "relativistic": False,                    # Use relativistic Boris pusher
+        "tolerance_Picard_iterations_implicit_CN": 1e-6, # Tolerance for Picard iterations in implicit Crank-Nicholson method
 
         # Boundary conditions
         "particle_BC_left":  0,                   # Left boundary condition for particles
@@ -133,7 +135,8 @@ def initialize_simulation_parameters(user_parameters={}):
 
     return parameters
 
-def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500, total_steps=350):
+def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500, total_steps=350
+                                ,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
     
@@ -355,14 +358,17 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "number_grid_points": number_grid_points,
         "plasma_frequency": plasma_frequency,
         "max_initial_vth_electrons": vth_electrons,
+        "max_number_of_Picard_iterations_implicit_CN": max_number_of_Picard_iterations_implicit_CN, 
+        "number_of_particle_substeps_implicit_CN": number_of_particle_substeps_implicit_CN,
     })
     
     return parameters
 
 
-@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver'])
-def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000, field_solver=0,
-               positions=None, velocities=None):
+@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver', "time_evolution_algorithm",
+                               "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
+def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000, 
+               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
@@ -385,7 +391,9 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     """
     # **Initialize simulation parameters**
     parameters = initialize_particles_fields(input_parameters, number_grid_points=number_grid_points,
-                                             number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps)
+                                             number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps,
+                                             max_number_of_Picard_iterations_implicit_CN=max_number_of_Picard_iterations_implicit_CN,
+                                             number_of_particle_substeps_implicit_CN=number_of_particle_substeps_implicit_CN)
 
     # Extract parameters for convenience
     dx = parameters["dx"]
@@ -420,75 +428,31 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         positions - (dt / 2) * velocities,
         parameters["charges"], dx, grid, *box_size,
         particle_BC_left, particle_BC_right)
-
-    initial_carry = (
-        E_field, B_field, positions_minus1_2, positions,
-        positions_plus1_2, velocities, qs, ms, q_ms,)
+    
+    if time_evolution_algorithm == 0:
+        initial_carry = (
+            E_field, B_field, positions_minus1_2, positions,
+            positions_plus1_2, velocities, qs, ms, q_ms,
+        )
+        step_func = lambda carry, step_index: Boris_step(
+            carry, step_index, parameters, dx, dt, grid, box_size,
+            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, field_solver
+        )
+    else:
+        initial_carry = (
+            E_field, B_field, positions,
+            velocities, qs, ms, q_ms,
+        )
+        step_func = lambda carry, step_index: CN_step(
+            carry, step_index, parameters, dx, dt, grid, box_size,
+            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right,
+            parameters["number_of_particle_substeps_implicit_CN"]
+        )
 
     @scan_tqdm(total_steps)
     def simulation_step(carry, step_index):
-        (E_field, B_field, positions_minus1_2, positions,
-         positions_plus1_2, velocities, qs, ms, q_ms) = carry
-        
-        J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
-                    qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-        E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
-        
-        # Add external fields
-        total_E = E_field + parameters["external_electric_field"]
-        total_B = B_field + parameters["external_magnetic_field"]
-
-        # Interpolate fields to particle positions
-        def interpolate_fields(x_n):
-            E = fields_to_particles_grid(x_n, total_E, dx, grid + dx/2, grid[0], field_BC_left, field_BC_right)
-            B = fields_to_particles_grid(x_n, total_B, dx, grid, grid[0] - dx/2, field_BC_left, field_BC_right)
-            return E, B
-
-        E_field_at_x, B_field_at_x = vmap(interpolate_fields)(positions_plus1_2)
-
-        # Particle update: Boris pusher
-        positions_plus3_2, velocities_plus1 = lax.cond(
-            parameters["relativistic"],
-            lambda _: boris_step_relativistic(dt, positions_plus1_2, velocities, qs, ms, E_field_at_x, B_field_at_x),
-            lambda _: boris_step(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
-            operand=None
-        )
-
-        # Apply boundary conditions
-        positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
-            positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
-            *box_size, particle_BC_left, particle_BC_right)
-        
-        positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
-                                           qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
-
-        J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                    qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-        E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
-        
-        if field_solver != 0:
-            charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
-            switcher = {
-                1: E_from_Gauss_1D_FFT,
-                2: E_from_Gauss_1D_Cartesian,
-                3: E_from_Poisson_1D_FFT,
-            }
-            E_field = E_field.at[:,0].set(switcher[field_solver](charge_density, dx))
-
-        # Update positions and velocities
-        positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2
-        velocities = velocities_plus1
-        positions = positions_plus1
-
-        # Prepare state for the next step
-        carry = (E_field, B_field, positions_minus1_2, positions,
-                 positions_plus1_2, velocities, qs, ms, q_ms)
-
-        # Collect data for storage
-        charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
-        step_data = (positions, velocities, E_field, B_field, J, charge_density)
-        
-        return carry, step_data
+        return step_func(carry, step_index)
+ 
 
     # Run simulation
     _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
