@@ -8,10 +8,11 @@ from jax import block_until_ready
 input_parameters = {
 "length"                       : 1e-2,  # dimensions of the simulation box in (x, y, z)
 "amplitude_perturbation_x"     : 4e-3,  # amplitude of sinusoidal perturbation in x
-"wavenumber_electrons": 8, # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
+"wavenumber_electrons_x": 8, # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
+"velocity_plus_minus_electrons_x": False, # create two groups of electrons moving in opposite directions
 "grid_points_per_Debye_length" : 10,     # dx over Debye length
-"vth_electrons_over_c"         : 0.05,  # thermal velocity of electrons over speed of light
-"ion_temperature_over_electron_temperature": 1e-9, # Temperature of ions over temperature of electrons
+"vth_electrons_over_c_x"         : 0.05,  # thermal velocity of electrons over speed of light
+"ion_temperature_over_electron_temperature_x": 1e-9, # Temperature of ions over temperature of electrons
 "timestep_over_spatialstep_times_c": 3, # dt * speed_of_light / dx
 "print_info"                   : True,  # print information about the simulation
 "tolerance_Picard_iterations_implicit_CN": 1e-5, # Tolerance for Picard iterations
