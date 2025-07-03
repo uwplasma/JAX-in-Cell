@@ -29,9 +29,22 @@ def diagnostics(output):
     
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
-    integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
+    # integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
     integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dx'])
-    
+
+    # def nd_trapezoid(arr, dxs):
+    #     # arr: ndarray to integrate
+    #     # dxs: list/tuple of grid spacings for each axis
+    #     for axis, dx in enumerate(dxs):
+    #         arr = jnp.trapezoid(arr, dx=dx, axis=axis)
+    #     return arr
+
+    # # Build dxs tuple with only components that are not 1
+    # dxs = tuple(d for d in (dx, dy, dz) if d != 1)
+
+    # E2_integral = jnp.squeeze( nd_trapezoid(Ex**2 + Ey**2 + Ez**2, dxs))
+    integral_E_squared = jnp.squeeze(jnp.trapezoid(abs_E_squared, dx=output['dx']))
+
     abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
     abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
     integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])

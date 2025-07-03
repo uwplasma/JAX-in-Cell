@@ -24,8 +24,8 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
     
-    J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+    # J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
+    #             qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
     # E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
 
     # E_field = E_field.at[:,0].set(1e-2)
@@ -34,7 +34,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     # E_field = jnp.zeros_like(E_field)
     
-    B_field = jnp.zeros_like(B_field)
+    # B_field = jnp.zeros_like(B_field)
     # Add external fields
     total_E = E_field + parameters["external_electric_field"]
     total_B = B_field + parameters["external_magnetic_field"]
@@ -59,7 +59,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # jprint("Average B_at_x: {}", jnp.mean(jnp.abs( B_field_at_x ) ) )
 
     # jprint("velocity of particle 1 {}", velocities[0,0])
-    jprint("\nposition of particle 1 {}", positions[0,0])
+    # jprint("\nposition of particle 1 {}", positions[0,0])
 
     # Particle update: Boris pusher
     positions_plus3_2, velocities_plus1 = lax.cond(
@@ -82,6 +82,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
 
     J = J_from_rhov(positions, velocities, qs, grid)
+    E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
 
     if field_solver != 0:
         charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)

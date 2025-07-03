@@ -293,3 +293,20 @@ def plot(output, direction="x", threshold=1e-12):
     for t, e in enumerate(zip(time, energy)):
         # print(e)
         file.write(f"{e[0]} {e[1]}\n")
+    file.close()
+
+
+    magnetic_field = output['magnetic_field_energy']
+    electric_field = output['electric_field_energy']
+    kinetic_energy_electrons = output['kinetic_energy_electrons']
+    kinetic_energy_ions = output['kinetic_energy_ions']
+
+    file = open("magnetic_field.txt", "a")
+    for t, e in enumerate(zip(time, magnetic_field)):
+        file.write(f"{e[0]} {e[1]}\n")
+    file.close()
+
+    file = open("electric_field.txt", "a")
+    for t, e in enumerate(zip(time, electric_field)):
+        file.write(f"{e[0]} {e[1]}\n")
+    file.close()
