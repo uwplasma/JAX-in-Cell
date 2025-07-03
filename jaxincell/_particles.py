@@ -148,24 +148,26 @@ def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_s, m_s, E_fields_at_x, B_f
 
     def single_particle_step(x, v, q, m, E, B):
         # Compute initial momentum
-        gamma_n = 1/jnp.sqrt(1.0 - jnp.sum((v / c) ** 2))
+        # gamma_n = 1/jnp.sqrt(1.0 - jnp.sum((v / c) ** 2))
 
-        p_n = gamma_n * m * v
+        # p_n = gamma_n * m * v
 
-        # Half electric field acceleration
-        p_minus = p_n + q * E * dt / 2
+        # # Half electric field acceleration
+        # p_minus = p_n + q * E * dt / 2
 
-        # Magnetic rotation
-        p_plus = relativistic_rotation(dt, B, p_minus, q, m)
+        # # Magnetic rotation
+        # p_plus = relativistic_rotation(dt, B, p_minus, q, m)
 
-        # Second half electric field acceleration
-        p_nplus1 = p_plus + q * E * dt / 2
+        # # Second half electric field acceleration
+        # p_nplus1 = p_plus + q * E * dt / 2
 
-        # Compute new gamma
-        gamma_nplus1 = jnp.sqrt(1.0 + jnp.sum((p_nplus1 / (m * c)) ** 2))
+        # # Compute new gamma
+        # gamma_nplus1 = jnp.sqrt(1.0 + jnp.sum((p_nplus1 / (m * c)) ** 2))
 
-        # Recover new velocity
-        v_nplus1 = p_nplus1 / (gamma_nplus1 * m)
+        # # Recover new velocity
+        # v_nplus1 = p_nplus1 / (gamma_nplus1 * m)
+
+        v_nplus1 = v + (q / m) * E * dt
 
         # Update position using new velocity
         x_nplus3_2 = x + dt * v_nplus1

@@ -15,6 +15,7 @@ from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_elect
 from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
                       E_from_Poisson_1D_FFT, field_update1, field_update2)
 from ._algorithms import Boris_step, CN_step
+import numpy as np
 
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
@@ -191,17 +192,17 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Ion positions: Add random y, z positions to uniform grid x positions
     ion_xs = lax.cond(parameters["random_positions_x"],
-        lambda _: uniform(PRNGKey(seed+1), shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
+        lambda _: uniform(PRNGKey(seed+7), shape=(number_pseudoelectrons,), minval=-box_size[0] / 2, maxval=box_size[0] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_x_ions = parameters["wavenumber_ions_x"] * 2 * jnp.pi / length
     ion_xs+= parameters["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x_ions * ion_xs)
     ion_ys = lax.cond(parameters["random_positions_y"],
-        lambda _: uniform(PRNGKey(seed+2), shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
+        lambda _: uniform(PRNGKey(seed+8), shape=(number_pseudoelectrons,), minval=-box_size[1] / 2, maxval=box_size[1] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_y_ions = parameters["wavenumber_ions_y"] * 2 * jnp.pi / length
     ion_ys+= parameters["amplitude_perturbation_y"] * jnp.sin(wavenumber_perturbation_y_ions * ion_ys)
     ion_zs = lax.cond(parameters["random_positions_z"],
-        lambda _: uniform(PRNGKey(seed+3), shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
+        lambda _: uniform(PRNGKey(seed+9), shape=(number_pseudoelectrons,), minval=-box_size[2] / 2, maxval=box_size[2] / 2),
         lambda _: jnp.linspace(-length / 2, length / 2, number_pseudoelectrons), operand=None)
     wavenumber_perturbation_z_ions = parameters["wavenumber_ions_z"] * 2 * jnp.pi / length
     ion_zs+= parameters["amplitude_perturbation_z"] * jnp.sin(wavenumber_perturbation_z_ions * ion_zs)
@@ -260,11 +261,11 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # **Particle Velocities**
     # Electron thermal velocities and drift speeds
-    v_electrons_x = parameters["vth_electrons_over_c_x"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+7), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_x"]
+    v_electrons_x = parameters["vth_electrons_over_c_x"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+4), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_x"]
     v_electrons_x = jnp.where(parameters["velocity_plus_minus_electrons_x"], v_electrons_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_x)
-    v_electrons_y = parameters["vth_electrons_over_c_y"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+8), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_y"]
+    v_electrons_y = parameters["vth_electrons_over_c_y"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+5), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_y"]
     v_electrons_y = jnp.where(parameters["velocity_plus_minus_electrons_y"], v_electrons_y * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_y)
-    v_electrons_z = parameters["vth_electrons_over_c_z"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+9), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_z"]
+    v_electrons_z = parameters["vth_electrons_over_c_z"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+6), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_z"]
     v_electrons_z = jnp.where(parameters["velocity_plus_minus_electrons_z"], v_electrons_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_z)
     electron_velocities = jnp.stack((v_electrons_x, v_electrons_y, v_electrons_z), axis=1)
     
@@ -279,6 +280,21 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     v_ions_z = vth_ions_z / jnp.sqrt(2) * normal(PRNGKey(seed+12), shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_z"]
     v_ions_z = jnp.where(parameters["velocity_plus_minus_ions_z"], v_ions_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_z)
     ion_velocities = jnp.stack((v_ions_x, v_ions_y, v_ions_z), axis=1)
+
+
+    jnp.save('evx.npy', v_electrons_x)
+    jnp.save('evy.npy', v_electrons_y)
+    jnp.save('evz.npy', v_electrons_z)
+    jnp.save('ivx.npy', v_ions_x)
+    jnp.save('ivy.npy', v_ions_y)
+    jnp.save('ivz.npy', v_ions_z)
+
+    jnp.save('ex.npy', electron_xs)
+    jnp.save('ey.npy', electron_ys)
+    jnp.save('ez.npy', electron_zs)
+    jnp.save('ix.npy', ion_xs)
+    jnp.save('iy.npy', ion_ys)
+    jnp.save('iz.npy', ion_zs)
     
     # Combine electron and ion velocities
     velocities = jnp.concatenate((electron_velocities, ion_velocities))
@@ -286,10 +302,45 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     speed_limit = 0.99 * speed_of_light
     velocities = jnp.where(jnp.abs(velocities) >= speed_limit, jnp.sign(velocities) * speed_limit, velocities)
 
+    import matplotlib.pyplot as plt
+
+    # Plot histograms for initial positions
+    fig_pos, axs_pos = plt.subplots(1, 3, figsize=(15, 4))
+    labels = ['x', 'y', 'z']
+    positions_np = np.array(positions)
+    for i in range(3):
+        axs_pos[i].hist(positions_np[:number_pseudoelectrons, i], bins=50, alpha=0.7, label='Electrons')
+        axs_pos[i].hist(positions_np[number_pseudoelectrons:, i], bins=50, alpha=0.7, label='Ions')
+        axs_pos[i].set_title(f'Initial {labels[i]} positions')
+        axs_pos[i].set_xlabel(f'{labels[i]} (m)')
+        axs_pos[i].set_ylabel('Count')
+        axs_pos[i].legend()
+    fig_pos.tight_layout()
+    plt.savefig('initial_positions.png')
+
+    # Plot histograms for initial velocities
+    fig_vel, axs_vel = plt.subplots(1, 3, figsize=(15, 4))
+    velocities_np = np.array(velocities)
+    for i in range(3):
+        axs_vel[i].hist(velocities_np[:number_pseudoelectrons, i], bins=50, alpha=0.7, label='Electrons')
+        axs_vel[i].hist(velocities_np[number_pseudoelectrons:, i], bins=50, alpha=0.7, label='Ions')
+        axs_vel[i].set_title(f'Initial {labels[i]} velocities')
+        axs_vel[i].set_xlabel(f'v_{labels[i]} (m/s)')
+        axs_vel[i].set_ylabel('Count')
+        axs_vel[i].legend()
+    fig_vel.tight_layout()
+    # plt.show()
+    plt.savefig('initial_velocities.png')
+
+    print(f"Particle Weights: {weight}")
+
+
     # Grid setup
     dx = length / number_grid_points
     grid = jnp.linspace(-length / 2 + dx / 2, length / 2 - dx / 2, number_grid_points)
     dt = parameters["timestep_over_spatialstep_times_c"] * dx / speed_of_light
+
+    print(dt)
 
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electrons**2)/jnp.sqrt(mass_electrons)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
@@ -365,8 +416,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     return parameters
 
 
-@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver', "time_evolution_algorithm",
-                               "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
+# @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver', "time_evolution_algorithm",
+                            #    "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
 def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000, 
                field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """

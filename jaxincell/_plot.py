@@ -267,3 +267,29 @@ def plot(output, direction="x", threshold=1e-12):
 
     plt.tight_layout()
     plt.show()
+
+
+    fields = output['electric_field']
+
+    for t, field in enumerate(fields):
+        # print(field.shape)
+        jnp.save(f"two_stream_fields_jax/electric_field_{t}.npy", field[:, 0])
+
+
+    jxs = output['current_density']
+    for t, jx in enumerate(jxs):
+        # print(jx.shape)
+        jnp.save(f"two_stream_fields_jax/current_density_{t}.npy", jx[:, 0])
+
+
+    rhos = output['charge_density']
+    for t, rho in enumerate(rhos):
+        # print(rho.shape)
+        jnp.save(f"two_stream_fields_jax/charge_density_{t}.npy", rho)
+
+
+    energy = output['total_energy']
+    file   = open("total_energy.txt", "a")
+    for t, e in enumerate(zip(time, energy)):
+        # print(e)
+        file.write(f"{e[0]} {e[1]}\n")

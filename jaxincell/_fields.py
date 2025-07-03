@@ -176,19 +176,19 @@ def field_update(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
 @jit
 def field_update1(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
     #First, update E (Ampere's)
-    curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
-    E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
+    # curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
+    E_fields -= dt*(j/epsilon_0)
     #Then, update B (Faraday's)
     curl_E = curlE(E_fields, B_fields, dx, dt, field_BC_left, field_BC_right)
-    B_fields -= dt*curl_E
+    # B_fields -= dt*curl_E
     return E_fields,B_fields
 
 @jit
 def field_update2(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
     #First, update B (Faraday's)
     curl_E = curlE(E_fields, B_fields, dx, dt, field_BC_left, field_BC_right)
-    B_fields -= dt*curl_E
+    # B_fields -= dt*curl_E
     #Then, update E (Ampere's)
-    curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
-    E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
+    # curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
+    E_fields -= dt*(j/epsilon_0)
     return E_fields,B_fields

@@ -2,10 +2,11 @@ import jax.numpy as jnp
 from jax import lax,  vmap, jit
 from functools import partial
 
-from ._sources import current_density, calculate_charge_density
+from ._sources import current_density, calculate_charge_density, J_from_rhov
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
+from jax.debug import print as jprint
 from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
                       E_from_Poisson_1D_FFT, field_update1, field_update2)
 
@@ -25,8 +26,15 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     
     J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-    E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+    # E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+
+    # E_field = E_field.at[:,0].set(1e-2)
+    # E_field = E_field.at[:,1].set(0.0)
+    # E_field = E_field.at[:,2].set(0.0)
+
+    # E_field = jnp.zeros_like(E_field)
     
+    B_field = jnp.zeros_like(B_field)
     # Add external fields
     total_E = E_field + parameters["external_electric_field"]
     total_B = B_field + parameters["external_magnetic_field"]
@@ -38,6 +46,20 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
         return E, B
 
     E_field_at_x, B_field_at_x = vmap(interpolate_fields)(positions_plus1_2)
+    # JIT-compatible checks for non-zero fields (will not raise, but can log or set flags)
+    E_field_at_x_nonzero = jnp.any(E_field_at_x != 0)
+    B_field_at_x_nonzero = jnp.any(B_field_at_x != 0)
+    # Optionally, you can return these flags or log them for debugging outside JIT
+
+    # jprint("E_field_at_x nonzero: {}", E_field_at_x_nonzero)
+    # jprint("B_field_at_x nonzero: {}", B_field_at_x_nonzero)
+
+    # # Print non-zero values of E_field_at_x and B_field_at_x for debugging
+    # jprint("Average E_at_x: {}", jnp.mean(jnp.abs( E_field_at_x ) ) )
+    # jprint("Average B_at_x: {}", jnp.mean(jnp.abs( B_field_at_x ) ) )
+
+    # jprint("velocity of particle 1 {}", velocities[0,0])
+    jprint("\nposition of particle 1 {}", positions[0,0])
 
     # Particle update: Boris pusher
     positions_plus3_2, velocities_plus1 = lax.cond(
@@ -55,10 +77,12 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
-    J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-    E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
-    
+    # J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
+    #             qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+    # E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+
+    J = J_from_rhov(positions, velocities, qs, grid)
+
     if field_solver != 0:
         charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
         switcher = {

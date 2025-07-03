@@ -5,6 +5,9 @@ from jaxincell import plot, simulation, load_parameters
 import numpy as np
 import pickle
 import json
+import jax
+
+# jax.config.update("jax_disable_jit", True)
 
 # Read from input.toml
 input_parameters, solver_parameters = load_parameters('input.toml')
