@@ -24,9 +24,9 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
     
-    # J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
-    #             qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-    # E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+    J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
+                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+    E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
 
     # E_field = E_field.at[:,0].set(1e-2)
     # E_field = E_field.at[:,1].set(0.0)
@@ -47,8 +47,8 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     E_field_at_x, B_field_at_x = vmap(interpolate_fields)(positions_plus1_2)
     # JIT-compatible checks for non-zero fields (will not raise, but can log or set flags)
-    E_field_at_x_nonzero = jnp.any(E_field_at_x != 0)
-    B_field_at_x_nonzero = jnp.any(B_field_at_x != 0)
+    # E_field_at_x_nonzero = jnp.any(E_field_at_x != 0)
+    # B_field_at_x_nonzero = jnp.any(B_field_at_x != 0)
     # Optionally, you can return these flags or log them for debugging outside JIT
 
     # jprint("E_field_at_x nonzero: {}", E_field_at_x_nonzero)
@@ -77,11 +77,11 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
-    # J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-    #             qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
-    # E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+    J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
+                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+    E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
 
-    J = J_from_rhov(positions, velocities, qs, grid)
+    # J = J_from_rhov(positions, velocities, qs, grid)
     E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
 
     if field_solver != 0:
