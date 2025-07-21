@@ -2,10 +2,8 @@
 title: 'Gala: A Python package for galactic dynamics'
 tags:
   - Python
-  - astronomy
+  - plasma
   - dynamics
-  - galactic dynamics
-  - milky way
 authors:
   - name: Adrian M. Price-Whelan
     orcid: 0000-0000-0000-0000
@@ -40,54 +38,146 @@ aas-journal: Astrophysical Journal <- The name of the AAS journal.
 
 # Summary
 
-The forces on stars, galaxies, and dark matter under external gravitational
-fields lead to the dynamical evolution of structures in the universe. The orbits
-of these bodies are therefore key to understanding the formation, history, and
-future state of galaxies. The field of "galactic dynamics," which aims to model
-the gravitating components of galaxies to study their structure and evolution,
-is now well-established, commonly taught, and frequently used in astronomy.
-Aside from toy problems and demonstrations, the majority of problems require
-efficient numerical tools, many of which require the same base code (e.g., for
-performing numerical orbit integration).
+Particle‐in‐cell (PIC) methods are widely used to study the dynamics of charged particles interacting with electromagnetic fields. In a typical PIC framework, the domain is discretized on a grid and particles are represented by pseudo particles, with evolution carried out via a field solver, a particle pusher, and suitable boundary conditions. Jaxincell implements 1D3V PIC in JAX, enabling GPU acceleration, just in time (JIT) compilation, vectorized operations, and automatic differentiation to speed up simulations.
+
 
 # Statement of need
 
-`Gala` is an Astropy-affiliated Python package for galactic dynamics. Python
-enables wrapping low-level languages (e.g., C) for speed without losing
-flexibility or ease-of-use in the user-interface. The API for `Gala` was
-designed to provide a class-based and user-friendly interface to fast (C or
-Cython-optimized) implementations of common operations such as gravitational
-potential and force evaluation, orbit integration, dynamical transformations,
-and chaos indicators for nonlinear dynamics. `Gala` also relies heavily on and
-interfaces well with the implementations of physical units and astronomical
-coordinate systems in the `Astropy` package [@astropy] (`astropy.units` and
-`astropy.coordinates`).
+Accurate and efficient tools are essential for modeling plasmas, whether for rapid testing of analytical ideas or large-scale optimization tasks. There is a need for modern PIC software that combines speed, flexibility, and ease of use. Jaxincell meets this need, offering high-performance simulations suitable for both research and educational purposes.
 
-`Gala` was designed to be used by both astronomical researchers and by
-students in courses on gravitational dynamics or astronomy. It has already been
-used in a number of scientific publications [@Pearson:2017] and has also been
-used in graduate courses on Galactic dynamics to, e.g., provide interactive
-visualizations of textbook material [@Binney:2008]. The combination of speed,
-design, and support for Astropy functionality in `Gala` will enable exciting
-scientific explorations of forthcoming data releases from the *Gaia* mission
-[@gaia] by students and experts alike.
+While PIC methods are well established, many codes remain closed‑source, written in legacy languages like Fortran, and carry high computational and maintenance costs. In contrast, Jaxincell is implemented entirely in Python, making it immediately accessible to a broad community of researchers and students. Furthermore, although the classic Boris push is both simple and robust, long‐term simulations can accumulate energy errors. To address this, Jaxincell includes not only the standard Boris algorithm but also an implicit, discretely energy‐conserving scheme.
 
-# Mathematics
+# Structure
 
-Single dollars ($) are required for inline mathematics e.g. $f(x) = e^{\pi/x}$
+The core of our PIC code is the Vlasov–Maxwell system.  In particular, we solve
 
-Double dollars make self-standing equations:
-
-$$\Theta(x) = \left\{\begin{array}{l}
-0\textrm{ if } x < 0\cr
-1\textrm{ else}
-\end{array}\right.$$
-
-You can also use plain \LaTeX for equations
-\begin{equation}\label{eq:fourier}
-\hat f(\omega) = \int_{-\infty}^{\infty} f(x) e^{i\omega x} dx
+\begin{equation}
+\label{pusher}
+\partial_t f_s
++ v \cdot \nabla f_s
++ \frac{q_s}{m_s} \left( E + v \times B \right) \cdot \nabla_{\mathbf{u}} f_s = 0,
 \end{equation}
-and refer to \autoref{eq:fourier} from text.
+
+\begin{equation}
+\label{half_B}
+\frac{\partial \mathbf{B}}{\partial t} 
++ \nabla \times \mathbf{E} = 0,
+\end{equation}
+
+\begin{equation}
+\label{half_E}
+\varepsilon_0 \frac{\partial \mathbf{E}}{\partial t}
+- c^2 \nabla \times \mathbf{B}
++ \mathbf{j} = 0.
+\end{equation}
+
+where $f_s(x,u)\approx\sum_{p\in s}w_p \delta(x-x_p)\delta(u-u_p)$ the distribution function is discretized by pseudo‑particle, $x$ is the position, $v$ is the velocity, $u=v\gamma$ is the proper velocity and $\gamma=\sqrt{1+u^2/c^2}$ is the Lorentz factor with c speed of light.
+
+For notation, we will use s to label the species of particle, i to label the cell, n to label the step of time, and p to label the pseudo-particles. To reduce numerical noise, we represent each pseudo‑particle with a B‑spline shape function that spans three cells.  Its contribution to the charge density at cell $i$ is
+
+\begin{equation}
+\rho(x_p) =
+\begin{cases}
+\displaystyle
+\frac{q}{\Delta x}
+\left(
+\frac{3}{4}
+- \frac{(x_p - x_i)^2}{\Delta x^2}
+\right),
+& \text{if } \left| x_p - x_i \right| \le \frac{\Delta x}{2}, \\[10pt]
+\displaystyle
+\frac{q}{2 \Delta x}
+\left(
+\frac{3}{2}
+- \frac{\left| x_p - x_i \right|}{\Delta x}
+\right)^2,
+& \text{if } \frac{\Delta x}{2} < \left| x_p - x_i \right| \le \frac{3 \Delta x}{2}, \\[10pt]
+0, & \text{if } \left| x_p - x_i \right| > \frac{3 \Delta x}{2}.
+\end{cases}
+\end{equation}
+
+Then, interpolation for fields is required as pseudo-particle weights span more than a single cell. Note, it is shifted by one cell due to ghost cells.
+
+\begin{equation}
+F(x_p)=
+\frac{1}{2} F_{i-1} 
+(
+\frac{1}{2} + \frac{x_i - x_p}{\Delta x}
+)^2
++
+F_i 
+(
+\frac{3}{4} - \frac{(x_i - x_p)^2}{\Delta x^2}
+)
++
+\frac{1}{2} F_{i+1}
+(
+\frac{1}{2} - \frac{x_i - x_p}{\Delta x}
+)^2.
+\label{field}
+\end{equation}
+
+ We implement two standard methods, one explicit and one implicit. For explict method, we use the Boris Algorithm that have the following steps. 
+
+1: Initialization with $E_i^n,B_i^n,v_p^n,x_p^{n-\frac{1}{2}},x_p^n,x_p^{n+\frac{1}{2}}$
+
+2: Prepare the field $E(x_p^n),B(x_p^n)$ for the particle pusher by \autoref{field}
+
+3: Push the particle as follows from \autoref{pusher}. 
+
+(a) Electric half‑kick: $$v_p^{n+1/2}=v_p^n+\frac{q_p}{2m_p{\Delta t}} E(x_p^n) ,$$
+
+(b) Magnetic rotation with second electric half‑kick: 
+
+$${v_p^{n+1}} = \text{BorisRotate}(v_p^{n+1/2}, B(x_p^n))+\frac{q_p}{2m_p{\Delta t}} E(x_p^n),$$
+
+
+(c) Position update (with centered interpolation): 
+
+$$x_p^{n+\frac{3}{2}} = x_p^{n+\frac{1}{2}}+v_p^{n+1}{\Delta t}, x_p^{n+1}=\frac{1}{2}(x_p^{n+\frac{3}{2}}+x_p^{n+\frac{1}{2}})$$
+
+4: Update the field according to \autoref{half_E} and \autoref{half_B}. 
+
+(a) Electric half‑step:    
+
+$$E_i^{n+\frac{1}{2}}= E_i^n +(c^2\nabla_i\times B_i^n - \frac{j_i^n}{\epsilon_0})\frac{\Delta t}{2}$$
+
+(b) Magnetic full‑step:
+
+$$B_i^{n+1} = B_i^n - (\nabla_i\times E_i^{n+\frac{1}{2}})\Delta t$$
+
+(c) Electric half‑step:
+
+$$ E_i^{n+1} = E_i^{n+\frac{1}{2}} +(c^2\nabla_i\times B_i^{n+1} - \frac{j_i^{n+1}}{\epsilon_0})\frac{\Delta t}{2}. $$
+
+5: Save the carry for next step $E_i^{n+1},B_i^{n+1},v_p^{n+1},x_p^{n+\frac{1}{2}},x_p^{n+1},x_p^{n+\frac{3}{2}}$
+
+Implicit method is similar but run iteration to solve the exact system of equation through Picard iteration. For simplicity we will set magnetic field to 0 and the Crank–Nicolson step follows:
+
+1: Initialization with $E_i^n,v_p^n,x_p^n$
+
+2: Picard iteration with intial guess $x_p^{n+\frac{1}{2}}=x_p^n$
+
+
+(a) Prepare the field $E(x_p^{n+\frac{1}{2}})$ for the particle pusher
+
+(b) Push the particle as follows from \autoref{pusher}: 
+
+$$v_p^{n+1}=v_p^n+\frac{q_p}{m_p{\Delta t}} E(x_p^{n+\frac{1}{2}}), v_p^{n+\frac{1}{2}}=\frac{1}{2}(v_p^{n}+v_p^{n+1}),$$ 
+
+$$x_p^{n+1} = x_p^n+v_p^{n+1/2}\Delta t$$
+
+(c) Update the field according to \autoref{half_E}
+
+$$ E_i^{n+1} = E_i^n  - \frac{1}{\epsilon_0} j_i^{n+1} \Delta t.$$
+
+3: Check convergence. If $|E_\text{new}-E_\text{old}|<\text{tol}$, save  $E_i^{n+1},v_p^{n+1},x_p^{n+1}$ for next step. Otherwise, set $x_p^{n+\frac{1}{2}} = \frac{1}{2}\bigl(x_p^n + x_p^{n+1}\bigr)$ and return to step 2
+
+# Capabilities
+
+Two-stream instability, Landau damping, and Weibel instability are used for testing the correctness of the algorithms.
+
+
 
 # Citations
 
