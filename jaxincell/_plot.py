@@ -164,19 +164,19 @@ def plot(output, direction="x", threshold=1e-12):
         energy_ax.set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)",
                     ylabel="Energy (J)", yscale="log", ylim=[1e-7, None])
         energy_ax.legend(fontsize=7)
-    
+
     if second_direction:
         electron_ax2 = axes_flat[used_axes + 1]
         ion_ax2 = axes_flat[used_axes + 2]
         positions_ax = axes_flat[used_axes + 3]
-        
+
         # Phase space in second direction
         max_velocity_electrons_2 = max(1.0 * jnp.max(output["velocity_electrons"][:, :, direction_index2]),
                                     2.5 * jnp.abs(vth_e_2) + jnp.abs(output[f"electron_drift_speed_{direction2}"]))
         max_velocity_ions_2 = max(1.0 * jnp.max(output["velocity_ions"][:, :, direction_index2]),
                                 sqrtmemi * 0.3 * jnp.abs(vth_i_2) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction2}"]) +
                                 jnp.abs(output[f"ion_drift_speed_{direction2}"]))
-        
+
         max_velocity_electrons_12 = max(max_velocity_electrons_1, max_velocity_electrons_2)
         max_velocity_ions_12      = max(max_velocity_ions_1, max_velocity_ions_2)
         electron_phase_histograms2 = vmap(lambda pos, vel: jnp.histogram2d(
@@ -204,7 +204,7 @@ def plot(output, direction="x", threshold=1e-12):
         ion_ax2.set(xlabel=f"Ion Velocity {direction1} (m/s)",
                     ylabel=f"Ion Velocity {direction2} (m/s)",
                     title=f"Ion Phase Space v{direction1} vs v{direction2}")
-        
+
         B_field_densities = output["magnetic_field_energy_density"]
         B0 = np.asarray(B_field_densities[0])
         global_max = np.asarray(B_field_densities).max()
@@ -226,12 +226,12 @@ def plot(output, direction="x", threshold=1e-12):
         scat_r.set_animated(True)
         scat_b.set_animated(True)
         im.set_animated(True)
-        
+
         # Time label
         animated_time_text2 = positions_ax.text(0.5, 0.9, "", transform=positions_ax.transAxes,
                                             ha="center", va="top", fontsize=12,
                                             bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
-        
+
         # Add marker explanation text
         positions_ax.text(0.02, 0.98, "Electrons: '<'", color="red",
                   transform=positions_ax.transAxes, ha="left", va="top",
@@ -239,7 +239,7 @@ def plot(output, direction="x", threshold=1e-12):
         positions_ax.text(0.02, 0.92, "Ions: '>'", color="blue",
                   transform=positions_ax.transAxes, ha="left", va="top",
                   fontsize=10, bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
-        
+
     def update(frame):
         electron_plot.set_array(electron_phase_histograms[frame].T)
         ion_plot.set_array(ion_phase_histograms[frame].T)
@@ -247,7 +247,7 @@ def plot(output, direction="x", threshold=1e-12):
         if second_direction:
             electron_plot2.set_array(electron_phase_histograms2[frame].T)
             ion_plot2.set_array(ion_phase_histograms2[frame].T)
-            
+
             x_electrons = np.asarray(output["position_electrons"][frame, subset_electrons, direction_index2])
             z_electrons = np.asarray(output["position_electrons"][frame, subset_electrons, direction_index1])
             x_ions = np.asarray(output["position_ions"][frame, subset_ions, direction_index2])

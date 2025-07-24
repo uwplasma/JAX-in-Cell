@@ -44,14 +44,14 @@ def load_parameters(input_file):
 
 def initialize_simulation_parameters(user_parameters={}):
     """
-    Initialize the simulation parameters for a particle-in-cell simulation, 
-    combining user-provided values with predefined defaults. This function 
-    ensures all required parameters are set and automatically calculates 
+    Initialize the simulation parameters for a particle-in-cell simulation,
+    combining user-provided values with predefined defaults. This function
+    ensures all required parameters are set and automatically calculates
     derived parameters based on the inputs.
 
-    The function uses lambda functions to define derived parameters that 
-    depend on other parameters. These lambda functions are evaluated after 
-    merging user-provided parameters with the defaults, ensuring derived 
+    The function uses lambda functions to define derived parameters that
+    depend on other parameters. These lambda functions are evaluated after
+    merging user-provided parameters with the defaults, ensuring derived
     parameters are consistent with any overrides.
 
     Parameters:
@@ -115,19 +115,19 @@ def initialize_simulation_parameters(user_parameters={}):
         "particle_BC_right": 0,                   # Right boundary condition for particles
         "field_BC_left":     0,                   # Left boundary condition for fields
         "field_BC_right":    0,                   # Right boundary condition for fields
-        
+
         # External fields (initialized to zero)
         "external_electric_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_electric_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
         "external_magnetic_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
-        
+
         "weight": 0,
     }
 
     # Merge user-provided parameters into the default dictionary
     parameters = {**default_parameters, **user_parameters}
-    
+
     # Compute derived parameters based on user-provided or default values
     for key, value in parameters.items():
         if callable(value):  # If the value is a lambda function, compute it
@@ -139,9 +139,9 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
                                 ,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
-    
-    This function generates particle positions, velocities, charges, masses, and 
-    charge-to-mass ratios, as well as the initial electric and magnetic fields. It 
+
+    This function generates particle positions, velocities, charges, masses, and
+    charge-to-mass ratios, as well as the initial electric and magnetic fields. It
     combines user-provided parameters with default values and calculates derived quantities.
 
     Parameters:
@@ -169,7 +169,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Random key generator for reproducibility
     seed = parameters["seed"]
-    
+
     # **Particle Positions**
     # Use random positions in x if requested, otherwise linspace
     electron_xs = lax.cond(parameters["random_positions_x"],
@@ -247,7 +247,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
                             / number_grid_points
                             / (vth_electrons_over_c)
     ))
-    
+
     charges = jnp.concatenate((
         charge_electrons * weight * jnp.ones((number_pseudoelectrons, 1)),
         charge_ions   * weight * jnp.ones((number_pseudoelectrons, 1))
@@ -267,7 +267,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     v_electrons_z = parameters["vth_electrons_over_c_z"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+9), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_z"]
     v_electrons_z = jnp.where(parameters["velocity_plus_minus_electrons_z"], v_electrons_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_z)
     electron_velocities = jnp.stack((v_electrons_x, v_electrons_y, v_electrons_z), axis=1)
-    
+
     # Ion thermal velocities and drift speeds
     vth_ions_x = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_x"])) * parameters["vth_electrons_over_c_x"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
     vth_ions_y = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_y"])) * parameters["vth_electrons_over_c_y"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
@@ -279,7 +279,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     v_ions_z = vth_ions_z / jnp.sqrt(2) * normal(PRNGKey(seed+12), shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_z"]
     v_ions_z = jnp.where(parameters["velocity_plus_minus_ions_z"], v_ions_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_z)
     ion_velocities = jnp.stack((v_ions_x, v_ions_y, v_ions_z), axis=1)
-    
+
     # Combine electron and ion velocities
     velocities = jnp.concatenate((electron_velocities, ion_velocities))
     # Cap velocities at 99% the speed of light
@@ -305,7 +305,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Ion temperature / Electron temperature: {}\n"
             "Debye length: {} m\n"
             "Skin depth: {} m\n"
-            "Wavenumber * Debye length: {}\n" 
+            "Wavenumber * Debye length: {}\n"
             "Pseudoparticles per cell: {}\n"
             "Pseudoparticle weight: {}\n"
             "Steps at each plasma frequency: {}\n"
@@ -329,13 +329,13 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
           jnp.max(relativistic_gamma_factor), jnp.mean(relativistic_gamma_factor),
           -charge_electrons * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electrons * vth_electrons**2 / 2),
         ), lambda _: None, operand=None)
-    
+
     # **Fields Initialization**
     B_field = jnp.zeros((grid.size, 3))
     E_field = jnp.zeros((grid.size, 3))
-    
+
     fields = (E_field, B_field)
-    
+
     external_E_field_x = parameters["external_electric_field_amplitude"] * jnp.cos(parameters["external_electric_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
     external_B_field_x = parameters["external_magnetic_field_amplitude"] * jnp.cos(parameters["external_magnetic_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
 
@@ -358,22 +358,22 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "number_grid_points": number_grid_points,
         "plasma_frequency": plasma_frequency,
         "max_initial_vth_electrons": vth_electrons,
-        "max_number_of_Picard_iterations_implicit_CN": max_number_of_Picard_iterations_implicit_CN, 
+        "max_number_of_Picard_iterations_implicit_CN": max_number_of_Picard_iterations_implicit_CN,
         "number_of_particle_substeps_implicit_CN": number_of_particle_substeps_implicit_CN,
     })
-    
+
     return parameters
 
 
 @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver', "time_evolution_algorithm",
                                "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
-def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000, 
+def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000,
                field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
     This function simulates the evolution of a plasma system by solving for particle motion
-    (electrons and ions) and self-consistent electromagnetic fields on a grid. It uses the 
+    (electrons and ions) and self-consistent electromagnetic fields on a grid. It uses the
     Boris algorithm for particle updates and a leapfrog scheme for field updates.
 
     Parameters:
@@ -423,12 +423,12 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         positions + (dt / 2) * velocities, velocities,
         parameters["charges"], parameters["masses"], parameters["charge_to_mass_ratios"],
         dx, grid, *box_size, particle_BC_left, particle_BC_right)
-    
+
     positions_minus1_2 = set_BC_positions(
         positions - (dt / 2) * velocities,
         parameters["charges"], dx, grid, *box_size,
         particle_BC_left, particle_BC_right)
-    
+
     if time_evolution_algorithm == 0:
         initial_carry = (
             E_field, B_field, positions_minus1_2, positions,
@@ -452,7 +452,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     @scan_tqdm(total_steps)
     def simulation_step(carry, step_index):
         return step_func(carry, step_index)
- 
+
 
     # Run simulation
     _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
@@ -460,7 +460,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     # Unpack results
     positions_over_time, velocities_over_time, electric_field_over_time, \
     magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
-    
+
     # **Output results**
     temporary_output = {
         "position_electrons": positions_over_time[ :, :number_pseudoelectrons, :],
@@ -480,9 +480,9 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         "total_steps": total_steps,
         "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
     }
-    
+
     output = {**temporary_output, **parameters}
 
     diagnostics(output)
-    
+
     return output

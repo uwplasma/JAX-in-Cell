@@ -25,7 +25,7 @@ input_parameters = {
 }
 
 solver_parameters = {
-    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
+    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT,
     "number_grid_points"     : 201,  # Number of grid points
     "number_pseudoelectrons" : 3000, # Number of pseudoelectrons
     "total_steps"            : 6000, # Total number of time steps
