@@ -131,6 +131,9 @@ seed_position_override = true
 seed_position = 10
 
 [solver_parameters]
+time_evolution_algorithm = 0  # 0: Boris solver, 1: implicit Crank-Nicholson
+max_number_of_Picard_iterations_implicit_CN = 30
+number_of_particle_substeps_implicit_CN = 2
 number_grid_points = 40  # number of grid CELLS, not edges/vertices
 field_solver = 0  # 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
 number_pseudoelectrons = 40000  # Total in entire domain

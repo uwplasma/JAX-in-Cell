@@ -24,8 +24,8 @@ diagnostics(output)
 # Plot the results
 plot(output)
 
-# # Save the output to a file
-# np.savez("simulation_output.npz", **output)
+# Save the output to a file
+np.savez("simulation_output.npz", **output)
 
 # # Load the output from the file
 # data = np.load("simulation_output.npz", allow_pickle=True)
