@@ -9,7 +9,7 @@ __all__ = ['E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cart
 @jit
 def E_from_Gauss_1D_FFT(charge_density, dx):
     """
-    Solve for the electric field E = -d(phi)/dx using FFT, 
+    Solve for the electric field E = -d(phi)/dx using FFT,
     where phi is derived from the 1D Gauss' law equation.
     Parameters:
     charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
@@ -34,7 +34,7 @@ def E_from_Gauss_1D_FFT(charge_density, dx):
 @jit
 def E_from_Poisson_1D_FFT(charge_density, dx):
     """
-    Solve for the electric field E = -d(phi)/dx using FFT, 
+    Solve for the electric field E = -d(phi)/dx using FFT,
     where phi is derived from the 1D Poisson equation.
     Parameters:
     charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
@@ -63,20 +63,20 @@ def E_from_Poisson_1D_FFT(charge_density, dx):
 @jit
 def E_from_Gauss_1D_Cartesian(charge_density, dx):
     """
-    Solve for the electric field at t=0 (E0) using the charge density distribution 
+    Solve for the electric field at t=0 (E0) using the charge density distribution
     and applying Gauss's law in a 1D system.
 
     Args:
         charge_density : 1D numpy array, source term (right-hand side of Gauss equation)
         dx : float, grid spacing in the x-direction
-    
+
     Returns:
         array: The electric field at each grid point due to the particles, shape (G,).
     """
     # Construct divergence matrix for solving Gauss' Law
     divergence_matrix = jnp.diag(jnp.ones(len(charge_density)))-jnp.diag(jnp.ones(len(charge_density)-1),k=-1)
     divergence_matrix.at[0,-1].set(-1)
-    
+
     # Solve for the electric field using Gauss' law in the 1D case
     E_field_from_Gauss = (dx / epsilon_0) * jnp.linalg.solve(divergence_matrix, charge_density)
     return E_field_from_Gauss
@@ -85,7 +85,7 @@ def E_from_Gauss_1D_Cartesian(charge_density, dx):
 @jit
 def curlE(E_field, B_field, dx, dt, field_BC_left, field_BC_right):
     """
-    Compute the curl of the electric field, which is related to the time derivative of 
+    Compute the curl of the electric field, which is related to the time derivative of
     the magnetic field in Maxwell's equations (Faraday's law).
 
     Args:
@@ -103,7 +103,7 @@ def curlE(E_field, B_field, dx, dt, field_BC_left, field_BC_right):
     ghost_cell_L, ghost_cell_R = field_ghost_cells_E(field_BC_left, field_BC_right, E_field, B_field)
     E_field = jnp.insert(E_field, 0, ghost_cell_L, axis=0)
     E_field = jnp.append(E_field, jnp.array([ghost_cell_R]), axis=0)
-    
+
     # Compute the curl using the finite difference approximation for 1D (only d/dx)
     dFz_dx = (E_field[1:-1, 2] - E_field[0:-2, 2]) / dx
     dFy_dx = (E_field[1:-1, 1] - E_field[0:-2, 1]) / dx
@@ -115,7 +115,7 @@ def curlE(E_field, B_field, dx, dt, field_BC_left, field_BC_right):
 @jit
 def curlB(B_field, E_field, dx, dt, field_BC_left, field_BC_right):
     """
-    Compute the curl of the magnetic field, which is related to the time derivative of 
+    Compute the curl of the magnetic field, which is related to the time derivative of
     the electric field in Maxwell's equations (Ampère's law with Maxwell correction).
 
     Args:
@@ -134,7 +134,7 @@ def curlB(B_field, E_field, dx, dt, field_BC_left, field_BC_right):
     B_field = jnp.insert(B_field, 0, ghost_cell_L, axis=0)
     B_field = jnp.append(B_field, jnp.array([ghost_cell_R]), axis=0)
 
-    #If taking E_i = B_(i+1) - B_i (since B-fields defined on centers), roll by -1 first. 
+    #If taking E_i = B_(i+1) - B_i (since B-fields defined on centers), roll by -1 first.
     B_field = jnp.roll(B_field, -1, axis=0)
 
     # Compute the curl using the finite difference approximation for 1D (only d/dx)
@@ -166,7 +166,7 @@ def field_update(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
 
     # Faraday's law
     curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
-    
+
     # Update the Fields
     B_fields -= dt*curl_E
     E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))

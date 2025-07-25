@@ -47,7 +47,7 @@ def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, 
 @jit
 def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC_right):
     """
-    Computes the charge density contribution of a single particle to the grid using a 
+    Computes the charge density contribution of a single particle to the grid using a
     quadratic particle shape function.
 
     Args:
@@ -91,7 +91,7 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
     """
     # Vectorize over particles
     chargedens_contrib = vmap(single_particle_charge_density, in_axes=(0, 0, None, None, None, None))
-    
+
     # Compute charge density for all particles
     chargedens = chargedens_contrib(xs_n[:, 0], qs[:, 0], dx, grid, particle_BC_left, particle_BC_right)
 
@@ -155,7 +155,7 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
         j_grid_z = chargedens * vz_n
 
         return j_grid_x, j_grid_y, j_grid_z  # Each output has shape (grid_size,)
- 
+
     current_dens_x, current_dens_y, current_dens_z = vmap(compute_current)(jnp.arange(len(xs_nminushalf)))
     current_dens_x = jnp.sum(current_dens_x, axis=0)
     current_dens_y = jnp.sum(current_dens_y, axis=0)
