@@ -26,7 +26,7 @@ wavenumber_ions_z = 0
 vth_electrons_over_c_x = 0.014142135624  # sqrt(2*T/m)/c
 vth_electrons_over_c_y = 0
 vth_electrons_over_c_z = 0
-electron_drift_speed_x = 0 # Drift speed of electrons in the x direction
+electron_drift_speed_x = -1.125e5 # -0.125c * 3e-3  # drift in m/s; compensate bump drift so that j(t)=0
 electron_drift_speed_y = 0
 electron_drift_speed_z = 0
 velocity_plus_minus_electrons_x = false # create two groups of electrons moving in opposite directions in the x direction
@@ -62,8 +62,79 @@ relativistic = false  # Use relativistic Boris pusher
 seed = 250724  # Random seed for reproducibility
 tolerance_Picard_iterations_implicit_CN = 1e-6  # Tolerance for Picard iterations in implicit Crank-Nicholson method
 
+# ------------------------------
+# Additional Maxwellian particle populations with bulk drift.
+# To add new populations, copy this block and modify parameter values,
+# but don't change the header "[[species]]" or parameter names.
+# To only use default ion/electron plasma, comment out all [[species]] blocks.
+# All parameters must be specified; internal code doesn't set default values.
+# ------------------------------
+[[species]]
+mass_over_proton_mass = 0.0005446170199382714  # me/mp using values from jaxincell/_constants.py
+charge_over_elementary_charge = -1
+weight_ratio = 3e-3  # sets density ratio between bulk/beam, in combination with "number_pseudoparticles_species"
+# spatial distribution
+random_positions_x = true
+random_positions_y = false
+random_positions_z = false
+amplitude_perturbation_x = 0  # Amplitude of sinusoidal perturbation
+amplitude_perturbation_y = 0
+amplitude_perturbation_z = 0
+wavenumber_perturbation_x = 0  # Wavenumber of sinusoidal density perturbation (factor of 2pi/length)
+wavenumber_perturbation_y = 0
+wavenumber_perturbation_z = 0
+# velocity distribution
+vth_over_c_x = 0.014142135624  # sqrt(2*T/m)/c
+vth_over_c_y = 0
+vth_over_c_z = 0
+drift_speed_x = 3.75e7  # drift speed 0.125c converted to m/s
+drift_speed_y = 0
+drift_speed_z = 0
+# RNG control
+# "seed_position", "seed_position_override" parameters allow you to put
+# different particle species at identical positions, so as to ensure exact
+# charge neutrality at t=0 for multiple ion/electron populations.
+# WARNING: to avoid unphysically correlated coordinates, choose the position
+# seed to not coincide with RNG seeds used elsewhere in the program.
+seed_position_override = false
+seed_position = 10
+
+# enforce charge neutrality for the bump distribution
+[[species]]
+mass_over_proton_mass = 1e9
+charge_over_elementary_charge = 1
+weight_ratio = 3e-3
+# spatial distribution
+random_positions_x = true
+random_positions_y = false
+random_positions_z = false
+amplitude_perturbation_x = 0  # Amplitude of sinusoidal perturbation
+amplitude_perturbation_y = 0
+amplitude_perturbation_z = 0
+wavenumber_perturbation_x = 0  # Wavenumber of sinusoidal density perturbation (factor of 2pi/length)
+wavenumber_perturbation_y = 0
+wavenumber_perturbation_z = 0
+# velocity distribution
+vth_over_c_x = 1e-100
+vth_over_c_y = 1e-100
+vth_over_c_z = 1e-100
+drift_speed_x = 0
+drift_speed_y = 0
+drift_speed_z = 0
+# RNG control
+# "seed_position", "seed_position_override" parameters allow you to put
+# different particle species at identical positions, so as to ensure exact
+# charge neutrality at t=0 for multiple ion/electron populations.
+# WARNING: to avoid unphysically correlated coordinates, choose the position
+# seed to not coincide with RNG seeds used elsewhere in the program.
+seed_position_override = false
+seed_position = 10
+
 [solver_parameters]
 number_grid_points = 60  # number of grid CELLS, not edges/vertices
 field_solver = 0  # 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
 number_pseudoelectrons = 1000  # Total in entire domain
-total_steps = 10000  # Total number of time steps
+total_steps = 5000  # Total number of time steps
+# number of particles for each additional species
+# provide one list value per [[species]] block
+number_pseudoparticles_species = [1000,1000,]

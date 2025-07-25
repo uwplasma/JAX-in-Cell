@@ -40,6 +40,19 @@ def load_parameters(input_file):
     parameters = tomllib.load(open(input_file, "rb"))
     input_parameters = parameters['input_parameters']
     solver_parameters = parameters['solver_parameters']
+    # Interface for additional species and/or particle populations
+    try:
+        # Nest within main struct to avoid changing top-level internal API
+        input_parameters['species'] = parameters['species']
+    except:
+        input_parameters['species'] = []
+    # Convert TOML array -> Python tuple to make hashable static argument, as
+    # required by Jax
+    try:
+        solver_parameters['number_pseudoparticles_species'] = tuple(solver_parameters['number_pseudoparticles_species'])
+    except:
+        solver_parameters['number_pseudoparticles_species'] = ()
+    assert len(solver_parameters['number_pseudoparticles_species']) == len(input_parameters['species'])
     return input_parameters, solver_parameters
 
 def initialize_simulation_parameters(user_parameters={}):
@@ -135,7 +148,8 @@ def initialize_simulation_parameters(user_parameters={}):
 
     return parameters
 
-def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500, total_steps=350
+def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500,
+                                number_pseudoparticles_species=None, total_steps=350
                                 ,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
@@ -256,7 +270,6 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         mass_electrons * weight * jnp.ones((number_pseudoelectrons, 1)),
         mass_ions      * weight * jnp.ones((number_pseudoelectrons, 1))
     ), axis=0)
-    charge_to_mass_ratios = charges / masses
 
     # **Particle Velocities**
     # Electron thermal velocities and drift speeds
@@ -282,6 +295,21 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Combine electron and ion velocities
     velocities = jnp.concatenate((electron_velocities, ion_velocities))
+
+    # Introduce additional particle species
+    for ii, species in enumerate(parameters['species']):
+        plists = make_particles(species_parameters=species,
+                                Nprt=number_pseudoparticles_species[ii],
+                                box_size=box_size, weight=weight, seed=seed,
+                                rng_index=ii)
+        positions  = jnp.concatenate((positions,  plists['positions']))
+        velocities = jnp.concatenate((velocities, plists['velocities']))
+        charges    = jnp.concatenate((charges,    plists['charges']), axis=0)
+        masses     = jnp.concatenate((masses,     plists['masses']), axis=0)
+
+    # After done adding all species
+    charge_to_mass_ratios = charges / masses
+
     # Cap velocities at 99% the speed of light
     speed_limit = 0.99 * speed_of_light
     velocities = jnp.where(jnp.abs(velocities) >= speed_limit, jnp.sign(velocities) * speed_limit, velocities)
@@ -364,10 +392,103 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     return parameters
 
+def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
+    """
+    Generate Nprt total particles of a user-requested species with specified
+    charge, mass, and space/velocity distribution.
 
-@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver', "time_evolution_algorithm",
+    Parameters:
+    ----------
+    species_parameters : dict
+        Dictionary of user-specified species parameters.
+    Nprt : int
+        Total number of pseudoparticles in the domain
+    box_size : tuple
+        Domain size in x,y,z
+    weight : float
+        Top-level pseudoelectron weight
+    seed : int
+        Top-level random number generator seed used for entire simulation
+    rng_index : int
+        Species or particle population index in [0,1,2,3,...]
+        Use a unique index value for each population.
+        This index is used to advance the random seed and so avoid spurious
+        correlation between different particle positions and velocities.
+        See https://docs.jax.dev/en/latest/random-numbers.html
+
+    Returns:
+    -------
+    plist : dict
+        Dictionary with lists of positions, velocities, charges, masses.
+    """
+    _p = species_parameters
+    charge = _p["charge_over_elementary_charge"] * elementary_charge
+    mass   = _p["mass_over_proton_mass"] * mass_proton
+    vth_x  = _p["vth_over_c_x"] * speed_of_light
+    vth_y  = _p["vth_over_c_y"] * speed_of_light
+    vth_z  = _p["vth_over_c_z"] * speed_of_light
+
+    # This code is brittle; it depends on hard-coded offsets to the RNG seed
+    # within initialize_particles_fields(...)
+    assert rng_index >= 0
+    local_seed = seed+12 + rng_index*6
+    # Separate position/velocity seeds allow different ion and electron
+    # populations to be inited with identical space positions, but
+    # uncorrelated velocity distributions
+    seed_pos = lax.cond(_p['seed_position_override'],
+                        lambda _: _p['seed_position'],
+                        lambda _: local_seed, operand=None)
+    seed_vel = local_seed
+
+    out = dict()
+
+    # **Particle Positions**
+
+    xs = lax.cond(_p["random_positions_x"],
+        lambda _: uniform(PRNGKey(seed_pos+1), shape=(Nprt,),
+                          minval=-box_size[0] / 2, maxval=box_size[0] / 2),
+        lambda _: jnp.linspace(-box_size[0] / 2, box_size[0] / 2, Nprt), operand=None)
+    wavenumber_perturbation_x = _p["wavenumber_perturbation_x"] * 2 * jnp.pi / box_size[0]
+    xs += _p["amplitude_perturbation_x"] * jnp.sin(wavenumber_perturbation_x * xs)
+
+    ys = lax.cond(_p["random_positions_y"],
+        lambda _: uniform(PRNGKey(seed_pos+2), shape=(Nprt,),
+                          minval=-box_size[1] / 2, maxval=box_size[1] / 2),
+        lambda _: jnp.linspace(-box_size[1] / 2, box_size[1] / 2, Nprt), operand=None)
+    wavenumber_perturbation_y = _p["wavenumber_perturbation_y"] * 2 * jnp.pi / box_size[1]
+    ys += _p["amplitude_perturbation_y"] * jnp.sin(wavenumber_perturbation_y * ys)
+
+    zs = lax.cond(_p["random_positions_z"],
+        lambda _: uniform(PRNGKey(seed_pos+3), shape=(Nprt,),
+                          minval=-box_size[2] / 2, maxval=box_size[2] / 2),
+        lambda _: jnp.linspace(-box_size[2] / 2, box_size[2] / 2, Nprt), operand=None)
+    wavenumber_perturbation_z = _p["wavenumber_perturbation_z"] * 2 * jnp.pi / box_size[2]
+    zs += _p["amplitude_perturbation_z"] * jnp.sin(wavenumber_perturbation_z * zs)
+
+    out['positions'] = jnp.stack((xs, ys, zs), axis=1)
+
+    # **Particle Charges and Masses**
+
+    out['charges'] = charge * weight * _p['weight_ratio'] * jnp.ones((Nprt, 1))
+    out['masses']  = mass   * weight * _p['weight_ratio'] * jnp.ones((Nprt, 1))
+
+    # **Particle Velocities**
+
+    v_x = vth_x/jnp.sqrt(2) * normal(PRNGKey(seed_vel+4), shape=(Nprt,))
+    v_y = vth_y/jnp.sqrt(2) * normal(PRNGKey(seed_vel+5), shape=(Nprt,))
+    v_z = vth_z/jnp.sqrt(2) * normal(PRNGKey(seed_vel+6), shape=(Nprt,))
+    v_x += _p["drift_speed_x"]
+    v_y += _p["drift_speed_y"]
+    v_z += _p["drift_speed_z"]
+
+    out['velocities'] = jnp.stack((v_x, v_y, v_z), axis=1)
+
+    return out
+
+@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'number_pseudoparticles_species', 'total_steps', 'field_solver', "time_evolution_algorithm",
                                "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
-def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000,
+def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000,
+               number_pseudoparticles_species=None, total_steps=1000,
                field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
@@ -391,7 +512,9 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     """
     # **Initialize simulation parameters**
     parameters = initialize_particles_fields(input_parameters, number_grid_points=number_grid_points,
-                                             number_pseudoelectrons=number_pseudoelectrons, total_steps=total_steps,
+                                             number_pseudoelectrons=number_pseudoelectrons,
+                                             number_pseudoparticles_species=number_pseudoparticles_species,
+                                             total_steps=total_steps,
                                              max_number_of_Picard_iterations_implicit_CN=max_number_of_Picard_iterations_implicit_CN,
                                              number_of_particle_substeps_implicit_CN=number_of_particle_substeps_implicit_CN)
 
