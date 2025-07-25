@@ -1,7 +1,7 @@
 ## scaling_time.py
 import time
 from jaxincell import simulation
-from jaxincell import diagnostics
+from jaxincell import diagnostics, diagnostics
 from jax import block_until_ready
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
@@ -46,7 +46,7 @@ timestep_list        = [input_parameters["timestep_over_spatialstep_times_c"] * 
 
 # Function to compute the maximum relative energy error
 def max_relative_energy_error(output):
-    diagnostics(output)
+    #diagnostics(output)  # moved to outer caller level to be more consistent with other jaxincell example problems
     relative_energy_error = jnp.abs((output["total_energy"] - output["total_energy"][0]) / output["total_energy"][0])
     return jnp.max(relative_energy_error)
 
@@ -78,6 +78,8 @@ def measure_time_and_error(parameter_list, param_name):
             #     solver_parameters['number_grid_points'] = old_grid_points
         elapsed_time = time.time() - start
         times.append(elapsed_time)
+        # Post-process: segregate ions/electrons, compute energies, compute FFT
+        diagnostics(output)
         max_relative_errors.append(max_relative_energy_error(output))
         print(f"{param_name.capitalize()}: {param}, Time: {elapsed_time}s")
     return times, max_relative_errors

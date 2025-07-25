@@ -9,7 +9,7 @@ import numpy as np
 from datetime import datetime
 
 from jax import block_until_ready
-from jaxincell import plot, simulation, load_parameters
+from jaxincell import plot, simulation, load_parameters, diagnostics
 
 input_parameters, solver_parameters = load_parameters('bump-on-tail.toml')
 
@@ -17,6 +17,9 @@ input_parameters, solver_parameters = load_parameters('bump-on-tail.toml')
 started = datetime.now()
 output = block_until_ready(simulation(input_parameters, **solver_parameters))
 print("Simulation done, elapsed:", datetime.now()-started)
+
+# Post-process: segregate ions/electrons, compute energies, compute FFT
+diagnostics(output)
 
 # Plot the results
 plot(output)

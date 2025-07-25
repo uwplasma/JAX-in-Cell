@@ -6,7 +6,7 @@ import time
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from jax import jit, grad, lax, block_until_ready, debug
-from jaxincell import simulation, load_parameters
+from jaxincell import simulation, load_parameters, diagnostics
 
 # Read from input.toml
 input_parameters, solver_parameters = load_parameters('input.toml')
@@ -15,6 +15,8 @@ input_parameters, solver_parameters = load_parameters('input.toml')
 def mean_electric_field(electron_drift_speed):
     input_parameters["electron_drift_speed_x"] = electron_drift_speed
     output = block_until_ready(simulation(input_parameters, **solver_parameters))
+    # Post-process: segregate ions/electrons, compute energies, compute FFT
+    diagnostics(output)
     electric_field = jnp.mean(output['electric_field_x'][:, :, 0], axis=1)
     mean_E = jnp.mean(lax.slice(electric_field, [solver_parameters["total_steps"]//2], [solver_parameters["total_steps"]]))
     return mean_E

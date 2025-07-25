@@ -586,14 +586,20 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
 
     # **Output results**
     temporary_output = {
-        "position_electrons": positions_over_time[ :, :number_pseudoelectrons, :],
-        "velocity_electrons": velocities_over_time[:, :number_pseudoelectrons, :],
-        "mass_electrons":     parameters["masses"][   :number_pseudoelectrons],
-        "charge_electrons":   parameters["charges"][  :number_pseudoelectrons],
-        "position_ions":      positions_over_time[ :, number_pseudoelectrons:, :],
-        "velocity_ions":      velocities_over_time[:, number_pseudoelectrons:, :],
-        "mass_ions":          parameters["masses"][   number_pseudoelectrons:],
-        "charge_ions":        parameters["charges"][  number_pseudoelectrons:],
+        ## segregate ions/electrons in non-jitted method outside simulation(...)
+        ## so we can make use of dynamically constructed arrays
+        #"position_electrons": positions_over_time[ :, :number_pseudoelectrons, :],
+        #"velocity_electrons": velocities_over_time[:, :number_pseudoelectrons, :],
+        #"mass_electrons":     parameters["masses"][   :number_pseudoelectrons],
+        #"charge_electrons":   parameters["charges"][  :number_pseudoelectrons],
+        #"position_ions":      positions_over_time[ :, number_pseudoelectrons:, :],
+        #"velocity_ions":      velocities_over_time[:, number_pseudoelectrons:, :],
+        #"mass_ions":          parameters["masses"][   number_pseudoelectrons:],
+        #"charge_ions":        parameters["charges"][  number_pseudoelectrons:],
+        "positions": positions_over_time,
+        "velocities": velocities_over_time,
+        "masses": parameters["masses"],
+        "charges": parameters["charges"],
         "electric_field":  electric_field_over_time,
         "magnetic_field":  magnetic_field_over_time,
         "current_density": current_density_over_time,
@@ -606,6 +612,6 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
 
     output = {**temporary_output, **parameters}
 
-    diagnostics(output)
+    #diagnostics(output)
 
     return output

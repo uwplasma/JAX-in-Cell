@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jax import jit, grad
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
-from jaxincell import simulation, epsilon_0, load_parameters
+from jaxincell import simulation, epsilon_0, load_parameters, diagnostics
 
 # Read from input.toml
 input_parameters, solver_parameters = load_parameters('input.toml')
@@ -24,6 +24,8 @@ def objective_function(Ti):
     Ti = jnp.atleast_1d(Ti)[0]
     params["ion_temperature_over_electron_temperature_x"] = Ti
     output = simulation(params, **solver_parameters)
+    # Post-process: segregate ions/electrons, compute energies, compute FFT
+    diagnostics(output)
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     integral_E_squared         = jnp.trapezoid(abs_E_squared, dx=output['dx'], axis=-1)
     energy = (epsilon_0/2) * integral_E_squared
@@ -33,6 +35,8 @@ jac = jit(grad(objective_function))
 print(f'Perform a first run to see one objective function')
 input_parameters["ion_temperature_over_electron_temperature_x"] = x0_optimization
 output = simulation(input_parameters, **solver_parameters)
+# Post-process: segregate ions/electrons, compute energies, compute FFT
+diagnostics(output)
 objective = objective_function(x0_optimization)
 plt.figure(figsize=(8,6))
 plt.plot(output['time_array']*output['plasma_frequency'],output['electric_field_energy'], label='Electric Field Energy')

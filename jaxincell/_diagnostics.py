@@ -6,6 +6,25 @@ from ._constants import epsilon_0, mu_0
 __all__ = ['diagnostics']
 
 def diagnostics(output):
+
+    isel = (output["charges"] >= 0)[:,0]  # cannot use masks in jitted functions
+    esel = (output["charges"] <  0)[:,0]
+    segregated = {
+        "position_electrons": output["positions"] [:, esel, :],
+        "velocity_electrons": output["velocities"][:, esel, :],
+        "mass_electrons":     output["masses"]    [   esel],
+        "charge_electrons":   output["charges"]   [   esel],
+        "position_ions":      output["positions"] [:, isel, :],
+        "velocity_ions":      output["velocities"][:, isel, :],
+        "mass_ions":          output["masses"]    [   isel],
+        "charge_ions":        output["charges"]   [   isel],
+    }
+    output.update(**segregated)
+    del output["positions"]
+    del output["velocities"]
+    del output["masses"]
+    del output["charges"]
+
     E_field_over_time = output['electric_field']
     grid              = output['grid']
     dt                = output['dt']
