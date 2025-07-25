@@ -23,10 +23,10 @@ wavenumber_ions_z = 0
 # ------------------------------
 # electron velocity distribution
 # ------------------------------
-vth_electrons_over_c_x = 0.014142135624  # sqrt(2*T/m)/c
+vth_electrons_over_c_x = 0.07071067812  # sqrt(2*T/m)/c = sqrt(2)*0.05
 vth_electrons_over_c_y = 0
 vth_electrons_over_c_z = 0
-electron_drift_speed_x = -1.125e5 # -0.125c * 3e-3  # drift in m/s; compensate bump drift so that j(t)=0
+electron_drift_speed_x = -2.25e6 # -0.25c * 3e-2  # drift in m/s; compensate bump drift so that j(t)=0
 electron_drift_speed_y = 0
 electron_drift_speed_z = 0
 velocity_plus_minus_electrons_x = false # create two groups of electrons moving in opposite directions in the x direction
@@ -48,7 +48,7 @@ velocity_plus_minus_ions_z = false
 # domain, spacetime gridding
 # ------------------------------
 length = 1  # Simulation box size in meters (sets dimensionful normalization, but does not change dimensionless ratios?)
-grid_points_per_Debye_length = 5  # dx over Debye length (ignore the conflicting variable name)
+grid_points_per_Debye_length = 2.565  # dx over Debye length (ignore the conflicting variable name)
 timestep_over_spatialstep_times_c = 1.0  # dt * speed_of_light / dx
 particle_BC_left  = 0  # 0: periodic, 1: reflective, 2: absorbing
 particle_BC_right = 0
@@ -72,7 +72,7 @@ tolerance_Picard_iterations_implicit_CN = 1e-6  # Tolerance for Picard iteration
 [[species]]
 mass_over_proton_mass = 0.0005446170199382714  # me/mp using values from jaxincell/_constants.py
 charge_over_elementary_charge = -1
-weight_ratio = 3e-3  # sets density ratio between bulk/beam, in combination with "number_pseudoparticles_species"
+weight_ratio = 3e-2  # sets density ratio between bulk/beam, in combination with "number_pseudoparticles_species"
 # spatial distribution
 random_positions_x = true
 random_positions_y = false
@@ -84,10 +84,10 @@ wavenumber_perturbation_x = 0  # Wavenumber of sinusoidal density perturbation (
 wavenumber_perturbation_y = 0
 wavenumber_perturbation_z = 0
 # velocity distribution
-vth_over_c_x = 0.014142135624  # sqrt(2*T/m)/c
+vth_over_c_x = 0.07071067812  # sqrt(2*T/m)/c = sqrt(2)*0.05
 vth_over_c_y = 0
 vth_over_c_z = 0
-drift_speed_x = 3.75e7  # drift speed 0.125c converted to m/s
+drift_speed_x = 7.5e7  # drift speed 0.25c converted to m/s
 drift_speed_y = 0
 drift_speed_z = 0
 # RNG control
@@ -96,14 +96,14 @@ drift_speed_z = 0
 # charge neutrality at t=0 for multiple ion/electron populations.
 # WARNING: to avoid unphysically correlated coordinates, choose the position
 # seed to not coincide with RNG seeds used elsewhere in the program.
-seed_position_override = false
+seed_position_override = true
 seed_position = 10
 
 # enforce charge neutrality for the bump distribution
 [[species]]
 mass_over_proton_mass = 1e9
 charge_over_elementary_charge = 1
-weight_ratio = 3e-3
+weight_ratio = 3e-2
 # spatial distribution
 random_positions_x = true
 random_positions_y = false
@@ -127,14 +127,14 @@ drift_speed_z = 0
 # charge neutrality at t=0 for multiple ion/electron populations.
 # WARNING: to avoid unphysically correlated coordinates, choose the position
 # seed to not coincide with RNG seeds used elsewhere in the program.
-seed_position_override = false
+seed_position_override = true
 seed_position = 10
 
 [solver_parameters]
-number_grid_points = 60  # number of grid CELLS, not edges/vertices
+number_grid_points = 40  # number of grid CELLS, not edges/vertices
 field_solver = 0  # 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
-number_pseudoelectrons = 1000  # Total in entire domain
-total_steps = 5000  # Total number of time steps
+number_pseudoelectrons = 40000  # Total in entire domain
+total_steps = 2000  # Total number of time steps
 # number of particles for each additional species
 # provide one list value per [[species]] block
-number_pseudoparticles_species = [1000,1000,]
+number_pseudoparticles_species = [40000,40000,]
