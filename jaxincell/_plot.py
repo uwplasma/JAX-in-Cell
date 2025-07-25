@@ -100,8 +100,11 @@ def plot(output, direction="x", threshold=1e-12):
     fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 2.5 * nrows), squeeze=False)
 
     def plot_field(ax, field_data, title, xlabel, ylabel, cbar_label):
+        print('plotting', title, 'field_data.shape', field_data.shape)
+        vbnd = np.max(np.abs(field_data[np.isfinite(field_data)]))  # enforce symmetric colormap
         im = ax.imshow(field_data, aspect="auto", cmap="RdBu", origin="lower",
-                       extent=[grid[0], grid[-1], time[0], time[-1]])
+                       extent=[grid[0], grid[-1], time[0], time[-1]],
+                       vmin=-vbnd, vmax=vbnd)
         ax.set(title=title, xlabel=xlabel, ylabel=ylabel)
         fig.colorbar(im, ax=ax, label=cbar_label)
         return im
