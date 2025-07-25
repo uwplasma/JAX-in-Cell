@@ -52,7 +52,6 @@ def load_parameters(input_file):
         solver_parameters['number_pseudoparticles_species'] = tuple(solver_parameters['number_pseudoparticles_species'])
     except:
         solver_parameters['number_pseudoparticles_species'] = ()
-    assert len(solver_parameters['number_pseudoparticles_species']) == len(input_parameters['species'])
     return input_parameters, solver_parameters
 
 def initialize_simulation_parameters(user_parameters={}):
@@ -510,6 +509,16 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     -------
     output : dict
     """
+
+    # For simulation(...) parameters specified via Python, not parsed TOML file
+    if 'species' not in input_parameters:
+        input_parameters['species'] = []
+    if not number_pseudoparticles_species:
+        number_pseudoparticles_species = ()
+    else:
+        number_pseudoparticles_species = tuple(number_pseudoparticles_species)
+    assert len(number_pseudoparticles_species) == len(input_parameters['species'])
+
     # **Initialize simulation parameters**
     parameters = initialize_particles_fields(input_parameters, number_grid_points=number_grid_points,
                                              number_pseudoelectrons=number_pseudoelectrons,
