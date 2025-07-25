@@ -1,3 +1,20 @@
+# ---------------------------------------------------
+# bump-on-tail.toml
+# ---------------------------------------------------
+# For the following plasma:
+#     nbeam/n0 = 0.03
+#     vbeam = 0.25*c
+#     sqrt(Te/me) = 0.05 for both bulk and beam populations
+# Fastest-growing mode predicted by non-relativistic electrostatic dispersion
+# has parameters:
+#     Re(omega) = 1.0*omega_pe
+#     Im(omega) = 0.075*omega_pe
+#     k = 4.9*omega_pe/c
+# where omega_pe is the electron plasma frequency, k = 2*pi/wavelength is the
+# wavenumber, c is speed of light, vbeam is (non-relativistic) three-velocity,
+# nbeam is beam density, n0 = background (bulk) density.
+# ---------------------------------------------------
+
 [input_parameters]
 # -----------------------------
 # species intrinsic properties
