@@ -1,7 +1,7 @@
 ## scaling_time.py
 import time
 from jaxincell import simulation
-from jaxincell import diagnostics, diagnostics
+from jaxincell import diagnostics
 from jax import block_until_ready
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
