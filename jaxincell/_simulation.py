@@ -50,7 +50,13 @@ def load_parameters(input_file):
     # required by Jax
     try:
         solver_parameters['number_pseudoparticles_species'] = tuple(solver_parameters['number_pseudoparticles_species'])
-    except:
+    except KeyError:
+        input_parameters['species'] = []
+    # Convert TOML array -> Python tuple to make hashable static argument, as
+    # required by Jax
+    try:
+        solver_parameters['number_pseudoparticles_species'] = tuple(solver_parameters['number_pseudoparticles_species'])
+    except KeyError:
         solver_parameters['number_pseudoparticles_species'] = ()
     return input_parameters, solver_parameters
 
