@@ -44,12 +44,6 @@ def load_parameters(input_file):
     try:
         # Nest within main struct to avoid changing top-level internal API
         input_parameters['species'] = parameters['species']
-    except:
-        input_parameters['species'] = []
-    # Convert TOML array -> Python tuple to make hashable static argument, as
-    # required by Jax
-    try:
-        solver_parameters['number_pseudoparticles_species'] = tuple(solver_parameters['number_pseudoparticles_species'])
     except KeyError:
         input_parameters['species'] = []
     # Convert TOML array -> Python tuple to make hashable static argument, as
