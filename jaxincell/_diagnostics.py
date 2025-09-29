@@ -7,6 +7,13 @@ __all__ = ['diagnostics']
 
 def diagnostics(output):
 
+    # weight arrays are redundant w.r.t. charge/mass arrays,
+    # but they are convenient for histogram plotting
+    output["weights"] = jnp.ones_like(output["charges"])
+    for ii, species in enumerate(output["species"]):
+        ssel = (output['species_ids'] == ii+2)  # hardcoded offset here is not great!!
+        output["weights"] = output["weights"].at[ssel].set( species["weight_ratio"] )
+
     isel = (output["charges"] >= 0)[:,0]  # cannot use masks in jitted functions
     esel = (output["charges"] <  0)[:,0]
     segregated = {
@@ -14,10 +21,12 @@ def diagnostics(output):
         "velocity_electrons": output["velocities"][:, esel, :],
         "mass_electrons":     output["masses"]    [   esel],
         "charge_electrons":   output["charges"]   [   esel],
+        "weight_electrons":   output["weights"]   [   esel],
         "position_ions":      output["positions"] [:, isel, :],
         "velocity_ions":      output["velocities"][:, isel, :],
         "mass_ions":          output["masses"]    [   isel],
         "charge_ions":        output["charges"]   [   isel],
+        "weight_ions":        output["weights"]   [   isel],
     }
     output.update(**segregated)
     del output["positions"]
@@ -29,8 +38,6 @@ def diagnostics(output):
     grid              = output['grid']
     dt                = output['dt']
     total_steps       = output['total_steps']
-    mass_electrons    = output["mass_electrons"][0]
-    mass_ions         = output["mass_ions"][0]
 
     # array_to_do_fft_on = charge_density_over_time[:,len(grid)//2]
     array_to_do_fft_on = E_field_over_time[:,len(grid)//2,0]
@@ -56,9 +63,10 @@ def diagnostics(output):
     integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
     integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
 
-    v_electrons_squared = jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1)
-    v_ions_squared      = jnp.sum(jnp.sum(output['velocity_ions']**2     , axis=-1), axis=-1)
-
+    KE_electrons = (1/2) * jnp.expand_dims(output['mass_electrons'][...,0], 0) * jnp.sum(output['velocity_electrons']**2, axis=-1)
+    KE_ions      = (1/2) * jnp.expand_dims(output['mass_ions']     [...,0], 0) * jnp.sum(output['velocity_ions']**2,      axis=-1)
+    KE_electrons = jnp.sum(KE_electrons, axis=-1)
+    KE_ions      = jnp.sum(KE_ions,      axis=-1)
 
     output.update({
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
@@ -67,9 +75,9 @@ def diagnostics(output):
         'magnetic_field_energy':         1/(2*mu_0)    * integral_B_squared,
         'dominant_frequency': dominant_frequency,
         'plasma_frequency':   plasma_frequency,
-        'kinetic_energy':     (1/2) * mass_electrons * v_electrons_squared + (1/2) * mass_ions * v_ions_squared,
-        'kinetic_energy_electrons': (1/2) * mass_electrons * v_electrons_squared,
-        'kinetic_energy_ions':      (1/2) * mass_ions      * v_ions_squared,
+        'kinetic_energy':           KE_electrons + KE_ions,
+        'kinetic_energy_electrons': KE_electrons,
+        'kinetic_energy_ions':      KE_ions,
         'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
         'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
         'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
