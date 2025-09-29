@@ -269,6 +269,10 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         mass_electrons * weight * jnp.ones((number_pseudoelectrons, 1)),
         mass_ions      * weight * jnp.ones((number_pseudoelectrons, 1))
     ), axis=0)
+    species_ids = jnp.concatenate((
+        0. * jnp.ones((number_pseudoelectrons, 1)),  # "default" electrons hardcoded ID = 0
+        1. * jnp.ones((number_pseudoelectrons, 1))  # "default" ions harcoded ID = 1
+    ), axis=0)
 
     # **Particle Velocities**
     # Electron thermal velocities and drift speeds
@@ -296,15 +300,18 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     velocities = jnp.concatenate((electron_velocities, ion_velocities))
 
     # Introduce additional particle species
+    # starting from id=2 (range inclusive); id=0,1 already used by "default"
+    # ion and electron populations
     for ii, species in enumerate(parameters['species']):
         plists = make_particles(species_parameters=species,
                                 Nprt=number_pseudoparticles_species[ii],
                                 box_size=box_size, weight=weight, seed=seed,
-                                rng_index=ii)
+                                species_id=ii+2)
         positions  = jnp.concatenate((positions,  plists['positions']))
         velocities = jnp.concatenate((velocities, plists['velocities']))
         charges    = jnp.concatenate((charges,    plists['charges']), axis=0)
         masses     = jnp.concatenate((masses,     plists['masses']), axis=0)
+        species_ids= jnp.concatenate((species_ids,plists['species_ids']), axis=0)
 
     # After done adding all species
     charge_to_mass_ratios = charges / masses
@@ -373,6 +380,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "initial_velocities": velocities,
         "charges": charges,
         "masses": masses,
+        "species_ids": species_ids,
         "charge_to_mass_ratios": charge_to_mass_ratios,
         "fields": fields,
         "grid": grid,
@@ -391,7 +399,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     return parameters
 
-def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
+def make_particles(species_parameters, Nprt, box_size, weight, seed, species_id):
     """
     Generate Nprt total particles of a user-requested species with specified
     charge, mass, and space/velocity distribution.
@@ -408,9 +416,11 @@ def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
         Top-level pseudoelectron weight
     seed : int
         Top-level random number generator seed used for entire simulation
-    rng_index : int
-        Species or particle population index in [0,1,2,3,...]
-        Use a unique index value for each population.
+    species_id : int
+        Species ID (index) in [2,3,4,...]; note that 0,1 are reserved for the
+        default electron/ion population that is created separately from the
+        [[species]] TOML blocks.
+        Use a unique ID for each population.
         This index is used to advance the random seed and so avoid spurious
         correlation between different particle positions and velocities.
         See https://docs.jax.dev/en/latest/random-numbers.html
@@ -429,8 +439,8 @@ def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
 
     # This code is brittle; it depends on hard-coded offsets to the RNG seed
     # within initialize_particles_fields(...)
-    assert rng_index >= 0
-    local_seed = seed+12 + rng_index*6
+    assert species_id >= 2
+    local_seed = seed + species_id*6
     # Separate position/velocity seeds allow different ion and electron
     # populations to be inited with identical space positions, but
     # uncorrelated velocity distributions
@@ -470,6 +480,7 @@ def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
 
     out['charges'] = charge * weight * _p['weight_ratio'] * jnp.ones((Nprt, 1))
     out['masses']  = mass   * weight * _p['weight_ratio'] * jnp.ones((Nprt, 1))
+    out['species_ids'] = species_id * jnp.ones((Nprt, 1))
 
     # **Particle Velocities**
 
@@ -609,6 +620,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         "velocities": velocities_over_time,
         "masses": parameters["masses"],
         "charges": parameters["charges"],
+        "species_ids": parameters["species_ids"],
         "electric_field":  electric_field_over_time,
         "magnetic_field":  magnetic_field_over_time,
         "current_density": current_density_over_time,
