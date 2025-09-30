@@ -633,6 +633,6 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
 
     output = {**temporary_output, **parameters}
 
-    #diagnostics(output)
+    diagnostics(output, jittable=True)
 
     return output

@@ -5,89 +5,123 @@ from ._constants import epsilon_0, mu_0
 
 __all__ = ['diagnostics']
 
-def diagnostics(output):
+def diagnostics(output, *, jittable: bool = False):
+    """
+    If jittable=True: avoid any boolean-mask indexing that changes shapes.
+    Compute diagnostics via mask-weighted reductions and keep arrays intact.
+    If jittable=False: (old behavior) you may split arrays into electrons/ions.
+    """
+    # ---------- locals ----------
+    E_t = output['electric_field']      # (T, Ng, 3)
+    B_t = output['magnetic_field']      # (T, Ng, 3)
+    grid = output['grid']               # (Ng,)
+    dt   = output['dt']                 # scalar
+    T    = output['total_steps']        # int
+    dx   = output['dx']                 # scalar
+    N    = output['number_pseudoelectrons']  # electrons per default pop
 
-    # weight arrays are redundant w.r.t. charge/mass arrays,
-    # but they are convenient for histogram plotting
-    output["weights"] = jnp.ones_like(output["charges"])
-    for ii, species in enumerate(output["species"]):
-        ssel = (output['species_ids'] == ii+2)  # hardcoded offset here is not great!!
-        output["weights"] = output["weights"].at[ssel].set( species["weight_ratio"] )
+    # ---------- FFT-based dominant frequency ----------
+    arr = E_t[:, len(grid)//2, 0]
+    arr = (arr - jnp.mean(arr)) / jnp.max(arr)
+    fft_vals = lax.slice(fft(arr), (0,), (T//2,))
+    freqs = fftfreq(T, d=dt)[:T//2] * 2*jnp.pi
+    mag = jnp.abs(fft_vals)
+    idx = jnp.argmax(mag)
+    dom_omega = jnp.abs(freqs[idx])
 
-    isel = (output["charges"] >= 0)[:,0]  # cannot use masks in jitted functions
-    esel = (output["charges"] <  0)[:,0]
-    segregated = {
-        "position_electrons": output["positions"] [:, esel, :],
-        "velocity_electrons": output["velocities"][:, esel, :],
-        "mass_electrons":     output["masses"]    [   esel],
-        "charge_electrons":   output["charges"]   [   esel],
-        "weight_electrons":   output["weights"]   [   esel],
-        "species_id_electrons": output["species_ids"][esel],
-        "position_ions":      output["positions"] [:, isel, :],
-        "velocity_ions":      output["velocities"][:, isel, :],
-        "mass_ions":          output["masses"]    [   isel],
-        "charge_ions":        output["charges"]   [   isel],
-        "weight_ions":        output["weights"]   [   isel],
-        "species_id_ions":    output["species_ids"][  isel],
-    }
-    output.update(**segregated)
-    del output["positions"]
-    del output["velocities"]
-    del output["masses"]
-    del output["charges"]
+    # ---------- trapz integrate ----------
+    def integrate_trap(y, dx):
+        # y: (..., Ng)
+        return 0.5 * (jnp.asarray(dx) * (y[..., 1:] + y[..., :-1])).sum(-1)
 
-    E_field_over_time = output['electric_field']
-    grid              = output['grid']
-    dt                = output['dt']
-    total_steps       = output['total_steps']
+    # ---------- field energies ----------
+    absE2 = jnp.sum(E_t**2, axis=-1)  # (T, Ng)
+    absB2 = jnp.sum(B_t**2, axis=-1)  # (T, Ng)
 
-    # array_to_do_fft_on = charge_density_over_time[:,len(grid)//2]
-    array_to_do_fft_on = E_field_over_time[:,len(grid)//2,0]
-    array_to_do_fft_on = (array_to_do_fft_on-jnp.mean(array_to_do_fft_on))/jnp.max(array_to_do_fft_on)
-    plasma_frequency = output['plasma_frequency']
+    # external fields are static in time; make (T, Ng) for energy time series
+    absE2_ext = jnp.sum(output['external_electric_field']**2, axis=-1)      # (Ng,)
+    absB2_ext = jnp.sum(output['external_magnetic_field']**2, axis=-1)      # (Ng,)
+    absE2_ext_T = jnp.broadcast_to(absE2_ext, (absE2.shape[0], absE2.shape[1]))
+    absB2_ext_T = jnp.broadcast_to(absB2_ext, (absB2.shape[0], absB2.shape[1]))
 
-    fft_values = lax.slice(fft(array_to_do_fft_on), (0,), (total_steps//2,))
-    freqs = fftfreq(total_steps, d=dt)[:total_steps//2]*2*jnp.pi # d=dt specifies the time step
-    magnitude = jnp.abs(fft_values)
-    peak_index = jnp.argmax(magnitude)
-    dominant_frequency = jnp.abs(freqs[peak_index])
+    intE2     = integrate_trap(absE2,     dx)
+    intB2     = integrate_trap(absB2,     dx)
+    intE2_ext = integrate_trap(absE2_ext_T, dx)
+    intB2_ext = integrate_trap(absB2_ext_T, dx)
 
-    def integrate(y, dx): return 0.5 * (jnp.asarray(dx) * (y[..., 1:] + y[..., :-1])).sum(-1)
-    # def integrate(y, dx): return jnp.sum(y, axis=-1) * dx
+    # ---------- kinetic energies via mask-weighted reductions ----------
+    # unified arrays
+    pos = output['positions']    # (T, Ntot, 3)
+    vel = output['velocities']   # (T, Ntot, 3)
+    m   = output['masses'][...,0]   # (Ntot,)
+    q   = output['charges'][...,0]  # (Ntot,)
 
-    abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
-    abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
-    integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
-    integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dx'])
+    # masks (elementwise use only; no slicing by mask)
+    is_e = (q < 0)  # (Ntot,)
+    is_i = ~is_e
+    me = is_e.astype(m.dtype)
+    mi = is_i.astype(m.dtype)
 
-    abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
-    abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
-    integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
-    integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
+    v2 = jnp.sum(vel**2, axis=-1)     # (T, Ntot)
+    KE_particle = 0.5 * v2 * m[None,:]  # (T, Ntot)
+    KE_e = jnp.sum(KE_particle * me[None,:], axis=-1)  # (T,)
+    KE_i = jnp.sum(KE_particle * mi[None,:], axis=-1)  # (T,)
+    KE   = KE_e + KE_i
 
-    KE_electrons = (1/2) * jnp.expand_dims(output['mass_electrons'][...,0], 0) * jnp.sum(output['velocity_electrons']**2, axis=-1)
-    KE_ions      = (1/2) * jnp.expand_dims(output['mass_ions']     [...,0], 0) * jnp.sum(output['velocity_ions']**2,      axis=-1)
-    KE_electrons = jnp.sum(KE_electrons, axis=-1)
-    KE_ions      = jnp.sum(KE_ions,      axis=-1)
-
+    # ---------- pack scalars/time series ----------
     output.update({
-        'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
-        'electric_field_energy':         (epsilon_0/2) * integral_E_squared,
-        'magnetic_field_energy_density': 1/(2*mu_0)    * abs_B_squared,
-        'magnetic_field_energy':         1/(2*mu_0)    * integral_B_squared,
-        'dominant_frequency': dominant_frequency,
-        'plasma_frequency':   plasma_frequency,
-        'kinetic_energy':           KE_electrons + KE_ions,
-        'kinetic_energy_electrons': KE_electrons,
-        'kinetic_energy_ions':      KE_ions,
-        'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
-        'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
-        'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
-        'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared
+        'electric_field_energy_density': (epsilon_0/2) * absE2,          # (T, Ng)
+        'electric_field_energy':         (epsilon_0/2) * intE2,           # (T,)
+        'magnetic_field_energy_density': 1/(2*mu_0) * absB2,             # (T, Ng)
+        'magnetic_field_energy':         1/(2*mu_0) * intB2,              # (T,)
+        'external_electric_field_energy_density': (epsilon_0/2) * absE2_ext,  # (Ng,)
+        'external_electric_field_energy':         (epsilon_0/2) * intE2_ext,  # (T,)
+        'external_magnetic_field_energy_density': 1/(2*mu_0) * absB2_ext,     # (Ng,)
+        'external_magnetic_field_energy':         1/(2*mu_0) * intB2_ext,     # (T,)
+        'dominant_frequency': dom_omega,
+        'kinetic_energy': KE,                      # (T,)
+        'kinetic_energy_electrons': KE_e,          # (T,)
+        'kinetic_energy_ions': KE_i,               # (T,)
     })
 
-    total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
-                    output["magnetic_field_energy"] + output["external_magnetic_field_energy"] +
-                    output["kinetic_energy"])
+    # ---------- JIT-safe default species split via static slices ----------
+    # Your particle ordering is: [electrons (N), ions (N), then any extra species...]
+    # We only split the *default* two populations for plotting.
+    e_slice = slice(0, N)
+    i_slice = slice(N, 2*N)
 
+    output.update({
+        "position_electrons": pos[:, e_slice, :],
+        "velocity_electrons": vel[:, e_slice, :],
+        "mass_electrons":     output["masses"][e_slice, :],
+        "charge_electrons":   output["charges"][e_slice, :],
+        "species_id_electrons": output["species_ids"][e_slice, :],
+
+        "position_ions":      pos[:, i_slice, :],
+        "velocity_ions":      vel[:, i_slice, :],
+        "mass_ions":          output["masses"][i_slice, :],
+        "charge_ions":        output["charges"][i_slice, :],
+        "species_id_ions":    output["species_ids"][i_slice, :],
+    })
+
+    # weights for histograms (default pops → 1.0 is fine; keeps plot working)
+    # If later you want real per-species weight ratios, emit a parallel array
+    # from initialize and slice here similarly.
+    ones_N = jnp.ones((N,1), dtype=output["charges"].dtype)
+    output.update({
+        "weight_electrons": ones_N,
+        "weight_ions":      ones_N,
+    })
+
+    # ---------- total energy ----------
+    total_energy = (output["electric_field_energy"]
+                    + output["external_electric_field_energy"]
+                    + output["magnetic_field_energy"]
+                    + output["external_magnetic_field_energy"]
+                    + output["kinetic_energy"])
     output.update({'total_energy': total_energy})
+
+    # In jittable=True, keep unified arrays; do NOT delete anything.
+    if not jittable:
+        # (optional non-JIT path: you could delete unified arrays here)
+        pass

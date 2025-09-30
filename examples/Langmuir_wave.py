@@ -26,9 +26,6 @@ solver_parameters = {
 
 output = block_until_ready(simulation(input_parameters, **solver_parameters))
 
-# Post-process: segregate ions/electrons, compute energies, compute FFT
-diagnostics(output)
-
 print(f"Dominant FFT frequency (f): {output['dominant_frequency']} Hz")
 print(f"Plasma frequency (w_p):     {output['plasma_frequency']} Hz")
 print(f"Error: {jnp.abs(output['dominant_frequency'] - output['plasma_frequency']) / output['plasma_frequency'] * 100:.2f}%")

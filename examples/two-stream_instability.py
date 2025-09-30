@@ -1,10 +1,7 @@
 # Example script to run the simulation and plot the results
 import time
 from jax import block_until_ready
-from jaxincell import plot, simulation, load_parameters, diagnostics
-import numpy as np
-import pickle
-import json
+from jaxincell import plot, simulation, load_parameters
 
 # Read from input.toml
 input_parameters, solver_parameters = load_parameters('input.toml')
@@ -18,15 +15,14 @@ for i in range(n_simulations):
     output = block_until_ready(simulation(input_parameters, **solver_parameters))
     print(f"Run #{i+1}: Wall clock time: {time.time()-start}s")
 
-# Post-process: segregate ions/electrons, compute energies, compute FFT
-diagnostics(output)
-
 # Plot the results
 plot(output)
 
 # # Save the output to a file
+# import numpy as np
 # np.savez("simulation_output.npz", **output)
 
 # # Load the output from the file
+# import numpy as np
 # data = np.load("simulation_output.npz", allow_pickle=True)
 # output2 = dict(data)
