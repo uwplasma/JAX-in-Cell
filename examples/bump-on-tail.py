@@ -23,7 +23,6 @@ diagnostics(output)
 
 # Plot the results
 plot(output)
-plot(output, species_id=2)
 
 # Save the output to a file
 np.savez("simulation_output.npz", **output)

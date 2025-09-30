@@ -5,11 +5,10 @@ from jax import vmap
 from jax.debug import print as jprint
 from ._constants import speed_of_light, mass_electron, mass_proton
 from matplotlib.animation import FuncAnimation
-import matplotlib as mpl
 
 __all__ = ['plot']
 
-def plot(output, direction="x", threshold=1e-12, species_id=None):
+def plot(output, direction="x", threshold=1e-12):
     def is_nonzero(field):
         return jnp.max(jnp.abs(field)) > threshold
 
@@ -39,14 +38,6 @@ def plot(output, direction="x", threshold=1e-12, species_id=None):
     else:
         raise ValueError("direction must be one or two of 'x', 'y', or 'z'")
     # direction_index = {"x": 0, "y": 1, "z": 2}[direction]
-
-    if species_id is None: # show all particles
-        # is_finite(...) is just a lazy way to get boolean array of all True
-        ssele = jnp.isfinite(output['species_id_electrons'])[:,0]
-        sseli = jnp.isfinite(output['species_id_ions'])[:,0]
-    else:  # only show one species
-        ssele = (output['species_id_electrons'] == species_id)[:,0]
-        sseli = (output['species_id_ions']      == species_id)[:,0]
 
     # Determine which vector fields have nonzero components
     def add_field_components(field, unit, label_prefix):
@@ -82,29 +73,26 @@ def plot(output, direction="x", threshold=1e-12, species_id=None):
     # we cannot assume constant mass for all pseudoparticles with varying weights; hardcode
     # using the "default" ion species
     sqrtmemi = jnp.sqrt( mass_electron / (mass_proton * output["ion_mass_over_proton_mass"]) )
-    max_velocity_electrons_1 = 2.5 * jnp.abs(vth_e_1) + jnp.abs(output[f"electron_drift_speed_{direction1}"])
-    if np.any(ssele):
-        max_velocity_electrons_1 = max(1.0 * jnp.max(output["velocity_electrons"][:, ssele, direction_index1]),
-                                       max_velocity_electrons_1)
-    max_velocity_ions_1 = (sqrtmemi * 0.3 * jnp.abs(vth_i_1) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction1}"])
-                           + jnp.abs(output[f"ion_drift_speed_{direction1}"]) )
-    if np.any(sseli):
-        max_velocity_ions_1 = max(1.0 * jnp.max(output["velocity_ions"][:, sseli, direction_index1]),
-                                  max_velocity_ions_1)
+    max_velocity_electrons_1 = max(1.0 * jnp.max(output["velocity_electrons"][:, :, direction_index1]),
+                                 2.5 * jnp.abs(vth_e_1)
+                                 + jnp.abs(output[f"electron_drift_speed_{direction1}"]))
+    max_velocity_ions_1      = max(1.0 * jnp.max(output["velocity_ions"][:, :, direction_index1]),
+                                 sqrtmemi * 0.3 * jnp.abs(vth_i_1) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction1}"])
+                                 + jnp.abs(output[f"ion_drift_speed_{direction1}"]))
     max_velocity_ions_1 = float(jnp.asarray(max_velocity_ions_1))
     bins_velocity = max(min(len(grid), 111), 71)
 
     electron_phase_histograms = vmap(lambda pos, vel, wt: jnp.histogram2d(
         pos, vel, weights=wt, bins=[len(grid), bins_velocity],
         range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_electrons_1, max_velocity_electrons_1]])[0]
-    )(output["position_electrons"][:, ssele, direction_index1], output["velocity_electrons"][:, ssele, direction_index1],
-      jnp.tile(jnp.expand_dims(output["weight_electrons"][ssele,0],0), (output["position_electrons"].shape[0], 1)))
+    )(output["position_electrons"][:, :, direction_index1], output["velocity_electrons"][:, :, direction_index1],
+      jnp.tile(jnp.expand_dims(output["weight_electrons"][:,0],0), (output["position_electrons"].shape[0], 1)))
 
     ion_phase_histograms = vmap(lambda pos, vel, wt: jnp.histogram2d(
         pos, vel, weights=wt, bins=[len(grid), bins_velocity],
         range=[[-box_size_x / 2, box_size_x / 2], [-max_velocity_ions_1, max_velocity_ions_1]])[0]
-    )(output["position_ions"][:, sseli, direction_index1], output["velocity_ions"][:, sseli, direction_index1],
-      jnp.tile(jnp.expand_dims(output["weight_ions"][sseli,0],0), (output["position_ions"].shape[0], 1)))
+    )(output["position_ions"][:, :, direction_index1], output["velocity_ions"][:, :, direction_index1],
+      jnp.tile(jnp.expand_dims(output["weight_ions"][:,0],0), (output["position_ions"].shape[0], 1)))
 
     # Grid layout
     ncols = 3
@@ -190,29 +178,25 @@ def plot(output, direction="x", threshold=1e-12, species_id=None):
         positions_ax = axes_flat[used_axes + 3]
 
         # Phase space in second direction
-        max_velocity_electrons_2 = 2.5 * jnp.abs(vth_e_2) + jnp.abs(output[f"electron_drift_speed_{direction2}"])
-        if np.any(ssele):
-            max_velocity_electrons_2 = max(1.0 * jnp.max(output["velocity_electrons"][:, ssele, direction_index2]),
-                                           max_velocity_electrons_2)
-        max_velocity_ions_2 = (sqrtmemi * 0.3 * jnp.abs(vth_i_2) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction2}"])
-                               + jnp.abs(output[f"ion_drift_speed_{direction2}"]) )
-        if np.any(sseli):
-            max_velocity_ions_2 = max(1.0 * jnp.max(output["velocity_ions"][:, sseli, direction_index2]),
-                                      max_velocity_ions_2)
+        max_velocity_electrons_2 = max(1.0 * jnp.max(output["velocity_electrons"][:, :, direction_index2]),
+                                    2.5 * jnp.abs(vth_e_2) + jnp.abs(output[f"electron_drift_speed_{direction2}"]))
+        max_velocity_ions_2 = max(1.0 * jnp.max(output["velocity_ions"][:, :, direction_index2]),
+                                sqrtmemi * 0.3 * jnp.abs(vth_i_2) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction2}"]) +
+                                jnp.abs(output[f"ion_drift_speed_{direction2}"]))
 
         max_velocity_electrons_12 = max(max_velocity_electrons_1, max_velocity_electrons_2)
         max_velocity_ions_12      = max(max_velocity_ions_1, max_velocity_ions_2)
         electron_phase_histograms2 = vmap(lambda pos, vel, wt: jnp.histogram2d(
             pos, vel, weights=wt, bins=[len(grid), bins_velocity],
             range=[[-max_velocity_electrons_12, max_velocity_electrons_12], [-max_velocity_electrons_12, max_velocity_electrons_12]])[0]
-        )(output["velocity_electrons"][:, ssele, direction_index1], output["velocity_electrons"][:, ssele, direction_index2],
-          jnp.tile(jnp.expand_dims(output["weight_electrons"][ssele,0],0), (output["position_electrons"].shape[0], 1)))
+        )(output["velocity_electrons"][:, :, direction_index1], output["velocity_electrons"][:, :, direction_index2],
+          jnp.tile(jnp.expand_dims(output["weight_electrons"][:,0],0), (output["position_electrons"].shape[0], 1)))
 
         ion_phase_histograms2 = vmap(lambda pos, vel, wt: jnp.histogram2d(
             pos, vel, weights=wt, bins=[len(grid), bins_velocity],
             range=[[-max_velocity_ions_12, max_velocity_ions_12], [-max_velocity_ions_12, max_velocity_ions_12]])[0]
-        )(output["velocity_ions"][:, sseli, direction_index1], output["velocity_ions"][:, sseli, direction_index2],
-          jnp.tile(jnp.expand_dims(output["weight_ions"][sseli,0],0), (output["position_ions"].shape[0], 1)))
+        )(output["velocity_ions"][:, :, direction_index1], output["velocity_ions"][:, :, direction_index2],
+          jnp.tile(jnp.expand_dims(output["weight_ions"][:,0],0), (output["position_ions"].shape[0], 1)))
 
         electron_plot2 = electron_ax2.imshow(
             jnp.zeros((len(grid), bins_velocity)), aspect="auto", origin="lower", cmap="twilight",
