@@ -22,11 +22,13 @@ def diagnostics(output):
         "mass_electrons":     output["masses"]    [   esel],
         "charge_electrons":   output["charges"]   [   esel],
         "weight_electrons":   output["weights"]   [   esel],
+        "species_id_electrons": output["species_ids"][esel],
         "position_ions":      output["positions"] [:, isel, :],
         "velocity_ions":      output["velocities"][:, isel, :],
         "mass_ions":          output["masses"]    [   isel],
         "charge_ions":        output["charges"]   [   isel],
         "weight_ions":        output["weights"]   [   isel],
+        "species_id_ions":    output["species_ids"][  isel],
     }
     output.update(**segregated)
     del output["positions"]
