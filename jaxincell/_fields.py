@@ -203,8 +203,75 @@ def lap1d_periodic(u, dx):
     return (jnp.roll(u, -1) - 2.0 * u + jnp.roll(u, 1)) / (dx * dx)
 
 @jit
-def delta_leapfrog_step(delta, delta_prev, dx, dt, source):
-    # δ_tt = - c^2 δ_xx + source
-    acc = - (speed_of_light**2) * lap1d_periodic(delta, dx) + source
-    delta_next = 2.0 * delta - delta_prev + (dt**2) * acc
+def lap1d_periodic_spectral(u, dx):
+    # spectral Laplacian with periodic BCs
+    N  = u.shape[0]
+    k  = 2.0 * jnp.pi * jnp.fft.fftfreq(N, d=dx)  # rad/m
+    uk = jnp.fft.fft(u)
+    lap_k = -(k**2) * uk
+    return jnp.fft.ifft(lap_k).real
+
+@jit
+# def delta_leapfrog_step(delta, delta_prev, dx, dt, rhs):
+def delta_leapfrog_step(delta, delta_prev, dx, dt, rhs,
+                           remove_mean=False, ko_nu=0.0, ko_power=0):
+    """
+    Implicit midpoint (Crank–Nicolson) in time, spectral in space, for:
+        delta_tt + c^2 k^2 delta = -c^2 rhs   (linearized δ-PDE)
+    Treat rhs at time n (you can change to (rhs_{n+1}+rhs_{n-1})/2 if desired).
+
+    Args:
+      delta, delta_prev: δ^n and δ^{n-1} on E-grid (shape G,)
+      dx, dt: grid spacing, timestep
+      rhs: RHS^n on the E-grid (units 1/m^2)
+      remove_mean: zero the k=0 drive (prevents secular runaway)
+      ko_nu: optional KO filter strength (0 → off)
+      ko_power: KO filter exponent (even integer, e.g., 6, 8)
+
+    Returns:
+      delta_next: δ^{n+1}
+    """
+    N = delta.shape[0]
+    k = 2.0 * jnp.pi * jnp.fft.fftfreq(N, d=dx)  # rad/m
+    k2 = k * k
+    c2 = speed_of_light * speed_of_light
+
+    # FFTs
+    dk   = jnp.fft.fft(delta)
+    dkm1 = jnp.fft.fft(delta_prev)
+    rk   = jnp.fft.fft(rhs)
+
+    # Kill k=0 source and mean δ (no restoring force at k=0 → unbounded drift)
+    if remove_mean:
+        rk   = rk.at[0].set(0.0)
+        dk   = dk.at[0].set(0.0)
+        dkm1 = dkm1.at[0].set(0.0)
+
+    # Implicit midpoint on δ'' + ω^2 δ = f  with ω^2 = c^2 k^2, f = -c^2 rhs
+    # Discretization (centered second diff + midpoint for stiffness):
+    #   (δ^{n+1} - 2δ^n + δ^{n-1})/dt^2 + ω^2 * (δ^{n+1} + δ^{n-1})/2 = f^n
+    # Solve for δ^{n+1} mode-by-mode:
+    #   A δ^{n+1} = B  with
+    #   A = 1/dt^2 + (ω^2)/2
+    #   B = 2δ^n/dt^2 - δ^{n-1}/dt^2 - (ω^2/2) δ^{n-1} + f^n
+    omega2 = c2 * k2
+    inv_dt2 = 1.0 / (dt * dt)
+
+    A = inv_dt2 + 0.5 * omega2
+    B = (2.0 * inv_dt2) * dk - (inv_dt2 + 0.5 * omega2) * dkm1 - c2 * rk
+
+    dk_next = B / A
+
+    # Optional mild KO filter to tame grid-scale PIC noise (does *not* affect stability)
+    if ko_nu > 0.0:
+        kmax = jnp.max(jnp.abs(k[1:]))
+        s = (jnp.abs(k) / kmax) ** ko_power
+        dk_next = (1.0 - ko_nu * s) * dk_next
+
+    delta_next = jnp.fft.ifft(dk_next).real
+
+    # Keep mean pinned to zero if requested
+    if remove_mean:
+        delta_next = delta_next - jnp.mean(delta_next)
+
     return delta_next

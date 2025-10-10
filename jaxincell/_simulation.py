@@ -128,6 +128,8 @@ def initialize_simulation_parameters(user_parameters={}):
         "kappa": 1.0,              # set 1 to match R - Lambda = T * kappa * 8 pi G / c^4
         "Lambda": 0.0,             # cosmological constant
         "use_gravity": True,       # switch to enable/disable delta-coupling
+        "delta_amplitude": 0.0,    # Amplitude of initial perturbation in delta
+        "delta_wavenumber": 0.0,   # Wavenumber of initial perturbation in delta (factor of 2pi/length)
     }
 
     # Merge user-provided parameters into the default dictionary
@@ -344,8 +346,10 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     external_E_field_x = parameters["external_electric_field_amplitude"] * jnp.cos(parameters["external_electric_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
     external_B_field_x = parameters["external_magnetic_field_amplitude"] * jnp.cos(parameters["external_magnetic_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
 
-    delta = jnp.zeros((number_grid_points,))           # δ at E-grid (grid + dx/2 staggering)
-    delta_prev = delta.copy()                          # for leapfrog
+    # delta = jnp.zeros((number_grid_points,))           # δ at E-grid (grid + dx/2 staggering)
+    k  = 2.0 * jnp.pi * parameters["delta_wavenumber"] / length
+    delta = parameters["delta_amplitude"] * jnp.sin(k * (grid + 0.5 * dx))
+    delta_prev = delta.copy()
 
     # **Update parameters**
     parameters.update({

@@ -17,12 +17,20 @@ from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_F
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
 
+from jax.debug import print as jprint
+
 __all__ = ['Boris_step', 'CN_step']
 
-def split_species_charge_density(positions, qs, dx, grid_E, particle_BC_left, particle_BC_right, N_e):
-    # electrons: [0:N_e), ions: [N_e: ]
-    rho_e = calculate_charge_density(positions[:N_e], qs[:N_e], dx, grid_E, particle_BC_left, particle_BC_right)
-    rho_i = calculate_charge_density(positions[N_e:], qs[N_e:], dx, grid_E, particle_BC_left, particle_BC_right)
+def split_species_charge_density(positions, qs, dx, grid_E, particle_BC_left, particle_BC_right):
+    # masks by sign of charge (safe under jit)
+    q = qs[:, 0]
+    mask_e = (q < 0).astype(qs.dtype)[:, None]
+    mask_i = (q > 0).astype(qs.dtype)[:, None]
+
+    rho_e = calculate_charge_density(positions, qs * mask_e, dx, grid_E,
+                                     particle_BC_left, particle_BC_right)
+    rho_i = calculate_charge_density(positions, qs * mask_i, dx, grid_E,
+                                     particle_BC_left, particle_BC_right)
     return rho_e, rho_i
 
 #Boris step
@@ -157,27 +165,34 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     # ---- δ update (wave eqn) with your source
     if use_gravity:
+        # ---- Build mass density ρ (kg/m^3) on the E-grid from species charge densities
         Np = parameters["number_pseudoelectrons"]
-        rho_e, rho_i = split_species_charge_density(positions, qs, dx, grid + dx/2,
-                                                    particle_BC_left, particle_BC_right, Np)
-        qe = parameters["electron_charge_over_elementary_charge"] * elementary_charge
-        qi = parameters["ion_charge_over_elementary_charge"]      * elementary_charge
+
+        # electrons: [0:Np), ions: [Np:)
+        rho_e, rho_i = split_species_charge_density(
+            positions, qs, dx, grid + dx/2, particle_BC_left, particle_BC_right
+        )
+
+        # signed species charges (SI)
+        qe = parameters["electron_charge_over_elementary_charge"] * elementary_charge  # < 0
+        qi = parameters["ion_charge_over_elementary_charge"]      * elementary_charge  # > 0
+
+        # number densities (m^-3); these are positive (negative/negative -> positive for electrons)
         ne = rho_e / qe
         ni = rho_i / qi
 
+        # rest-mass density ρ = m_e ne + m_i ni  (kg/m^3)
         m_e = mass_electron
         m_i = parameters["ion_mass_over_proton_mass"] * mass_proton
-        m2n_sum = (m_e**2) * ne + (m_i**2) * ni
+        rho_mass = m_e * ne + m_i * ni
 
-        total_Ex = (E_field[:, 0] + parameters["external_electric_field"][:, 0])
-
-        kappa  = parameters["kappa"] * 8 * jnp.pi * gravitational_constant / (speed_of_light**4)
+        # ---- Correct RHS for (1/c^2) (1/α)_{tt} - α_xx = RHS, from trace of Einstein eq:
+        kappa  = parameters["kappa"] * 8 * jnp.pi * gravitational_constant / (speed_of_light**2)
         Lambda = parameters["Lambda"]
-        source = -(speed_of_light**2) * Lambda \
-                 + kappa * (speed_of_light**2) * epsilon_0 * (total_Ex**2) \
-                 + kappa * (speed_of_light**5) * m2n_sum
+        RHS = Lambda + kappa * rho_mass   # units: 1/m^2
 
-        delta_next = delta_leapfrog_step(delta, delta_prev, dx, dt, source)
+        # ---- Advance δ with leapfrog in u = 1/α
+        delta_next = delta_leapfrog_step(delta, delta_prev, dx, dt, RHS)
         delta_prev, delta = delta, delta_next
 
     # pack carry + diagnostics
@@ -342,38 +357,34 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     
     # ---------- δ update (leapfrog) ----------
     if use_gravity:
-        # species densities on E-grid
+        # ---- Build mass density ρ (kg/m^3) on the E-grid from species charge densities
         Np = parameters["number_pseudoelectrons"]
-        
-        # electrons have negative q, ions positive q in your setup
-        mask_e = (qs[:, 0] < 0).astype(qs.dtype).reshape(-1, 1)
-        mask_i = (qs[:, 0] > 0).astype(qs.dtype).reshape(-1, 1)
 
-        # deposit with masked charges (positions shape unchanged)
-        rho_e = calculate_charge_density(positions_new, qs * mask_e, dx, grid + dx/2,
-                                        particle_BC_left, particle_BC_right)
-        rho_i = calculate_charge_density(positions_new, qs * mask_i, dx, grid + dx/2,
-                                        particle_BC_left, particle_BC_right)
+        # electrons: [0:Np), ions: [Np:)
+        rho_e, rho_i = split_species_charge_density(
+            positions_new, qs, dx, grid + dx/2, particle_BC_left, particle_BC_right
+        )
 
-        # number densities
-        qe = parameters["electron_charge_over_elementary_charge"] * elementary_charge
-        qi = parameters["ion_charge_over_elementary_charge"]      * elementary_charge
+        # signed species charges (SI)
+        qe = parameters["electron_charge_over_elementary_charge"] * elementary_charge  # < 0
+        qi = parameters["ion_charge_over_elementary_charge"]      * elementary_charge  # > 0
+
+        # number densities (m^-3); these are positive (negative/negative -> positive for electrons)
         ne = rho_e / qe
         ni = rho_i / qi
 
+        # rest-mass density ρ = m_e ne + m_i ni  (kg/m^3)
         m_e = mass_electron
         m_i = parameters["ion_mass_over_proton_mass"] * mass_proton
-        m2n_sum = (m_e**2) * ne + (m_i**2) * ni
+        rho_mass = m_e * ne + m_i * ni
 
-        total_Ex = (E_new[:, 0] + parameters["external_electric_field"][:, 0])
-
-        kappa = parameters["kappa"] * 8 * jnp.pi * gravitational_constant / speed_of_light**4
+        # ---- Correct RHS for (1/c^2) (1/α)_{tt} - α_xx = RHS, from trace of Einstein eq:
+        kappa  = parameters["kappa"] * 8 * jnp.pi * gravitational_constant / (speed_of_light**2)
         Lambda = parameters["Lambda"]
-        source = -(speed_of_light**2) * Lambda \
-                + kappa * (speed_of_light**2) * epsilon_0 * (total_Ex**2) \
-                + kappa * (speed_of_light**5) * m2n_sum
+        RHS = Lambda + kappa * rho_mass   # units: 1/m^2
 
-        delta_next = delta_leapfrog_step(delta, delta_prev, dx, dt, source)
+        # ---- Advance δ with leapfrog in u = 1/α
+        delta_next = delta_leapfrog_step(delta, delta_prev, dx, dt, RHS)
         delta_prev, delta = delta, delta_next
 
     # Update carrys for next step

@@ -18,6 +18,7 @@ for i in range(n_simulations):
     output = block_until_ready(simulation(input_parameters, **solver_parameters))
     print(f"Run #{i+1}: Wall clock time: {time.time()-start}s")
 
+print(output['delta_over_time'][:,-1])
 # Plot the results
 plot(output)
 
