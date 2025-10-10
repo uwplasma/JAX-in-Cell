@@ -192,3 +192,19 @@ def field_update2(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
     curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
     E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
     return E_fields,B_fields
+
+@jit
+def grad1d_periodic(u, dx):
+    # centered (periodic) gradient on same grid
+    return (jnp.roll(u, -1) - jnp.roll(u, 1)) / (2.0 * dx)
+
+@jit
+def lap1d_periodic(u, dx):
+    return (jnp.roll(u, -1) - 2.0 * u + jnp.roll(u, 1)) / (dx * dx)
+
+@jit
+def delta_leapfrog_step(delta, delta_prev, dx, dt, source):
+    # δ_tt = - c^2 δ_xx + source
+    acc = - (speed_of_light**2) * lap1d_periodic(delta, dx) + source
+    delta_next = 2.0 * delta - delta_prev + (dt**2) * acc
+    return delta_next

@@ -123,6 +123,11 @@ def initialize_simulation_parameters(user_parameters={}):
         "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
         
         "weight": 0,
+        
+        # gravity / coupling
+        "kappa": 1.0,              # set 1 to match R - Lambda = T * kappa * 8 pi G / c^4
+        "Lambda": 0.0,             # cosmological constant
+        "use_gravity": True,       # switch to enable/disable delta-coupling
     }
 
     # Merge user-provided parameters into the default dictionary
@@ -339,6 +344,9 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     external_E_field_x = parameters["external_electric_field_amplitude"] * jnp.cos(parameters["external_electric_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
     external_B_field_x = parameters["external_magnetic_field_amplitude"] * jnp.cos(parameters["external_magnetic_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
 
+    delta = jnp.zeros((number_grid_points,))           # δ at E-grid (grid + dx/2 staggering)
+    delta_prev = delta.copy()                          # for leapfrog
+
     # **Update parameters**
     parameters.update({
         "weight": weight,
@@ -360,6 +368,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "max_initial_vth_electrons": vth_electrons,
         "max_number_of_Picard_iterations_implicit_CN": max_number_of_Picard_iterations_implicit_CN, 
         "number_of_particle_substeps_implicit_CN": number_of_particle_substeps_implicit_CN,
+        "delta": delta,
+        "delta_prev": delta_prev,
     })
     
     return parameters
@@ -433,20 +443,24 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         initial_carry = (
             E_field, B_field, positions_minus1_2, positions,
             positions_plus1_2, velocities, qs, ms, q_ms,
+            parameters["delta"], parameters["delta_prev"],
         )
         step_func = lambda carry, step_index: Boris_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
-            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, field_solver
+            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, field_solver,
+            parameters["use_gravity"]
         )
     else:
         initial_carry = (
             E_field, B_field, positions,
             velocities, qs, ms, q_ms,
+            parameters["delta"], parameters["delta_prev"],
         )
         step_func = lambda carry, step_index: CN_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
             particle_BC_left, particle_BC_right, field_BC_left, field_BC_right,
-            parameters["number_of_particle_substeps_implicit_CN"]
+            parameters["number_of_particle_substeps_implicit_CN"],
+            parameters["use_gravity"]
         )
 
     @scan_tqdm(total_steps)
@@ -459,7 +473,8 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
 
     # Unpack results
     positions_over_time, velocities_over_time, electric_field_over_time, \
-    magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+    magnetic_field_over_time, current_density_over_time, charge_density_over_time, \
+    delta_over_time = results
     
     # **Output results**
     temporary_output = {
@@ -479,6 +494,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         "number_pseudoelectrons": number_pseudoelectrons,
         "total_steps": total_steps,
         "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
+        "delta_over_time": delta_over_time,
     }
     
     output = {**temporary_output, **parameters}

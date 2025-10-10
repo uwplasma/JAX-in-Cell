@@ -57,7 +57,20 @@ def plot(output, direction="x", threshold=1e-12):
     plots_to_make = []
     plots_to_make += add_field_components("electric_field", "V/m", "Electric Field")
     plots_to_make += add_field_components("magnetic_field", "T", "Magnetic Field")
-    plots_to_make += add_field_components("current_density", "A/m²", "Current Density")
+    # If gravity is on, plot delta instead of current-density-x
+    use_gravity = bool(output.get("use_gravity", False))
+    if use_gravity and "delta_over_time" in output:
+        # Remove Current Density X panel if present and inject delta
+        # (We don't know which index it is; simplest is to append δ as its own panel.)
+        plots_to_make.append({
+            "data": output["delta_over_time"],    # shape: (T, G)
+            "title": "Metric perturbation δ(x,t)",
+            "xlabel": "x Position (m)",
+            "ylabel": r"Time ($\omega_{pe}^{-1}$)",
+            "cbar": "δ (dimensionless)"
+        })
+    else:
+        plots_to_make += add_field_components("current_density", "A/m²", "Current Density")
 
     # Charge density (always plotted)
     plots_to_make.append({

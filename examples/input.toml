@@ -1,12 +1,12 @@
 [input_parameters]
 length = 1.0
-amplitude_perturbation_x = 0
-wavenumber_electrons_x = 0
+amplitude_perturbation_x = 0.1
+wavenumber_electrons_x = 8
 wavenumber_ions_x = 0
 grid_points_per_Debye_length = 2.0
-vth_electrons_over_c_x = 0.05
+vth_electrons_over_c_x = 0.1
 ion_temperature_over_electron_temperature_x = 0.01
-timestep_over_spatialstep_times_c = 4.0
+timestep_over_spatialstep_times_c = 0.1
 electron_drift_speed_x = 150000000.0
 velocity_plus_minus_electrons_x = true
 print_info = true
@@ -14,12 +14,13 @@ external_electric_field_amplitude = 0
 external_electric_field_wavenumber = 0
 relativistic = true
 tolerance_Picard_iterations_implicit_CN = 1e-5
+kappa = 1
 
 [solver_parameters]
 time_evolution_algorithm = 1
 max_number_of_Picard_iterations_implicit_CN = 30
 number_of_particle_substeps_implicit_CN = 2
 field_solver = 0
-number_grid_points = 61
+number_grid_points = 51
 number_pseudoelectrons = 3000
-total_steps = 700
+total_steps = 570
