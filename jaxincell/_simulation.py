@@ -123,6 +123,10 @@ def initialize_simulation_parameters(user_parameters={}):
         "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
         
         "weight": 0,
+
+        "filter_passes": 5,            # integer >= 1
+        "filter_alpha": 0.5,           # 0..1
+        "filter_strides": (1, 2, 4),   # tuple of ints (hashable)
     }
 
     # Merge user-provided parameters into the default dictionary

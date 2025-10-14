@@ -1,6 +1,9 @@
 import jax.numpy as jnp
+from functools import partial
 from jax import jit, vmap
 from jax.lax import dynamic_update_slice
+from ._filters import filter_scalar_field
+
 
 __all__ = ['charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density']
 
@@ -74,7 +77,7 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
     return grid_BCs
 
 @jit
-def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right):
+def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right, filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4)):
     """
     Computes the total charge density on the grid by summing contributions from all particles.
 
@@ -97,6 +100,11 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
 
     # Sum the contributions across all particles
     total_chargedens = jnp.sum(chargedens, axis=0)
+
+    total_chargedens = filter_scalar_field(total_chargedens,
+                                           passes=filter_passes,
+                                           alpha=filter_alpha,
+                                           strides=filter_strides)
 
     return total_chargedens
 
