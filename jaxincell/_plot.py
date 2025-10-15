@@ -159,10 +159,13 @@ def plot(output, direction="x", threshold=1e-12):
         energy_ax.plot(time, output["electric_field_energy"], label="Electric field energy")
         if jnp.max(output["magnetic_field_energy"]) > 1e-10:
             energy_ax.plot(time, output["magnetic_field_energy"], label="Magnetic field energy")
-        energy_ax.plot(time[2:], jnp.abs(jnp.mean(output["charge_density"][2:], axis=-1))*1e15, label=r"Mean $\rho \times 10^{15}$")
+        charge = jnp.abs(jnp.mean(output["charge_density"], axis=-1))
+        # energy_ax.plot(time[4:], jnp.abs(charge[4:]-charge[4])/charge[4], label="Relative charge error")
+        # energy_ax.plot(time, output["gauss_rel_error"], label="Gauss law relative error")
+        energy_ax.plot(time, output["momentum_rel_error"], label="Relative momentum error")
         energy_ax.plot(time[1:], jnp.abs(output["total_energy"][1:] - output["total_energy"][0]) / output["total_energy"][0], label="Relative energy error")
         energy_ax.set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)",
-                    ylabel="Energy (J)", yscale="log", ylim=[1e-7, None])
+                    ylabel="Energy (J)", yscale="log", ylim=[1e-5, None])
         energy_ax.legend(fontsize=7)
     
     if second_direction:

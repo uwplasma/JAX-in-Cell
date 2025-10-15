@@ -26,24 +26,29 @@ def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, fi
         array: The interpolated field values at the particle positions, shape (N,).
     """
     # Add ghost cells for the boundaries using provided boundary conditions
-    ghost_cell_L1, ghost_cell_L2, ghost_cell_R = field_2_ghost_cells(field_BC_left,field_BC_right,field)
-    field = jnp.insert(field,0,ghost_cell_L2,axis=0)
-    field = jnp.insert(field,0,ghost_cell_L1,axis=0)
-    field = jnp.append(field,jnp.array([ghost_cell_R]),axis=0)
+    ghost_L1, ghost_L2, ghost_R = field_2_ghost_cells(field_BC_left, field_BC_right, field)
+    # single left pad (L2, L1), single right pad (R)
+    left_pad  = jnp.stack([ghost_L2, ghost_L1], axis=0)       # (2, 3)
+    right_pad = ghost_R[None, ...]                             # (1, 3)
+    field = jnp.concatenate([left_pad, field, right_pad], axis=0)
+
     x = x_n[0]
     
     # Adjust the grid to accommodate particles at the first half grid cell (staggered grid)
     #If using a staggered grid, particles at first half cell will be out of grid, so add extra cell
-    grid = jnp.insert(grid,0,grid[0]-dx,axis=0) 
-    
-    # Calculate the index of the field grid corresponding to the particle position
-    i = ((x-grid_start+dx)//dx).astype(int) #new grid_start = grid_start-dx due to extra cell
+    grid_left = (grid[0] - dx)[None]                           # (1,)
+    grid = jnp.concatenate([grid_left, grid], axis=0)
+
+    # because we added one cell on the left, effective start shifts by -dx
+    i = ((x - (grid_start - dx) + dx) // dx).astype(int)
     
     # Interpolate the field at the particle position using a quadratic interpolation
-    fields_n = 0.5*field[i]*(0.5+(grid[i]-x)/dx)**2 + field[i+1]*(0.75-(grid[i]-x)**2/dx**2) + 0.5*field[i+2]*(0.5-(grid[i]-x)/dx)**2
-    
+    fields_n = (
+        0.5 * field[i]   * (0.5 + (grid[i]   - x) / dx) ** 2 +
+              field[i+1] * (0.75 - ((grid[i] - x) / dx) ** 2) +
+        0.5 * field[i+2] * (0.5 - (grid[i]   - x) / dx) ** 2
+    )
     return fields_n
-
 
 @jit
 def rotation(dt, B, vsub, q_m):

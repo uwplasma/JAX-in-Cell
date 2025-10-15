@@ -12,7 +12,8 @@ def diagnostics(output):
     total_steps       = output['total_steps']
     mass_electrons    = output["mass_electrons"][0]
     mass_ions         = output["mass_ions"][0]
-    
+    dx                = output['dx']
+
     # array_to_do_fft_on = charge_density_over_time[:,len(grid)//2]
     array_to_do_fft_on = E_field_over_time[:,len(grid)//2,0]
     array_to_do_fft_on = (array_to_do_fft_on-jnp.mean(array_to_do_fft_on))/jnp.max(array_to_do_fft_on)
@@ -39,7 +40,32 @@ def diagnostics(output):
     
     v_electrons_squared = jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1)
     v_ions_squared      = jnp.sum(jnp.sum(output['velocity_ions']**2     , axis=-1), axis=-1)
-    
+
+    # ---------- Gauss' law deviation (1D) ----------
+    # Use Ex component; periodic central difference
+    Ex_tg = output['electric_field'][:,:,0]                  # (T, G)
+    rho_tg = output['charge_density']                        # (T, G)
+    # periodic roll for central diff
+    dEx_dx = (jnp.roll(Ex_tg, -1, axis=1) - jnp.roll(Ex_tg, 1, axis=1)) / (2.0*dx)
+    rhs = rho_tg / epsilon_0
+    num = jnp.linalg.norm(dEx_dx - rhs, axis=1)
+    den = jnp.maximum(jnp.linalg.norm(rhs, axis=1), 1e-300)
+    gauss_rel_error = num / den
+
+    # ---------- Momentum relative error ----------
+    # Mass arrays are (Np,1); velocities are (T, Np, 3)
+    me = output['mass_electrons']            # (Ne,1)
+    mi = output['mass_ions']                 # (Ni,1)
+    ve = output['velocity_electrons']        # (T, Ne, 3)
+    vi = output['velocity_ions']             # (T, Ni, 3)
+    # convert to (T, Ne, 1) broadcast for multiply
+    me_b = me[None, :, :]   # (1,Ne,1)
+    mi_b = mi[None, :, :]   # (1,Ni,1)
+    Pe_t = jnp.sum(me_b * ve, axis=1) + jnp.sum(mi_b * vi, axis=1)  # (T, 3)
+    P0   = Pe_t[0]  # (3,)
+    numP = jnp.linalg.norm(Pe_t - P0, axis=1)
+    denP = jnp.maximum(jnp.linalg.norm(P0), 1e-300)
+    momentum_rel_error = numP / denP
 
     output.update({
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
@@ -54,7 +80,9 @@ def diagnostics(output):
         'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
         'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
         'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
-        'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared
+        'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared,
+        'gauss_rel_error': gauss_rel_error,
+        'momentum_rel_error': momentum_rel_error
     })
     
     total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +

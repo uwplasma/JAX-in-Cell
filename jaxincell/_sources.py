@@ -101,10 +101,7 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
     # Sum the contributions across all particles
     total_chargedens = jnp.sum(chargedens, axis=0)
 
-    total_chargedens = filter_scalar_field(total_chargedens,
-                                           passes=filter_passes,
-                                           alpha=filter_alpha,
-                                           strides=filter_strides)
+    total_chargedens = filter_scalar_field(total_chargedens, passes=filter_passes, alpha=filter_alpha, strides=filter_strides) 
 
     return total_chargedens
 
