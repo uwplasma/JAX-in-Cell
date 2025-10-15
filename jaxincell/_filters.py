@@ -2,7 +2,7 @@ import jax.numpy as jnp
 from jax import jit, lax
 
 @jit
-def binomial1(x, alpha=0.5, stride=1):
+def binomial_filter_3point(x, alpha=0.5, stride=1):
     # 3-point: x^f_j = α x_j + (1-α)(x_{j-1}+x_{j+1})/2
     # periodic ends assumed at call site (we’ll pad/roll in callers)
     return alpha * x + (1 - alpha) * 0.5 * (
@@ -13,11 +13,11 @@ def binomial1(x, alpha=0.5, stride=1):
 def _repeat_filter(y, stride, passes, alpha):
     # (passes-1) regular passes
     def body(_, val):
-        return binomial1(val, alpha, stride=stride)
-    y = lax.fori_loop(0, jnp.maximum(passes - 1, 0), lambda i, v: body(i, v), y)
-    # compensation pass
+        return binomial_filter_3point(val, alpha, stride=stride)
+    y = lax.fori_loop(0, jnp.maximum(passes - 1, 0), body, y)
+    # compensation pass - sharp cutoff in k-space (see https://warpx.readthedocs.io/en/latest/theory/pic.html)
     comp_alpha = passes - alpha * (passes - 1)
-    y = binomial1(y, comp_alpha, stride=stride)
+    y = binomial_filter_3point(y, comp_alpha, stride=stride)
     return y
 
 @jit
