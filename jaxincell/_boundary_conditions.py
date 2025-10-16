@@ -4,13 +4,13 @@ from ._constants import speed_of_light
 
 __all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
 
-def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
+def set_BC_single_particle(x_n, p_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
     """
-    Applies boundary conditions (BCs) to a single particle's position and velocity.
+    Applies boundary conditions (BCs) to a single particle's position and momentum.
 
     Args:
         x_n (jnp.ndarray): Particle position as a 1D array [x, y, z].
-        v_n (jnp.ndarray): Particle velocity as a 1D array [vx, vy, vz].
+        p_n (jnp.ndarray): Particle momentum as a 1D array [px, py, pz].
         q (float): Particle charge.
         q_m (float): Charge-to-mass ratio of the particle.
         dx (float): Grid spacing.
@@ -55,22 +55,22 @@ def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, b
         ),
     )
 
-    # Update velocities for reflective or absorbing boundaries
-    v_n = jnp.where(
+    # Update momentum for reflective or absorbing boundaries
+    p_n = jnp.where(
         x_n[0] < -box_size_x / 2,
         jnp.where(
             BC_left == 0,  # Periodic
-            v_n,
-            jnp.where(BC_left == 1, v_n * jnp.array([-1, 1, 1]), jnp.array([0, 0, 0])),  # Reflective or Absorbing
+            p_n,
+            jnp.where(BC_left == 1, p_n * jnp.array([-1, 1, 1]), jnp.array([0, 0, 0])),  # Reflective or Absorbing
         ),
         jnp.where(
             x_n[0] > box_size_x / 2,
             jnp.where(
                 BC_right == 0,  # Periodic
-                v_n,
-                jnp.where(BC_right == 1, v_n * jnp.array([-1, 1, 1]), jnp.array([0, 0, 0])),  # Reflective or Absorbing
+                p_n,
+                jnp.where(BC_right == 1, p_n * jnp.array([-1, 1, 1]), jnp.array([0, 0, 0])),  # Reflective or Absorbing
             ),
-            v_n,
+            p_n,
         ),
     )
 
@@ -78,28 +78,28 @@ def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, b
     q   = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q)
     q_m = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q_m)
 
-    return jnp.array([x_n0, x_n1, x_n2]), v_n, q, q_m
+    return jnp.array([x_n0, x_n1, x_n2]), p_n, q, q_m
 
 @jit
-def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
+def set_BC_particles(xs_n, ps_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
     """
     Applies boundary conditions to all particles in parallel.
 
     Args:
         xs_n (jnp.ndarray): Positions of all particles, shape (N, 3).
-        vs_n (jnp.ndarray): Velocities of all particles, shape (N, 3).
+        ps_n (jnp.ndarray): Momentum of all particles, shape (N, 3).
         qs (jnp.ndarray): Charges of all particles, shape (N,).
         ms (jnp.ndarray): Masses of all particles, shape (N,).
         q_ms (jnp.ndarray): Charge-to-mass ratios of all particles, shape (N,).
         Other parameters: Same as set_BCs.
 
     Returns:
-        tuple: Updated positions, velocities, charges, masses, and charge-to-mass ratios for all particles.
+        tuple: Updated positions, momentum, charges, masses, and charge-to-mass ratios for all particles.
     """
-    xs_n, vs_n, qs, q_ms = vmap(
-        lambda x_n, v_n, q, q_m: set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right)
-    )(xs_n, vs_n, qs, q_ms)
-    return xs_n, vs_n, qs, ms, q_ms
+    xs_n, ps_n, qs, q_ms = vmap(
+        lambda x_n, p_n, q, q_m: set_BC_single_particle(x_n, p_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right)
+    )(xs_n, ps_n, qs, q_ms)
+    return xs_n, ps_n, qs, ms, q_ms
 
 def set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
     """

@@ -4,9 +4,9 @@ amplitude_perturbation_x = 0
 wavenumber_electrons_x = 0
 wavenumber_ions_x = 0
 grid_points_per_Debye_length = 2.0
-vth_electrons_over_c_x = 0.05
+vth_electrons_over_c_x = 0.2
 ion_temperature_over_electron_temperature_x = 0.01
-timestep_over_spatialstep_times_c = 4.0
+timestep_over_spatialstep_times_c = 0.5
 electron_drift_speed_x = 150000000.0
 velocity_plus_minus_electrons_x = true
 print_info = true
@@ -19,10 +19,10 @@ filter_alpha = 0.5
 filter_strides = [1, 2, 4]
 
 [solver_parameters]
-time_evolution_algorithm = 1
+time_evolution_algorithm = 0
 max_number_of_Picard_iterations_implicit_CN = 30
 number_of_particle_substeps_implicit_CN = 2
 field_solver = 0
 number_grid_points = 61
-number_pseudoelectrons = 3000
-total_steps = 400
+number_pseudoelectrons = 5000
+total_steps = 1200

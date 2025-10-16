@@ -7,3 +7,5 @@ from ._plot import *
 from ._simulation import *
 from ._sources import *
 from ._initialization import *
+from ._distributions import *
+from ._movies import *

@@ -1,12 +1,13 @@
 import jax.numpy as jnp
 from jax import lax
-from jax.random import PRNGKey, uniform, normal
+from jax.random import PRNGKey, uniform
 from jax.debug import print as jprint
 
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
 
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
+from ._distributions import _relativistic_distribution, _nonrelativistic_distribution
 
 __all__ = ["initialize_simulation_parameters", "initialize_particles_fields", "load_parameters"]
 
@@ -249,33 +250,19 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     ), axis=0)
     charge_to_mass_ratios = charges / masses
 
-    # **Particle Velocities**
-    # Electron thermal velocities and drift speeds
-    v_electrons_x = parameters["vth_electrons_over_c_x"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+7), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_x"]
-    v_electrons_x = jnp.where(parameters["velocity_plus_minus_electrons_x"], v_electrons_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_x)
-    v_electrons_y = parameters["vth_electrons_over_c_y"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+8), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_y"]
-    v_electrons_y = jnp.where(parameters["velocity_plus_minus_electrons_y"], v_electrons_y * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_y)
-    v_electrons_z = parameters["vth_electrons_over_c_z"] * speed_of_light / jnp.sqrt(2) * normal(PRNGKey(seed+9), shape=(number_pseudoelectrons, )) + parameters["electron_drift_speed_z"]
-    v_electrons_z = jnp.where(parameters["velocity_plus_minus_electrons_z"], v_electrons_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_electrons_z)
-    electron_velocities = jnp.stack((v_electrons_x, v_electrons_y, v_electrons_z), axis=1)
-    
-    # Ion thermal velocities and drift speeds
-    vth_ions_x = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_x"])) * parameters["vth_electrons_over_c_x"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
-    vth_ions_y = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_y"])) * parameters["vth_electrons_over_c_y"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
-    vth_ions_z = jnp.sqrt(jnp.abs(parameters["ion_temperature_over_electron_temperature_z"])) * parameters["vth_electrons_over_c_z"] * speed_of_light * jnp.sqrt(jnp.abs(mass_electrons / mass_ions))
-    v_ions_x = vth_ions_x / jnp.sqrt(2) * normal(PRNGKey(seed+10), shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_x"]
-    v_ions_x = jnp.where(parameters["velocity_plus_minus_ions_x"], v_ions_x * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_x)
-    v_ions_y = vth_ions_y / jnp.sqrt(2) * normal(PRNGKey(seed+11), shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_y"]
-    v_ions_y = jnp.where(parameters["velocity_plus_minus_ions_y"], v_ions_y * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_y)
-    v_ions_z = vth_ions_z / jnp.sqrt(2) * normal(PRNGKey(seed+12), shape=(number_pseudoelectrons, )) + parameters["ion_drift_speed_z"]
-    v_ions_z = jnp.where(parameters["velocity_plus_minus_ions_z"], v_ions_z * (-1) ** jnp.arange(0, number_pseudoelectrons), v_ions_z)
-    ion_velocities = jnp.stack((v_ions_x, v_ions_y, v_ions_z), axis=1)
-    
-    # Combine electron and ion velocities
-    velocities = jnp.concatenate((electron_velocities, ion_velocities))
-    # Cap velocities at 99% the speed of light
-    speed_limit = 0.99 * speed_of_light
-    velocities = jnp.where(jnp.abs(velocities) >= speed_limit, jnp.sign(velocities) * speed_limit, velocities)
+    relativistic_flag = parameters["relativistic"]
+    # Temperatures in theta = kT/(m c^2)
+    theta_e = (parameters["vth_electrons_over_c_x"]**2) / 2.0
+    theta_i = theta_e * parameters["ion_temperature_over_electron_temperature_x"] * (mass_electrons / mass_ions)
+
+    params = parameters, number_pseudoelectrons, masses, mass_electrons, mass_ions, weight, seed, theta_e, theta_i
+    Np = int(number_pseudoelectrons)
+    velocities, momenta = lax.cond(
+        relativistic_flag,
+        lambda op: _relativistic_distribution(op, Np),
+        lambda op: _nonrelativistic_distribution(op, Np),
+        params,
+    )
 
     # Grid setup
     dx = length / number_grid_points
@@ -335,6 +322,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "weight": weight,
         "initial_positions": positions,
         "initial_velocities": velocities,
+        "initial_momenta": momenta,
         "charges": charges,
         "masses": masses,
         "charge_to_mass_ratios": charge_to_mass_ratios,

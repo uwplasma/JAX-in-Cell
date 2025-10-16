@@ -69,13 +69,14 @@ def plot(output, direction="x", threshold=1e-12):
     })
 
     # Compute phase space histograms
-    sqrtmemi = jnp.sqrt(output["mass_electrons"][0] / output["mass_ions"][0])
-    max_velocity_electrons_1 = max(1.0 * jnp.max(output["velocity_electrons"][:, :, direction_index1]),
+    sqrtmemi = jnp.sqrt(output["mass_electrons"][0] / output["mass_ions"][0])[0]
+    max_velocity_electrons_1 = min(max(1.0 * jnp.max(output["velocity_electrons"][:, :, direction_index1]),
                                  2.5 * jnp.abs(vth_e_1)
-                                 + jnp.abs(output[f"electron_drift_speed_{direction1}"]))
-    max_velocity_ions_1      = max(1.0 * jnp.max(output["velocity_ions"][:, :, direction_index1]),
+                                 + jnp.abs(output[f"electron_drift_speed_{direction1}"])), 1.1*speed_of_light)
+    max_velocity_electrons_1 = float(jnp.asarray(max_velocity_electrons_1))
+    max_velocity_ions_1      = min(max(1.0 * jnp.max(output["velocity_ions"][:, :, direction_index1]),
                                  sqrtmemi * 0.3 * jnp.abs(vth_i_1) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction1}"])
-                                 + jnp.abs(output[f"ion_drift_speed_{direction1}"]))
+                                 + jnp.abs(output[f"ion_drift_speed_{direction1}"])), 1.1*speed_of_light)
     max_velocity_ions_1 = float(jnp.asarray(max_velocity_ions_1))
     bins_velocity = max(min(len(grid), 111), 71)
 
@@ -162,7 +163,7 @@ def plot(output, direction="x", threshold=1e-12):
         charge = jnp.abs(jnp.mean(output["charge_density"], axis=-1))
         # energy_ax.plot(time[4:], jnp.abs(charge[4:]-charge[4])/charge[4], label="Relative charge error")
         # energy_ax.plot(time, output["gauss_rel_error"], label="Gauss law relative error")
-        energy_ax.plot(time, output["momentum_rel_error"], label="Relative momentum error")
+        # energy_ax.plot(time, output["momentum_rel_error"], label="Relative momentum error")
         energy_ax.plot(time[1:], jnp.abs(output["total_energy"][1:] - output["total_energy"][0]) / output["total_energy"][0], label="Relative energy error")
         energy_ax.set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)",
                     ylabel="Energy (J)", yscale="log", ylim=[1e-5, None])

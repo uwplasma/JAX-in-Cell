@@ -78,7 +78,7 @@ def rotation(dt, B, vsub, q_m):
     return vplus
 
 @jit
-def boris_step(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_fields_at_x):
+def boris_step(dt, xs_nplushalf, ps_n, q_ms, ms, E_fields_at_x, B_fields_at_x):
     """
     This function performs one step of the Boris algorithm for particle motion. 
     The particle velocity is updated using the electric and magnetic fields at its position, 
@@ -87,16 +87,20 @@ def boris_step(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_fields_at_x):
     Args:
         dt (float): Time step for the simulation.
         xs_nplushalf (array): The particle positions at the half-time step n+1/2, shape (N, 3).
-        vs_n (array): The particle velocities at time step n, shape (N, 3).
+        ps_n (array): The particle momenta at time step n, shape (N, 3).
         q_ms (array): The charge-to-mass ratio of each particle, shape (N, 1).
+        ms (array): The mass of each particle, shape (N, 1).
         E_fields_at_x (array): The interpolated electric field values at the particle positions, shape (N, 3).
         B_fields_at_x (array): The magnetic field values at the particle positions, shape (N, 3).
 
     Returns:
         tuple: A tuple containing:
             - xs_nplus3_2 (array): The updated particle positions at time step n+3/2, shape (N, 3).
-            - vs_nplus1 (array): The updated particle velocities at time step n+1, shape (N, 3).
+            - ps_nplus1 (array): The updated particle momenta at time step n+1, shape (N, 3).
     """
+    # Convert momentum to velocity
+    vs_n = ps_n / ms
+    
     # First half step update for velocity due to electric field
     vs_n_int = vs_n + (q_ms) * E_fields_at_x * dt / 2
     
@@ -108,11 +112,34 @@ def boris_step(dt, xs_nplushalf, vs_n, q_ms, E_fields_at_x, B_fields_at_x):
     
     # Update the particle positions using the new velocities
     xs_nplus3_2 = xs_nplushalf + dt * vs_nplus1
+
+    # Convert velocity to momentum
+    ps_nplus1 = vs_nplus1 * ms
     
-    return xs_nplus3_2, vs_nplus1
+    return xs_nplus3_2, ps_nplus1
     # vs_nplus1 = vs_n + (q_ms) * E_fields_at_x * dt
     # xs_nplus1 = xs_nplushalf + dt * vs_nplus1
     # return xs_nplus1, vs_nplus1
+
+@jit
+def gamma_from_v(v):
+    beta2 = jnp.sum((v / c) ** 2, axis=-1)              # (...)
+    return 1.0 / jnp.sqrt(1.0 - beta2)                  # (...)
+
+@jit
+def p_from_v(v, m):
+    g = gamma_from_v(v)[..., None]                      # (...,1)
+    return g * m * v                                    # (...,3)
+
+@jit
+def gamma_from_p(p, m):
+    u2 = jnp.sum(p * p, axis=-1, keepdims=True) / (m * m * c * c)  # (...,1)
+    return jnp.sqrt(1.0 + u2)[..., 0]                   # (...)
+
+@jit
+def v_from_p(p, m):
+    g = gamma_from_p(p, m)[..., None]                   # (...,1)
+    return p / (g * m)                                  # (...,3)
 
 @jit
 def relativistic_rotation(dt, B, p_minus, q, m):
@@ -120,7 +147,7 @@ def relativistic_rotation(dt, B, p_minus, q, m):
     Rotate momentum vector in magnetic field (relativistic Boris step).
     """
     # gamma_minus from p_minus
-    gamma_minus = jnp.sqrt(1 + jnp.sum(p_minus ** 2) / (m ** 2 * c ** 2))
+    gamma_minus = gamma_from_p(p_minus, m)  # (...)
 
     # t vector (rotation vector)
     t = (q * dt) / (2 * m * gamma_minus) * B
@@ -133,14 +160,15 @@ def relativistic_rotation(dt, B, p_minus, q, m):
     return p_plus
 
 @jit
-def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_s, m_s, E_fields_at_x, B_fields_at_x):
+def boris_step_relativistic(dt, xs_nplushalf, ps_n, q_s, m_s, E_fields_at_x, B_fields_at_x):
     """
     Relativistic Boris pusher for N particles.
-    
+    Momentum-based update, with momentum p = gamma*m*v.
+
     Args:
         dt: Time step
         xs_nplushalf: Particle positions at t = n + 1/2, shape (N, 3)
-        vs_n: Velocities at time t = n, shape (N, 3)
+        ps_n: Momentum at time t = n, shape (N, 3)
         q_s: Charges, shape (N,)
         m_s: Masses, shape (N,)
         E_fields_at_x: Electric fields at particle positions, shape (N, 3)
@@ -148,15 +176,10 @@ def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_s, m_s, E_fields_at_x, B_f
         c: Speed of light (default = 1.0 for normalized units)
     Returns:
         xs_nplus3_2: Updated positions at t = n + 3/2, shape (N, 3)
-        vs_nplus1: Updated velocities at t = n + 1, shape (N, 3)
+        ps_nplus1: Updated momentum at t = n + 1, shape (N, 3)
     """
 
-    def single_particle_step(x, v, q, m, E, B):
-        # Compute initial momentum
-        gamma_n = 1/jnp.sqrt(1.0 - jnp.sum((v / c) ** 2))
-
-        p_n = gamma_n * m * v
-
+    def single_particle_step(x, p_n, q, m, E, B):
         # Half electric field acceleration
         p_minus = p_n + q * E * dt / 2
 
@@ -166,20 +189,17 @@ def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_s, m_s, E_fields_at_x, B_f
         # Second half electric field acceleration
         p_nplus1 = p_plus + q * E * dt / 2
 
-        # Compute new gamma
-        gamma_nplus1 = jnp.sqrt(1.0 + jnp.sum((p_nplus1 / (m * c)) ** 2))
-
         # Recover new velocity
-        v_nplus1 = p_nplus1 / (gamma_nplus1 * m)
+        v_nplus1 = v_from_p(p_nplus1, m)
 
         # Update position using new velocity
         x_nplus3_2 = x + dt * v_nplus1
 
-        return x_nplus3_2, v_nplus1
+        return x_nplus3_2, p_nplus1
 
     # Vectorize over particles
-    xs_nplus3_2, vs_nplus1 = vmap(single_particle_step)(
-        xs_nplushalf, vs_n, q_s, m_s, E_fields_at_x, B_fields_at_x
+    xs_nplus3_2, ps_nplus1 = vmap(single_particle_step)(
+        xs_nplushalf, ps_n, q_s, m_s, E_fields_at_x, B_fields_at_x
     )
 
-    return xs_nplus3_2, vs_nplus1
+    return xs_nplus3_2, ps_nplus1

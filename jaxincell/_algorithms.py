@@ -4,7 +4,7 @@ from functools import partial
 
 from ._sources import current_density, calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
-from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic
+from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic, v_from_p, p_from_v
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
 from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
                       E_from_Poisson_1D_FFT, field_update1, field_update2)
@@ -24,7 +24,9 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     fstrides = parameters["filter_strides"]
 
     (E_field, B_field, positions_minus1_2, positions,
-    positions_plus1_2, velocities, qs, ms, q_ms) = carry
+    positions_plus1_2, momenta, qs, ms, q_ms) = carry
+
+    velocities = v_from_p(momenta, ms)  # (N,3) used by current deposition and BCs
     
     J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
@@ -47,18 +49,20 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     E_field_at_x, B_field_at_x = vmap(interpolate_fields)(positions_plus1_2)
 
     # Particle update: Boris pusher
-    positions_plus3_2, velocities_plus1 = lax.cond(
+    positions_plus3_2, momenta_plus1 = lax.cond(
         parameters["relativistic"],
-        lambda _: boris_step_relativistic(dt, positions_plus1_2, velocities, qs, ms, E_field_at_x, B_field_at_x),
-        lambda _: boris_step(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
+        lambda _: boris_step_relativistic(dt, positions_plus1_2, momenta, qs, ms, E_field_at_x, B_field_at_x),
+        lambda _: boris_step(dt, positions_plus1_2, momenta, q_ms, ms, E_field_at_x, B_field_at_x),
         operand=None
     )
 
     # Apply boundary conditions
-    positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
-        positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
+    positions_plus3_2, momenta_plus1, qs, ms, q_ms = set_BC_particles(
+        positions_plus3_2, momenta_plus1, qs, ms, q_ms, dx, grid,
         *box_size, particle_BC_left, particle_BC_right)
     
+    velocities_plus1 = v_from_p(momenta_plus1, ms)
+
     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
@@ -78,17 +82,18 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     # Update positions and velocities
     positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2
+    momenta    = momenta_plus1
     velocities = velocities_plus1
-    positions = positions_plus1
-
+    positions  = positions_plus1
 
     # Prepare state for the next step
-    charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right, filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
+    charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right,
+                                              filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
     carry = (E_field, B_field, positions_minus1_2, positions,
-            positions_plus1_2, velocities, qs, ms, q_ms)
+            positions_plus1_2, momenta, qs, ms, q_ms)
 
     # Collect data for storage
-    step_data = (positions, velocities, E_field, B_field, J, charge_density)
+    step_data = (positions, velocities, momenta, E_field, B_field, J, charge_density)
     
     return carry, step_data
 
@@ -144,10 +149,12 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
             pos_new = pos_sub + vel_mid * dtau
 
             # Apply boundary conditions
-            pos_new, vel_mid, qs_new, ms_new, q_ms_new = set_BC_particles(
-                pos_new, vel_mid, qs_sub, ms_sub, q_ms_sub,
+            momentum_mid = vel_mid * ms_sub
+            pos_new, momentum_mid, qs_new, ms_new, q_ms_new = set_BC_particles(
+                pos_new, momentum_mid, qs_sub, ms_sub, q_ms_sub,
                 dx, grid, *box_size, particle_BC_left, particle_BC_right
             )
+            vel_new = momentum_mid / ms_new
 
             pos_stag_new = set_BC_positions(
                 pos_new - 0.5*dtau*vel_mid,
@@ -220,6 +227,7 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
     
     # Collect data
-    step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
+    momenta_plus_1 = ms * velocities_plus1
+    step_data = (positions_plus1, velocities_plus1, momenta_plus_1, E_field, B_field, J, charge_density)
     
     return carry, step_data

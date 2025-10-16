@@ -10,6 +10,7 @@ from ._diagnostics import diagnostics
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
 from ._initialization import initialize_particles_fields
+from ._particles import p_from_v, v_from_p
 
 __all__ = ["simulation"]
 
@@ -58,6 +59,9 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     if positions is None:
         positions = parameters["initial_positions"]
     if velocities is None:
+        momenta0 = parameters["initial_momenta"]
+        velocities = v_from_p(momenta0, parameters["masses"])
+    else:
         velocities = parameters["initial_velocities"]
 
     # Ensure the provided positions/velocities match the expected shape
@@ -67,10 +71,12 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         raise ValueError(f"Expected velocities shape {parameters['initial_velocities'].shape}, got {velocities.shape}")
 
     # Leapfrog integration: positions at half-step before the start
-    positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
-        positions + (dt / 2) * velocities, velocities,
+    positions_plus1_2, momenta0, qs, ms, q_ms = set_BC_particles(
+        positions + (dt / 2) * velocities, momenta0,
         parameters["charges"], parameters["masses"], parameters["charge_to_mass_ratios"],
         dx, grid, *box_size, particle_BC_left, particle_BC_right)
+    
+    velocities = v_from_p(momenta0, ms)
     
     positions_minus1_2 = set_BC_positions(
         positions - (dt / 2) * velocities,
@@ -79,7 +85,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     
     if time_evolution_algorithm == 0:
         initial_carry = (E_field, B_field, positions_minus1_2, positions,
-                         positions_plus1_2, velocities, qs, ms, q_ms)
+                         positions_plus1_2, momenta0, qs, ms, q_ms)
         step_func = lambda carry, step_index: Boris_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
             particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, field_solver)
@@ -99,17 +105,19 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
 
     # Unpack results
-    positions_over_time, velocities_over_time, electric_field_over_time, \
+    positions_over_time, velocities_over_time, momenta_over_time, electric_field_over_time, \
     magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
     
     # **Output results**
     temporary_output = {
         "position_electrons": positions_over_time[ :, :number_pseudoelectrons, :],
         "velocity_electrons": velocities_over_time[:, :number_pseudoelectrons, :],
+        "momentum_electrons": momenta_over_time[:, :number_pseudoelectrons, :],
         "mass_electrons":     parameters["masses"][   :number_pseudoelectrons],
         "charge_electrons":   parameters["charges"][  :number_pseudoelectrons],
         "position_ions":      positions_over_time[ :, number_pseudoelectrons:, :],
         "velocity_ions":      velocities_over_time[:, number_pseudoelectrons:, :],
+        "momentum_ions":      momenta_over_time[:, number_pseudoelectrons:, :],
         "mass_ions":          parameters["masses"][   number_pseudoelectrons:],
         "charge_ions":        parameters["charges"][  number_pseudoelectrons:],
         "electric_field":  electric_field_over_time,
