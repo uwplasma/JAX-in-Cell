@@ -180,17 +180,25 @@ def boris_step_relativistic(dt, xs_nplushalf, ps_n, q_s, m_s, E_fields_at_x, B_f
     """
 
     def single_particle_step(x, p_n, q, m, E, B):
-        # Half electric field acceleration
-        p_minus = p_n + q * E * dt / 2
-
-        # Magnetic rotation
-        p_plus = relativistic_rotation(dt, B, p_minus, q, m)
-
-        # Second half electric field acceleration
-        p_nplus1 = p_plus + q * E * dt / 2
-
-        # Recover new velocity
+        # Vay integrator, Phys. Plasmas 15, 056701 (2008)
+        v_n = v_from_p(p_n, m)
+        p_star = p_n + q * dt * (E + jnp.cross(v_n, B)/2)
+        tau = q * dt * B / (2 * m)
+        gamma_prime = jnp.sqrt(1 + jnp.sum(p_star * p_star) / (m * m * c * c))
+        sigma = (gamma_prime**2 - jnp.sum(tau * tau))/2
+        w = jnp.dot(p_star, tau)
+        gamma_plus = jnp.sqrt(sigma + jnp.sqrt(sigma**2 + jnp.sum(tau * tau) + w**2))
+        t = tau / gamma_plus
+        p_nplus1 = (p_star + jnp.dot(p_star, t) * t + jnp.cross(p_star, t)) / (1 + jnp.dot(t, t))
         v_nplus1 = v_from_p(p_nplus1, m)
+
+        # # Half electric field acceleration
+        # p_minus = p_n + q * E * dt / 2
+        # # Magnetic rotation
+        # p_plus = relativistic_rotation(dt, B, p_minus, q, m)
+        # # Second half electric field acceleration
+        # p_nplus1 = p_plus + q * E * dt / 2
+        # v_nplus1 = v_from_p(p_nplus1, m)
 
         # Update position using new velocity
         x_nplus3_2 = x + dt * v_nplus1

@@ -259,7 +259,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     Np = int(number_pseudoelectrons)
     velocities, momenta = lax.cond(
         relativistic_flag,
-        lambda op: _relativistic_distribution(op, Np),
+        # lambda op: _relativistic_distribution(op, Np),
+        lambda op: _nonrelativistic_distribution(op, Np),
         lambda op: _nonrelativistic_distribution(op, Np),
         params,
     )

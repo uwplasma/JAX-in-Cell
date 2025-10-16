@@ -221,13 +221,13 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     B_field = B_new
     positions_plus1= positions_new
     velocities_plus1 = velocities_new
+    momenta_plus1 = ms * velocities_plus1
 
     charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right, filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
 
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
     
     # Collect data
-    momenta_plus_1 = ms * velocities_plus1
-    step_data = (positions_plus1, velocities_plus1, momenta_plus_1, E_field, B_field, J, charge_density)
+    step_data = (positions_plus1, velocities_plus1, momenta_plus1, E_field, B_field, J, charge_density)
     
     return carry, step_data
