@@ -177,9 +177,9 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs,
         Jx = F_full / (sqrt_gamma * alpha + 1e-30)           # small eps to guard div-by-zero
 
         # Transverse currents from coordinate ρ at t^n and v^y,v^z (coordinate)
-        rho_at_n = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
-        Jy = rho_at_n * vs_n[i, 1]    # (G,)
-        Jz = rho_at_n * vs_n[i, 2]    # (G,)
+        rho_avg = 0.5 * (rho_minus + rho_plus)
+        Jy = rho_avg * vs_n[i, 1]
+        Jz = rho_avg * vs_n[i, 2]
 
         return Jx, Jy, Jz
 

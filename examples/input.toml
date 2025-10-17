@@ -4,9 +4,9 @@ amplitude_perturbation_x = 0
 wavenumber_electrons_x = 0
 wavenumber_ions_x = 0
 grid_points_per_Debye_length = 2.0
-vth_electrons_over_c_x = 0.05
-vth_electrons_over_c_y = 0.05
-vth_electrons_over_c_z = 0.05
+vth_electrons_over_c_x = 0.01
+vth_electrons_over_c_y = 0.01
+vth_electrons_over_c_z = 0.01
 electron_drift_speed_x = 0.0
 electron_drift_speed_y = 0.0
 electron_drift_speed_z = 0.0
@@ -17,31 +17,31 @@ random_positions_x = true
 random_positions_y = true
 random_positions_z = true
 ion_temperature_over_electron_temperature_x = 0.01
-timestep_over_spatialstep_times_c = 0.1
+timestep_over_spatialstep_times_c = 0.5
 print_info = true
 external_electric_field_amplitude = 0
 external_electric_field_wavenumber = 0
-relativistic = true
+relativistic = false
 tolerance_Picard_iterations_implicit_CN = 1e-5
 filter_passes = 5
-filter_alpha = 0.5
+filter_alpha =  0.5
 filter_strides = [1, 2, 4]
 
 [input_parameters.metric]
 # 0=minkowski, 1=rindler, 2=schwarzschild_iso, 4=flrw_powerlaw, 5=flrw_exp
-#kind = 0
+kind = 0
 #kind = 4
 #params = { a0 = 1.0, H0 = 3e-1 }  # de Sitter-like; use H>0 for expansion
 #kind = 1
 #params = {g0 = 1e5}
-kind = 6
-params = { a0x=1.0, a0y=1.0, a0z=1.0, Hx=0.0, Hy=1e-5, Hz=1e-5 }
+#kind = 6
+#params = { a0x=1.0, a0y=1.0, a0z=1.0, Hx=0.0, Hy=1e-5, Hz=1e-5 }
 
 [solver_parameters]
 time_evolution_algorithm = 0
 max_number_of_Picard_iterations_implicit_CN = 30
 number_of_particle_substeps_implicit_CN = 2
 field_solver = 0
-number_grid_points = 81
-number_pseudoelectrons = 10000
-total_steps = 2000
+number_grid_points = 61
+number_pseudoelectrons = 3000
+total_steps = 400
