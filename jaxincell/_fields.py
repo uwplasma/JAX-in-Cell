@@ -170,7 +170,7 @@ def curlB(B_field, E_field, dx, dt, field_BC_left, field_BC_right, invS1=None):
     B = jnp.insert(B_field, 0, ghost_L, axis=0)
     B = jnp.append(B, jnp.array([ghost_R]), axis=0)
 
-    # stagger handling as before
+    # stagger handling
     B = jnp.roll(B, -1, axis=0)
 
     dFz_dx = (B[1:-1, 2] - B[0:-2, 2]) / dx
@@ -213,58 +213,58 @@ def field_update(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
 @jit
 def field_update1(E_fields, B_fields, dx, dt, J, field_BC_left, field_BC_right, grid, t, metric_cfg):
     """
-    Densitized 3+1 update for diagonal, zero-shift metrics:
-      ∂t(√γ B) = − √γ curl(α E)
-      ∂t(√γ E) = + √γ c^2 curl(α B) − α √γ J/ε0
-    Curls use physical derivative: ∂x_phys = (1/S1) ∂x.
+    Local-frame Maxwell update (Ampère then Faraday) for diagonal, zero-shift metrics.
+      E_loc = S * E,  B_loc = S * B,  J_loc = S * J
+      dt_loc = α dt
+      ∂t_loc E_loc =  c^2 curl_phys B_loc - J_loc/ε0
+      ∂t_loc B_loc = -      curl_phys E_loc
+    with curl_phys ≡ (1/S1) d/dx applied by passing invS1 to curl stencils.
     """
-    alphas, S = _geom_at_grid(t, grid, metric_cfg)       # (G,), (G,3)
-    S1 = S[:, 0]
-    invS1 = 1.0 / (S1 + 1e-30)                           # guard against degeneracy
-    sqrt_gamma = (S[:, 0] * S[:, 1] * S[:, 2])           # (G,)
-    sg = sqrt_gamma[:, None]                              # (G,1)
-    al = alphas[:, None]                                  # (G,1)
+    alphas, S = _geom_at_grid(t, grid, metric_cfg)   # (G,), (G,3)
+    S1 = S[:, 0]; invS1 = 1.0 / (S1 + 1e-30)
+    dt_loc = (alphas[:, None]) * dt
 
-    # Densitized fields
-    Eden = sg * E_fields
-    Bden = sg * B_fields
+    # Map to local orthonormal frame
+    E_loc = S * E_fields
+    B_loc = S * B_fields
+    J_loc = S * J
 
-    # Ampère first (on coordinate fields inside curl)
-    curl_alphaB = curlB(al * B_fields, E_fields, dx, dt, field_BC_left, field_BC_right, invS1=invS1)
-    Eden = Eden + dt * ( sg * (speed_of_light**2) * curl_alphaB - (al * sg / epsilon_0) * J )
+    # Ampère (local)
+    curl_B_loc = curlB(B_loc, E_loc, dx, dt, field_BC_left, field_BC_right, invS1=invS1)
+    E_loc = E_loc + dt_loc * ( (speed_of_light**2) * curl_B_loc - J_loc/epsilon_0 )
 
-    # Then Faraday
-    curl_alphaE = curlE(al * E_fields, B_fields, dx, dt, field_BC_left, field_BC_right, invS1=invS1)
-    Bden = Bden - dt * ( sg * curl_alphaE )
+    # Faraday (local)
+    curl_E_loc = curlE(E_loc, B_loc, dx, dt, field_BC_left, field_BC_right, invS1=invS1)
+    B_loc = B_loc - dt_loc * ( curl_E_loc )
 
-    # Back to coordinate components
-    E = Eden / sg
-    B = Bden / sg
+    # Map back to coordinate components
+    invS = 1.0 / (S + 1e-30)
+    E = invS * E_loc
+    B = invS * B_loc
     return E, B
 
 @jit
 def field_update2(E_fields, B_fields, dx, dt, J, field_BC_left, field_BC_right, grid, t, metric_cfg):
     """
-    Same densitized update, but Faraday (B) first then Ampère (E).
+    Same as field_update1 but Faraday first, then Ampère (leapfrog symmetry).
     """
     alphas, S = _geom_at_grid(t, grid, metric_cfg)
-    S1 = S[:, 0]
-    invS1 = 1.0 / (S1 + 1e-30)
-    sqrt_gamma = (S[:, 0] * S[:, 1] * S[:, 2])
-    sg = sqrt_gamma[:, None]
-    al = alphas[:, None]
+    S1 = S[:, 0]; invS1 = 1.0 / (S1 + 1e-30)
+    dt_loc = (alphas[:, None]) * dt
 
-    Eden = sg * E_fields
-    Bden = sg * B_fields
+    E_loc = S * E_fields
+    B_loc = S * B_fields
+    J_loc = S * J
 
     # Faraday first
-    curl_alphaE = curlE(al * E_fields, B_fields, dx, dt, field_BC_left, field_BC_right, invS1=invS1)
-    Bden = Bden - dt * ( sg * curl_alphaE )
+    curl_E_loc = curlE(E_loc, B_loc, dx, dt, field_BC_left, field_BC_right, invS1=invS1)
+    B_loc = B_loc - dt_loc * ( curl_E_loc )
 
     # Then Ampère
-    curl_alphaB = curlB(al * B_fields, E_fields, dx, dt, field_BC_left, field_BC_right, invS1=invS1)
-    Eden = Eden + dt * ( sg * (speed_of_light**2) * curl_alphaB - (al * sg / epsilon_0) * J )
+    curl_B_loc = curlB(B_loc, E_loc, dx, dt, field_BC_left, field_BC_right, invS1=invS1)
+    E_loc = E_loc + dt_loc * ( (speed_of_light**2) * curl_B_loc - J_loc/epsilon_0 )
 
-    E = Eden / sg
-    B = Bden / sg
+    invS = 1.0 / (S + 1e-30)
+    E = invS * E_loc
+    B = invS * B_loc
     return E, B

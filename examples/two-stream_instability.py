@@ -16,7 +16,7 @@ for i in range(n_simulations):
     print(f"Run #{i+1}: Wall clock time: {time.time()-start}s")
 
 # Plot the results
-plot(output)
+plot(output, direction="x")
 
 # 1) Waves + spectrum + energy
 # from jaxincell import wave_spectrum_movie

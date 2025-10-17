@@ -135,6 +135,8 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     start_for_E  = grid[0]            # left start for E
     grid_for_J   = grid               # for current deposition
     start_for_J  = grid[0] - dx/2     # J stagger
+    t_n = step_index * dt * parameters["plasma_frequency"]
+    metric_cfg = parameters.get("metric", {"kind": 0, "params": {}})
 
     # Prebuild interpolation closure once
     interp_E = partial(
@@ -182,8 +184,8 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
             pos_stag_arr = pos_stag_arr.at[step_idx].set(pos_stag_new)
 
             # half step current density
-            J_sub = current_density(pos_sub, pos_stag_new, pos_new, vel_mid, qs_new, dx, dtau,
-                grid_for_J, start_for_J, particle_BC_left, particle_BC_right)
+            J_sub = current_density(pos_sub, pos_stag_new, pos_new, vel_mid, qs_new,
+                dx, dtau, grid_for_J, start_for_J, particle_BC_left, particle_BC_right,t_n, metric_cfg)
             J_sub = filter_vector_field(J_sub, passes=fpasses, alpha=falpha, strides=fstrides)
 
             return (pos_new, vel_new, qs_new, ms_new, q_ms_new, pos_stag_arr), J_sub * dtau
