@@ -84,14 +84,12 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         particle_BC_left, particle_BC_right)
     
     if time_evolution_algorithm == 0:
-        initial_carry = (E_field, B_field, positions_minus1_2, positions,
-                         positions_plus1_2, momenta0, qs, ms, q_ms)
+        initial_carry = (E_field, B_field, positions_minus1_2, positions, positions_plus1_2, momenta0, qs, ms, q_ms)
         step_func = lambda carry, step_index: Boris_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
             particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, field_solver)
     else:
-        initial_carry = (E_field, B_field, positions,
-                         velocities, qs, ms, q_ms)
+        initial_carry = (E_field, B_field, positions, velocities, qs, ms, q_ms)
         step_func = lambda carry, step_index: CN_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
             particle_BC_left, particle_BC_right, field_BC_left, field_BC_right,

@@ -149,12 +149,10 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
             pos_new = pos_sub + vel_mid * dtau
 
             # Apply boundary conditions
-            momentum_mid = vel_mid * ms_sub
-            pos_new, momentum_mid, qs_new, ms_new, q_ms_new = set_BC_particles(
-                pos_new, momentum_mid, qs_sub, ms_sub, q_ms_sub,
+            pos_new, vel_mid, qs_new, ms_new, q_ms_new = set_BC_particles(
+                pos_new, vel_mid, qs_sub, ms_sub, q_ms_sub,
                 dx, grid, *box_size, particle_BC_left, particle_BC_right
             )
-            vel_new = momentum_mid / ms_new
 
             pos_stag_new = set_BC_positions(
                 pos_new - 0.5*dtau*vel_mid,

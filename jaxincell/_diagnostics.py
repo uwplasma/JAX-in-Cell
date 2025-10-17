@@ -57,8 +57,18 @@ def diagnostics(output):
     # Kinetic energy per species: sum over particles, keep time axis
     v_electrons_squared = jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1)
     v_ions_squared      = jnp.sum(jnp.sum(output['velocity_ions']**2     , axis=-1), axis=-1)
-    KEe_t = (1/2) * mass_electrons * v_electrons_squared#jnp.sum((gamma_e - 1.0) * me_b * (c**2), axis=1)   # (T,)
-    KEi_t = (1/2) * mass_ions      * v_ions_squared#jnp.sum((gamma_i - 1.0) * mi_b * (c**2), axis=1)   # (T,)
+
+    kinetic_energy_electrons = lax.cond(
+        output["relativistic"],
+        lambda _: jnp.sum((gamma_e - 1.0) * me_b * (c**2), axis=1),  # (T,)
+        lambda _: (1/2) * mass_electrons * v_electrons_squared,      # (T,)
+        operand=None)
+    kinetic_energy_ions = lax.cond(
+        output["relativistic"],
+        lambda _: jnp.sum((gamma_i - 1.0) * mi_b * (c**2), axis=1),  # (T,)
+        lambda _: (1/2) * mass_ions * v_ions_squared,  # (T,)
+        operand=None
+    )
 
     # ---------- Gauss' law deviation (1D) ----------
     # Use Ex component; periodic central difference
@@ -76,12 +86,20 @@ def diagnostics(output):
     me_b3 = me[None, :, :]                      # (1,Ne,1) -> broadcast to (T,Ne,1)
     mi_b3 = mi[None, :, :]                      # (1,Ni,1)
 
-    pe_t = jnp.sum((gamma_e[..., None] * me_b3) * ve, axis=1)   # (T, 3)
-    pi_t = jnp.sum((gamma_i[..., None] * mi_b3) * vi, axis=1)   # (T, 3)
-    P_tot = pe_t + pi_t                                         # (T, 3)
+    momentum_electrons = lax.cond(
+        output["relativistic"],
+        lambda _: jnp.sum((gamma_e[..., None] * me_b3) * ve, axis=1),  # (T, 3)
+        lambda _: jnp.sum(me_b3 * ve, axis=1),                # (T, 3)
+        operand=None)
+    momentum_ions = lax.cond(
+        output["relativistic"],
+        lambda _: jnp.sum((gamma_i[..., None] * mi_b3) * vi, axis=1),  # (T, 3)
+        lambda _: jnp.sum(mi_b3 * vi, axis=1),                # (T, 3)
+        operand=None)
+    total_momentum = momentum_electrons + momentum_ions                                         # (T, 3)
 
-    P0   = P_tot[0]
-    numP = jnp.linalg.norm(P_tot - P0, axis=1)
+    P0   = total_momentum[0]
+    numP = jnp.linalg.norm(total_momentum - P0, axis=1)
     denP = jnp.maximum(jnp.linalg.norm(P0), 1e-300)
     momentum_rel_error = numP / denP
 
@@ -92,9 +110,12 @@ def diagnostics(output):
         'magnetic_field_energy':         1/(2*mu_0)    * integral_B_squared,
         'dominant_frequency': dominant_frequency,
         'plasma_frequency':   plasma_frequency,
-        'kinetic_energy_electrons': KEe_t,
-        'kinetic_energy_ions':      KEi_t,
-        'kinetic_energy':           KEe_t + KEi_t,
+        'kinetic_energy_electrons': kinetic_energy_electrons,
+        'kinetic_energy_ions':      kinetic_energy_ions,
+        'kinetic_energy':           kinetic_energy_electrons + kinetic_energy_ions,
+        'momentum_electrons': momentum_electrons,
+        'momentum_ions': momentum_ions,
+        'total_momentum': total_momentum,
         'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
         'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
         'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
