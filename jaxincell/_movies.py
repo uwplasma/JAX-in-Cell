@@ -7,17 +7,75 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, writers
 from matplotlib.collections import LineCollection
+from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FFMpegWriter, PillowWriter
+import shutil  # to detect if ffmpeg is available
 
 # --------------------------- helpers reused ---------------------------
+
+def _save_animation(ani, fig, save_path, fps=30, dpi=110, crf=23):
+    """
+    Save animation to MP4 (libx264, yuv420p) with even-dimension fix.
+    Falls back to GIF if ffmpeg is missing or fails.
+    """
+    import os
+    from matplotlib.animation import FFMpegWriter, PillowWriter
+
+    ext = os.path.splitext(save_path)[1].lower()
+    if ext in (".mp4", ".m4v", ".mov"):
+        try:
+            writer = FFMpegWriter(
+                fps=fps,
+                codec="libx264",
+                extra_args=[
+                    "-pix_fmt", "yuv420p",
+                    "-crf", str(int(crf)),
+                    "-movflags", "+faststart",
+                    # ensure even width/height (required by yuv420p)
+                    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-threads", "0",           # let ffmpeg use all cores,
+                    "-preset", "veryfast",     # <<— add this (or "faster"/"superfast"/"ultrafast")
+                ],
+            )
+            ani.save(save_path, writer=writer, dpi=dpi)
+            plt.close(fig)
+            return
+        except Exception as e:
+            # Fall back to GIF with same basename
+            gif_path = os.path.splitext(save_path)[0] + ".gif"
+            print(f"FFmpeg failed ({e!r}); falling back to GIF: {gif_path}")
+            try:
+                writer = PillowWriter(fps=fps)
+                ani.save(gif_path, writer=writer)
+                plt.close(fig)
+                return
+            except Exception as e2:
+                print(f"Pillow writer also failed ({e2!r}); showing interactively instead.")
+                plt.show()
+                return
+    elif ext == ".gif":
+        try:
+            writer = PillowWriter(fps=fps)
+            ani.save(save_path, writer=writer)
+            plt.close(fig)
+            return
+        except Exception as e:
+            print(f"Pillow writer failed ({e!r}); showing interactively instead.")
+            plt.show()
+            return
+    else:
+        print(f"Unknown extension '{ext}', not saving. Showing interactively instead.")
+        plt.show()
+        return
 
 def _to_np(x):
     return np.asarray(x)
 
-def _robust_bounds(a, lo=2, hi=98, eps=1e-12):
+def _robust_bounds(a, lo=0.1, hi=99.9, eps=1e-12):
     vmin = float(np.percentile(a, lo))
     vmax = float(np.percentile(a, hi))
     if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin == vmax:
-        pad = eps if vmin == 0 else abs(vmin) * 1e-6
+        pad = eps if vmin == 0 else abs(vmin) * 1e-2
         return vmin - pad, vmax + pad
     return vmin, vmax
 
@@ -27,27 +85,29 @@ def _robust_bounds(a, lo=2, hi=98, eps=1e-12):
 def wave_spectrum_movie(
     output,
     direction="x",
-    fps=60,
-    interval_ms=1000//60,
+    fps=30,
+    interval_ms=None,             # if None, computed from fps
     save_path=None,
     spectrogram_cmap="magma",
     field_cmap="coolwarm",
+    show_B=True,                  # NEW: include B-field
+    crf=23,                       # NEW: H.264 quality (lower = better quality, bigger file)
+    dpi=110,                      # NEW: lower dpi for smaller files
+    b_direction="auto",
 ):
     """
-    **Wave growth dashboard**:
-      - Top-left: progressive E(x,t) ribbon (audiences instantly see waves move/grow)
-      - Top-right: live |Ê(k)| spectrum bars (which modes dominate?)
-      - Bottom: energy time-series (total, kinetic e/i, electric & magnetic)
+    Wave growth dashboard:
+      - E(x,t) ribbon + |Ê(k)| spectrum
+      - (optional) B(x,t) ribbon + |B̂(k)| spectrum
+      - Total / kinetic(e,i) / E / B energies
 
     Parameters
     ----------
-    output : dict
-        Needs keys:
-          grid [Nx], time_array [T], plasma_frequency (scalar), total_steps (int),
-          electric_field [T,Nx,3], kinetic_energy_electrons [T], kinetic_energy_ions [T],
-          electric_field_energy [T], magnetic_field_energy [T], total_energy [T]
-    direction : {'x','y','z'}
-        Which E-component to visualize / FFT.
+    output : dict with standard fields
+    direction : {'x','y','z'}  component to visualize
+    show_B : bool              include B evolution panels
+    crf : int                  H.264 quality (18~28 reasonable)
+    dpi : int                  output dpi for saved movie frames
     """
     assert direction in "xyz"
     di = {"x":0, "y":1, "z":2}[direction]
@@ -56,53 +116,110 @@ def wave_spectrum_movie(
     grid  = _to_np(output["grid"])
     T     = int(_to_np(output["total_steps"]))
     time  = _to_np(output["time_array"]) * float(_to_np(output["plasma_frequency"]))
-    Eall  = _to_np(output["electric_field"][:, :, di])  # [T, Nx]
     Nx    = grid.size
+    if interval_ms is None:
+        interval_ms = int(1000/max(1, fps))
 
-    # Energies (robust to missing magnetic field energy)
+    Eall  = _to_np(output["electric_field"][:, :, di])  # [T, Nx]
+    if show_B:
+        if b_direction == "auto":
+            # choose the B component with the largest RMS across time & x
+            Ball_all = _to_np(output["magnetic_field"])  # [T, Nx, 3]
+            # prevent NaNs
+            Ball_all = np.nan_to_num(Ball_all, nan=0.0)
+            rms = np.sqrt(np.mean(Ball_all**2, axis=(0,1)))  # [3]
+            bi = int(np.argmax(rms))
+            b_dir_label = "xyz"[bi]
+        else:
+            assert b_direction in "xyz"
+            bi = {"x":0, "y":1, "z":2}[b_direction]
+            b_dir_label = b_direction
+
+        Ball = Ball_all[:, :, bi]
+    else:
+        Ball = None
+        bi = None
+        b_dir_label = None
+
+    # Energies
     KEe = _to_np(output.get("kinetic_energy_electrons", np.zeros(T)))
     KEi = _to_np(output.get("kinetic_energy_ions",     np.zeros(T)))
     EE  = _to_np(output.get("electric_field_energy",   np.zeros(T)))
     BE  = _to_np(output.get("magnetic_field_energy",   np.zeros(T)))
     TE  = _to_np(output.get("total_energy",            KEe+KEi+EE+BE))
 
-    # Robust color scaling for E ribbon
-    e_vmin, e_vmax = _robust_bounds(Eall, 2, 98)
+    # Robust scaling for ribbons
+    e_vmin, e_vmax = _robust_bounds(Eall, 0.1, 99.9)
+    if show_B:
+        b_vmin, b_vmax = _robust_bounds(Ball, 0.1, 99.9)
 
-    # Precompute spectrum |Ê(k)| with rfft for speed
-    Ek = np.abs(np.fft.rfft(Eall, axis=1))  # [T, Nk]
-    Ek_vis = np.log1p(Ek)                   # log-like for dynamic range
+    # Spectra (precompute)
+    Ek = np.abs(np.fft.rfft(Eall, axis=1))   # [T, Nk]
+    Ek_vis = np.log1p(Ek)
+    if show_B:
+        Bk = np.abs(np.fft.rfft(Ball, axis=1))
+        Bk_vis = np.log1p(Bk)
     k = np.fft.rfftfreq(Nx, d=(grid[1]-grid[0]))
-    s_vmin, s_vmax = _robust_bounds(Ek_vis, 2, 98)
+    sE_vmin, sE_vmax = _robust_bounds(Ek_vis, 0.1, 99.9)
+    if show_B:
+        sB_vmin, sB_vmax = _robust_bounds(Bk_vis, 0.1, 99.9)
 
     # Figure layout
-    fig = plt.figure(figsize=(11.5, 6.4))
-    gs = fig.add_gridspec(2, 2, height_ratios=[2.0, 1.2], width_ratios=[2.0, 1.2], hspace=0.25, wspace=0.25)
-    ax_ribbon = fig.add_subplot(gs[0, 0])
-    ax_spec   = fig.add_subplot(gs[0, 1])
-    ax_energy = fig.add_subplot(gs[1, :])
+    nrows = 3 if show_B else 2
+    fig = plt.figure(figsize=(11.8, 6.8 if show_B else 5.2), dpi=dpi)
+    if show_B:
+        gs = fig.add_gridspec(nrows, 2, height_ratios=[1.6, 1.6, 1.2], width_ratios=[2.0, 1.2], hspace=0.28, wspace=0.28)
+        ax_ribbonE = fig.add_subplot(gs[0, 0])
+        ax_specE   = fig.add_subplot(gs[0, 1])
+        ax_ribbonB = fig.add_subplot(gs[1, 0])
+        ax_specB   = fig.add_subplot(gs[1, 1])
+        ax_energy  = fig.add_subplot(gs[2, :])
+    else:
+        gs = fig.add_gridspec(nrows, 2, height_ratios=[2.0, 1.2], width_ratios=[2.0, 1.2], hspace=0.28, wspace=0.28)
+        ax_ribbonE = fig.add_subplot(gs[0, 0])
+        ax_specE   = fig.add_subplot(gs[0, 1])
+        ax_energy  = fig.add_subplot(gs[1, :])
+        ax_ribbonB = ax_specB = None
 
-    # --- Top-left: progressive E(x,t) ribbon
-    # Start blank and "paint" rows as time flows (gives motion even if waves are standing)
-    buf = np.zeros_like(Eall)
-    im_ribbon = ax_ribbon.imshow(
-        buf, origin="lower", aspect="auto", cmap=field_cmap,
+    # --- E ribbon
+    bufE = np.zeros_like(Eall)
+    im_ribbonE = ax_ribbonE.imshow(
+        bufE, origin="lower", aspect="auto", cmap=field_cmap,
         extent=[grid[0], grid[-1], time[0], time[-1]],
         vmin=e_vmin, vmax=e_vmax, animated=True,
     )
-    ax_ribbon.set_title(f"Electric field $E_{direction}(x,t)$")
-    ax_ribbon.set_xlabel(f"{direction}-position (m)")
-    ax_ribbon.set_ylabel(r"Time ($\omega_{pe}^{-1}$)")
+    ax_ribbonE.set_title(f"Electric field $E_{direction}(x,t)$")
+    ax_ribbonE.set_xlabel(f"{direction}-position (m)")
+    ax_ribbonE.set_ylabel(r"Time ($\omega_{pe}^{-1}$)")
 
-    # --- Top-right: spectrum bars
-    bars = ax_spec.bar(k, Ek_vis[0], width=(k[1]-k[0]) if len(k) > 1 else 1.0, align="center")
-    ax_spec.set_xlim(k[0], k[-1] if len(k)>1 else k[0]+1)
-    ax_spec.set_ylim(s_vmin, s_vmax)
-    ax_spec.set_xlabel("Wavenumber k (1/m)")
-    ax_spec.set_ylabel(r"$\log(1+|\hat{E}(k)|)$")
-    ax_spec.set_title("Mode content")
+    # --- E spectrum
+    barsE = ax_specE.bar(k, Ek_vis[0], width=(k[1]-k[0]) if len(k) > 1 else 1.0, align="center")
+    ax_specE.set_xlim(k[0], k[-1] if len(k)>1 else k[0]+1)
+    ax_specE.set_ylim(sE_vmin, sE_vmax)
+    ax_specE.set_xlabel("Wavenumber k (1/m)")
+    ax_specE.set_ylabel(r"$\log(1+|\hat{E}(k)|)$")
+    ax_specE.set_title("E-mode content")
 
-    # --- Bottom: energy timeline
+    # --- B ribbon/spectrum (optional)
+    if show_B:
+        bufB = np.zeros_like(Ball)
+        im_ribbonB = ax_ribbonB.imshow(
+            bufB, origin="lower", aspect="auto", cmap=field_cmap,
+            extent=[grid[0], grid[-1], time[0], time[-1]],
+            vmin=b_vmin, vmax=b_vmax, animated=True,
+        )
+        ax_ribbonB.set_title(f"Magnetic field $B_{b_dir_label}(x,t)$")
+        ax_ribbonB.set_xlabel(f"{direction}-position (m)")
+        ax_ribbonB.set_ylabel(r"Time ($\omega_{pe}^{-1}$)")
+
+        barsB = ax_specB.bar(k, Bk_vis[0], width=(k[1]-k[0]) if len(k) > 1 else 1.0, align="center")
+        ax_specB.set_xlim(k[0], k[-1] if len(k)>1 else k[0]+1)
+        ax_specB.set_ylim(sB_vmin, sB_vmax)
+        ax_specB.set_xlabel("Wavenumber k (1/m)")
+        ax_specB.set_ylabel(r"$\log(1+|\hat{B}(k)|)$")
+        ax_specB.set_title(f"B-mode content ($B_{b_dir_label}$)")
+
+    # --- Energy panel
     (ltotal,) = ax_energy.plot(time, np.zeros_like(time), lw=2.0, color="black", label="Total")
     (lke_e,)  = ax_energy.plot(time, np.zeros_like(time), lw=1.6, color="#0066cc", label="Kinetic (e⁻)")
     (lke_i,)  = ax_energy.plot(time, np.zeros_like(time), lw=1.6, color="#00aa66", label="Kinetic (ions)")
@@ -111,59 +228,55 @@ def wave_spectrum_movie(
     ax_energy.set_title("Energies")
     ax_energy.set_xlabel(r"Time ($\omega_{pe}^{-1}$)")
     ax_energy.set_ylabel("Energy (J)")
-    # Set sensible y-lims using the final ranges
     y_all = np.stack([TE, KEe, KEi, EE, BE], axis=0)
-    ymin, ymax = _robust_bounds(y_all, 2, 98)
+    ymin, ymax = _robust_bounds(y_all, 0.1, 99.9)
     pad = 0.08 * (ymax - ymin + 1e-12)
     ax_energy.set_ylim(max(0.0, ymin - pad), ymax + pad)
     ax_energy.grid(alpha=0.25)
     ax_energy.legend(fontsize=8, loc="upper right")
 
-    time_text = ax_spec.text(0.02, 0.92, "", transform=ax_spec.transAxes,
-                             ha="left", va="top",
-                             bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
-                             animated=True)
+    time_textE = ax_specE.text(0.02, 0.92, "", transform=ax_specE.transAxes,
+                               ha="left", va="top",
+                               bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+                               animated=True)
+    time_textB = None
+    if show_B:
+        time_textB = ax_specB.text(0.02, 0.92, "", transform=ax_specB.transAxes,
+                                   ha="left", va="top",
+                                   bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+                                   animated=True)
 
-    artists = [im_ribbon, time_text] + list(bars) + [ltotal, lke_e, lke_i, le, lb]
+    artists = [im_ribbonE, time_textE] + list(barsE) + [ltotal, lke_e, lke_i, le, lb]
+    if show_B:
+        artists = [*artists, im_ribbonB, time_textB, *list(barsB)]
     artists = tuple(artists)
 
     def _update(ti):
-        # paint ribbon up to ti
-        buf[ti] = Eall[ti]
-        im_ribbon.set_array(buf)
+        # paint ribbons
+        bufE[ti] = Eall[ti]; im_ribbonE.set_array(bufE)
+        hE = Ek_vis[ti]
+        for b, val in zip(barsE, hE): b.set_height(val)
 
-        # spectrum bars at ti
-        h = Ek_vis[ti]
-        for b, val in zip(bars, h):
-            b.set_height(val)
+        if show_B:
+            bufB[ti] = Ball[ti]; im_ribbonB.set_array(bufB)
+            hB = Bk_vis[ti]
+            for b, val in zip(barsB, hB): b.set_height(val)
 
-        # energies up to ti  (keep x & y lengths equal)
+        # energies
         ltotal.set_data(time[:ti+1], TE[:ti+1])
         lke_e.set_data(time[:ti+1], KEe[:ti+1])
         lke_i.set_data(time[:ti+1], KEi[:ti+1])
         le.set_data(time[:ti+1], EE[:ti+1])
         lb.set_data(time[:ti+1], BE[:ti+1])
 
-        time_text.set_text(f"t = {time[ti]:.2f}  $\\omega_{{pe}}^{{-1}}$")
+        time_textE.set_text(f"t = {time[ti]:.2f}  $\\omega_{{pe}}^{{-1}}$")
+        if time_textB is not None:
+            time_textB.set_text(f"t = {time[ti]:.2f}  $\\omega_{{pe}}^{{-1}}$")
         return artists
 
     ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
-
-    # Save or show
     if save_path is not None:
-        ext = save_path.split(".")[-1].lower()
-        if ext in ("mp4", "m4v", "mov"):
-            Writer = writers.get("ffmpeg", None)
-            if Writer is None:
-                print("ffmpeg not available; showing instead.")
-                plt.show()
-            else:
-                ani.save(save_path, writer=Writer(fps=fps), dpi=120)
-        elif ext == "gif":
-            ani.save(save_path, writer="pillow", fps=fps)
-        else:
-            print(f"Unknown extension '.{ext}', not saving. Showing instead.")
-            plt.show()
+        _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=crf)
     else:
         plt.show()
 
@@ -225,8 +338,8 @@ def phase_space_movie(
     idx_i = rng.choice(Ni, size=min(points_per_species, Ni), replace=False) if Ni>0 else np.array([])
 
     # phase-space ranges (robust)
-    v_e_vmin, v_e_vmax = _robust_bounds(Ve, 2, 98) if Ne>0 else (-1.0, 1.0)
-    v_i_vmin, v_i_vmax = _robust_bounds(Vi, 2, 98) if Ni>0 else (-1.0, 1.0)
+    v_e_vmin, v_e_vmax = _robust_bounds(Ve, 0.1, 99.9) if Ne>0 else (-1.0, 1.0)
+    v_i_vmin, v_i_vmax = _robust_bounds(Vi, 0.1, 99.9) if Ni>0 else (-1.0, 1.0)
 
     # histogram bins
     x_edges = np.linspace(-Lx/2, Lx/2, bins_x+1)
@@ -318,22 +431,8 @@ def phase_space_movie(
         return artists
 
     ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
-
-    # Save or show
     if save_path is not None:
-        ext = save_path.split(".")[-1].lower()
-        if ext in ("mp4", "m4v", "mov"):
-            Writer = writers.get("ffmpeg", None)
-            if Writer is None:
-                print("ffmpeg not available; showing instead.")
-                plt.show()
-            else:
-                ani.save(save_path, writer=Writer(fps=fps), dpi=120)
-        elif ext == "gif":
-            ani.save(save_path, writer="pillow", fps=fps)
-        else:
-            print(f"Unknown extension '.{ext}', not saving. Showing instead.")
-            plt.show()
+        _save_animation(ani, fig, save_path, fps=fps, dpi=110, crf=23)
     else:
         plt.show()
 
@@ -433,8 +532,8 @@ def particle_box_movie(
         E_all  = _to_np(output["electric_field"][:, :, di])   # [T, Nx]
         # Robust global vmin/vmax for nice colorscales:
         # Use percentiles to avoid a single spike ruining the palette
-        vmin = float(np.percentile(E_all, 2))
-        vmax = float(np.percentile(E_all, 98))
+        vmin = float(np.percentile(E_all, 0.1))
+        vmax = float(np.percentile(E_all, 99.9))
         if vmin == vmax:  # fallback
             vmax = vmin + (1e-12 if vmin == 0 else abs(vmin)*1e-6)
 
@@ -560,22 +659,8 @@ def particle_box_movie(
         return artists
 
     ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
-
-    # Save or show
     if save_path is not None:
-        ext = save_path.split(".")[-1].lower()
-        if ext in ("mp4", "m4v", "mov"):
-            Writer = writers.get("ffmpeg", None)
-            if Writer is None:
-                print("ffmpeg writer not available; showing interactively instead.")
-                plt.show()
-            else:
-                ani.save(save_path, writer=Writer(fps=fps), dpi=120)
-        elif ext == "gif":
-            ani.save(save_path, writer="pillow", fps=fps)
-        else:
-            print(f"Unknown extension '.{ext}', not saving. Showing interactively instead.")
-            plt.show()
+        _save_animation(ani, fig, save_path, fps=fps, dpi=110, crf=23)
     else:
         plt.show()
 

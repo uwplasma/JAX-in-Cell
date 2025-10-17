@@ -5,16 +5,75 @@ from jax import vmap
 from jax.debug import print as jprint
 from ._constants import speed_of_light
 from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FFMpegWriter, PillowWriter
 
 __all__ = ['plot']
 
-def plot(output, direction="x", threshold=1e-12):
+def _save_animation_or_image(ani, fig, save_path, fps=30, dpi=130, crf=23, last_frame_updater=None):
+    ext = str(save_path).lower().rsplit(".", 1)[-1]
+
+    if ext in ("mp4", "m4v", "mov"):
+        # Force even video resolution via scale filter (prevents libx264 errors)
+        try:
+            writer = FFMpegWriter(
+                fps=fps,
+                codec="h264",
+                extra_args=[
+                    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-pix_fmt", "yuv420p",
+                    "-preset", "veryfast",     # <<— add this (or "faster"/"superfast"/"ultrafast")
+                    "-crf", str(int(crf)),
+                    "-movflags", "+faststart",
+                    "-threads", "0",           # let ffmpeg use all cores
+                ],
+            )
+            ani.save(save_path, writer=writer, dpi=dpi)
+            plt.close(fig)
+        except Exception as e:
+            print(f"FFmpeg failed ({e!r}). Falling back to GIF…")
+            try:
+                writer = PillowWriter(fps=fps)
+                ani.save(save_path.rsplit(".",1)[0] + ".gif", writer=writer)
+                plt.close(fig)
+            except Exception as e2:
+                print(f"Pillow writer also failed ({e2!r}); showing interactively instead.")
+                plt.show()
+
+    elif ext == "gif":
+        try:
+            writer = PillowWriter(fps=fps)
+            ani.save(save_path, writer=writer, dpi=dpi)
+            plt.close(fig)
+        except Exception as e:
+            print(f"Pillow writer failed ({e!r}); showing interactively instead.")
+            plt.show()
+
+    else:
+        # Static image (png/pdf/svg). If caller wants the LAST frame, update first.
+        if last_frame_updater is not None:
+            last_frame_updater()
+            fig.canvas.draw()  # make sure the canvas reflects the updated artists
+        fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+
+def plot(
+    output,
+    direction="x",
+    threshold=1e-12,
+    save_path=None,     # NEW: '...mp4', '...gif', '...png', etc.
+    dpi=130,            # NEW
+    fps=30,             # NEW
+    interval_ms=None,   # NEW: if None, computed from fps
+    crf=23,             # NEW: H.264 quality for MP4
+):
     def is_nonzero(field):
         return jnp.max(jnp.abs(field)) > threshold
 
     grid = output["grid"]
     time = output["time_array"] * output["plasma_frequency"]
     total_steps = output["total_steps"]
+    if interval_ms is None:
+        interval_ms = int(1000 / max(1, fps))
     box_size_x = output["length"]
     number_pseudoelectrons = output["number_pseudoelectrons"]
 
@@ -270,4 +329,17 @@ def plot(output, direction="x", threshold=1e-12):
     ani = FuncAnimation(fig, update, frames=total_steps, blit=True, interval=1, repeat_delay=1000)
 
     plt.tight_layout()
-    plt.show()
+    # --- SAVE/SHOW ---
+    if save_path is not None:
+        # If saving a static image (e.g. PNG), we want the LAST timestep on the figure:
+        def _update_to_last_frame():
+            # drive the artists to the final state
+            update(total_steps - 1)
+
+        _save_animation_or_image(
+            ani, fig, save_path,
+            fps=fps, dpi=dpi, crf=crf,
+            last_frame_updater=_update_to_last_frame
+        )
+    else:
+        plt.show()
