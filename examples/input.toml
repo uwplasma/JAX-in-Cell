@@ -12,7 +12,7 @@ velocity_plus_minus_electrons_x = true
 print_info = true
 external_electric_field_amplitude = 0
 external_electric_field_wavenumber = 0
-relativistic = true
+relativistic = false
 tolerance_Picard_iterations_implicit_CN = 1e-5
 
 [solver_parameters]
