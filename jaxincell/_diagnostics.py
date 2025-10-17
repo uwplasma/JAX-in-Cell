@@ -58,17 +58,19 @@ def diagnostics(output):
     v_electrons_squared = jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1)
     v_ions_squared      = jnp.sum(jnp.sum(output['velocity_ions']**2     , axis=-1), axis=-1)
 
-    kinetic_energy_electrons = lax.cond(
-        output["relativistic"],
+    # Only do relativistic if Boris (algorithm 0) and relativistic=True
+    algo_is_zero = jnp.equal(jnp.asarray(output['time_evolution_algorithm']), 0)
+    relativistic_flag = jnp.asarray(output['relativistic'])
+    algo_rel_check = jnp.where(algo_is_zero,
+        jnp.where(jnp.logical_not(relativistic_flag), False, True), False)
+    kinetic_energy_electrons = lax.cond(algo_rel_check,
         lambda _: jnp.sum((gamma_e - 1.0) * me_b * (c**2), axis=1),  # (T,)
         lambda _: (1/2) * mass_electrons * v_electrons_squared,      # (T,)
         operand=None)
-    kinetic_energy_ions = lax.cond(
-        output["relativistic"],
+    kinetic_energy_ions = lax.cond(algo_rel_check,
         lambda _: jnp.sum((gamma_i - 1.0) * mi_b * (c**2), axis=1),  # (T,)
         lambda _: (1/2) * mass_ions * v_ions_squared,  # (T,)
-        operand=None
-    )
+        operand=None)
 
     # ---------- Gauss' law deviation (1D) ----------
     # Use Ex component; periodic central difference
@@ -86,13 +88,11 @@ def diagnostics(output):
     me_b3 = me[None, :, :]                      # (1,Ne,1) -> broadcast to (T,Ne,1)
     mi_b3 = mi[None, :, :]                      # (1,Ni,1)
 
-    momentum_electrons = lax.cond(
-        output["relativistic"],
+    momentum_electrons = lax.cond(algo_rel_check,
         lambda _: jnp.sum((gamma_e[..., None] * me_b3) * ve, axis=1),  # (T, 3)
         lambda _: jnp.sum(me_b3 * ve, axis=1),                # (T, 3)
         operand=None)
-    momentum_ions = lax.cond(
-        output["relativistic"],
+    momentum_ions = lax.cond(algo_rel_check,
         lambda _: jnp.sum((gamma_i[..., None] * mi_b3) * vi, axis=1),  # (T, 3)
         lambda _: jnp.sum(mi_b3 * vi, axis=1),                # (T, 3)
         operand=None)

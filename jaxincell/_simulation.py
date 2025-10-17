@@ -126,6 +126,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         "number_pseudoelectrons": number_pseudoelectrons,
         "total_steps": total_steps,
         "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
+        "time_evolution_algorithm": time_evolution_algorithm,
     }
     
     output = {**temporary_output, **parameters}
