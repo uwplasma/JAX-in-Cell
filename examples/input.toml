@@ -25,4 +25,4 @@ number_of_particle_substeps_implicit_CN = 2
 field_solver = 0
 number_grid_points = 61
 number_pseudoelectrons = 3000
-total_steps = 400
+total_steps = 700
