@@ -44,7 +44,7 @@ solver_parameters = {
  "total_steps": 1300,
 }
 
-save_movies = True
+save_movies = False
 
 # Run a simulation with GR metric kind=6 (anisotropic expanding universe)
 start = time.time()
