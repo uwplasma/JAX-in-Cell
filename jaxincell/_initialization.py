@@ -115,6 +115,11 @@ def initialize_simulation_parameters(user_parameters={}):
         "filter_passes": 5,            # integer >= 1
         "filter_alpha": 0.5,           # 0..1
         "filter_strides": (1, 2, 4),   # tuple of ints (hashable)
+
+        "metric": {
+            "kind": 0,     # 0=minkowski, 1=rindler, 2=schwarzschild_iso, 3=flrw_x
+            "params": {}   # e.g., {"g0": 9.81, "rs": 2*G*M/c**2, "a_of_x": fn, "da_dx": fn}
+        }
     }
 
     # Merge user-provided parameters into the default dictionary

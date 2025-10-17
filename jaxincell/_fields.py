@@ -1,11 +1,49 @@
-from jax import jit
+from jax import jit, lax, vmap
 import jax.numpy as jnp
-from ._sources import calculate_charge_density
 from ._boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
 from ._constants import epsilon_0, speed_of_light
+from ._metric_tensor import metric_bundle
 
 __all__ = ['E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cartesian', 'curlE',
            'curlB', 'field_update', 'field_update1', 'field_update2']
+
+@jit
+def _metric_kind_is_flrw(metric_cfg):
+    # 4 = flrw_powerlaw, 5 = flrw_exp in your current catalog
+    k = jnp.asarray(metric_cfg["kind"])
+    return jnp.logical_or(k == 4, k == 5)
+
+@jit
+def _scale_factor_at_time(t, metric_cfg):
+    """
+    Returns a(t) and a_dot(t) for your FLRW kinds.
+    For non-FLRW kinds, returns (1, 0).
+    Uses metric_bundle at x=0 to reuse your metric code path (safe and JIT-friendly).
+    """
+    # Probe metric to extract g_11 = a(t)^2 when FLRW; otherwise a=1.
+    # We pass x=0.0; for FLRW g depends only on t.
+    mb = metric_bundle(t, 0.0, metric_cfg["kind"], speed_of_light, **metric_cfg.get("params", {}))
+    g = mb["g"]  # (4,4)
+    # For FLRW: g = diag(-c^2, a^2, a^2, a^2). Take sqrt of g_11 to get a(t).
+    a = jnp.sqrt(jnp.abs(g[1,1]))
+    return a
+
+@jit
+def _geom_weights_at_grid(t, x_grid, metric_cfg):
+    """
+    Return per-cell alpha(x)=sqrt(-g00)/c and sqrt_gamma(x)=sqrt(det spatial metric)
+    for a diagonal metric with zero shift. Vectorized over x_grid.
+    """
+    def one_x(x):
+        mb = metric_bundle(t, x, metric_cfg["kind"], speed_of_light, **metric_cfg.get("params", {}))
+        g = mb["g"]
+        alpha = jnp.sqrt(-g[0,0]) / speed_of_light
+        # spatial diag metric
+        gamma11, gamma22, gamma33 = g[1,1], g[2,2], g[3,3]
+        sqrt_gamma = jnp.sqrt(gamma11 * gamma22 * gamma33)
+        return alpha, sqrt_gamma
+    alphas, sqrt_gammas = vmap(one_x)(x_grid)
+    return alphas, sqrt_gammas
 
 @jit
 def E_from_Gauss_1D_FFT(charge_density, dx):
@@ -175,21 +213,118 @@ def field_update(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
     return E_fields, B_fields
 
 @jit
-def field_update1(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
-    #First, update E (Ampere's)
-    curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
-    E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
-    #Then, update B (Faraday's)
-    curl_E = curlE(E_fields, B_fields, dx, dt, field_BC_left, field_BC_right)
-    B_fields -= dt*curl_E
-    return E_fields,B_fields
+def field_update1(E_fields, B_fields, dx, dt, J, field_BC_left, field_BC_right, grid, t, metric_cfg):
+    """
+    Metric-aware explicit update (E half, then B), specializing FLRW(t) to conformal form.
+    For non-FLRW metrics, falls back to your existing flat update.
+    """
+    is_flrw = _metric_kind_is_flrw(metric_cfg)
+
+    def flrw_branch(args):
+        E, B, dx, dt, J, fL, fR, grid, t, mc = args
+        a = _scale_factor_at_time(t, mc)
+        dt_conf = dt / a
+
+        # Conformal variables
+        Etilde = (a*a) * E
+        Btilde = (a*a) * B
+        Jtilde = (a*a*a) * J
+
+        # First, update Etilde (Ampère in conformal time)
+        curl_Btilde = curlB(Btilde, Etilde, dx, dt_conf, fL, fR)
+        Etilde = Etilde + dt_conf * ( (speed_of_light**2) * curl_Btilde - Jtilde / epsilon_0 )
+
+        # Then, update Btilde (Faraday in conformal time)
+        curl_Etilde = curlE(Etilde, Btilde, dx, dt_conf, fL, fR)
+        Btilde = Btilde - dt_conf * curl_Etilde
+
+        # Back to physical fields
+        inv_a2 = 1.0 / (a*a)
+        return Etilde * inv_a2, Btilde * inv_a2
+
+    def flat_branch(args):
+        E, B, dx, dt, J, fL, fR, grid, t, mc = args
+        # Per-cell geometry
+        alphas, sqrt_gammas = _geom_weights_at_grid(t, grid, mc)          # (G,), (G,)
+        al = alphas[:, None]                                              # (G,1)
+        sg = sqrt_gammas[:, None]                                         # (G,1)
+
+        # Densitized fields
+        Eden = sg * E
+        Bden = sg * B
+
+        # Faraday: ∂t B^i = - (curl(α E))^i   → densitized: ∂t(√γ B^i) = - √γ curl(α E)
+        curl_alphaE = curlE(al * E, B, dx, dt, fL, fR)                    # (G,3)
+        Bden = Bden - dt * (sg * curl_alphaE)
+
+        # Ampère: ∂t E^i = (curl(α c^2 B))^i - α J^i/ε0
+        # densitized: ∂t(√γ E^i) = √γ curl(α c^2 B) - α √γ J^i / ε0
+        curl_alphaB = curlB(al * B, E, dx, dt, fL, fR)                    # (G,3)
+        Eden = Eden + dt * ( sg * (speed_of_light**2) * curl_alphaB - (al * sg / epsilon_0) * J )
+
+        # back to physical fields
+        E = Eden / sg
+        B = Bden / sg
+        return E, B
+
+    return lax.cond(
+        is_flrw,
+        flrw_branch,
+        flat_branch,
+        operand=(E_fields, B_fields, dx, dt, J, field_BC_left, field_BC_right, grid, t, metric_cfg)
+    )
 
 @jit
-def field_update2(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
-    #First, update B (Faraday's)
-    curl_E = curlE(E_fields, B_fields, dx, dt, field_BC_left, field_BC_right)
-    B_fields -= dt*curl_E
-    #Then, update E (Ampere's)
-    curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
-    E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
-    return E_fields,B_fields
+def field_update2(E_fields, B_fields, dx, dt, J, field_BC_left, field_BC_right, grid, t, metric_cfg):
+    """
+    Metric-aware explicit update (B half, then E). Same FLRW special-case.
+    """
+    is_flrw = _metric_kind_is_flrw(metric_cfg)
+
+    def flrw_branch(args):
+        E, B, dx, dt, J, fL, fR, grid, t, mc = args
+        a = _scale_factor_at_time(t, mc)
+        dt_conf = dt / a
+
+        Etilde = (a*a) * E
+        Btilde = (a*a) * B
+        Jtilde = (a*a*a) * J
+
+        # First, Btilde (Faraday)
+        curl_Etilde = curlE(Etilde, Btilde, dx, dt_conf, fL, fR)
+        Btilde = Btilde - dt_conf * curl_Etilde
+
+        # Then, Etilde (Ampère)
+        curl_Btilde = curlB(Btilde, Etilde, dx, dt_conf, fL, fR)
+        Etilde = Etilde + dt_conf * ( (speed_of_light**2) * curl_Btilde - Jtilde / epsilon_0 )
+
+        inv_a2 = 1.0 / (a*a)
+        return Etilde * inv_a2, Btilde * inv_a2
+
+    def flat_branch(args):
+        E, B, dx, dt, J, fL, fR, grid, t, mc = args
+        alphas, sqrt_gammas = _geom_weights_at_grid(t, grid, mc)
+        al = alphas[:, None]
+        sg = sqrt_gammas[:, None]
+
+        Eden = sg * E
+        Bden = sg * B
+
+        # First Faraday on densitized B: −√γ curl(α E)
+        curl_alphaE = curlE(al * E, B, dx, dt, fL, fR)
+        Bden = Bden - dt * (sg * curl_alphaE)
+
+        # Then Ampère on densitized E: + √γ curl(α c^2 B) − α √γ J/ε0
+        curl_alphaB = curlB(al * B, E, dx, dt, fL, fR)
+        Eden = Eden + dt * ( sg * (speed_of_light**2) * curl_alphaB - (al * sg / epsilon_0) * J )
+
+        E = Eden / sg
+        B = Bden / sg
+        return E, B
+
+    return lax.cond(
+        is_flrw,
+        flrw_branch,
+        flat_branch,
+        operand=(E_fields, B_fields, dx, dt, J, field_BC_left, field_BC_right, grid, t, metric_cfg)
+    )

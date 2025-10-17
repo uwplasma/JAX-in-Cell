@@ -17,7 +17,8 @@ __all__ = ["simulation"]
 @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'total_steps', 'field_solver', "time_evolution_algorithm",
                                "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
 def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000, total_steps=1000, 
-               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
+               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,
+               max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 

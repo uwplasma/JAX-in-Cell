@@ -3,7 +3,8 @@ from functools import partial
 from jax import jit, vmap
 from jax.lax import dynamic_update_slice
 from ._filters import filter_scalar_field
-
+from ._fields import _geom_weights_at_grid
+from ._metric_tensor import metric_bundle
 
 __all__ = ['charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density']
 
@@ -106,9 +107,15 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
     return total_chargedens
 
 @jit
-def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, grid_start, particle_BC_left, particle_BC_right):
+def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs,
+                    dx, dt, grid, grid_start,
+                    particle_BC_left, particle_BC_right,
+                    t, metric_cfg):
     """
     Computes the current density `j` on the grid from particle motion.
+    GR-aware current deposition for diagonal, zero-shift metrics.
+    Enforces the densitized continuity equation:
+        ∂t(√γ ρ) + ∂x(√γ J^x) = 0
 
     Args:
         xs_nminushalf (array): Particle positions at the half timestep before the current one, shape (N, 1).
@@ -126,44 +133,52 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
     Returns:
         array: Current density on the grid, shape (G, 3), where G is the number of grid points.
     """
+    _, sqrt_gammas = _geom_weights_at_grid(t, grid, metric_cfg)   # (G,)
+    sg = sqrt_gammas
+
     def compute_current(i):
         # Compute x-component of the current density
         x_nminushalf = xs_nminushalf[i, 0]
-        x_nplushalf = xs_nplushalf[i, 0]
-        q = qs[i, 0]
-        cell_no = ((x_nminushalf - grid_start) // dx).astype(int)
+        x_nplushalf  = xs_nplushalf [i, 0]
+        x_n          = xs_n        [i, 0]
+        q            = qs[i, 0]
+        cell_no      = ((x_nminushalf - grid_start) // dx).astype(int)
 
-        # Compute the charge density difference over time
-        diff_chargedens_1particle_whole = (
-            single_particle_charge_density(x_nplushalf, q, dx, grid, particle_BC_left, particle_BC_right) -
-            single_particle_charge_density(x_nminushalf, q, dx, grid, particle_BC_left, particle_BC_right)
-        ) / dt
+        # coordinate charge density at two half-times
+        rho_minus = single_particle_charge_density(x_nminushalf, q, dx, grid, particle_BC_left, particle_BC_right)
+        rho_plus  = single_particle_charge_density(x_nplushalf,  q, dx, grid, particle_BC_left, particle_BC_right)
 
-        # Sweep only cells -3 to 2 relative to particle's initial position.
-        diff_chargedens_1particle_short = jnp.roll(diff_chargedens_1particle_whole, 3 - cell_no)[:6]
-        j_grid_short = jnp.cumsum(-diff_chargedens_1particle_short * dx)
+        # densitized
+        rho_den_minus = sg * rho_minus
+        rho_den_plus  = sg * rho_plus
 
-        # Copy 6-cell grid back onto proper grid
-        j_grid_x = jnp.zeros(len(grid))
-        j_grid_x = dynamic_update_slice(j_grid_x, j_grid_short, (0,))
+        # time difference
+        diff_rho_den_whole = (rho_den_plus - rho_den_minus) / dt
 
-        # Roll back to its correct position on grid
-        j_grid_x = jnp.roll(j_grid_x, cell_no - 3)
+        # local 6-cell stencil
+        diff_short   = jnp.roll(diff_rho_den_whole, 3 - cell_no)[:6]
+        Jx_den_short = jnp.cumsum(-diff_short * dx)
 
-        # Compute y- and z-components of the current density
-        x_n = xs_n[i, 0]
+        # place back and unroll
+        Jx_den = jnp.zeros(len(grid))
+        Jx_den = dynamic_update_slice(Jx_den, Jx_den_short, (0,))
+        Jx_den = jnp.roll(Jx_den, cell_no - 3)
+
+        # densitized → coordinate
+        Jx = Jx_den / sg
+
+        # transverse: J^y,J^z via ρ v^i (coordinate); build via densitized then divide
         vy_n = vs_n[i, 1]
         vz_n = vs_n[i, 2]
-        chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
+        rho_at_n = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
 
-        j_grid_y = chargedens * vy_n
-        j_grid_z = chargedens * vz_n
+        Jy = (sg * rho_at_n * vy_n) / sg
+        Jz = (sg * rho_at_n * vz_n) / sg
 
-        return j_grid_x, j_grid_y, j_grid_z  # Each output has shape (grid_size,)
- 
-    current_dens_x, current_dens_y, current_dens_z = vmap(compute_current)(jnp.arange(len(xs_nminushalf)))
-    current_dens_x = jnp.sum(current_dens_x, axis=0)
-    current_dens_y = jnp.sum(current_dens_y, axis=0)
-    current_dens_z = jnp.sum(current_dens_z, axis=0)
+        return Jx, Jy, Jz
 
-    return jnp.stack([current_dens_x, current_dens_y, current_dens_z], axis=0).T
+    Jx_all, Jy_all, Jz_all = vmap(compute_current)(jnp.arange(len(xs_nminushalf)))
+    Jx = jnp.sum(Jx_all, axis=0)
+    Jy = jnp.sum(Jy_all, axis=0)
+    Jz = jnp.sum(Jz_all, axis=0)
+    return jnp.stack([Jx, Jy, Jz], axis=0).T

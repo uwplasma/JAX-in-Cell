@@ -4,7 +4,7 @@ from functools import partial
 
 from ._sources import current_density, calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
-from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic, v_from_p, p_from_v
+from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic, v_from_p, p_from_v, v_from_p_at_positions
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
 from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
                       E_from_Poisson_1D_FFT, field_update1, field_update2)
@@ -26,13 +26,25 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, momenta, qs, ms, q_ms) = carry
 
-    velocities = v_from_p(momenta, ms)  # (N,3) used by current deposition and BCs
+    t_n = step_index * dt * parameters["plasma_frequency"]
+
+    metric_cfg = parameters.get("metric", {"kind": 0, "params": {}})
+    kind = jnp.asarray(metric_cfg["kind"])
+    is_flat = jnp.equal(kind, 0)
+    velocities = lax.cond(
+        is_flat,
+        lambda _: v_from_p(momenta, ms),
+        lambda _: v_from_p_at_positions(momenta, ms, positions, t_n, metric_cfg),
+        operand=None,
+    )
     
     J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+                        t_n, parameters.get("metric", {"kind": 0, "params": {}}))
     J = filter_vector_field(J, passes=fpasses, alpha=falpha, strides=fstrides)
-    E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
-    
+
+    E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right,
+                                     grid, t_n, parameters.get("metric", {"kind": 0, "params": {}}))
     # Add external fields
     total_E = E_field + parameters["external_electric_field"]
     total_B = B_field + parameters["external_magnetic_field"]
@@ -51,7 +63,8 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # Particle update: Boris pusher
     positions_plus3_2, momenta_plus1 = lax.cond(
         parameters["relativistic"],
-        lambda _: boris_step_relativistic(dt, positions_plus1_2, momenta, qs, ms, E_field_at_x, B_field_at_x),
+        lambda _: boris_step_relativistic(dt, positions_plus1_2, momenta, qs, ms, E_field_at_x,
+                                          B_field_at_x, parameters.get("metric", None), t_n),
         lambda _: boris_step(dt, positions_plus1_2, momenta, q_ms, ms, E_field_at_x, B_field_at_x),
         operand=None
     )
@@ -61,15 +74,22 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
         positions_plus3_2, momenta_plus1, qs, ms, q_ms, dx, grid,
         *box_size, particle_BC_left, particle_BC_right)
     
-    velocities_plus1 = v_from_p(momenta_plus1, ms)
+    velocities_plus1 = lax.cond(
+        is_flat,
+        lambda _: v_from_p(momenta_plus1, ms),
+        lambda _: v_from_p_at_positions(momenta_plus1, ms, positions_plus3_2, t_n, metric_cfg),
+        operand=None,
+    )
 
     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
     J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)  
+                        qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+                        t_n, parameters.get("metric", {"kind": 0, "params": {}})) 
     J = filter_vector_field(J, passes=fpasses, alpha=falpha, strides=fstrides)
-    E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+    E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right,
+                                     grid, t_n, parameters.get("metric", {"kind": 0, "params": {}}))
     
     if field_solver != 0:
         charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right, filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)

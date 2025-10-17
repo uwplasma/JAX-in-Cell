@@ -2,8 +2,58 @@ from jax import vmap, jit
 import jax.numpy as jnp
 from ._boundary_conditions import field_2_ghost_cells
 from ._constants import speed_of_light as c
+from ._metric_tensor import metric_bundle
 
-__all__ = ['fields_to_particles_grid', 'rotation', 'boris_step', 'boris_step_relativistic']
+__all__ = ['fields_to_particles_grid', 'rotation', 'boris_step', 'boris_step_relativistic',
+           'u0_from_v_metric', 'gravity_kick_half',
+           'gamma_from_v', 'p_from_v', 'gamma_from_p', 'v_from_p', 'relativistic_rotation']
+
+@jit
+def u0_from_v_metric(v, g):
+    """
+    For static diagonal metric with g0i=0:
+      normalization: g00 (u0)^2 + gij u^i u^j = -c^2
+      with u^i = v^i * u0  (since v^i = dx^i/dt = u^i/u^0).
+      => (u0)^2 ( g00 + gij v^i v^j ) = -c^2
+    """
+    g00 = g[0,0]
+    gij = g[1:,1:]                   # 3x3
+    vv = jnp.dot(v, jnp.dot(gij, v)) # scalar
+    denom = g00 + vv                 # <0 for physically sensible metrics used here
+    u0 = c / jnp.sqrt(-denom)
+    return u0
+
+@jit
+def gravity_kick_half(dt_half, t, x_vec, p, m, metric_cfg):
+    """
+    Half-step geodesic update on the *contravariant spatial* momentum p^i
+    (we store and evolve 3-vector p consistent with p^i = m u^i = m v^i u^0).
+
+    Inputs:
+      x_vec: (3,) Cartesian position; we only use x_vec[0] as your code is 1D in space.
+      metric_cfg: dict with keys { 'kind', 'params' } from parameters.
+    """
+    x = x_vec[0]
+    mb = metric_bundle(t, x, metric_cfg["kind"], c, **metric_cfg.get("params", {}))
+    g  = mb["g"]; Gamma = mb["Gamma"]
+
+    # Build 4-vectors using current p (contravariant spatial) and metric normalization
+    v  = p / (jnp.sqrt(m*m*c*c + jnp.dot(p,p)) / m)  # flat-space estimate; next line refines via metric
+    u0 = u0_from_v_metric(v, g)                      # metric-correct u^0
+    ui = v * u0                                      # u^i
+
+    # Assemble u^α and p^β with indices: (0..3)
+    u4 = jnp.concatenate([jnp.array([u0]), ui])  # u^0, u^i
+    p4 = jnp.concatenate((jnp.atleast_1d(m*u0*c), p))  # p^0 = m u^0 c; spatial p^i as stored
+
+    # dp^i/dt = - Γ^i_{αβ} u^α p^β, integrate for dt_half
+    def dp_i(i):
+        # G = Γ^i_{αβ}
+        G = Gamma[i+1, :, :]   # shape (4,4)
+        inner = jnp.tensordot(G, p4, axes=([1],[0]))    # Γ^i_{αβ} p^β
+        return - jnp.tensordot(u4, inner, axes=([0],[0]))  # u^α Γ^i_{αβ} p^β
+    dp = jnp.array([dp_i(0), dp_i(1), dp_i(2)])
+    return p + dt_half * dp
 
 @jit
 def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):
@@ -26,7 +76,7 @@ def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, fi
         array: The interpolated field values at the particle positions, shape (N,).
     """
     # Add ghost cells for the boundaries using provided boundary conditions
-    ghost_L1, ghost_L2, ghost_R = field_2_ghost_cells(field_BC_left, field_BC_right, field)
+    ghost_L2, ghost_L1, ghost_R = field_2_ghost_cells(field_BC_left, field_BC_right, field)
     # single left pad (L2, L1), single right pad (R)
     left_pad  = jnp.stack([ghost_L2, ghost_L1], axis=0)       # (2, 3)
     right_pad = ghost_R[None, ...]                             # (1, 3)
@@ -142,6 +192,37 @@ def v_from_p(p, m):
     return p / (g * m)                                  # (...,3)
 
 @jit
+def v_from_p_metric(p, m, g):
+    """
+    Coordinate velocity v^i from spatial contravariant momentum p^i = m u^i,
+    using metric g_{μν} (diagonal, zero shift).
+    """
+    gij = g[1:, 1:]
+    g00 = g[0, 0]
+    # u^i = p^i / m
+    ui = p / m
+    # (u0)^2 = (-c^2 - g_ij u^i u^j) / g00   (note g00 < 0)
+    ui_g_ui = jnp.dot(ui, jnp.dot(gij, ui))
+    u0 = jnp.sqrt((-c*c - ui_g_ui) / g00)
+    return ui / u0
+
+@jit
+def p_from_v_metric(v, m, g):
+    """
+    Spatial momentum p^i = m u^i from coordinate velocity v^i using metric g_{μν}.
+    """
+    u0 = u0_from_v_metric(v, g)
+    ui = v * u0
+    return m * ui
+
+def v_from_p_at_positions(p_arr, m_arr, x_arr, t, metric_cfg):
+    def one(p, m, x):
+        mb = metric_bundle(t, x[0], metric_cfg["kind"], c, **metric_cfg.get("params", {}))
+        g  = mb["g"]
+        return v_from_p_metric(p, m, g)
+    return vmap(one)(p_arr, m_arr, x_arr)
+
+@jit
 def relativistic_rotation(dt, B, p_minus, q, m):
     """
     Rotate momentum vector in magnetic field (relativistic Boris step).
@@ -160,7 +241,8 @@ def relativistic_rotation(dt, B, p_minus, q, m):
     return p_plus
 
 @jit
-def boris_step_relativistic(dt, xs_nplushalf, ps_n, q_s, m_s, E_fields_at_x, B_fields_at_x):
+def boris_step_relativistic(dt, xs_nplushalf, ps_n, q_s, m_s, E_fields_at_x,
+                            B_fields_at_x, metric_cfg=None, t_cur=None):
     """
     Relativistic Boris pusher for N particles.
     Momentum-based update, with momentum p = gamma*m*v.
@@ -180,28 +262,66 @@ def boris_step_relativistic(dt, xs_nplushalf, ps_n, q_s, m_s, E_fields_at_x, B_f
     """
 
     def single_particle_step(x, p_n, q, m, E, B):
-        # Vay integrator, Phys. Plasmas 15, 056701 (2008)
-        v_n = v_from_p(p_n, m)
-        p_star = p_n + q * dt * (E + jnp.cross(v_n, B)/2)
-        tau = q * dt * B / (2 * m)
-        gamma_prime = jnp.sqrt(1 + jnp.sum(p_star * p_star) / (m * m * c * c))
-        sigma = (gamma_prime**2 - jnp.sum(tau * tau))/2
-        w = jnp.dot(p_star, tau)
-        gamma_plus = jnp.sqrt(sigma + jnp.sqrt(sigma**2 + jnp.sum(tau * tau) + w**2))
-        t = tau / gamma_plus
-        p_nplus1 = (p_star + jnp.dot(p_star, t) * t + jnp.cross(p_star, t)) / (1 + jnp.dot(t, t))
-        v_nplus1 = v_from_p(p_nplus1, m)
+        if (metric_cfg is not None) and (t_cur is not None):
+            # first half gravity at midpoint time t+dt/2 and *current* position
+            p_half = gravity_kick_half(0.5*dt, t_cur + 0.5*dt, x, p_n, m, metric_cfg)
+        else:
+            p_half = p_n
+        # Build local scalings for diagonal gamma_ii
+        x0 = x[0]
+        mb = metric_bundle(t_cur, x0, metric_cfg["kind"], c, **metric_cfg.get("params", {}))
+        g  = mb["g"]
 
+        v_n = v_from_p_metric(p_half, m, g)
+
+        # build tetrad scalings
+        alpha = jnp.sqrt(-g[0,0]) / c
+        S = jnp.array([jnp.sqrt(g[1,1]), jnp.sqrt(g[2,2]), jnp.sqrt(g[3,3])])
+
+        # map EM fields and momentum to local orthonormal frame
+        E_loc = S * E
+        B_loc = S * B
+        p_half_loc = S * p_half
+
+        # local timestep
+        dt_loc = alpha * dt
+
+        # local velocity from local momentum (flat relation in orthonormal frame)
+        v_loc = v_from_p(p_half_loc, m)
+
+        # --- Vay update in local frame (Phys. Plasmas 15, 056701) ---
+        p_star = p_half_loc + q * dt_loc * (E_loc + 0.5 * jnp.cross(v_loc, B_loc))
+        tau    = (q * dt_loc / (2 * m)) * B_loc
+        gamma_prime = jnp.sqrt(1.0 + jnp.sum(p_star * p_star) / (m*m*c*c))
+        sigma  = 0.5 * (gamma_prime**2 - jnp.sum(tau * tau))
+        w      = jnp.dot(p_star, tau)
+        gamma_plus = jnp.sqrt(sigma + jnp.sqrt(sigma**2 + jnp.sum(tau * tau) + w*w))
+        tvec   = tau / gamma_plus
+        p_loc_plus = (p_star + jnp.dot(p_star, tvec) * tvec + jnp.cross(p_star, tvec)) / (1.0 + jnp.dot(tvec, tvec))
+
+        # map updated momentum back to coordinates
+        p_nplus1 = p_loc_plus / S
+
+        # # Standard relativistic Boris integrator, Birdsall & Langdon 2004
         # # Half electric field acceleration
-        # p_minus = p_n + q * E * dt / 2
+        # p_minus = p_half + q * E * dt / 2
         # # Magnetic rotation
         # p_plus = relativistic_rotation(dt, B, p_minus, q, m)
         # # Second half electric field acceleration
         # p_nplus1 = p_plus + q * E * dt / 2
-        # v_nplus1 = v_from_p(p_nplus1, m)
+
+        # coordinate velocity for advection (metric-aware)
+        v_nplus1 = v_from_p_metric(p_nplus1, m, g)
 
         # Update position using new velocity
         x_nplus3_2 = x + dt * v_nplus1
+
+        if (metric_cfg is not None) and (t_cur is not None):
+            # second half gravity at midpoint time around end state: also t+dt/2,
+            # but evaluated at x_np3_2 for symmetry
+            p_nplus1 = gravity_kick_half(0.5*dt, t_cur + 0.5*dt, x_nplus3_2, p_nplus1, m, metric_cfg)
+        else:
+            p_nplus1 = p_nplus1
 
         return x_nplus3_2, p_nplus1
 
