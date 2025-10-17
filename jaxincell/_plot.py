@@ -6,6 +6,7 @@ from jax.debug import print as jprint
 from ._constants import speed_of_light
 from matplotlib.animation import FuncAnimation
 from matplotlib.animation import FFMpegWriter, PillowWriter
+import time
 
 __all__ = ['plot']
 
@@ -68,6 +69,9 @@ def plot(
 ):
     def is_nonzero(field):
         return jnp.max(jnp.abs(field)) > threshold
+    
+    t0 = time.time()
+    print(f"[plot] Start: building summary (direction='{direction}', frames={int(output['total_steps'])}) -> {save_path or 'interactive window'}")
 
     grid = output["grid"]
     time = output["time_array"] * output["plasma_frequency"]
@@ -341,5 +345,8 @@ def plot(
             fps=fps, dpi=dpi, crf=crf,
             last_frame_updater=_update_to_last_frame
         )
+
+        print(f"[plot] Done: wrote {save_path} in {time.time()-t0:.2f}s")
     else:
+        print(f"[plot] Done: displayed in {time.time()-t0:.2f}s")
         plt.show()

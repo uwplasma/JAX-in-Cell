@@ -10,6 +10,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.animation import FuncAnimation
 from matplotlib.animation import FFMpegWriter, PillowWriter
 import shutil  # to detect if ffmpeg is available
+import time
 
 # --------------------------- helpers reused ---------------------------
 
@@ -111,6 +112,9 @@ def wave_spectrum_movie(
     """
     assert direction in "xyz"
     di = {"x":0, "y":1, "z":2}[direction]
+
+    t0 = time.time()
+    print(f"[wave_spectrum_movie] Start: preparing frames at {fps} fps -> {save_path or 'interactive window'}")
 
     # Unpack
     grid  = _to_np(output["grid"])
@@ -277,7 +281,9 @@ def wave_spectrum_movie(
     ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
     if save_path is not None:
         _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=crf)
+        print(f"[wave_spectrum_movie] Done: wrote {save_path} in {time.time()-t0:.2f}s")
     else:
+        print(f"[wave_spectrum_movie] Done: displayed in {time.time()-t0:.2f}s")
         plt.show()
 
     return ani
@@ -316,6 +322,9 @@ def phase_space_movie(
     """
     assert direction in "xyz"
     di = {"x":0, "y":1, "z":2}[direction]
+
+    t0 = time.time()
+    print(f"[phase_space_movie] Start: preparing frames at {fps} fps -> {save_path or 'interactive window'}")
 
     rng = np.random.default_rng(seed)
 
@@ -433,7 +442,9 @@ def phase_space_movie(
     ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
     if save_path is not None:
         _save_animation(ani, fig, save_path, fps=fps, dpi=110, crf=23)
+        print(f"[phase_space_movie] Done: wrote {save_path} in {time.time()-t0:.2f}s")
     else:
+        print(f"[phase_space_movie] Done: displayed in {time.time()-t0:.2f}s")
         plt.show()
 
     return ani
@@ -516,6 +527,9 @@ def particle_box_movie(
     """
     assert direction in "xyz"
     di = {"x":0, "y":1, "z":2}[direction]
+
+    t0 = time.time()
+    print(f"[particle_box_movie] Start: preparing frames at {fps} fps -> {save_path or 'interactive window'}")
 
     rng = np.random.default_rng(seed)
 
@@ -661,7 +675,9 @@ def particle_box_movie(
     ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
     if save_path is not None:
         _save_animation(ani, fig, save_path, fps=fps, dpi=110, crf=23)
+        print(f"[particle_box_movie] Done: wrote {save_path} in {time.time()-t0:.2f}s")
     else:
+        print(f"[particle_box_movie] Done: displayed in {time.time()-t0:.2f}s")
         plt.show()
 
     return ani

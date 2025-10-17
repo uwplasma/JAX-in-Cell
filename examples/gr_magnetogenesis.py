@@ -67,21 +67,21 @@ if save_movies:
         save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_waves.mp4"), fps=30, crf=23, dpi=110)
     # --------- 2) Phase space (both species) ---------
     phase_space_movie(output, direction="x", species="both", points_per_species=250,
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space.mp4"), fps=30, interval_ms=33)
+        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_x.mp4"), fps=30, interval_ms=33)
     phase_space_movie(output, direction="y", species="both", points_per_species=250,
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space.mp4"), fps=30, interval_ms=33)
+        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_y.mp4"), fps=30, interval_ms=33)
     phase_space_movie(output, direction="z", species="both", points_per_species=250,
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space.mp4"), fps=30, interval_ms=33)
+        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_z.mp4"), fps=30, interval_ms=33)
     # --------- 3) Particle box (with field overlay) ---------
     particle_box_movie(output, direction="x", trail_len=20, n_electrons=120, n_ions=120,
                     show_field=True, field_alpha=0.32, field_cmap="coolwarm",
-                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles.mp4"), fps=30,)
+                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_x.mp4"), fps=30,)
     particle_box_movie(output, direction="y", trail_len=20, n_electrons=120, n_ions=120,
                     show_field=True, field_alpha=0.32, field_cmap="coolwarm",
-                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles.mp4"), fps=30,)
+                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_y.mp4"), fps=30,)
     particle_box_movie(output, direction="z", trail_len=20, n_electrons=120, n_ions=120,
                     show_field=True, field_alpha=0.32, field_cmap="coolwarm",
-                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles.mp4"), fps=30,)
+                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_z.mp4"), fps=30,)
     # --------- Save the raw output ---------
     # np.savez(os.path.join(OUTPUT_DIR, f"{RUN_NAME}_output.npz"), **output)
     print(f"Saved results under: {OUTPUT_DIR}")
@@ -108,21 +108,21 @@ if save_movies:
         save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_waves.mp4"), fps=30, crf=23, dpi=110)
     # --------- 2) Phase space (both species) ---------
     phase_space_movie(output, direction="x", species="both", points_per_species=250,
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space.mp4"), fps=30, interval_ms=33)
+        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_x.mp4"), fps=30, interval_ms=33)
     phase_space_movie(output, direction="y", species="both", points_per_species=250,
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space.mp4"), fps=30, interval_ms=33)
+        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_y.mp4"), fps=30, interval_ms=33)
     phase_space_movie(output, direction="z", species="both", points_per_species=250,
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space.mp4"), fps=30, interval_ms=33)
+        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_z.mp4"), fps=30, interval_ms=33)
     # --------- 3) Particle box (with field overlay) ---------
     particle_box_movie(output, direction="x", trail_len=20, n_electrons=120, n_ions=120,
                     show_field=True, field_alpha=0.32, field_cmap="coolwarm",
-                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles.mp4"), fps=30,)
+                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_x.mp4"), fps=30,)
     particle_box_movie(output, direction="y", trail_len=20, n_electrons=120, n_ions=120,
                     show_field=True, field_alpha=0.32, field_cmap="coolwarm",
-                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles.mp4"), fps=30,)
+                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_y.mp4"), fps=30,)
     particle_box_movie(output, direction="z", trail_len=20, n_electrons=120, n_ions=120,
                     show_field=True, field_alpha=0.32, field_cmap="coolwarm",
-                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles.mp4"), fps=30,)
+                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_z.mp4"), fps=30,)
     # --------- Save the raw output ---------
     # np.savez(os.path.join(OUTPUT_DIR, f"{RUN_NAME}_output.npz"), **output)
     print(f"Saved results under: {OUTPUT_DIR}")
