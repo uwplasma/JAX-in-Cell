@@ -81,6 +81,26 @@ def flrw_tx(t, x, a, adot, c):
     return g, dg_dt, dg_dx
 
 @jit
+def bianchi_i_a_linear(t, a0x, a0y, a0z, Hx, Hy, Hz):
+    ax   = a0x * (1 + Hx * t)
+    ay   = a0y * (1 + Hy * t)
+    az   = a0z * (1 + Hz * t)
+    adx  = Hx * a0x * jnp.ones_like(t)
+    ady  = Hy * a0y * jnp.ones_like(t)
+    adz  = Hz * a0z * jnp.ones_like(t)
+    return (ax, ay, az), (adx, ady, adz)
+
+@jit
+def bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c):
+    """
+    Bianchi I (diagonal, zero shift): ds^2 = -c^2 dt^2 + ax(t)^2 dx^2 + ay(t)^2 dy^2 + az(t)^2 dz^2
+    """
+    g = jnp.diag(jnp.array([-c*c, ax*ax, ay*ay, az*az]))
+    dg_dt = jnp.diag(jnp.array([0.0, 2*ax*adx, 2*ay*ady, 2*az*adz]))
+    dg_dx = jnp.zeros((4,4))
+    return g, dg_dt, dg_dx
+
+@jit
 def metric_bundle(t, x, metric_kind, c, **kwargs):
     """
     metric_kind:
@@ -107,12 +127,25 @@ def metric_bundle(t, x, metric_kind, c, **kwargs):
         a0 = kwargs.get("a0", 1.0); H = kwargs.get("H", 0.0)
         a, adot = flrw_a_exponential(t, a0, H)
         return flrw_tx(t, x, a, adot, c)
+    
+    def bianchi_i_linear_case(_):
+        # defaults: unit scale factors at t=0, choose your H's
+        a0x = kwargs.get("a0x", 1.0); a0y = kwargs.get("a0y", 1.0); a0z = kwargs.get("a0z", 1.0)
+        Hx  = kwargs.get("Hx",  0.0); Hy  = kwargs.get("Hy",  0.0); Hz  = kwargs.get("Hz",  0.0)
+        (ax, ay, az), (adx, ady, adz) = bianchi_i_a_linear(t, a0x, a0y, a0z, Hx, Hy, Hz)
+        return bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c)
 
     g, dg_dt, dg_dx = lax.switch(
         metric_kind,
-        [minkowski_case, rindler_case, schwarzschild_case,
-         minkowski_case,  # (placeholder for old #3 if you keep it)
-         flrw_powerlaw_case, flrw_exp_case],
+        [
+            minkowski_case,         # 0
+            rindler_case,           # 1
+            schwarzschild_case,     # 2
+            minkowski_case,         # 3 (placeholder)
+            flrw_powerlaw_case,     # 4
+            flrw_exp_case,          # 5
+            bianchi_i_linear_case,  # 6 
+        ],
         operand=None,
     )
     g_inv  = jnp.linalg.inv(g)
