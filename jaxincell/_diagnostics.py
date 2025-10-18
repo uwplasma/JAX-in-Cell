@@ -6,9 +6,28 @@ from ._metric_tensor import metric_bundle
 
 __all__ = ['diagnostics']
 
-
-
 # ---------- Geometry helpers (GR) ----------
+def _sqrt_minus_g_on_grid(t_phys, x_grid, metric_cfg):
+    """Return sqrt(-g)(t,x) = alpha(t,x) * sqrt_gamma(t,x) for diagonal, zero-shift metrics."""
+    def one_x(x):
+        mb = metric_bundle(t_phys, x, metric_cfg["kind"], c, **metric_cfg.get("params", {}))
+        g = mb["g"]
+        alpha = jnp.sqrt(-g[0,0]) / c
+        S1, S2, S3 = jnp.sqrt(g[1,1]), jnp.sqrt(g[2,2]), jnp.sqrt(g[3,3])
+        sqrt_gamma = S1 * S2 * S3
+        return alpha * sqrt_gamma
+    return vmap(one_x)(x_grid)  # (G,)
+
+def _EM_Tij_local(E_loc, B_loc):
+    # E_loc, B_loc: (G,3) in orthonormal basis; return Tij at each grid point (G,3,3)
+    E2 = jnp.sum(E_loc**2, axis=-1)  # (G,)
+    B2 = jnp.sum(B_loc**2, axis=-1)  # (G,)
+    # outer products
+    EE = jnp.einsum('gi,gj->gij', E_loc, E_loc)
+    BB = jnp.einsum('gi,gj->gij', B_loc, B_loc)
+    I = jnp.eye(3)
+    Tij = epsilon_0*(EE - 0.5*E2[:,None,None]*I) + (1.0/mu_0)*(BB - 0.5*B2[:,None,None]*I)
+    return Tij  # (G,3,3)
 
 def _geom_at_grid_time(t, x_grid, metric_cfg):
     """
@@ -24,6 +43,13 @@ def _geom_at_grid_time(t, x_grid, metric_cfg):
     alphas, S, sqrtg = vmap(one_x)(x_grid)      # alphas: (G,), S: (G,3), sqrtg: (G,)
     return alphas, S, sqrtg
 
+def _geom_at_grid_times(t_arr, x_grid, metric_cfg):
+    """Batch: for each t in t_arr, return alpha(t,x), S(t,x), sqrt_gamma(t,x)."""
+    def one_t(t):
+        return _geom_at_grid_time(t, x_grid, metric_cfg)
+    alphas_tg, S_tg3, sqrtg_tg = vmap(one_t)(t_arr)  # (T,G), (T,G,3), (T,G)
+    return alphas_tg, S_tg3, sqrtg_tg
+
 def _geom_at_positions_time(t, x_pos, metric_cfg):
     """
     Metric at particle positions x_pos[...,0] (N,1 or (N,3) but we use x).
@@ -36,8 +62,6 @@ def _geom_at_positions_time(t, x_pos, metric_cfg):
         return alpha, jnp.array([jnp.sqrt(g[1,1]), jnp.sqrt(g[2,2]), jnp.sqrt(g[3,3])])
     alphas, S = vmap(one_x)(x_pos)
     return alphas, S
-
-# ---------- Local-frame energy helpers (GR) ----------
 
 def _em_energy_split_gr_at_time(E_gx, B_gx, grid, t, metric_cfg, dx):
     """
@@ -110,20 +134,29 @@ def diagnostics(output):
     mass_ions         = output["mass_ions"][0]
     dx                = output['dx']
 
+    metric_cfg = output.get("metric", {"kind": 0, "params": {}})
+    kind = jnp.asarray(metric_cfg.get("kind", 0))        # stays a JAX scalar
+    use_gr = (kind != 0)                                 # JAX bool scalar
+
     # array_to_do_fft_on = charge_density_over_time[:,len(grid)//2]
     array_to_do_fft_on = E_field_over_time[:,len(grid)//2,0]
     array_to_do_fft_on = (array_to_do_fft_on-jnp.mean(array_to_do_fft_on))/jnp.max(array_to_do_fft_on)
     plasma_frequency = output['plasma_frequency']
+    t_arr = jnp.arange(total_steps) * dt * plasma_frequency
 
-    fft_values = lax.slice(fft(array_to_do_fft_on), (0,), (total_steps//2,))
+    ft = fft(array_to_do_fft_on)
+    fft_values = ft[: (total_steps // 2)]
     freqs = fftfreq(total_steps, d=dt)[:total_steps//2]*2*jnp.pi # d=dt specifies the time step
     magnitude = jnp.abs(fft_values)
     peak_index = jnp.argmax(magnitude)
     dominant_frequency = jnp.abs(freqs[peak_index])
 
+    # Geometry
+    # _, S_tg3, sqrtg_tg = _geom_at_grid_times(t_arr, grid, metric_cfg)  # (T,G,3), (T,G)
+    
     def integrate(y, dx): return 0.5 * (jnp.asarray(dx) * (y[..., 1:] + y[..., :-1])).sum(-1)
     # def integrate(y, dx): return jnp.sum(y, axis=-1) * dx
-    
+
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
     integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
@@ -178,6 +211,27 @@ def diagnostics(output):
     num = jnp.linalg.norm(dEx_dx - rhs, axis=1)
     den = jnp.maximum(jnp.linalg.norm(rhs, axis=1), 1e-300)
     gauss_rel_error = num / den
+    
+    # ---------- GR Gauss-law residual (optional) ----------
+    def gauss_gr_residual():
+        # Precompute geometry once for all t (reduces recomp/AD work)
+        _, S_tg3, sqrtg_tg = _geom_at_grid_times(t_arr, grid, metric_cfg)   # (T,G,3), (T,G)
+        # Local-frame fields for all t (no Python loops)
+        E_loc_tg3 = S_tg3 * output['electric_field']    # (T,G,3)
+        Ex_hat_tg = E_loc_tg3[..., 0]                   # (T,G)
+        lhs_tg = (jnp.roll(sqrtg_tg * Ex_hat_tg, -1, axis=1)
+                - jnp.roll(sqrtg_tg * Ex_hat_tg,  1, axis=1)) / (2.0*dx)  # (T,G)
+        rhs_tg = (sqrtg_tg * rho_tg) / epsilon_0
+        num = jnp.linalg.norm(lhs_tg - rhs_tg, axis=1)
+        den = jnp.maximum(jnp.linalg.norm(rhs_tg, axis=1), 1e-30)
+        return num / den
+
+    gauss_rel_error = lax.cond(
+        use_gr,
+        lambda _: gauss_gr_residual(),
+        lambda _: gauss_rel_error,
+        operand=None
+    )
 
     # ---------- Momentum relative error ----------
     # convert to (T, Ne, 1) broadcast for multiply
@@ -198,6 +252,126 @@ def diagnostics(output):
     numP = jnp.linalg.norm(total_momentum - P0, axis=1)
     denP = jnp.maximum(jnp.linalg.norm(P0), 1e-300)
     momentum_rel_error = numP / denP
+    
+    # ---------- Charge continuity residual (periodic x, nonperiodic t) ----------
+    rho_tg = output['charge_density']                      # (T,G)
+    J_tgx  = output.get('current_density', None)           # (T,G,3) or None
+    if J_tgx is not None:
+        Jx_tg = J_tgx[..., 0]                              # (T,G)
+
+        dt = output['dt']
+        dx = output['dx']
+        grid = output['grid']
+
+        # weight(t,x) = sqrt(-g)(t,x) for GR, or 1 for flat
+        def w_of_t(tphys):
+            return _sqrt_minus_g_on_grid(tphys, grid, metric_cfg)  # (G,)
+        w_tg = vmap(w_of_t)(t_arr)                                  # (T,G)
+        w_tg = jnp.where(use_gr, w_tg, jnp.ones_like(w_tg))
+
+        # conservative variables: q = w * rho, f = w * Jx
+        q_tg = w_tg * rho_tg
+        f_tg = w_tg * Jx_tg
+
+        # time derivative: centered for interior, one-sided at ends (time is NOT periodic)
+        dqdt_center = (q_tg[2:] - q_tg[:-2]) / (2.0 * dt)            # (T-2,G)
+        dqdt_0 = (q_tg[1] - q_tg[0]) / dt                            # (G,)
+        dqdt_T = (q_tg[-1] - q_tg[-2]) / dt                          # (G,)
+        dqdt = jnp.vstack([dqdt_0[None, :], dqdt_center, dqdt_T[None, :]])  # (T,G)
+
+        # spatial derivative: centered with periodic wrap in x
+        dfxdx = (jnp.roll(f_tg, -1, axis=1) - jnp.roll(f_tg, 1, axis=1)) / (2.0 * dx)  # (T,G)
+
+        # residual per time: ||dqdt + dfxdx|| / (||dqdt|| + ||dfxdx|| + eps)
+        eps = 1e-30
+        num = jnp.linalg.norm(dqdt + dfxdx, axis=1)                   # (T,)
+        den = jnp.linalg.norm(dqdt, axis=1) + jnp.linalg.norm(dfxdx, axis=1) + eps
+        charge_continuity_residual = num / den                        # (T,)
+    else:
+        charge_continuity_residual = jnp.zeros_like(gauss_rel_error)
+        
+    # ---------- Flat-space Poynting balance residual (periodic box => net flux ~ 0) ----------
+    # U_EM = ∫ (ε0 E^2/2 + B^2/(2 μ0)) dx   (already have E/B integrals)
+    U_flat = (epsilon_0/2)*integral_E_squared + (1.0/(2*mu_0))*integral_B_squared  # (T,)
+
+    # Work term W(t) = ∫ J·E dx (coordinate fields; periodic => no surface term)
+    if Jx_tg is not None:
+        JdotE = jnp.sum(output['current_density']*output['electric_field'], axis=-1)  # (T,G)
+        W_t   = jnp.sum(JdotE, axis=1) * dx                                          # (T,)
+    else:
+        W_t = jnp.zeros_like(U_flat)
+
+    # One-step discrete balance: ΔU + ∫_t^{t+Δt} W dt ≈ 0
+    if U_flat.shape[0] >= 2:
+        dU   = U_flat[1:] - U_flat[:-1]
+        Wdt  = 0.5*(W_t[1:] + W_t[:-1]) * dt
+        # robust denominator: energy scale + ∫|W|dt
+        denom = jnp.maximum(jnp.abs(U_flat[1:]), 1e-30) + 0.5*(jnp.abs(W_t[1:]) + jnp.abs(W_t[:-1]))*dt
+        poynting_balance_residual = jnp.abs(dU + Wdt) / denom                         # (T-1,)
+    else:
+        poynting_balance_residual = jnp.zeros((1,))
+
+    # ---------- GR energy balance residual (periodic, include geometric work) ----------
+    # Build local-frame fields and Tij, and ∂t γ_ij via finite differences on time.
+    
+    def compute_gr_energy_balance_residual():
+        # Geometry once for all t
+        _, S_tg3, sqrtg_tg = _geom_at_grid_times(t_arr, grid, metric_cfg)  # (T,G,3), (T,G)
+
+        # Local-frame fields for all t
+        E_loc_tg3 = S_tg3 * output['electric_field']    # (T,G,3)
+        B_loc_tg3 = S_tg3 * output['magnetic_field']    # (T,G,3)
+
+        # u_EM and integral
+        uEM_tg = 0.5*epsilon_0*jnp.sum(E_loc_tg3**2, axis=-1) + 0.5*(1.0/mu_0)*jnp.sum(B_loc_tg3**2, axis=-1)  # (T,G)
+        U_EM_gr = jnp.sum(uEM_tg * sqrtg_tg, axis=1) * dx  # (T,)
+
+        # Tij in local frame, vectorized (avoid per-time Python)
+        def Tij_of(Eg3, Bg3):
+            return _EM_Tij_local(Eg3, Bg3)  # (G,3,3)
+        Tij_tgij = vmap(Tij_of)(E_loc_tg3, B_loc_tg3)  # (T,G,3,3)
+
+        # γ_ii(t,x): build once via vmap over t & x
+        def gamma_diag_at(tphys):
+            def one_x(x):
+                mb = metric_bundle(tphys, x, metric_cfg["kind"], c, **metric_cfg.get("params", {}))
+                g  = mb["g"]
+                return jnp.array([g[1,1], g[2,2], g[3,3]])  # (3,)
+            return vmap(one_x)(grid)  # (G,3)
+        gamma_tgk = vmap(gamma_diag_at)(t_arr)  # (T,G,3)
+
+        # centered time derivative (periodic-free time ⇒ pad endpoints with one-sided)
+        dgamma_dt_center = (gamma_tgk[2:] - gamma_tgk[:-2]) / (2.0*dt)        # (T-2,G,3)
+        d0  = (gamma_tgk[1]  - gamma_tgk[0])  / dt                            # (G,3)
+        dT  = (gamma_tgk[-1] - gamma_tgk[-2]) / dt                            # (G,3)
+        dgamma_dt_tgk = jnp.concatenate([d0[None, ...], dgamma_dt_center, dT[None, ...]], axis=0)  # (T,G,3)
+
+        # geometric work density (diag only)
+        geom_work_tg = 0.5 * (
+            Tij_tgij[..., 0, 0] * dgamma_dt_tgk[..., 0] +
+            Tij_tgij[..., 1, 1] * dgamma_dt_tgk[..., 1] +
+            Tij_tgij[..., 2, 2] * dgamma_dt_tgk[..., 2]
+        )  # (T,G)
+        G_t = jnp.sum(geom_work_tg * sqrtg_tg, axis=1) * dx  # (T,)
+
+        # J·E work in curved measure (broadcast √γ)
+        if Jx_tg is not None:
+            JdotE_tg = jnp.sum(output['current_density']*output['electric_field'], axis=-1)  # (T,G)
+            W_t2     = jnp.sum(JdotE_tg * sqrtg_tg, axis=1) * dx                              # (T,)
+        else:
+            W_t2     = jnp.zeros_like(G_t)
+
+        # One-step balance
+        dU_gr = U_EM_gr[1:] - U_EM_gr[:-1]
+        Wdt   = 0.5*(W_t2[1:] + W_t2[:-1]) * dt
+        Gdt   = 0.5*(G_t[1:]  + G_t[:-1])  * dt
+        return jnp.abs(dU_gr + Wdt + Gdt) / jnp.maximum(jnp.abs(U_EM_gr[1:]), 1e-30)
+
+    gr_energy_balance_residual = lax.cond(
+        use_gr,
+        lambda _: compute_gr_energy_balance_residual(),
+        lambda _: jnp.zeros((max(total_steps - 1, 1),)),
+        operand=None,)
 
     output.update({
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
@@ -217,7 +391,10 @@ def diagnostics(output):
         'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
         'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared,
         'gauss_rel_error': gauss_rel_error,
-        'momentum_rel_error': momentum_rel_error
+        'momentum_rel_error': momentum_rel_error,
+        'charge_continuity_residual': charge_continuity_residual,     # (T,)
+        'poynting_balance_residual':  poynting_balance_residual,      # (T-1,)
+        'gr_energy_balance_residual': gr_energy_balance_residual,     # (T-1,)
     })
     
     total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
@@ -227,10 +404,6 @@ def diagnostics(output):
     output.update({'total_energy': total_energy})
 
     # ---------- GR-correct energies (when metric != flat) ----------
-    metric_cfg = output.get("metric", {"kind": 0, "params": {}})
-    kind = jnp.asarray(metric_cfg.get("kind", 0))
-    use_gr = kind != 0
-
     # Flat energies already computed above:
     UE_flat = output['electric_field_energy']          # (T,)
     UB_flat = output['magnetic_field_energy']          # (T,)

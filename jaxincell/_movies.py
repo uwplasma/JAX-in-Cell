@@ -9,8 +9,9 @@ from matplotlib.animation import FuncAnimation, writers
 from matplotlib.collections import LineCollection
 from matplotlib.animation import FuncAnimation
 from matplotlib.animation import FFMpegWriter, PillowWriter
-import shutil  # to detect if ffmpeg is available
 import time as time_package
+import matplotlib
+matplotlib.use("Agg")
 
 # --------------------------- helpers reused ---------------------------
 
@@ -35,7 +36,9 @@ def _save_animation(ani, fig, save_path, fps=30, dpi=110, crf=23):
                     # ensure even width/height (required by yuv420p)
                     "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                     "-threads", "0",           # let ffmpeg use all cores,
-                    "-preset", "veryfast",     # <<— add this (or "faster"/"superfast"/"ultrafast")
+                    "-preset", "ultrafast",
+                    "-tune", "fastdecode",
+                    "-r", str(int(fps)),       # force CFR
                 ],
             )
             ani.save(save_path, writer=writer, dpi=dpi)
@@ -170,7 +173,7 @@ def wave_spectrum_movie(
 
     # Figure layout
     nrows = 3 if show_B else 2
-    fig = plt.figure(figsize=(11.8, 6.8 if show_B else 5.2), dpi=dpi)
+    fig = plt.figure(figsize=(9.8, 5.8 if show_B else 4.6), dpi=dpi)
     if show_B:
         gs = fig.add_gridspec(nrows, 2, height_ratios=[1.6, 1.6, 1.2], width_ratios=[2.0, 1.2], hspace=0.28, wspace=0.28)
         ax_ribbonE = fig.add_subplot(gs[0, 0])
@@ -186,9 +189,9 @@ def wave_spectrum_movie(
         ax_ribbonB = ax_specB = None
 
     # --- E ribbon
-    bufE = np.zeros_like(Eall)
+    E_masked = np.ma.masked_array(Eall, mask=np.ones_like(Eall, dtype=bool))
     im_ribbonE = ax_ribbonE.imshow(
-        bufE, origin="lower", aspect="auto", cmap=field_cmap,
+        E_masked, origin="lower", aspect="auto", cmap=field_cmap,
         extent=[grid[0], grid[-1], time[0], time[-1]],
         vmin=e_vmin, vmax=e_vmax, animated=True,
     )
@@ -197,8 +200,8 @@ def wave_spectrum_movie(
     ax_ribbonE.set_ylabel(r"Time ($\omega_{pe}^{-1}$)")
 
     # --- E spectrum
-    barsE = ax_specE.bar(k, Ek_vis[0], width=(k[1]-k[0]) if len(k) > 1 else 1.0, align="center")
-    ax_specE.set_xlim(k[0], k[-1] if len(k)>1 else k[0]+1)
+    (lineE,) = ax_specE.plot(k, Ek_vis[0], lw=1.4)
+    ax_specE.set_xlim(float(k[0]), float(k[-1] if len(k)>1 else k[0]+1))
     ax_specE.set_ylim(sE_vmin, sE_vmax)
     ax_specE.set_xlabel("Wavenumber k (1/m)")
     ax_specE.set_ylabel(r"$\log(1+|\hat{E}(k)|)$")
@@ -206,9 +209,9 @@ def wave_spectrum_movie(
 
     # --- B ribbon/spectrum (optional)
     if show_B:
-        bufB = np.zeros_like(Ball)
+        B_masked = np.ma.masked_array(Ball, mask=np.ones_like(Ball, dtype=bool))
         im_ribbonB = ax_ribbonB.imshow(
-            bufB, origin="lower", aspect="auto", cmap=field_cmap,
+            B_masked, origin="lower", aspect="auto", cmap=field_cmap,
             extent=[grid[0], grid[-1], time[0], time[-1]],
             vmin=b_vmin, vmax=b_vmax, animated=True,
         )
@@ -216,8 +219,8 @@ def wave_spectrum_movie(
         ax_ribbonB.set_xlabel(f"{direction}-position (m)")
         ax_ribbonB.set_ylabel(r"Time ($\omega_{pe}^{-1}$)")
 
-        barsB = ax_specB.bar(k, Bk_vis[0], width=(k[1]-k[0]) if len(k) > 1 else 1.0, align="center")
-        ax_specB.set_xlim(k[0], k[-1] if len(k)>1 else k[0]+1)
+        (lineB,) = ax_specB.plot(k, Bk_vis[0], lw=1.4)
+        ax_specB.set_xlim(float(k[0]), float(k[-1] if len(k)>1 else k[0]+1))
         ax_specB.set_ylim(sB_vmin, sB_vmax)
         ax_specB.set_xlabel("Wavenumber k (1/m)")
         ax_specB.set_ylabel(r"$\log(1+|\hat{B}(k)|)$")
@@ -250,21 +253,23 @@ def wave_spectrum_movie(
                                    bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
                                    animated=True)
 
-    artists = [im_ribbonE, time_textE] + list(barsE) + [ltotal, lke_e, lke_i, le, lb]
+    artists = [im_ribbonE, time_textE, lineE, ltotal, lke_e, lke_i, le, lb]
     if show_B:
-        artists = [*artists, im_ribbonB, time_textB, *list(barsB)]
+        artists = [*artists, im_ribbonB, time_textB, lineB]
     artists = tuple(artists)
 
     def _update(ti):
+        # reveal up to ti by unmasking rows 0..ti
+        E_masked.mask[:ti+1, :] = False
+        im_ribbonE.set_array(E_masked)        # tell mpl the mask changed
         # paint ribbons
-        bufE[ti] = Eall[ti]; im_ribbonE.set_array(bufE)
-        hE = Ek_vis[ti]
-        for b, val in zip(barsE, hE): b.set_height(val)
+        # reveal up to current time by shrinking top of extent
+        lineE.set_ydata(Ek_vis[ti])
 
         if show_B:
-            bufB[ti] = Ball[ti]; im_ribbonB.set_array(bufB)
-            hB = Bk_vis[ti]
-            for b, val in zip(barsB, hB): b.set_height(val)
+            B_masked.mask[:ti+1, :] = False
+            im_ribbonB.set_array(B_masked)
+            lineB.set_ydata(Bk_vis[ti])
 
         # energies
         ltotal.set_data(time[:ti+1], TE[:ti+1])
@@ -278,7 +283,7 @@ def wave_spectrum_movie(
             time_textB.set_text(f"t = {time[ti]:.2f}  $\\omega_{{pe}}^{{-1}}$")
         return artists
 
-    ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
+    ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False, cache_frame_data=False)
     if save_path is not None:
         _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=crf)
         print(f"[wave_spectrum_movie] Done: wrote {save_path} in {time_package.time()-t0:.2f}s")
@@ -304,6 +309,7 @@ def phase_space_movie(
     points_per_species=200,   # overlay live points
     seed=7,
     cmap="twilight",
+    dpi=110,
 ):
     """
     **Phase-space showcase**:
@@ -368,6 +374,9 @@ def phase_space_movie(
 
     He = _hist2d_time(Xe, Ve, v_edges_e) if show_e else None  # [T, bins_v, bins_x]
     Hi = _hist2d_time(Xi, Vi, v_edges_i) if show_i else None
+    
+    if He is not None: He = He.astype(np.float32, copy=False)
+    if Hi is not None: Hi = Hi.astype(np.float32, copy=False)
 
     # figure layout
     if show_e and show_i:
@@ -386,7 +395,7 @@ def phase_space_movie(
         im_e = ax_e.imshow(
             He[0], origin="lower", aspect="auto", cmap=cmap,
             extent=[-Lx/2, Lx/2, v_edges_e[0], v_edges_e[-1]],
-            animated=True
+            interpolation="nearest", animated=True
         )
         ax_e.set_title(f"Electron phase space  $x$–$v_{direction}$")
         ax_e.set_xlabel("x (m)")
@@ -441,7 +450,7 @@ def phase_space_movie(
 
     ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
     if save_path is not None:
-        _save_animation(ani, fig, save_path, fps=fps, dpi=110, crf=23)
+        _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=23)
         print(f"[phase_space_movie] Done: wrote {save_path} in {time_package.time()-t0:.2f}s")
     else:
         print(f"[phase_space_movie] Done: displayed in {time_package.time()-t0:.2f}s")
@@ -492,6 +501,7 @@ def particle_box_movie(
     show_field=True,          # NEW: overlay field + line subplot
     field_alpha=0.35,         # transparency of field ribbon
     field_cmap="coolwarm",    # pretty divergent colormap
+    dpi=110,
 ):
     """
     Cinematic particle box with optional live electric field overlay & line plot.
@@ -593,18 +603,10 @@ def particle_box_movie(
 
     # Optional E-field ribbon overlay
     if show_field:
-        # Create a slim 2D tile from the 1D E(x) so we can color the strip
-        Nx = grid.size
-        ribbon_rows = 120  # vertical resolution of the ribbon
-        E0 = E_all[0]  # [Nx]
-        E_img = np.tile(E0[None, :], (ribbon_rows, 1))  # [H, Nx]
-
-        # Place as full background (y from -1 to 1); transparency via alpha
         im_field = ax.imshow(
-            E_img, origin="lower", aspect="auto", cmap=field_cmap,
+            E_all[0][None, :], origin="lower", aspect="auto", cmap=field_cmap,
             extent=[grid[0], grid[-1], -1.0, 1.0], alpha=field_alpha,
-            vmin=vmin, vmax=vmax, animated=True,
-        )
+            vmin=vmin, vmax=vmax, animated=True,)
     else:
         im_field = None
 
@@ -664,17 +666,16 @@ def particle_box_movie(
 
         # Field overlay + line
         if show_field:
-            E = E_all[frame]  # [Nx]
-            E_img = np.tile(E[None, :], (im_field.get_array().shape[0], 1))
-            im_field.set_array(E_img)
+            E = E_all[frame]
+            im_field.set_array(E[None, :])   # 1×Nx only
             line_field.set_ydata(E)
 
         time_text.set_text(f"t = {time[frame]:.2f}  $\\omega_{{pe}}^{{-1}}$")
         return artists
 
-    ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
+    ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False, cache_frame_data=False)
     if save_path is not None:
-        _save_animation(ani, fig, save_path, fps=fps, dpi=110, crf=23)
+        _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=23)
         print(f"[particle_box_movie] Done: wrote {save_path} in {time_package.time()-t0:.2f}s")
     else:
         print(f"[particle_box_movie] Done: displayed in {time_package.time()-t0:.2f}s")

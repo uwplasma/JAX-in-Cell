@@ -7,71 +7,51 @@ from ._constants import speed_of_light
 from matplotlib.animation import FuncAnimation
 from matplotlib.animation import FFMpegWriter, PillowWriter
 import time as time_package
+import platform
 
 __all__ = ['plot']
 
-def _save_animation_or_image(ani, fig, save_path, fps=30, dpi=130, crf=23, last_frame_updater=None):
-    ext = str(save_path).lower().rsplit(".", 1)[-1]
 
-    if ext in ("mp4", "m4v", "mov"):
-        # Force even video resolution via scale filter (prevents libx264 errors)
-        try:
-            writer = FFMpegWriter(
-                fps=fps,
-                codec="h264",
-                extra_args=[
-                    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                    "-pix_fmt", "yuv420p",
-                    "-preset", "veryfast",     # <<— add this (or "faster"/"superfast"/"ultrafast")
-                    "-crf", str(int(crf)),
-                    "-movflags", "+faststart",
-                    "-threads", "0",           # let ffmpeg use all cores
-                ],
-            )
-            ani.save(save_path, writer=writer, dpi=dpi)
-            plt.close(fig)
-        except Exception as e:
-            print(f"FFmpeg failed ({e!r}). Falling back to GIF…")
-            try:
-                writer = PillowWriter(fps=fps)
-                ani.save(save_path.rsplit(".",1)[0] + ".gif", writer=writer)
-                plt.close(fig)
-            except Exception as e2:
-                print(f"Pillow writer also failed ({e2!r}); showing interactively instead.")
-                plt.show()
+def _ensure_interactive_backend(save_path):
+    """
+    If the current backend is non-interactive (Agg) and the user didn't request saving,
+    switch to an interactive GUI backend (MacOSX on mac, else TkAgg).
+    If saving, prefer Agg for speed and stability.
+    """
+    import matplotlib.pyplot as plt
 
-    elif ext == "gif":
-        try:
-            writer = PillowWriter(fps=fps)
-            ani.save(save_path, writer=writer, dpi=dpi)
-            plt.close(fig)
-        except Exception as e:
-            print(f"Pillow writer failed ({e!r}); showing interactively instead.")
-            plt.show()
-
-    else:
-        # Static image (png/pdf/svg). If caller wants the LAST frame, update first.
-        if last_frame_updater is not None:
-            last_frame_updater()
-            fig.canvas.draw()  # make sure the canvas reflects the updated artists
-        fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
-        plt.close(fig)
+    try:
+        be = plt.get_backend().lower()
+        if save_path is None:
+            # we want to show a window
+            if be.endswith("agg"):
+                target = "MacOSX" if platform.system() == "Darwin" else "TkAgg"
+                plt.switch_backend(target)   # interactive
+        else:
+            # we are saving: switch to Agg for speed/consistency if not already
+            if not be.endswith("agg"):
+                plt.switch_backend("Agg")
+    except Exception:
+        # Best effort; if switch fails (e.g., no GUI available), just continue.
+        pass
 
 def plot(
     output,
     direction="x",
     threshold=1e-12,
-    save_path=None,     # NEW: '...mp4', '...gif', '...png', etc.
-    dpi=130,            # NEW
-    fps=30,             # NEW
-    interval_ms=None,   # NEW: if None, computed from fps
-    crf=23,             # NEW: H.264 quality for MP4
+    save_path=None,     # '...mp4', '...gif', '...png', etc.
+    dpi=130,            # 
+    fps=30,             # 
+    interval_ms=None,   # if None, computed from fps
+    crf=23,             # H.264 quality for MP4
 ):
     def is_nonzero(field):
         return jnp.max(jnp.abs(field)) > threshold
     
     t0 = time_package.time()
     print(f"[plot] Start: building summary (direction='{direction}', frames={int(output['total_steps'])}) -> {save_path or 'interactive window'}")
+
+    _ensure_interactive_backend(save_path)
 
     grid = output["grid"]
     time = output["time_array"] * output["plasma_frequency"]
@@ -217,17 +197,28 @@ def plot(
 
     if total_axes >= used_axes + 1:
         energy_ax = axes_flat[used_axes]
-        energy_ax.plot(time, output["total_energy"],          label="Total energy")
-        energy_ax.plot(time, output["kinetic_energy_electrons"], label="Kinetic energy electrons")
-        energy_ax.plot(time, output["kinetic_energy_ions"],   label="Kinetic energy ions")
+        
+        # Build local-frame fields and Tij, and ∂t γ_ij via finite differences on time.
+        metric_cfg = output.get("metric", {"kind": 0, "params": {}})
+        kind = jnp.asarray(metric_cfg.get("kind", 0))        # stays a JAX scalar
+        use_gr = (kind != 0)                                 # JAX bool scalar
+        
         energy_ax.plot(time, output["electric_field_energy"], label="Electric field energy")
         if jnp.max(output["magnetic_field_energy"]) > 1e-10:
             energy_ax.plot(time, output["magnetic_field_energy"], label="Magnetic field energy")
-        charge = jnp.abs(jnp.mean(output["charge_density"], axis=-1))
-        # energy_ax.plot(time[4:], jnp.abs(charge[4:]-charge[4])/charge[4], label="Relative charge error")
-        # energy_ax.plot(time, output["gauss_rel_error"], label="Gauss law relative error")
-        # energy_ax.plot(time, output["momentum_rel_error"], label="Relative momentum error")
-        energy_ax.plot(time[1:], jnp.abs(output["total_energy"][1:] - output["total_energy"][0]) / output["total_energy"][0], label="Relative energy error")
+        if use_gr:
+            # energy_ax.plot(time, output["charge_continuity_residual"], label="Charge continuity residual")
+            energy_ax.plot(time[2:-1], output["poynting_balance_residual"][1:-1], label="Poynting balance residual")
+            energy_ax.plot(time[2:-1], output["gr_energy_balance_residual"][1:-1], label="GR energy balance residual")
+        else:
+            energy_ax.plot(time, output["total_energy"],          label="Total energy")
+            energy_ax.plot(time, output["kinetic_energy_electrons"], label="Kinetic energy electrons")
+            energy_ax.plot(time, output["kinetic_energy_ions"],   label="Kinetic energy ions")
+            # charge = jnp.abs(jnp.mean(output["charge_density"], axis=-1))
+            # energy_ax.plot(time[4:], jnp.abs(charge[4:]-charge[4])/charge[4], label="Relative charge error")
+            # energy_ax.plot(time, output["gauss_rel_error"], label="Gauss law relative error")
+            # energy_ax.plot(time, output["momentum_rel_error"], label="Relative momentum error")
+            energy_ax.plot(time[1:], jnp.abs(output["total_energy"][1:] - output["total_energy"][0]) / output["total_energy"][0], label="Relative energy error")
         energy_ax.set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)",
                     ylabel="Energy (J)", yscale="log", ylim=[1e-5, None])
         energy_ax.legend(fontsize=7)
@@ -330,7 +321,7 @@ def plot(
         else:
             return (electron_plot, ion_plot, animated_time_text)
 
-    ani = FuncAnimation(fig, update, frames=total_steps, blit=True, interval=1, repeat_delay=1000)
+    ani = FuncAnimation(fig, update, frames=total_steps, blit=True, interval=1, repeat_delay=1000, cache_frame_data=False)
 
     plt.tight_layout()
     # --- SAVE/SHOW ---
@@ -350,3 +341,136 @@ def plot(
     else:
         print(f"[plot] Done: displayed in {time_package.time()-t0:.2f}s")
         plt.show()
+
+        
+
+def _save_animation_or_image(ani, fig, save_path, fps=30, dpi=130, crf=23, last_frame_updater=True):
+    ext = str(save_path).lower().rsplit(".", 1)[-1]
+
+    if ext in ("mp4", "m4v", "mov"):
+        try:
+            # Try macOS hardware encoder first (HUGE speedup)
+            hw_writer = FFMpegWriter(
+                fps=fps,
+                codec="h264_videotoolbox",  # Apple VideoToolbox (hardware)
+                extra_args=[
+                    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-pix_fmt", "yuv420p",
+                    "-b:v", "6M",                 # target bitrate (tweak as needed)
+                    "-maxrate", "10M",
+                    "-bufsize", "20M",
+                    "-profile:v", "main",
+                    "-movflags", "+faststart",
+                    "-r", str(int(fps)),          # constant frame rate
+                    "-threads", "0",
+                ],
+            )
+            ani.save(save_path, writer=hw_writer, dpi=dpi)
+            plt.close(fig)
+            return
+        except Exception as e:
+            print(f"[save] Hardware encoder failed ({e!r}); falling back to libx264…")
+
+        try:
+            # CPU fallback: libx264 ultrafast
+            sw_writer = FFMpegWriter(
+                fps=fps,
+                codec="libx264",
+                extra_args=[
+                    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-pix_fmt", "yuv420p",
+                    "-preset", "ultrafast",
+                    "-tune", "fastdecode",
+                    "-crf", str(int(crf)),
+                    "-movflags", "+faststart",
+                    "-r", str(int(fps)),
+                    "-threads", "0",
+                    "-g", str(int(fps) * 2),      # larger GOP for speed
+                    "-bf", "0",                   # fewer B-frames => faster
+                ],
+            )
+            ani.save(save_path, writer=sw_writer, dpi=dpi)
+            plt.close(fig)
+            return
+        except Exception as e2:
+            print(f"FFmpeg (libx264) failed ({e2!r}). Falling back to GIF…")
+            # falls through to GIF branch
+
+    elif ext == "gif":
+        import os, subprocess, tempfile
+        # 1) write a fast MP4 to a temp file
+        with tempfile.TemporaryDirectory() as td:
+            tmp_mp4 = os.path.join(td, "anim.mp4")
+            try:
+                # Prefer hardware; fall back to software automatically
+                try:
+                    hw_writer = FFMpegWriter(
+                        fps=fps,
+                        codec="h264_videotoolbox",
+                        extra_args=[
+                            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                            "-pix_fmt", "yuv420p",
+                            "-b:v", "6M",
+                            "-maxrate", "10M",
+                            "-bufsize", "20M",
+                            "-r", str(int(fps)),
+                            "-movflags", "+faststart",
+                            "-threads", "0",
+                        ],
+                    )
+                    ani.save(tmp_mp4, writer=hw_writer, dpi=dpi)
+                except Exception:
+                    sw_writer = FFMpegWriter(
+                        fps=fps,
+                        codec="libx264",
+                        extra_args=[
+                            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                            "-pix_fmt", "yuv420p",
+                            "-preset", "ultrafast",
+                            "-crf", "28",
+                            "-r", str(int(fps)),
+                            "-movflags", "+faststart",
+                            "-threads", "0",
+                            "-g", str(int(fps) * 2),
+                            "-bf", "0",
+                        ],
+                    )
+                    ani.save(tmp_mp4, writer=sw_writer, dpi=dpi)
+                plt.close(fig)
+            except Exception as e:
+                print(f"[save] Could not render intermediate MP4 ({e!r}). Falling back to PillowWriter...")
+                try:
+                    writer = PillowWriter(fps=fps)
+                    ani.save(save_path, writer=writer, dpi=dpi)
+                    plt.close(fig)
+                    return
+                except Exception as e2:
+                    print(f"Pillow writer also failed ({e2!r}); showing interactively instead.")
+                    plt.show()
+                    return
+
+            # 2) MP4 -> optimized GIF (palette) using ffmpeg (very fast)
+            # palette improves quality and speed; scale keeps even dims not required for GIF, but ok.
+            palette = os.path.join(td, "pal.png")
+            # Generate palette
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", tmp_mp4, "-vf",
+                 f"fps={int(fps)},scale=iw:ih:flags=fast_bilinear,palettegen",
+                 palette],
+                check=True
+            )
+            # Apply palette
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", tmp_mp4, "-i", palette, "-lavfi",
+                 f"fps={int(fps)},scale=iw:ih:flags=fast_bilinear [x]; [x][1:v] paletteuse=new=1",
+                 save_path],
+                check=True
+            )
+            return
+
+    else:
+        # Static image (png/pdf/svg). If caller wants the LAST frame, update first.
+        if last_frame_updater is not None:
+            last_frame_updater()
+        fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)

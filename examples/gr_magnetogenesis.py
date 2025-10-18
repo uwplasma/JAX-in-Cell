@@ -1,7 +1,7 @@
 # Example script to run the simulation and plot the results
 import os
 import time
-import numpy as np
+import jax.numpy as jnp
 from jax import block_until_ready
 from jaxincell import plot, simulation, load_parameters
 from jaxincell import wave_spectrum_movie, phase_space_movie, particle_box_movie
@@ -14,10 +14,10 @@ input_parameters = {
  "amplitude_perturbation_x": 0,
  "wavenumber_electrons_x": 0,
  "wavenumber_ions_x": 0,
- "grid_points_per_Debye_length": 0.4,
- "vth_electrons_over_c_x": 0.1,
- "vth_electrons_over_c_y": 0.1,
- "vth_electrons_over_c_z": 0.1,
+ "grid_points_per_Debye_length": 0.5,
+ "vth_electrons_over_c_x": 0.25,
+ "vth_electrons_over_c_y": 0.25,
+ "vth_electrons_over_c_z": 0.25,
  "electron_drift_speed_x": 0.0,
  "electron_drift_speed_y": 0.0,
  "electron_drift_speed_z": 0.0,
@@ -27,26 +27,55 @@ input_parameters = {
  "random_positions_x": True,
  "random_positions_y": True,
  "random_positions_z": True,
- "ion_temperature_over_electron_temperature_x": 0.01,
- "timestep_over_spatialstep_times_c": 0.4,
+ "ion_temperature_over_electron_temperature_x": 1.0,
+ "timestep_over_spatialstep_times_c": 0.3,
  "relativistic": True,
  "filter_passes": 5,
  "filter_alpha":  0.5,
  "filter_strides": [1, 2, 4],
- "metric": { "kind": 6, "params": { "a0x": 1.0, "a0y": 1.0, "a0z": 1.0, "Hx": 0e0, "Hy": 0e0, "Hz": 5e0 } }
+#  "metric": {
+#      "kind": 6, # bianchi_i_linear
+#      "params": {
+#          "a0x": 1.0, "a0y": 1.0, "a0z": 1.0,
+#          "Hx": 0e-2, "Hy": 0e-2, "Hz": 3e-1 }
+#      },
+# "metric": {
+#     "kind": 7,  # bianchi_i_cosine
+#     "params": {
+#         "a0x": 1.0, "a0y": 1.0, "a0z": 1.0,
+#         "Ax": 0.0, "Ay": 0.5, "Az": 0.5,           # amplitudes |A| < 1
+#         "Omegax": 0.0, "Omegay": 0.3, "Omegaz": 0.5, # angular freqs in ω_p^{-1} units
+#         "phix": 0.0, "phiy": 0.0, "phiz": 0.0,       # phases (rad)
+#     }
+# }
+"metric": {
+    "kind": 8,  # bianchi_i_lin_cos
+    "params": {
+        # base scales
+        "a0x": 1.0, "a0y": 1.0, "a0z": 1.0,
+        # linear slopes (A_i)
+        "Ax": 0.0, "Ay": 0.0, "Az": 0.3,
+        # oscillation amplitude (B_i)
+        "Bx": 0.0,  "By": 0.0,  "Bz": -0.5,
+        # angular frequencies and phases (in ω_p^{-1} time units)
+        "Omegax": 0.0, "Omegay": 0.0, "Omegaz": 0.5, # and 0.0
+        "phix": 0.0,  "phiy": 0.0,  "phiz": 0.0,
+    }
+}
 }
 
 solver_parameters = {
  "time_evolution_algorithm": 0,
  "field_solver": 0,
- "number_grid_points": 280,
+ "number_grid_points": 150,
  "number_pseudoelectrons": 4000,
- "total_steps": 1300,
+ "total_steps": 1000,
 }
 
-save_movies = False
+save_movies    = False
+run_flat_space = False
 
-# Run a simulation with GR metric kind=6 (anisotropic expanding universe)
+# Run a simulation with GR metric
 start = time.time()
 output = block_until_ready(simulation(input_parameters, **solver_parameters))
 print(f"Wall clock time: {time.time()-start}s")
@@ -55,75 +84,76 @@ RUN_NAME   = "maxwellian_gr"
 OUTPUT_DIR = os.path.join("outputs", RUN_NAME)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 # --------- save static summary plot ---------
-# Animated MP4
-# plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.mp4"), fps=30, dpi=130, crf=23)
-# Animated GIF
-# plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.gif"), fps=20, dpi=110)
 # Static PNG of the LAST frame
-plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.png"), dpi=150)
+plot(output, direction="xz", dpi=60, save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.png"))
 if save_movies:
+    # # Animated MP4
+    # plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.mp4"), fps=30, dpi=70, crf=23)
+    # # Animated GIF
+    # plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.gif"), fps=20, dpi=70)
     # --------- 1) Waves + spectra + energy (E & B) ---------
     wave_spectrum_movie( output, direction="x", show_B=True, 
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_waves.mp4"), fps=30, crf=23, dpi=110)
+        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_waves.mp4"), fps=30, crf=23, dpi=70)
     # --------- 2) Phase space (both species) ---------
-    phase_space_movie(output, direction="x", species="both", points_per_species=250,
+    phase_space_movie(output, direction="x", species="both", points_per_species=250, dpi=70,
         save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_x.mp4"), fps=30, interval_ms=33)
-    phase_space_movie(output, direction="y", species="both", points_per_species=250,
+    phase_space_movie(output, direction="y", species="both", points_per_species=250, dpi=70,
         save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_y.mp4"), fps=30, interval_ms=33)
-    phase_space_movie(output, direction="z", species="both", points_per_species=250,
+    phase_space_movie(output, direction="z", species="both", points_per_species=250, dpi=70,
         save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_z.mp4"), fps=30, interval_ms=33)
     # --------- 3) Particle box (with field overlay) ---------
     particle_box_movie(output, direction="x", trail_len=20, n_electrons=120, n_ions=120,
-                    show_field=True, field_alpha=0.32, field_cmap="coolwarm",
+                    show_field=True, field_alpha=0.32, field_cmap="coolwarm", dpi=70,
                     save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_x.mp4"), fps=30,)
     particle_box_movie(output, direction="y", trail_len=20, n_electrons=120, n_ions=120,
-                    show_field=True, field_alpha=0.32, field_cmap="coolwarm",
+                    show_field=True, field_alpha=0.32, field_cmap="coolwarm", dpi=70,
                     save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_y.mp4"), fps=30,)
     particle_box_movie(output, direction="z", trail_len=20, n_electrons=120, n_ions=120,
-                    show_field=True, field_alpha=0.32, field_cmap="coolwarm",
+                    show_field=True, field_alpha=0.32, field_cmap="coolwarm", dpi=70,
                     save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_z.mp4"), fps=30,)
     # --------- Save the raw output ---------
     # np.savez(os.path.join(OUTPUT_DIR, f"{RUN_NAME}_output.npz"), **output)
     print(f"Saved results under: {OUTPUT_DIR}")
 
 # Change metric kind to 0 (flat spacetime) and rerun the simulation for comparison
-input_parameters["metric"]["kind"] = 0
-start = time.time()
-output = block_until_ready(simulation(input_parameters, **solver_parameters))
-print(f"Wall clock time: {time.time()-start}s")
-# --------- run naming ---------
-RUN_NAME   = "maxwellian_flatspace"
-OUTPUT_DIR = os.path.join("outputs", RUN_NAME)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-# --------- save static summary plot ---------
-# Animated MP4
-# plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.mp4"), fps=30, dpi=130, crf=23)
-# Animated GIF
-# plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.gif"), fps=20, dpi=110)
-# Static PNG of the LAST frame
-plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.png"), dpi=150)
-if save_movies:
-    # --------- 1) Waves + spectra + energy (E & B) ---------
-    wave_spectrum_movie( output, direction="x", show_B=True, 
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_waves.mp4"), fps=30, crf=23, dpi=110)
-    # --------- 2) Phase space (both species) ---------
-    phase_space_movie(output, direction="x", species="both", points_per_species=250,
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_x.mp4"), fps=30, interval_ms=33)
-    phase_space_movie(output, direction="y", species="both", points_per_species=250,
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_y.mp4"), fps=30, interval_ms=33)
-    phase_space_movie(output, direction="z", species="both", points_per_species=250,
-        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_z.mp4"), fps=30, interval_ms=33)
-    # --------- 3) Particle box (with field overlay) ---------
-    particle_box_movie(output, direction="x", trail_len=20, n_electrons=120, n_ions=120,
-                    show_field=True, field_alpha=0.32, field_cmap="coolwarm",
-                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_x.mp4"), fps=30,)
-    particle_box_movie(output, direction="y", trail_len=20, n_electrons=120, n_ions=120,
-                    show_field=True, field_alpha=0.32, field_cmap="coolwarm",
-                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_y.mp4"), fps=30,)
-    particle_box_movie(output, direction="z", trail_len=20, n_electrons=120, n_ions=120,
-                    show_field=True, field_alpha=0.32, field_cmap="coolwarm",
-                    save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_z.mp4"), fps=30,)
-    # --------- Save the raw output ---------
-    # np.savez(os.path.join(OUTPUT_DIR, f"{RUN_NAME}_output.npz"), **output)
-    print(f"Saved results under: {OUTPUT_DIR}")
+if run_flat_space:
+    input_parameters["metric"]["kind"] = 0
+    start = time.time()
+    output = block_until_ready(simulation(input_parameters, **solver_parameters))
+    print(f"Wall clock time: {time.time()-start}s")
+    # --------- run naming ---------
+    RUN_NAME   = "maxwellian_flatspace"
+    OUTPUT_DIR = os.path.join("outputs", RUN_NAME)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    # --------- save static summary plot ---------
+    # Static PNG of the LAST frame
+    plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.png"), dpi=110)
+    if save_movies:
+        # Animated MP4
+        # plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.mp4"), fps=30, dpi=70, crf=23)
+        # Animated GIF
+        # plot(output, direction="xz", save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_summary.gif"), fps=20, dpi=70)
+        # --------- 1) Waves + spectra + energy (E & B) ---------
+        wave_spectrum_movie( output, direction="x", show_B=True, 
+            save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_waves.mp4"), fps=30, crf=23, dpi=70)
+        # --------- 2) Phase space (both species) ---------
+        phase_space_movie(output, direction="x", species="both", points_per_species=250, dpi=70,
+            save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_x.mp4"), fps=30, interval_ms=33)
+        phase_space_movie(output, direction="y", species="both", points_per_species=250, dpi=70,
+            save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_y.mp4"), fps=30, interval_ms=33)
+        phase_space_movie(output, direction="z", species="both", points_per_species=250, dpi=70,
+            save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_phase_space_z.mp4"), fps=30, interval_ms=33)
+        # --------- 3) Particle box (with field overlay) ---------
+        particle_box_movie(output, direction="x", trail_len=20, n_electrons=120, n_ions=120,
+                        show_field=True, field_alpha=0.32, field_cmap="coolwarm", dpi=70,
+                        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_x.mp4"), fps=30,)
+        particle_box_movie(output, direction="y", trail_len=20, n_electrons=120, n_ions=120,
+                        show_field=True, field_alpha=0.32, field_cmap="coolwarm", dpi=70,
+                        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_y.mp4"), fps=30,)
+        particle_box_movie(output, direction="z", trail_len=20, n_electrons=120, n_ions=120,
+                        show_field=True, field_alpha=0.32, field_cmap="coolwarm", dpi=70,
+                        save_path=os.path.join(OUTPUT_DIR, f"{RUN_NAME}_particles_z.mp4"), fps=30,)
+        # --------- Save the raw output ---------
+        # np.savez(os.path.join(OUTPUT_DIR, f"{RUN_NAME}_output.npz"), **output)
+        print(f"Saved results under: {OUTPUT_DIR}")
 
