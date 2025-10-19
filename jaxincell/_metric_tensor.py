@@ -3,6 +3,20 @@ import jax.numpy as jnp
 from jax import jit, vmap, lax
 
 @jit
+def decay_env(t, tau):
+    """
+    Exponential envelope for 'turning off' metric drive:
+        E(t; tau) = exp(-t/tau)  if tau > 0
+                  = 1            otherwise (no decay)
+
+    Using this multiplicative factor on the *deviation from a0* ensures:
+      - short times (t << tau): original behavior (linear/oscillatory/etc.)
+      - long times (t >> tau):  the deviation → 0 and a_i(t) → a0i
+    """
+    # JAX-friendly branch: tau<=0 => E=1
+    return jnp.where(tau > 0.0, jnp.exp(-t / tau), 1.0)
+
+@jit
 def _christoffel_from_metric_tx(g, dg_dt, dg_dx):
     """
     Γ^μ_{αβ} = 1/2 g^{μσ} (∂_α g_{σβ} + ∂_β g_{σα} - ∂_σ g_{αβ})
@@ -81,13 +95,39 @@ def flrw_tx(t, x, a, adot, c):
     return g, dg_dt, dg_dx
 
 @jit
-def bianchi_i_a_linear(t, a0x, a0y, a0z, Hx, Hy, Hz):
-    ax   = a0x * (1 + Hx * t)
-    ay   = a0y * (1 + Hy * t)
-    az   = a0z * (1 + Hz * t)
-    adx  = Hx * a0x * jnp.ones_like(t)
-    ady  = Hy * a0y * jnp.ones_like(t)
-    adz  = Hz * a0z * jnp.ones_like(t)
+def bianchi_i_a_linear(t, a0x, a0y, a0z, Hx, Hy, Hz, tau_x=0.0, tau_y=0.0, tau_z=0.0):
+    r"""
+    Decaying linear Bianchi I (diagonal, zero-shift):
+        a_i(t) = a0i * [ 1 + H_i t * E_i(t) ],
+      where E_i(t) = exp(-t/τ_i) if τ_i>0 else 1.
+
+    Derivatives:
+        d/dt [ H_i t E_i ] = H_i [ E_i + t * dE_i/dt ],
+        dE_i/dt = -E_i/τ_i (if τ_i>0; else 0).
+
+      Thus:
+        a_i(t) = a0i [ 1 + H_i t E_i ],
+        ȧ_i(t) = a0i H_i [ E_i - (t/τ_i) E_i ]  (if τ_i>0),
+               = a0i H_i                        (if τ_i<=0).
+
+    As t→∞ with τ_i>0, E_i→0 and a_i→a0i.
+    """
+    Ex = decay_env(t, tau_x)
+    Ey = decay_env(t, tau_y)
+    Ez = decay_env(t, tau_z)
+
+    ax = a0x * (1.0 + Hx * t * Ex)
+    ay = a0y * (1.0 + Hy * t * Ey)
+    az = a0z * (1.0 + Hz * t * Ez)
+
+    # ȧ: use d/dt[t E] = E + t dE/dt, with dE/dt = -E/τ (τ>0) else 0
+    dEx_dt = jnp.where(tau_x > 0.0, -Ex / tau_x, 0.0)
+    dEy_dt = jnp.where(tau_y > 0.0, -Ey / tau_y, 0.0)
+    dEz_dt = jnp.where(tau_z > 0.0, -Ez / tau_z, 0.0)
+
+    adx = a0x * Hx * (Ex + t * dEx_dt)
+    ady = a0y * Hy * (Ey + t * dEy_dt)
+    adz = a0z * Hz * (Ez + t * dEz_dt)
     return (ax, ay, az), (adx, ady, adz)
 
 @jit
@@ -104,108 +144,135 @@ def bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c):
 def bianchi_i_a_cosine(t, a0x, a0y, a0z,
                        Ax, Ay, Az,
                        Omegax, Omegay, Omegaz,
-                       phix, phiy, phiz):
-    """
-    Bianchi I with periodic scale factors:
-      a_x(t) = a0x * (1 + Ax * cos(Omegax * t + phix))
-      a_y(t) = a0y * (1 + Ay * cos(Omegay * t + phiy))
-      a_z(t) = a0z * (1 + Az * cos(Omegaz * t + phiz))
+                       phix, phiy, phiz,
+                       tau_x=0.0, tau_y=0.0, tau_z=0.0):
+    r"""
+    Decaying oscillatory Bianchi I:
+        a_i(t) = a0i [ 1 + A_i cos(Ω_i t + φ_i) E_i(t) ],
+        E_i(t) = exp(-t/τ_i) if τ_i>0 else 1.
 
-    Notes:
-    - Keep |A?| < 1 to ensure a_i(t) > 0. (We do a tiny floor for safety.)
-    - t is in your code’s time units (ω_p^{-1}).
-    """
-    ax = a0x * (1.0 + Ax * jnp.cos(Omegax * t + phix))
-    ay = a0y * (1.0 + Ay * jnp.cos(Omegay * t + phiy))
-    az = a0z * (1.0 + Az * jnp.cos(Omegaz * t + phiz))
+    Derivatives:
+        ȧ_i = a0i * d/dt[ A_i cos(…) E_i ]
+            = a0i * A_i [ -Ω_i sin(…) E_i + cos(…) dE_i/dt ],
+        dE_i/dt = -E_i/τ_i (if τ_i>0).
 
-    # time derivatives
-    adx = a0x * (-Ax * Omegax * jnp.sin(Omegax * t + phix))
-    ady = a0y * (-Ay * Omegay * jnp.sin(Omegay * t + phiy))
-    adz = a0z * (-Az * Omegaz * jnp.sin(Omegaz * t + phiz))
-
-    # tiny positive floor to avoid exact zeros (keeps metric well-defined)
-    eps = 1e-15
-    ax = jnp.clip(ax, eps, jnp.inf)
-    ay = jnp.clip(ay, eps, jnp.inf)
-    az = jnp.clip(az, eps, jnp.inf)
-    return (ax, ay, az), (adx, ady, adz)
-
-
-@jit
-def bianchi_i_cos_tx(t, x,
-                     a0x, a0y, a0z,
-                     Ax, Ay, Az,
-                     Omegax, Omegay, Omegaz,
-                     phix, phiy, phiz,
-                     c):
-    """
-    Wrapper that builds (g, ∂_t g, ∂_x g) for oscillatory Bianchi I
-    using the existing bianchi_i_tx.
-    """
-    (ax, ay, az), (adx, ady, adz) = bianchi_i_a_cosine(
-        t, a0x, a0y, a0z, Ax, Ay, Az, Omegax, Omegay, Omegaz, phix, phiy, phiz
-    )
-    return bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c)
-
-@jit
-def bianchi_i_a_lin_cos(t, a0x, a0y, a0z,
-                        Ax, Ay, Az,          # linear slopes A_?
-                        Bx, By, Bz,          # oscillation amplitudes B_?
-                        Omegax, Omegay, Omegaz,
-                        phix, phiy, phiz):
-    """
-    Bianchi I with linear×oscillatory scale factors:
-
-      a_i(t) = a0i * [ 1 + A_i * t * ( 1 + B_i * cos(Ω_i t + φ_i) ) ]
-
-    Derivative:
-      da_i/dt = a0i * [ A_i * ( 1 + B_i * cos(Ω_i t + φ_i) )
-                        + A_i * t * ( -B_i * Ω_i * sin(Ω_i t + φ_i) ) ]
-
-    Keep |1 + A_i t (1 + B_i cos)| > 0; we clip very near zero for safety.
+    As t→∞ (τ_i>0), E_i→0 and a_i→a0i.
     """
     cx = jnp.cos(Omegax * t + phix); sx = jnp.sin(Omegax * t + phix)
     cy = jnp.cos(Omegay * t + phiy); sy = jnp.sin(Omegay * t + phiy)
     cz = jnp.cos(Omegaz * t + phiz); sz = jnp.sin(Omegaz * t + phiz)
 
-    # scale factors
-    ax = a0x * (1.0 + Ax * t * (1.0 + Bx * cx))
-    ay = a0y * (1.0 + Ay * t * (1.0 + By * cy))
-    az = a0z * (1.0 + Az * t * (1.0 + Bz * cz))
+    Ex = decay_env(t, tau_x); dEx_dt = jnp.where(tau_x > 0.0, -Ex / tau_x, 0.0)
+    Ey = decay_env(t, tau_y); dEy_dt = jnp.where(tau_y > 0.0, -Ey / tau_y, 0.0)
+    Ez = decay_env(t, tau_z); dEz_dt = jnp.where(tau_z > 0.0, -Ez / tau_z, 0.0)
 
-    # time derivatives
-    dax = a0x * ( Ax * (1.0 + Bx * cx) + Ax * t * (-Bx * Omegax * sx) )
-    day = a0y * ( Ay * (1.0 + By * cy) + Ay * t * (-By * Omegay * sy) )
-    daz = a0z * ( Az * (1.0 + Bz * cz) + Az * t * (-Bz * Omegaz * sz) )
+    ax = a0x * (1.0 + Ax * cx * Ex)
+    ay = a0y * (1.0 + Ay * cy * Ey)
+    az = a0z * (1.0 + Az * cz * Ez)
 
-    # tiny positive floor to avoid singular metric when bracket ~ 0
+    adx = a0x * (Ax * (-Omegax * sx * Ex + cx * dEx_dt))
+    ady = a0y * (Ay * (-Omegay * sy * Ey + cy * dEy_dt))
+    adz = a0z * (Az * (-Omegaz * sz * Ez + cz * dEz_dt))
+
+    # keep tiny positive floor (optional)
     eps = 1e-15
-    ax = jnp.clip(ax, eps, jnp.inf)
-    ay = jnp.clip(ay, eps, jnp.inf)
-    az = jnp.clip(az, eps, jnp.inf)
-
-    return (ax, ay, az), (dax, day, daz)
-
+    ax = jnp.clip(ax, eps, jnp.inf); ay = jnp.clip(ay, eps, jnp.inf); az = jnp.clip(az, eps, jnp.inf)
+    return (ax, ay, az), (adx, ady, adz)
 
 @jit
-def bianchi_i_lin_cos_tx(t, x,
-                         a0x, a0y, a0z,
-                         Ax, Ay, Az,
-                         Bx, By, Bz,
-                         Omegax, Omegay, Omegaz,
-                         phix, phiy, phiz,
-                         c):
+def bianchi_i_a_lin_cos(t, a0x, a0y, a0z,
+                        Ax, Ay, Az,
+                        Bx, By, Bz,
+                        Omegax, Omegay, Omegaz,
+                        phix, phiy, phiz,
+                        tau_x=0.0, tau_y=0.0, tau_z=0.0):
+    r"""
+    Decaying linear×oscillatory Bianchi I:
+        a_i(t) = a0i [ 1 + A_i t (1 + B_i cos(Ω_i t + φ_i)) E_i(t) ],
+        E_i(t) = exp(-t/τ_i) if τ_i>0 else 1.
+
+    Let g_i(t) := A_i t (1 + B_i cos(…)).
+    Then:
+        a_i = a0i [1 + g_i E_i],
+        ȧ_i = a0i [ ġ_i E_i + g_i dE_i/dt ].
+
+    With:
+        ġ_i = A_i [ (1 + B_i cos(…)) + t (-B_i Ω_i sin(…)) ],
+        dE_i/dt = -E_i/τ_i (if τ_i>0).
+
+    As t→∞ (τ_i>0), E_i→0 ⇒ a_i→a0i.
     """
-    Build (g, ∂_t g, ∂_x g) for linear×oscillatory Bianchi I
-    using the existing bianchi_i_tx.
+    cx = jnp.cos(Omegax * t + phix); sx = jnp.sin(Omegax * t + phix)
+    cy = jnp.cos(Omegay * t + phiy); sy = jnp.sin(Omegay * t + phiy)
+    cz = jnp.cos(Omegaz * t + phiz); sz = jnp.sin(Omegaz * t + phiz)
+
+    Ex = decay_env(t, tau_x); dEx_dt = jnp.where(tau_x > 0.0, -Ex / tau_x, 0.0)
+    Ey = decay_env(t, tau_y); dEy_dt = jnp.where(tau_y > 0.0, -Ey / tau_y, 0.0)
+    Ez = decay_env(t, tau_z); dEz_dt = jnp.where(tau_z > 0.0, -Ez / tau_z, 0.0)
+
+    gx = Ax * t * (1.0 + Bx * cx)
+    gy = Ay * t * (1.0 + By * cy)
+    gz = Az * t * (1.0 + Bz * cz)
+
+    gdx = Ax * ((1.0 + Bx * cx) + t * (-Bx * Omegax * sx))
+    gdy = Ay * ((1.0 + By * cy) + t * (-By * Omegay * sy))
+    gdz = Az * ((1.0 + Bz * cz) + t * (-Bz * Omegaz * sz))
+
+    ax = a0x * (1.0 + gx * Ex)
+    ay = a0y * (1.0 + gy * Ey)
+    az = a0z * (1.0 + gz * Ez)
+
+    adx = a0x * (gdx * Ex + gx * dEx_dt)
+    ady = a0y * (gdy * Ey + gy * dEy_dt)
+    adz = a0z * (gdz * Ez + gz * dEz_dt)
+
+    eps = 1e-15
+    ax = jnp.clip(ax, eps, jnp.inf); ay = jnp.clip(ay, eps, jnp.inf); az = jnp.clip(az, eps, jnp.inf)
+    return (ax, ay, az), (adx, ady, adz)
+
+@jit
+def bianchi_i_a_volpres_cosine(t, a0x, a0y, a0z, eps, Omega, phi, tau_eps=0.0):
+    r"""
+    Volume-preserving oscillatory Bianchi I (diagonal, zero shift) with decaying drive:
+
+        a_x(t) = a0x,
+        a_y(t) = a0y * den(t),
+        a_z(t) = a0z / den(t),
+
+      where
+        den(t) = 1 + ε_eff(t) cos(Ω t + φ),
+        ε_eff(t) = ε * exp(-t/τ_ε)  if τ_ε > 0,  else ε.
+
+    Derivatives:
+        C := cos(Ω t + φ),  S := sin(Ω t + φ)
+        ε_eff' = -ε_eff / τ_ε  (if τ_ε>0, else 0)
+        den'   = ε_eff' C + ε_eff * (-Ω S)
+        ȧ_y    = a0y * den'
+        ȧ_z    = a0z * (-den') / den^2
+
+    As t→∞ with τ_ε>0, ε_eff→0 ⇒ den→1 ⇒ a_y→a0y, a_z→a0z (and a_y a_z→a0y a0z).
     """
-    (ax, ay, az), (adx, ady, adz) = bianchi_i_a_lin_cos(
-        t, a0x, a0y, a0z,
-        Ax, Ay, Az, Bx, By, Bz,
-        Omegax, Omegay, Omegaz, phix, phiy, phiz
-    )
-    return bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c)
+    C = jnp.cos(Omega * t + phi)
+    S = jnp.sin(Omega * t + phi)
+
+    eps_eff = jnp.where(tau_eps > 0.0, eps * jnp.exp(-t / tau_eps), eps)
+    deps_dt = jnp.where(tau_eps > 0.0, -eps_eff / tau_eps, 0.0)
+
+    den = 1.0 + eps_eff * C
+    den = jnp.clip(den, 1e-15, jnp.inf)   # robustness
+
+    ax = a0x * jnp.ones_like(t)
+    ay = a0y * den
+    az = a0z / den
+
+    dden_dt = deps_dt * C + eps_eff * (-Omega * S)
+
+    adx = jnp.zeros_like(t)
+    ady = a0y * dden_dt
+    adz = a0z * (-dden_dt) / (den * den)
+
+    return (ax, ay, az), (adx, ady, adz)
+
 
 @jit
 def metric_bundle(t, x, metric_kind, c, **kwargs):
@@ -218,6 +285,8 @@ def metric_bundle(t, x, metric_kind, c, **kwargs):
       6=bianchi_i_linear
       7=bianchi_i_cosine    # (periodic/oscillatory Bianchi I)
       8=bianchi_i_lin_cos   #  a_i(t) = a0i [1 + A_i t (1 + B_i cos)]
+      9=bianchi_i_volpres_cosine  # volume-preserving oscillatory (diag, zero shift)
+
       
       times are in units of plasma frequency ωₚ⁻¹
     """
@@ -238,28 +307,41 @@ def metric_bundle(t, x, metric_kind, c, **kwargs):
         a, adot = flrw_a_exponential(t, a0, H)
         return flrw_tx(t, x, a, adot, c)
     def bianchi_i_linear_case(_):
-        # defaults: unit scale factors at t=0, choose your H's
         a0x = kwargs.get("a0x", 1.0); a0y = kwargs.get("a0y", 1.0); a0z = kwargs.get("a0z", 1.0)
         Hx  = kwargs.get("Hx",  0.0); Hy  = kwargs.get("Hy",  0.0); Hz  = kwargs.get("Hz",  0.0)
-        (ax, ay, az), (adx, ady, adz) = bianchi_i_a_linear(t, a0x, a0y, a0z, Hx, Hy, Hz)
+        tau_x = kwargs.get("tau_x", 0.0); tau_y = kwargs.get("tau_y", 0.0); tau_z = kwargs.get("tau_z", 0.0)
+        (ax, ay, az), (adx, ady, adz) = bianchi_i_a_linear(t, a0x, a0y, a0z, Hx, Hy, Hz, tau_x, tau_y, tau_z)
         return bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c)
+
     def bianchi_i_cosine_case(_):
-        # defaults chosen so that with Ax=Ay=Az=0 you recover Minkowski space (a_i=a0i)
         a0x = kwargs.get("a0x", 1.0); a0y = kwargs.get("a0y", 1.0); a0z = kwargs.get("a0z", 1.0)
         Ax  = kwargs.get("Ax",  0.0); Ay  = kwargs.get("Ay",  0.0); Az  = kwargs.get("Az",  0.0)
         Omegax = kwargs.get("Omegax", 0.0); Omegay = kwargs.get("Omegay", 0.0); Omegaz = kwargs.get("Omegaz", 0.0)
         phix   = kwargs.get("phix",   0.0); phiy   = kwargs.get("phiy",   0.0); phiz   = kwargs.get("phiz",   0.0)
-        return bianchi_i_cos_tx(t, x, a0x, a0y, a0z,
-            Ax, Ay, Az, Omegax, Omegay, Omegaz, phix, phiy, phiz, c)
+        tau_x = kwargs.get("tau_x", 0.0); tau_y = kwargs.get("tau_y", 0.0); tau_z = kwargs.get("tau_z", 0.0)
+        (ax, ay, az), (adx, ady, adz) = bianchi_i_a_cosine(
+            t, a0x, a0y, a0z, Ax, Ay, Az, Omegax, Omegay, Omegaz, phix, phiy, phiz, tau_x, tau_y, tau_z
+        )
+        return bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c)
+
     def bianchi_i_lin_cos_case(_):
-        # Defaults recover Minkowski when A?=0.
         a0x = kwargs.get("a0x", 1.0); a0y = kwargs.get("a0y", 1.0); a0z = kwargs.get("a0z", 1.0)
         Ax  = kwargs.get("Ax",  0.0); Ay  = kwargs.get("Ay",  0.0); Az  = kwargs.get("Az",  0.0)
         Bx  = kwargs.get("Bx",  0.0); By  = kwargs.get("By",  0.0); Bz  = kwargs.get("Bz",  0.0)
         Omegax = kwargs.get("Omegax", 0.0); Omegay = kwargs.get("Omegay", 0.0); Omegaz = kwargs.get("Omegaz", 0.0)
         phix   = kwargs.get("phix",   0.0); phiy   = kwargs.get("phiy",   0.0); phiz   = kwargs.get("phiz",   0.0)
-        return bianchi_i_lin_cos_tx( t, x, a0x, a0y, a0z, Ax, Ay, Az, Bx, By, Bz,
-            Omegax, Omegay, Omegaz, phix, phiy, phiz,c)
+        tau_x = kwargs.get("tau_x", 0.0); tau_y = kwargs.get("tau_y", 0.0); tau_z = kwargs.get("tau_z", 0.0)
+        (ax, ay, az), (adx, ady, adz) = bianchi_i_a_lin_cos(
+            t, a0x, a0y, a0z, Ax, Ay, Az, Bx, By, Bz, Omegax, Omegay, Omegaz, phix, phiy, phiz, tau_x, tau_y, tau_z
+        )
+        return bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c)
+
+    def bianchi_i_volpres_cosine_case(_):
+        a0x = kwargs.get("a0x", 1.0); a0y = kwargs.get("a0y", 1.0); a0z = kwargs.get("a0z", 1.0)
+        eps = kwargs.get("eps", 0.1); Omega = kwargs.get("Omega", 5.0); phi = kwargs.get("phi", 0.0)
+        tau_eps = kwargs.get("tau_eps", 0.0)
+        (ax, ay, az), (adx, ady, adz) = bianchi_i_a_volpres_cosine(t, a0x, a0y, a0z, eps, Omega, phi, tau_eps)
+        return bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c)
 
     g, dg_dt, dg_dx = lax.switch(
         metric_kind,
@@ -273,6 +355,7 @@ def metric_bundle(t, x, metric_kind, c, **kwargs):
             bianchi_i_linear_case,  # 6 
             bianchi_i_cosine_case,  # 7
             bianchi_i_lin_cos_case,  # 8
+            bianchi_i_volpres_cosine_case,  # 9
         ],
         operand=None,
     )
