@@ -18,11 +18,17 @@ MOVIE_DIRECTION   = "xz"
 SOLVER = {
     "time_evolution_algorithm": 0,
     "field_solver": 0,
-    "number_grid_points": 251,
-    "number_pseudoelectrons": 13000,
+    "number_grid_points": 211,
+    "number_pseudoelectrons": 6000,
     "total_steps": 8000,
     # **solver_parameters,
 }
+
+####
+#### gravitational wave induced anisotropy??
+#### How would the metric look like? Same frequency, phase difference?
+#### Start with a mean field at t=0 and consider a slow expansion that should conserve: flux, magnetic moment
+####
 
 # --------- scenarios (simple, readable dicts) ---------
 CASES = [
