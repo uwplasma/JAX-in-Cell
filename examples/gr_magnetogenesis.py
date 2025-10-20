@@ -19,8 +19,8 @@ SOLVER = {
     "time_evolution_algorithm": 0,
     "field_solver": 0,
     "number_grid_points": 251,
-    "number_pseudoelectrons": 12000,
-    "total_steps": 9000,
+    "number_pseudoelectrons": 13000,
+    "total_steps": 8000,
     # **solver_parameters,
 }
 
@@ -33,10 +33,10 @@ CASES = [
         "metric": {"kind": 8, "params": dict(
             a0x=1.0, a0y=1.0, a0z=1.0,
             Ax=0.0, Ay=0.0, Az=0.3,
-            Bx=0.0, By=0.0, Bz=-0.5,
-            Omegax=0.0, Omegay=0.0, Omegaz=2.0,
+            Bx=0.0, By=0.0, Bz=0.5,
+            Omegax=0.0, Omegay=0.0, Omegaz=0.5,
             phix=0.0, phiy=0.0, phiz=0.0,
-            tau_x=0.0, tau_y=0.0, tau_z=20.0,
+            tau_x=0.0, tau_y=0.0, tau_z=30.0,
         )},
     },
     
@@ -48,7 +48,7 @@ CASES = [
             Bx=0.0, By=0.0, Bz=0.0,
             Omegax=0.0, Omegay=0.0, Omegaz=0.0,
             phix=0.0, phiy=0.0, phiz=0.0,
-            tau_x=0.0, tau_y=0.0, tau_z=20.0,
+            tau_x=0.0, tau_y=0.0, tau_z=30.0,
         )},
     },
 
@@ -63,7 +63,7 @@ CASES = [
         "name": "maxwellian_bianchi9_eps{eps}_epsdecay{tau_eps}",
         "metric": {"kind": 9, "params": dict(
             a0x=1.0, a0y=1.0, a0z=1.0,
-            eps=0.3, Omega=2.0, phi=0.0, tau_eps=20.0,
+            eps=0.3, Omega=2.0, phi=0.0, tau_eps=30.0,
         )},
     },
     
@@ -71,7 +71,7 @@ CASES = [
         "name": "maxwellian_bianchi9_eps{eps}_epsdecay{tau_eps}",
         "metric": {"kind": 9, "params": dict(
             a0x=1.0, a0y=1.0, a0z=1.0,
-            eps=0.5, Omega=2.0, phi=0.0, tau_eps=20.0,
+            eps=0.5, Omega=2.0, phi=0.0, tau_eps=30.0,
         )},
     },
 ]
