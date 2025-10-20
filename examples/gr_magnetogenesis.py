@@ -18,9 +18,9 @@ MOVIE_DIRECTION   = "xz"
 SOLVER = {
     "time_evolution_algorithm": 0,
     "field_solver": 0,
-    "number_grid_points": 211,
-    "number_pseudoelectrons": 4000,
-    "total_steps": 3000,
+    "number_grid_points": 221,
+    "number_pseudoelectrons": 5000,
+    "total_steps": 3500,
     # **solver_parameters,
 }
 
@@ -32,29 +32,35 @@ SOLVER = {
 
 # --------- scenarios (simple, readable dicts) ---------
 CASES = [
-    {
-        "name": "maxwellian_gravitational_wave",
-        "metric": {
-            "kind": 10,  # gw_sinusoid_case
-            "params": {
-                # base scales (≈1 for small perturbations)
-                "a0t": 1.0, "a0x": 1.0, "a0y": 1.0, "a0z": 1.0,
-                # small strains (|b?| << 1 recommended)
-                "bt": 0.00, "bx": 0.0, "by": 0.0, "bz": 0.5,
-                # frequencies (in ω_p units) and phases
-                "omeg_t": 0.0, "omeg_x": 0.0, "omeg_y": 0.0, "omeg_z": 1.0,
-                "phi_t": 0.0,  "phi_x": 0.0,  "phi_y": 0.0,  "phi_z": 0.0,
-                # optional exponential decay times (turns drive off)
-                "tau_t": 0.0, "tau_x": 0.0, "tau_y": 0.0, "tau_z": 0.0
-            }
-        }
-    },
+{
+  "name": "maxwellian_gravitational_wave",
+  "metric": {
+    "kind": 10,
+    "params": {
+      "a0t": 1.0, "a0x": 1.0, "a0y": 1.0, "a0z": 1.0,
 
-    # # Flat spacetime
-    # {
-    #     "name": "maxwellian_flatspace",
-    #     "metric": {"kind": 0},  # no params
-    # },
+      # GW-like + polarization: opposite shear in x and z
+      # keep |b| ≲ 0.1–0.2 for linear/TT-like regime
+      "bt": 0.0, "bx":  0.0, "by": +0.1, "bz":  -0.1,
+
+      # Fast drive for clean cycle-averaging: Ω ≫ max{γ, k v_th}
+      # As code units are ω_p = 1,  set Ω ~ 5–10
+      "omeg_t": 0.0, "omeg_x": 0.0, "omeg_y": 5.0, "omeg_z": 5.0,
+
+      # Same phase → pure “+” shear; change by π/2 to mimic “×”
+      "phi_t": 0.0, "phi_x": 0.0, "phi_y": 0.0, "phi_z": 0.0,
+
+      # Optional slow switch-off so growth saturates after pumping
+      "tau_t": 0.0, "tau_x": 0.0, "tau_y": 20.0, "tau_z": 20.0
+    }
+  }
+},
+
+    # Flat spacetime
+    {
+        "name": "maxwellian_flatspace",
+        "metric": {"kind": 0},  # no params
+    },
 
     # # Bianchi 8: linear + cosine pump
     # # metric equation: a_i(t) = a0i [1 + A_i t (1 + B_i cos)]
@@ -104,7 +110,7 @@ CASES = [
 BASE_INPUT = {
     # **input_parameters,
     "length": 0.03,
-    "amplitude_perturbation_x": 0,
+    "amplitude_perturbation_x": 0.0,
     "wavenumber_electrons_x": 0,
     "wavenumber_ions_x": 0,
     "grid_points_per_Debye_length": 0.7,
