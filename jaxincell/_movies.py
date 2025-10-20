@@ -1,76 +1,59 @@
-# --- ADDITIONS TO _movies.py ---
-
-__all__ = ["particle_box_movie", "wave_spectrum_movie", "phase_space_movie"]
 
 import numpy as np
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation, writers
+from matplotlib.animation import FuncAnimation
 from matplotlib.collections import LineCollection
 from matplotlib.animation import FuncAnimation
-from matplotlib.animation import FFMpegWriter, PillowWriter
 import time as time_package
 import matplotlib
 matplotlib.use("Agg")
+from ._plot import _frame_indices
+
+__all__ = ["particle_box_movie", "wave_spectrum_movie", "phase_space_movie", "vv_phase_grid_movie"]
 
 # --------------------------- helpers reused ---------------------------
-
 def _save_animation(ani, fig, save_path, fps=30, dpi=110, crf=23):
-    """
-    Save animation to MP4 (libx264, yuv420p) with even-dimension fix.
-    Falls back to GIF if ffmpeg is missing or fails.
-    """
     import os
     from matplotlib.animation import FFMpegWriter, PillowWriter
-
     ext = os.path.splitext(save_path)[1].lower()
     if ext in (".mp4", ".m4v", ".mov"):
         try:
             writer = FFMpegWriter(
-                fps=fps,
-                codec="libx264",
-                extra_args=[
-                    "-pix_fmt", "yuv420p",
-                    "-crf", str(int(crf)),
-                    "-movflags", "+faststart",
-                    # ensure even width/height (required by yuv420p)
-                    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                    "-threads", "0",           # let ffmpeg use all cores,
-                    "-preset", "ultrafast",
-                    "-tune", "fastdecode",
-                    "-r", str(int(fps)),       # force CFR
-                ],
+                fps=fps, codec="libx264",
+                extra_args=["-pix_fmt","yuv420p","-crf",str(int(crf)),
+                            "-movflags","+faststart","-vf","scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                            "-threads","0","-preset","ultrafast","-tune","fastdecode",
+                            "-r",str(int(fps)),"-vsync","cfr"]
             )
             ani.save(save_path, writer=writer, dpi=dpi)
             plt.close(fig)
-            return
+            return save_path
         except Exception as e:
-            # Fall back to GIF with same basename
             gif_path = os.path.splitext(save_path)[0] + ".gif"
             print(f"FFmpeg failed ({e!r}); falling back to GIF: {gif_path}")
             try:
                 writer = PillowWriter(fps=fps)
                 ani.save(gif_path, writer=writer)
                 plt.close(fig)
-                return
+                return gif_path
             except Exception as e2:
                 print(f"Pillow writer also failed ({e2!r}); showing interactively instead.")
                 plt.show()
-                return
+                return None
     elif ext == ".gif":
         try:
             writer = PillowWriter(fps=fps)
             ani.save(save_path, writer=writer)
             plt.close(fig)
-            return
+            return save_path
         except Exception as e:
             print(f"Pillow writer failed ({e!r}); showing interactively instead.")
             plt.show()
-            return
+            return None
     else:
         print(f"Unknown extension '{ext}', not saving. Showing interactively instead.")
         plt.show()
-        return
+        return None
 
 def _to_np(x):
     return np.asarray(x)
@@ -98,6 +81,7 @@ def wave_spectrum_movie(
     crf=23,                       # NEW: H.264 quality (lower = better quality, bigger file)
     dpi=110,                      # NEW: lower dpi for smaller files
     b_direction="auto",
+    steps_to_plot=None,
 ):
     """
     Wave growth dashboard:
@@ -124,14 +108,16 @@ def wave_spectrum_movie(
     T     = int(_to_np(output["total_steps"]))
     time  = _to_np(output["time_array"]) * float(_to_np(output["plasma_frequency"]))
     Nx    = grid.size
+    _frames = _frame_indices(T, steps_to_plot)
+    time = time[_frames]
     if interval_ms is None:
         interval_ms = int(1000/max(1, fps))
 
-    Eall  = _to_np(output["electric_field"][:, :, di])  # [T, Nx]
+    Eall = _to_np(output["electric_field"][:, :, di])[_frames]
     if show_B:
         if b_direction == "auto":
             # choose the B component with the largest RMS across time & x
-            Ball_all = _to_np(output["magnetic_field"])  # [T, Nx, 3]
+            Ball_all = _to_np(output["magnetic_field"])[_frames]  # [F, Nx, 3]
             # prevent NaNs
             Ball_all = np.nan_to_num(Ball_all, nan=0.0)
             rms = np.sqrt(np.mean(Ball_all**2, axis=(0,1)))  # [3]
@@ -149,11 +135,11 @@ def wave_spectrum_movie(
         b_dir_label = None
 
     # Energies
-    KEe = _to_np(output.get("kinetic_energy_electrons", np.zeros(T)))
-    KEi = _to_np(output.get("kinetic_energy_ions",     np.zeros(T)))
-    EE  = _to_np(output.get("electric_field_energy",   np.zeros(T)))
-    BE  = _to_np(output.get("magnetic_field_energy",   np.zeros(T)))
-    TE  = _to_np(output.get("total_energy",            KEe+KEi+EE+BE))
+    KEe = _to_np(output.get("kinetic_energy_electrons", np.zeros(T)))[_frames]
+    KEi = _to_np(output.get("kinetic_energy_ions",     np.zeros(T)))[_frames]
+    EE  = _to_np(output.get("electric_field_energy",   np.zeros(T)))[_frames]
+    BE  = _to_np(output.get("magnetic_field_energy",   np.zeros(T)))[_frames]
+    TE  = _to_np(output.get("total_energy",            KEe+KEi+EE+BE))[_frames]
 
     # Robust scaling for ribbons
     e_vmin, e_vmax = _robust_bounds(Eall, 0.1, 99.9)
@@ -283,12 +269,16 @@ def wave_spectrum_movie(
             time_textB.set_text(f"t = {time[ti]:.2f}  $\\omega_{{pe}}^{{-1}}$")
         return artists
 
-    ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False, cache_frame_data=False)
+    ani = FuncAnimation(fig, _update, frames=len(_frames), interval=interval_ms,
+                    blit=True, repeat=False, cache_frame_data=False)
     if save_path is not None:
-        _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=crf)
-        print(f"[wave_spectrum_movie] Done: wrote {save_path} in {time_package.time()-t0:.2f}s")
+        actual = _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=crf)
+        if actual:
+            print(f"[Wave spectrum movie] Done: wrote {actual} in {time_package.time()-t0:.2f}s")
+        else:
+            print(f"[Wave spectrum movie] Done: displayed in {time_package.time()-t0:.2f}s")
     else:
-        print(f"[wave_spectrum_movie] Done: displayed in {time_package.time()-t0:.2f}s")
+        print(f"[Wave spectrum movie] Done: displayed in {time_package.time()-t0:.2f}s")
         plt.show()
 
     return ani
@@ -310,6 +300,8 @@ def phase_space_movie(
     seed=7,
     cmap="twilight",
     dpi=110,
+    steps_to_plot=None,
+    crf = 23,
 ):
     """
     **Phase-space showcase**:
@@ -339,11 +331,13 @@ def phase_space_movie(
     Lx   = float(_to_np(output["length"]))
     T    = int(_to_np(output["total_steps"]))
     time = _to_np(output["time_array"]) * float(_to_np(output["plasma_frequency"]))
+    _frames = _frame_indices(T, steps_to_plot)
+    time = time[_frames]
 
-    Xe = _to_np(output["position_electrons"][:, :, di])
-    Ve = _to_np(output["velocity_electrons"][:, :, di])
-    Xi = _to_np(output["position_ions"][:, :, di])
-    Vi = _to_np(output["velocity_ions"][:, :, di])
+    Xe = _to_np(output["position_electrons"][:, :, di])[_frames]
+    Ve = _to_np(output["velocity_electrons"][:, :, di])[_frames]
+    Xi = _to_np(output["position_ions"][:, :, di])[_frames]
+    Vi = _to_np(output["velocity_ions"][:, :, di])[_frames]
 
     Ne = Xe.shape[1]
     Ni = Xi.shape[1]
@@ -363,8 +357,8 @@ def phase_space_movie(
 
     # Precompute histograms frame-by-frame (fast enough; avoids work in the loop)
     def _hist2d_time(X, V, vx_edges):
-        H = np.empty((T, bins_v, bins_x), dtype=float)  # store as [T, bins_v, bins_x]
-        for t in range(T):
+        H = np.empty((len(_frames), bins_v, bins_x), dtype=float)  # store as [T, bins_v, bins_x]
+        for t in range(len(_frames)):
             h, _, _ = np.histogram2d(X[t], V[t], bins=[x_edges, vx_edges])  # h: [bins_x, bins_v]
             H[t] = h.T  # now fits: [bins_v, bins_x]
         return H
@@ -448,12 +442,15 @@ def phase_space_movie(
         time_text.set_text(f"t = {time[ti]:.2f}  $\\omega_{{pe}}^{{-1}}$")
         return artists
 
-    ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False)
+    ani = FuncAnimation(fig, _update, frames=len(_frames), interval=interval_ms, blit=True, repeat=False)
     if save_path is not None:
-        _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=23)
-        print(f"[phase_space_movie] Done: wrote {save_path} in {time_package.time()-t0:.2f}s")
+        actual = _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=crf)
+        if actual:
+            print(f"[Phase space movie] Done: wrote {actual} in {time_package.time()-t0:.2f}s")
+        else:
+            print(f"[Phase space movie] Done: displayed in {time_package.time()-t0:.2f}s")
     else:
-        print(f"[phase_space_movie] Done: displayed in {time_package.time()-t0:.2f}s")
+        print(f"[Phase space movie] Done: displayed in {time_package.time()-t0:.2f}s")
         plt.show()
 
     return ani
@@ -498,43 +495,13 @@ def particle_box_movie(
     interval_ms=1000//60,
     save_path=None,
     seed=42,
-    show_field=True,          # NEW: overlay field + line subplot
-    field_alpha=0.35,         # transparency of field ribbon
-    field_cmap="coolwarm",    # pretty divergent colormap
+    show_field=True,          # overlay E ribbon + show E/B line subplots
+    field_alpha=0.35,
+    field_cmap="coolwarm",
     dpi=110,
+    steps_to_plot=None,
+    crf=23,                   # H.264 quality
 ):
-    """
-    Cinematic particle box with optional live electric field overlay & line plot.
-
-    - Top panel: particles + fading trails + semi-transparent E(x) ribbon (wow!)
-    - Bottom panel: instantaneous E(x) curve
-
-    Parameters
-    ----------
-    output : dict
-        Needs keys: grid, length, time_array, plasma_frequency, total_steps,
-        position_electrons [T,Ne,3], position_ions [T,Ni,3], electric_field [T,Nx,3].
-    direction : {'x','y','z'}
-        Which component/axis to visualize (and which E-component to show).
-    trail_len : int
-        Trail length in frames.
-    n_electrons, n_ions : int
-        Max particles to display (subsampled for speed).
-    jitter : float
-        Vertical jitter for particle rows to look “cloudy”.
-    fps, interval_ms : int
-        Playback/save speed settings.
-    save_path : str or None
-        If provided: saves to MP4 (ffmpeg) or GIF (pillow).
-    seed : int
-        RNG seed for subsampling & jitter.
-    show_field : bool
-        If True, overlay E-field and show E(x) subplot.
-    field_alpha : float
-        Alpha for the field ribbon overlay.
-    field_cmap : str
-        Matplotlib colormap for the field ribbon.
-    """
     assert direction in "xyz"
     di = {"x":0, "y":1, "z":2}[direction]
 
@@ -548,18 +515,26 @@ def particle_box_movie(
     Lx      = float(_to_np(output["length"]))
     time    = _to_np(output["time_array"]) * float(_to_np(output["plasma_frequency"]))
     T       = int(_to_np(output["total_steps"]))
-    pos_e   = _to_np(output["position_electrons"][:, :, di])  # [T, Ne]
-    pos_i   = _to_np(output["position_ions"][:, :, di])       # [T, Ni]
+    _frames = _frame_indices(T, steps_to_plot)
+    time = time[_frames]
+    pos_e = _to_np(output["position_electrons"][:, :, di])[_frames]
+    pos_i = _to_np(output["position_ions"][:, :, di])[_frames]
 
-    # Optional field (component along `direction`)
+    # Optional fields (components along `direction`)
     if show_field:
-        E_all  = _to_np(output["electric_field"][:, :, di])   # [T, Nx]
-        # Robust global vmin/vmax for nice colorscales:
-        # Use percentiles to avoid a single spike ruining the palette
-        vmin = float(np.percentile(E_all, 0.1))
-        vmax = float(np.percentile(E_all, 99.9))
-        if vmin == vmax:  # fallback
-            vmax = vmin + (1e-12 if vmin == 0 else abs(vmin)*1e-6)
+        E_all = _to_np(output["electric_field"][:, :, di])[_frames]
+        B_all = _to_np(output["magnetic_field"][:, :, di])[_frames]
+
+        # Robust global vmin/vmax for nice colorscales/axes
+        e_vmin = float(np.percentile(E_all, 0.1))
+        e_vmax = float(np.percentile(E_all, 99.9))
+        if e_vmin == e_vmax:
+            e_vmax = e_vmin + (1e-12 if e_vmin == 0 else abs(e_vmin)*1e-6)
+
+        b_vmin = float(np.percentile(B_all, 0.1))
+        b_vmax = float(np.percentile(B_all, 99.9))
+        if b_vmin == b_vmax:
+            b_vmax = b_vmin + (1e-12 if b_vmin == 0 else abs(b_vmin)*1e-6)
 
     Ne = pos_e.shape[1]
     Ni = pos_i.shape[1]
@@ -570,14 +545,14 @@ def particle_box_movie(
     idx_e = rng.choice(Ne, size=n_e, replace=False) if Ne > n_e else np.arange(Ne)
     idx_i = rng.choice(Ni, size=n_i, replace=False) if Ni > n_i else np.arange(Ni)
 
-    Xe = pos_e[:, idx_e]   # [T, n_e]
-    Xi = pos_i[:, idx_i]   # [T, n_i]
+    Xe = pos_e[:, idx_e]   # [F, n_e]
+    Xi = pos_i[:, idx_i]   # [F, n_i]
 
-    # Unwrap for trails
+    # Unwrap for trails (use subsampled arrays!)
     Xe_u = _unwrap_periodic(Xe, Lx)
     Xi_u = _unwrap_periodic(Xi, Lx)
 
-    # Vertical rows (fixed) for “aquarium” look
+    # Vertical rows (fixed)
     y_e_center = +0.6
     y_i_center = -0.6
     ye = y_e_center + jitter * rng.standard_normal(n_e)
@@ -585,12 +560,14 @@ def particle_box_movie(
 
     # --- figure layout ---
     if show_field:
-        fig, (ax, ax_field) = plt.subplots(
-            2, 1, figsize=(10, 6.2),
-            gridspec_kw={"height_ratios": [2.2, 1.0], "hspace": 0.28}
+        # 3 rows: aquarium / E-line / B-line
+        fig, (ax, ax_E, ax_B) = plt.subplots(
+            3, 1, figsize=(10, 8.3),
+            gridspec_kw={"height_ratios": [2.2, 1.0, 1.0], "hspace": 0.30}
         )
     else:
         fig, ax = plt.subplots(figsize=(10, 3.6))
+        ax_E = ax_B = None
 
     # TOP: particle aquarium
     ax.set_xlim(-Lx/2, Lx/2)
@@ -601,12 +578,13 @@ def particle_box_movie(
     ax.axvline(-Lx/2, color="k", lw=1, alpha=0.5)
     ax.axvline(+Lx/2, color="k", lw=1, alpha=0.5)
 
-    # Optional E-field ribbon overlay
+    # Optional E-field ribbon overlay in aquarium
     if show_field:
         im_field = ax.imshow(
             E_all[0][None, :], origin="lower", aspect="auto", cmap=field_cmap,
             extent=[grid[0], grid[-1], -1.0, 1.0], alpha=field_alpha,
-            vmin=vmin, vmax=vmax, animated=True,)
+            vmin=e_vmin, vmax=e_vmax, animated=True,
+        )
     else:
         im_field = None
 
@@ -626,23 +604,35 @@ def particle_box_movie(
                         bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
                         animated=True)
 
-    # BOTTOM: E(x) line plot
+    # MIDDLE: E(x) line
     if show_field:
-        ax_field.set_xlim(grid[0], grid[-1])
-        # sensible y-lims based on robust global vmin/vmax
-        pad = 0.05 * (vmax - vmin)
-        ax_field.set_ylim(vmin - pad, vmax + pad)
-        ax_field.set_xlabel(f"{direction}-position (m)")
-        ax_field.set_ylabel(f"E{direction} (V/m)")
-        (line_field,) = ax_field.plot(grid, E_all[0], lw=1.5, color="black", animated=True)
-        ax_field.grid(alpha=0.25)
+        ax_E.set_xlim(grid[0], grid[-1])
+        padE = 0.05 * (e_vmax - e_vmin)
+        ax_E.set_ylim(e_vmin - padE, e_vmax + padE)
+        ax_E.set_xlabel(f"{direction}-position (m)")
+        ax_E.set_ylabel(f"E{direction} (V/m)")
+        (line_E,) = ax_E.plot(grid, E_all[0], lw=1.5, color="black", animated=True)
+        ax_E.grid(alpha=0.25)
+        ax_E.set_title(f"Electric field E{direction}(x)")
+
+    # BOTTOM: B(x) line
+    if show_field:
+        ax_B.set_xlim(grid[0], grid[-1])
+        padB = 0.05 * (b_vmax - b_vmin)
+        ax_B.set_ylim(b_vmin - padB, b_vmax + padB)
+        ax_B.set_xlabel(f"{direction}-position (m)")
+        ax_B.set_ylabel(f"B{direction} (T)")
+        (line_B,) = ax_B.plot(grid, B_all[0], lw=1.5, color="black", animated=True)
+        ax_B.grid(alpha=0.25)
+        ax_B.set_title(f"Magnetic field B{direction}(x)")
 
     # Pre-create blit artists
     artists = [scat_e, scat_i, lc_e, lc_i, time_text]
     if im_field is not None:
         artists.append(im_field)
     if show_field:
-        artists.append(line_field)
+        artists.append(line_E)
+        artists.append(line_B)
     artists = tuple(artists)
 
     def _update(frame):
@@ -664,21 +654,238 @@ def particle_box_movie(
             cols[:, 3] = alpha_i
             lc_i.set_colors(cols)
 
-        # Field overlay + line
+        # Field overlay + lines
         if show_field:
             E = E_all[frame]
+            B = B_all[frame]
             im_field.set_array(E[None, :])   # 1×Nx only
-            line_field.set_ydata(E)
+            line_E.set_ydata(E)
+            line_B.set_ydata(B)
 
         time_text.set_text(f"t = {time[frame]:.2f}  $\\omega_{{pe}}^{{-1}}$")
         return artists
 
-    ani = FuncAnimation(fig, _update, frames=T, interval=interval_ms, blit=True, repeat=False, cache_frame_data=False)
+    ani = FuncAnimation(
+        fig, _update, frames=len(_frames), interval=interval_ms,
+        blit=True, repeat=False, cache_frame_data=False
+    )
     if save_path is not None:
-        _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=23)
-        print(f"[particle_box_movie] Done: wrote {save_path} in {time_package.time()-t0:.2f}s")
+        actual = _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=crf)
+        if actual:
+            print(f"[Particle box movie] Done: wrote {actual} in {time_package.time()-t0:.2f}s")
+        else:
+            print(f"[Particle box movie] Done: displayed in {time_package.time()-t0:.2f}s")
     else:
-        print(f"[particle_box_movie] Done: displayed in {time_package.time()-t0:.2f}s")
+        print(f"[Particle box movie] Done: displayed in {time_package.time()-t0:.2f}s")
+        plt.show()
+
+    return ani
+
+def vv_phase_grid_movie(
+    output,
+    fps=30,
+    interval_ms=None,          # if None, computed from fps
+    save_path=None,
+    bins_v=120,                # histogram bins per velocity axis
+    points_per_species=0,      # set >0 to overlay live points (per species)
+    seed=7,
+    cmap="twilight",
+    dpi=110,
+    steps_to_plot=None,
+    crf=23,                    # H.264 quality when saving MP4
+):
+    """
+    Velocity–velocity phase space grid:
+      Row 1 (electrons): (vx, vy), (vx, vz), (vy, vz)
+      Row 2 (ions):      (vx, vy), (vx, vz), (vy, vz)
+
+    Parameters
+    ----------
+    output : dict with standard fields
+      Requires:
+        time_array [T], plasma_frequency (scalar), total_steps (int),
+        velocity_electrons [T, Ne, 3], velocity_ions [T, Ni, 3]
+    fps, interval_ms, save_path, steps_to_plot, crf, dpi : as in other movies
+    bins_v : int
+      Number of bins along each velocity axis (square histograms).
+    points_per_species : int
+      If >0, overlays up to this many random particles per species as live points.
+    seed : int
+      RNG seed for optional overlay sampling.
+    """
+    t0 = time_package.time()
+    print(f"[vv_phase_grid_movie] Start: preparing frames at {fps} fps -> {save_path or 'interactive window'}")
+
+    rng = np.random.default_rng(seed)
+
+    # --- unpack / time selection ---
+    T_all = int(_to_np(output["total_steps"]))
+    _frames = _frame_indices(T_all, steps_to_plot)
+    time = _to_np(output["time_array"]) * float(_to_np(output["plasma_frequency"]))
+    time = time[_frames]
+
+    Ve = _to_np(output["velocity_electrons"])[_frames]   # [F, Ne, 3]
+    Vi = _to_np(output["velocity_ions"])[_frames]         # [F, Ni, 3]
+    F = len(_frames)
+
+    Ne = Ve.shape[1] if Ve.ndim == 3 else 0
+    Ni = Vi.shape[1] if Vi.ndim == 3 else 0
+    if Ne == 0 and Ni == 0:
+        raise ValueError("No particle velocities found for electrons or ions.")
+
+    if interval_ms is None:
+        interval_ms = int(1000 / max(1, fps))
+
+    # --- robust velocity ranges per species (shared across the three panels per species) ---
+    def _bounds_species(V):
+        # V: [F, N, 3]
+        if V.size == 0:
+            return (-1.0, 1.0)
+        vmin, vmax = _robust_bounds(V, 0.1, 99.9)
+        if vmin == vmax:
+            vmax = vmin + (1e-12 if vmin == 0 else abs(vmin)*1e-6)
+        # Make symmetric around zero (often better visually for velocity)
+        a = max(abs(vmin), abs(vmax))
+        return -a, +a
+
+    ve_min, ve_max = _bounds_species(Ve) if Ne > 0 else (-1.0, 1.0)
+    vi_min, vi_max = _bounds_species(Vi) if Ni > 0 else (-1.0, 1.0)
+
+    # Edges for histograms (square grids)
+    e_edges = np.linspace(ve_min, ve_max, bins_v + 1)
+    i_edges = np.linspace(vi_min, vi_max, bins_v + 1)
+
+    # --- pairs to compute: (x,y) indices in velocity vector ---
+    pairs = [(0,1), (0,2), (1,2)]  # (vx,vy), (vx,vz), (vy,vz)
+
+    # Precompute histograms: returns shape [F, bins_v, bins_v] (imshow expects [Y,X])
+    def _vv_hist_time(V, i, j, edges):
+        if V.size == 0: return None
+        H = np.empty((F, bins_v, bins_v), dtype=np.float32)
+        for t in range(F):
+            h, _, _ = np.histogram2d(V[t, :, i], V[t, :, j], bins=[edges, edges])
+            H[t] = h.T  # transpose: y-by-x
+        return H
+
+    He = [ _vv_hist_time(Ve, i, j, e_edges) if Ne>0 else None for (i,j) in pairs ]
+    Hi = [ _vv_hist_time(Vi, i, j, i_edges) if Ni>0 else None for (i,j) in pairs ]
+
+    # For consistent color scaling within species, find per-species global vmin/vmax across 3 panels
+    def _global_vminmax(Hlist):
+        arrs = [H for H in Hlist if H is not None]
+        if not arrs: return (0.0, 1.0)
+        vmin = float(min(np.min(H) for H in arrs))
+        vmax = float(max(np.max(H) for H in arrs))
+        if vmin == vmax:
+            vmax = vmin + 1.0
+        return vmin, vmax
+
+    e_hmin, e_hmax = _global_vminmax(He)
+    i_hmin, i_hmax = _global_vminmax(Hi)
+
+    # --- optional overlay points (fast) ---
+    if points_per_species > 0 and Ne > 0:
+        idx_e = rng.choice(Ne, size=min(points_per_species, Ne), replace=False)
+    else:
+        idx_e = np.array([], dtype=int)
+
+    if points_per_species > 0 and Ni > 0:
+        idx_i = rng.choice(Ni, size=min(points_per_species, Ni), replace=False)
+    else:
+        idx_i = np.array([], dtype=int)
+
+    # --- figure & axes (2 rows × 3 cols) ---
+    fig, axes = plt.subplots(2, 3, figsize=(12.5, 7.3), dpi=dpi, constrained_layout=True)
+    titles = [r"$v_x$ vs $v_y$", r"$v_x$ vs $v_z$", r"$v_y$ vs $v_z$"]
+
+    # Helper to set up a single panel
+    def _init_panel(ax, species, edges, vminmax, title):
+        vmin, vmax = vminmax
+        # Start with an empty image
+        im = ax.imshow(
+            np.zeros((bins_v, bins_v), dtype=np.float32),
+            origin="lower", aspect="equal", cmap=cmap,
+            extent=[edges[0], edges[-1], edges[0], edges[-1]],
+            vmin=vmin, vmax=vmax, animated=True
+        )
+        ax.set_title(f"{species}  {title}")
+        ax.set_xlabel(title.split(" vs ")[0].replace("$",""))
+        ax.set_ylabel(title.split(" vs ")[1].replace("$",""))
+        return im
+
+    ims = []
+    scats = []
+
+    # Row 1: electrons
+    for c, (i, j) in enumerate(pairs):
+        im = _init_panel(axes[0, c], "Electrons", e_edges, (e_hmin, e_hmax), titles[c])
+        ims.append(im)
+        if idx_e.size > 0:
+            scat = axes[0, c].scatter(
+                Ve[0, idx_e, i], Ve[0, idx_e, j], s=6, c="#ff3333",
+                alpha=0.9, edgecolor="none", animated=True
+            )
+        else:
+            scat = None
+        scats.append(scat)
+
+    # Row 2: ions
+    for c, (i, j) in enumerate(pairs):
+        im = _init_panel(axes[1, c], "Ions", i_edges, (i_hmin, i_hmax), titles[c])
+        ims.append(im)
+        if idx_i.size > 0:
+            scat = axes[1, c].scatter(
+                Vi[0, idx_i, i], Vi[0, idx_i, j], s=6, c="#3388ff",
+                alpha=0.9, edgecolor="none", animated=True
+            )
+        else:
+            scat = None
+        scats.append(scat)
+
+    # one time stamp (top-left axes)
+    t_ax = axes[0, 0]
+    time_text = t_ax.text(
+        0.02, 0.95, "", transform=t_ax.transAxes, ha="left", va="top",
+        bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"), animated=True
+    )
+
+    # Collect blit artists
+    artists = [*ims, time_text]
+    artists.extend([s for s in scats if s is not None])
+    artists = tuple(artists)
+
+    # Update function
+    def _update(ti):
+        # electrons panels
+        for c, H in enumerate(He):
+            if H is not None:
+                ims[c].set_array(H[ti])
+                if idx_e.size > 0 and scats[c] is not None:
+                    i, j = pairs[c]
+                    scats[c].set_offsets(np.column_stack([Ve[ti, idx_e, i], Ve[ti, idx_e, j]]))
+        # ions panels
+        offset = 3
+        for c, H in enumerate(Hi):
+            if H is not None:
+                ims[offset + c].set_array(H[ti])
+                if idx_i.size > 0 and scats[offset + c] is not None:
+                    i, j = pairs[c]
+                    scats[offset + c].set_offsets(np.column_stack([Vi[ti, idx_i, i], Vi[ti, idx_i, j]]))
+
+        time_text.set_text(f"t = {time[ti]:.2f}  $\\omega_{{pe}}^{{-1}}$")
+        return artists
+
+    ani = FuncAnimation(
+        fig, _update, frames=F, interval=interval_ms,
+        blit=True, repeat=False, cache_frame_data=False
+    )
+
+    # save/show
+    if save_path is not None:
+        _save_animation(ani, fig, save_path, fps=fps, dpi=dpi, crf=crf)
+        print(f"[vv_phase_grid_movie] Done: wrote {save_path} in {time_package.time()-t0:.2f}s")
+    else:
+        print(f"[vv_phase_grid_movie] Done: displayed in {time_package.time()-t0:.2f}s")
         plt.show()
 
     return ani

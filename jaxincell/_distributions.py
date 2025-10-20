@@ -310,7 +310,7 @@ def _nonrelativistic_distribution(params, Np: int):
 
     # Combine and cap
     velocities = jnp.concatenate((electron_velocities, ion_velocities), axis=0)
-    speed_limit = 0.99 * speed_of_light
+    speed_limit = 0.98 * speed_of_light
     velocities = jnp.where(jnp.abs(velocities) >= speed_limit,
                         jnp.sign(velocities) * speed_limit,
                         velocities)

@@ -179,7 +179,7 @@ def gamma_from_v(v):
 @jit
 def p_from_v(v, m):
     g = gamma_from_v(v)[..., None]                      # (...,1)
-    return g * m * v                                    # (...,3)
+    return g * m * v                               # (...,3)
 
 @jit
 def gamma_from_p(p, m):
