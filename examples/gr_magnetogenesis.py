@@ -6,9 +6,9 @@ from jaxincell import (simulation, plot,
 )
 
 # --------- global knobs (easy to see / edit) ---------
-SAVE_MOVIES    = True
+SAVE_MOVIES    = False
 STEPS_TO_PLOT  = 450
-MAKE_ZERO_DECAY_VARIANTS = True
+MAKE_ZERO_DECAY_VARIANTS = False
 SUMMARY_DIRECTION = "xz"
 MOVIE_DIRECTION   = "xz"
 
@@ -19,8 +19,8 @@ SOLVER = {
     "time_evolution_algorithm": 0,
     "field_solver": 0,
     "number_grid_points": 211,
-    "number_pseudoelectrons": 6000,
-    "total_steps": 8000,
+    "number_pseudoelectrons": 4000,
+    "total_steps": 3000,
     # **solver_parameters,
 }
 
@@ -32,54 +32,73 @@ SOLVER = {
 
 # --------- scenarios (simple, readable dicts) ---------
 CASES = [
-    # Bianchi 8: linear + cosine pump
-    # metric equation: a_i(t) = a0i [1 + A_i t (1 + B_i cos)]
     {
-        "name": "maxwellian_bianchi8_epsdecay{tau_z}_Bz{Bz}_omegaz{Omegaz}",
-        "metric": {"kind": 8, "params": dict(
-            a0x=1.0, a0y=1.0, a0z=1.0,
-            Ax=0.0, Ay=0.0, Az=0.3,
-            Bx=0.0, By=0.0, Bz=0.5,
-            Omegax=0.0, Omegay=0.0, Omegaz=0.5,
-            phix=0.0, phiy=0.0, phiz=0.0,
-            tau_x=0.0, tau_y=0.0, tau_z=30.0,
-        )},
-    },
-    
-    {
-        "name": "maxwellian_bianchi8_epsdecay{tau_z}_Bz{Bz}_omegaz{Omegaz}",
-        "metric": {"kind": 8, "params": dict(
-            a0x=1.0, a0y=1.0, a0z=1.0,
-            Ax=0.0, Ay=0.0, Az=0.3,
-            Bx=0.0, By=0.0, Bz=0.0,
-            Omegax=0.0, Omegay=0.0, Omegaz=0.0,
-            phix=0.0, phiy=0.0, phiz=0.0,
-            tau_x=0.0, tau_y=0.0, tau_z=30.0,
-        )},
+        "name": "maxwellian_gravitational_wave",
+        "metric": {
+            "kind": 10,  # gw_sinusoid_case
+            "params": {
+                # base scales (≈1 for small perturbations)
+                "a0t": 1.0, "a0x": 1.0, "a0y": 1.0, "a0z": 1.0,
+                # small strains (|b?| << 1 recommended)
+                "bt": 0.00, "bx": 0.0, "by": 0.0, "bz": 0.5,
+                # frequencies (in ω_p units) and phases
+                "omeg_t": 0.0, "omeg_x": 0.0, "omeg_y": 0.0, "omeg_z": 1.0,
+                "phi_t": 0.0,  "phi_x": 0.0,  "phi_y": 0.0,  "phi_z": 0.0,
+                # optional exponential decay times (turns drive off)
+                "tau_t": 0.0, "tau_x": 0.0, "tau_y": 0.0, "tau_z": 0.0
+            }
+        }
     },
 
-    # Flat spacetime
-    {
-        "name": "maxwellian_flatspace",
-        "metric": {"kind": 0},  # no params
-    },
+    # # Flat spacetime
+    # {
+    #     "name": "maxwellian_flatspace",
+    #     "metric": {"kind": 0},  # no params
+    # },
 
-    # Bianchi 9: volume-preserving cosine pump
-    {
-        "name": "maxwellian_bianchi9_eps{eps}_epsdecay{tau_eps}",
-        "metric": {"kind": 9, "params": dict(
-            a0x=1.0, a0y=1.0, a0z=1.0,
-            eps=0.3, Omega=2.0, phi=0.0, tau_eps=30.0,
-        )},
-    },
+    # # Bianchi 8: linear + cosine pump
+    # # metric equation: a_i(t) = a0i [1 + A_i t (1 + B_i cos)]
+    # {
+    #     "name": "maxwellian_bianchi8_epsdecay{tau_z}_Bz{Bz}_omegaz{Omegaz}",
+    #     "metric": {"kind": 8, "params": dict(
+    #         a0x=1.0, a0y=1.0, a0z=1.0,
+    #         Ax=0.0, Ay=0.0, Az=0.3,
+    #         Bx=0.0, By=0.0, Bz=0.5,
+    #         Omegax=0.0, Omegay=0.0, Omegaz=0.5,
+    #         phix=0.0, phiy=0.0, phiz=0.0,
+    #         tau_x=0.0, tau_y=0.0, tau_z=30.0,
+    #     )},
+    # },
     
-    {
-        "name": "maxwellian_bianchi9_eps{eps}_epsdecay{tau_eps}",
-        "metric": {"kind": 9, "params": dict(
-            a0x=1.0, a0y=1.0, a0z=1.0,
-            eps=0.5, Omega=2.0, phi=0.0, tau_eps=30.0,
-        )},
-    },
+    # {
+    #     "name": "maxwellian_bianchi8_epsdecay{tau_z}_Bz{Bz}_omegaz{Omegaz}",
+    #     "metric": {"kind": 8, "params": dict(
+    #         a0x=1.0, a0y=1.0, a0z=1.0,
+    #         Ax=0.0, Ay=0.0, Az=0.3,
+    #         Bx=0.0, By=0.0, Bz=0.0,
+    #         Omegax=0.0, Omegay=0.0, Omegaz=0.0,
+    #         phix=0.0, phiy=0.0, phiz=0.0,
+    #         tau_x=0.0, tau_y=0.0, tau_z=30.0,
+    #     )},
+    # },
+
+
+    # # Bianchi 9: volume-preserving cosine pump
+    # {
+    #     "name": "maxwellian_bianchi9_eps{eps}_epsdecay{tau_eps}",
+    #     "metric": {"kind": 9, "params": dict(
+    #         a0x=1.0, a0y=1.0, a0z=1.0,
+    #         eps=0.3, Omega=2.0, phi=0.0, tau_eps=30.0,
+    #     )},
+    # },
+    
+    # {
+    #     "name": "maxwellian_bianchi9_eps{eps}_epsdecay{tau_eps}",
+    #     "metric": {"kind": 9, "params": dict(
+    #         a0x=1.0, a0y=1.0, a0z=1.0,
+    #         eps=0.5, Omega=2.0, phi=0.0, tau_eps=30.0,
+    #     )},
+    # },
 ]
 
 BASE_INPUT = {

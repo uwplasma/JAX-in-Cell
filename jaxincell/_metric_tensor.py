@@ -273,6 +273,102 @@ def bianchi_i_a_volpres_cosine(t, a0x, a0y, a0z, eps, Omega, phi, tau_eps=0.0):
 
     return (ax, ay, az), (adx, ady, adz)
 
+@jit
+def gw_sinusoid_scales(t,
+                       a0t, a0x, a0y, a0z,
+                       bt, bx, by, bz,
+                       omeg_t, omeg_x, omeg_y, omeg_z,
+                       phi_t,  phi_x,  phi_y,  phi_z,
+                       tau_t=0.0, tau_x=0.0, tau_y=0.0, tau_z=0.0):
+    r"""
+    General-polarization diagonal sinusoid for *all* directions, including time:
+        s_i(t) = a0_i * [ 1 + b_i cos(ω_i t + φ_i) E_i(t) ],   i ∈ {t,x,y,z}
+      with an optional exponential envelope E_i(t)=exp(-t/τ_i) (if τ_i>0) else 1.
+
+    We use these scales to define the diagonal metric
+        ds^2 = - [ s_t(t) c ]^2 dt^2 + s_x(t)^2 dx^2 + s_y(t)^2 dy^2 + s_z(t)^2 dz^2,
+
+    so g_00 = - (s_t c)^2, and g_ii = s_i^2.  This mimics a GW-like strain with fully
+    general “polarization” (independent amplitudes/phases/frequencies on each axis).
+    Keeping it diagonal ensures compatibility with your JAX-in-Cell infrastructure.
+
+    Derivatives:
+        s_i = a0_i [ 1 + b_i cos(…) E_i ],
+        ẋs_i = a0_i [ b_i ( -ω_i sin(…) E_i + cos(…) dE_i/dt ) ],
+        dE_i/dt = -E_i/τ_i  (if τ_i>0, else 0).
+
+    Notes:
+      • Set τ_i=0 to disable decay (pure sinusoid). For τ_i>0, s_i → a0_i as t→∞.
+      • Small b_i gives “linearized” strain; larger b_i is supported but keep |1+b_i cos|>0.
+    """
+    # fast trigs
+    Ct = jnp.cos(omeg_t * t + phi_t);   St = jnp.sin(omeg_t * t + phi_t)
+    Cx = jnp.cos(omeg_x * t + phi_x);   Sx = jnp.sin(omeg_x * t + phi_x)
+    Cy = jnp.cos(omeg_y * t + phi_y);   Sy = jnp.sin(omeg_y * t + phi_y)
+    Cz = jnp.cos(omeg_z * t + phi_z);   Sz = jnp.sin(omeg_z * t + phi_z)
+
+    # envelopes and time-derivatives
+    Et = decay_env(t, tau_t); dEt_dt = jnp.where(tau_t > 0.0, -Et / tau_t, 0.0)
+    Ex = decay_env(t, tau_x); dEx_dt = jnp.where(tau_x > 0.0, -Ex / tau_x, 0.0)
+    Ey = decay_env(t, tau_y); dEy_dt = jnp.where(tau_y > 0.0, -Ey / tau_y, 0.0)
+    Ez = decay_env(t, tau_z); dEz_dt = jnp.where(tau_z > 0.0, -Ez / tau_z, 0.0)
+
+    # scales
+    s_t = a0t * (1.0 + bt * Ct * Et)
+    s_x = a0x * (1.0 + bx * Cx * Ex)
+    s_y = a0y * (1.0 + by * Cy * Ey)
+    s_z = a0z * (1.0 + bz * Cz * Ez)
+
+    # time derivatives of scales
+    ds_t = a0t * (bt * (-omeg_t * St * Et + Ct * dEt_dt))
+    ds_x = a0x * (bx * (-omeg_x * Sx * Ex + Cx * dEx_dt))
+    ds_y = a0y * (by * (-omeg_y * Sy * Ey + Cy * dEy_dt))
+    ds_z = a0z * (bz * (-omeg_z * Sz * Ez + Cz * dEz_dt))
+
+    # tiny floor to keep metric well-defined
+    eps = 1e-15
+    s_x = jnp.clip(s_x, eps, jnp.inf)
+    s_y = jnp.clip(s_y, eps, jnp.inf)
+    s_z = jnp.clip(s_z, eps, jnp.inf)
+    # s_t appears as a multiplicative factor on c in g00; positivity is ensured by (1 + b cos E).
+    return (s_t, s_x, s_y, s_z), (ds_t, ds_x, ds_y, ds_z)
+
+
+@jit
+def gw_sinusoid_tx(t, x,
+                   a0t, a0x, a0y, a0z,
+                   bt, bx, by, bz,
+                   omeg_t, omeg_x, omeg_y, omeg_z,
+                   phi_t,  phi_x,  phi_y,  phi_z,
+                   c,
+                   tau_t=0.0, tau_x=0.0, tau_y=0.0, tau_z=0.0):
+    r"""
+    Build (g, ∂_t g, ∂_x g) for the general-polarization diagonal sinusoidal metric.
+
+    Metric:
+        g_00 = - (s_t c)^2,   g_11 = s_x^2,  g_22 = s_y^2,  g_33 = s_z^2.
+    Time derivatives:
+        ∂_t g_00 = -2 (s_t c)^2 * (ḋs_t / s_t) = -2 c^2 s_t ḋs_t,
+        ∂_t g_ii =  2 s_i ḋs_i.
+    Spatial derivatives:
+        ∂_x g_{μν} = 0  (homogeneous in x for this driver).
+    """
+    (s_t, s_x, s_y, s_z), (ds_t, ds_x, ds_y, ds_z) = gw_sinusoid_scales(
+        t, a0t, a0x, a0y, a0z,
+        bt, bx, by, bz,
+        omeg_t, omeg_x, omeg_y, omeg_z,
+        phi_t, phi_x, phi_y, phi_z,
+        tau_t, tau_x, tau_y, tau_z
+    )
+
+    g = jnp.diag(jnp.array([-(s_t * c) * (s_t * c), s_x * s_x, s_y * s_y, s_z * s_z]))
+    dg_dt = jnp.diag(jnp.array([-2.0 * (c * c) * s_t * ds_t,
+                                 2.0 * s_x * ds_x,
+                                 2.0 * s_y * ds_y,
+                                 2.0 * s_z * ds_z]))
+    dg_dx = jnp.zeros((4,4))
+    return g, dg_dt, dg_dx
+
 
 @jit
 def metric_bundle(t, x, metric_kind, c, **kwargs):
@@ -342,6 +438,28 @@ def metric_bundle(t, x, metric_kind, c, **kwargs):
         tau_eps = kwargs.get("tau_eps", 0.0)
         (ax, ay, az), (adx, ady, adz) = bianchi_i_a_volpres_cosine(t, a0x, a0y, a0z, eps, Omega, phi, tau_eps)
         return bianchi_i_tx(t, x, ax, ay, az, adx, ady, adz, c)
+    
+    def gw_sinusoid_case(_):
+        # Amplitudes b? should typically satisfy |b?| << 1 for a weak-strain regime.
+        # Set tau_? > 0 to let the drive decay and recover Minkowski locally.
+        a0t = kwargs.get("a0t", 1.0); a0x = kwargs.get("a0x", 1.0); a0y = kwargs.get("a0y", 1.0); a0z = kwargs.get("a0z", 1.0)
+        bt  = kwargs.get("bt",  0.0); bx  = kwargs.get("bx",  0.0); by  = kwargs.get("by",  0.0); bz  = kwargs.get("bz",  0.0)
+        omeg_t = kwargs.get("omeg_t", 0.0); omeg_x = kwargs.get("omeg_x", 0.0)
+        omeg_y = kwargs.get("omeg_y", 0.0); omeg_z = kwargs.get("omeg_z", 0.0)
+        phi_t  = kwargs.get("phi_t",  0.0); phi_x  = kwargs.get("phi_x",  0.0)
+        phi_y  = kwargs.get("phi_y",  0.0); phi_z  = kwargs.get("phi_z",  0.0)
+        tau_t  = kwargs.get("tau_t",  0.0); tau_x  = kwargs.get("tau_x",  0.0)
+        tau_y  = kwargs.get("tau_y",  0.0); tau_z  = kwargs.get("tau_z",  0.0)
+
+        return gw_sinusoid_tx(
+            t, x,
+            a0t, a0x, a0y, a0z,
+            bt, bx, by, bz,
+            omeg_t, omeg_x, omeg_y, omeg_z,
+            phi_t, phi_x, phi_y, phi_z,
+            c,
+            tau_t, tau_x, tau_y, tau_z
+        )
 
     g, dg_dt, dg_dx = lax.switch(
         metric_kind,
@@ -356,6 +474,7 @@ def metric_bundle(t, x, metric_kind, c, **kwargs):
             bianchi_i_cosine_case,  # 7
             bianchi_i_lin_cos_case,  # 8
             bianchi_i_volpres_cosine_case,  # 9
+            gw_sinusoid_case,            # 10
         ],
         operand=None,
     )
