@@ -1,5 +1,5 @@
 ---
-title: "JAX-in-Cell: A 1D3V Particle-in-Cell Plasma Simulation Framework in JAX"
+title: "JAX-in-Cell"
 tags:
   - plasma physics
   - particle-in-cell
@@ -55,8 +55,8 @@ j^n_i = \frac{\Delta x}{\Delta t} \sum_{k=i-3}^{i+2} \left( \rho^{n+1/2}_{k+1/2}
 This discrete form ensures exact charge conservation within each cell.  
 For stability, the **Courant–Friedrichs–Lewy (CFL)** condition ensures particles traverse at most one cell per step.
 
-![Demonstration of two time evolution algorithms.](figs/explicit.PNG){ width=49% }
-![Demonstration of two time evolution algorithms (implicit).](figs/implicit.PNG){ width=49% }
+![Demonstration of two time evolution algorithms.](figs/explicit.png){ width=49% }
+![Demonstration of two time evolution algorithms (implicit).](figs/implicit.png){ width=49% }
 
 We employ periodic boundary conditions, adding ghost cells at both ends of the spatial grid.  
 Because the particle shape function spans three grid points, three ghost cells are required in total: two on the left and one on the right.
