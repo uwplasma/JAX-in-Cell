@@ -1,210 +1,146 @@
 ---
-title: 'Gala: A Python package for galactic dynamics'
+title: "JAX-in-Cell: A 1D3V Particle-in-Cell Plasma Simulation Framework in JAX"
 tags:
-  - Python
-  - plasma
-  - dynamics
+  - plasma physics
+  - particle-in-cell
+  - JAX
+  - GPU acceleration
+  - kinetic simulation
 authors:
-  - name: Adrian M. Price-Whelan
-    orcid: 0000-0000-0000-0000
-    equal-contrib: true
-    affiliation: "1, 2" # (Multiple affiliations must be quoted)
-  - name: Author Without ORCID
-    equal-contrib: true # (This is how you can denote equal contributions between multiple authors)
-    affiliation: 2
-  - name: Author with no affiliation
-    corresponding: true # (This is how to denote the corresponding author)
-    affiliation: 3
-  - given-names: Ludwig
-    dropping-particle: van
-    surname: Beethoven
-    affiliation: 3
+  - name: Longyu Ma
+    affiliation: 1
 affiliations:
- - name: Lyman Spitzer, Jr. Fellow, Princeton University, United States
-   index: 1
-   ror: 00hx57361
- - name: Institution Name, Country
-   index: 2
- - name: Independent Researcher, Country
-   index: 3
-date: 13 August 2017
+  - name: University of Wisconsin–Madison
+    index: 1
+date: July 2025
 bibliography: paper.bib
-
-# Optional fields if submitting to a AAS journal too, see this blog post:
-# https://blog.joss.theoj.org/2018/12/a-new-collaboration-with-aas-publishing
-aas-doi: 10.3847/xxxxx <- update this with the DOI from AAS once you know it.
-aas-journal: Astrophysical Journal <- The name of the AAS journal.
 ---
 
 # Summary
 
-Particle‐in‐cell (PIC) methods are widely used to study the dynamics of charged particles interacting with electromagnetic fields. In a typical PIC framework, the domain is discretized on a grid and particles are represented by pseudo particles, with evolution carried out via a field solver, a particle pusher, and suitable boundary conditions. Jaxincell implements 1D3V PIC in JAX, enabling GPU acceleration, just in time (JIT) compilation, vectorized operations, and automatic differentiation to speed up simulations.
+A plasma is a collection of free ions and electrons whose self-generated and external electromagnetic fields drive collective behavior. Particle-in-Cell (PIC) simulation is a powerful tool in plasma physics, offering a fully kinetic description and enabling exploration of complex interactions in fusion devices and astrophysical plasmas.
 
+Our code, **JAX-in-Cell**, implements a 1D3V PIC framework in JAX and is built to be open-source, user-friendly, and developer-friendly, written entirely in Python in contrast to many other PIC codes implemented in legacy languages such as Fortran or mixed‐language frameworks. Utilizing JAX, the code achieves high performance through GPU acceleration, just-in-time compilation, vectorized operations, and automatic differentiation, and it is well-suited for both educational-scale demonstrations—such as reproducing Landau damping and two-stream instability—and research-scale simulations such as rapid optimization.
 
-# Statement of need
-
-Accurate and efficient tools are essential for modeling plasmas, whether for rapid testing of analytical ideas or large-scale optimization tasks. There is a need for modern PIC software that combines speed, flexibility, and ease of use. Jaxincell meets this need, offering high-performance simulations suitable for both research and educational purposes.
-
-While PIC methods are well established, many codes remain closed‑source, written in legacy languages like Fortran, and carry high computational and maintenance costs. In contrast, Jaxincell is implemented entirely in Python, making it immediately accessible to a broad community of researchers and students. Furthermore, although the classic Boris push is both simple and robust, long‐term simulations can accumulate energy errors. To address this, Jaxincell includes not only the standard Boris algorithm but also an implicit, discretely energy‐conserving scheme.
+Furthermore, although the classic Boris push is simple and robust, long-term PIC simulations can experience energy drift (numerical heating). To mitigate this, **JAX-in-Cell** implements both the standard Boris algorithm and an implicit, discretely energy-conserving method, providing improved energy conservation for extended simulations.
 
 # Structure
 
-The core of our PIC code is the Vlasov–Maxwell system.  In particular, we solve
+The core of our Particle-in-Cell (PIC) code is based on the **Vlasov–Maxwell system**, which governs the self-consistent evolution of the particle distribution function and electromagnetic fields:
 
-\begin{equation}
-\label{pusher}
-\partial_t f_s
-+ v \cdot \nabla f_s
-+ \frac{q_s}{m_s} \left( E + v \times B \right) \cdot \nabla_{\mathbf{u}} f_s = 0,
-\end{equation}
+\begin{align}
+\partial_t f_s + v \cdot \nabla f_s + \frac{q_s}{m_s} (E + v \times B) \cdot \nabla_{\mathbf{u}} f_s &= 0, \\
+\frac{\partial B}{\partial t} + \nabla \times E &= 0, \\
+\varepsilon_0 \frac{\partial E}{\partial t} - c^2 \nabla \times B + j &= 0.
+\end{align}
 
-\begin{equation}
-\label{half_B}
-\frac{\partial \mathbf{B}}{\partial t} 
-+ \nabla \times \mathbf{E} = 0,
-\end{equation}
+Here, \( f_s \) denotes the distribution function for species \( s \), \( {v} \) is the particle velocity, \( q_s \) and \( m_s \) are the particle charge and mass, \({E} \) and \( {B} \) are the electric and magnetic fields, \( \varepsilon_0 \) is the vacuum permittivity, and \( {j} \) is the current density.
 
-\begin{equation}
-\label{half_E}
-\varepsilon_0 \frac{\partial \mathbf{E}}{\partial t}
-- c^2 \nabla \times \mathbf{B}
-+ \mathbf{j} = 0.
-\end{equation}
+The distribution function is discretized using pseudo-particles as
 
-where $f_s(x,u)\approx\sum_{p\in s}w_p \delta(x-x_p)\delta(u-u_p)$ the distribution function is discretized by pseudo‑particle, $x$ is the position, $v$ is the velocity, $u=v\gamma$ is the proper velocity and $\gamma=\sqrt{1+u^2/c^2}$ is the Lorentz factor with c speed of light.
+\[
+f_s(x, u) \approx \sum_{p \in s} w_p\, \delta(x - x_p)\, \delta(u - u_p),
+\]
 
-For notation, we will use s to label the species of particle, i to label the cell, n to label the step of time, and p to label the pseudo-particles. To reduce numerical noise, we represent each pseudo‑particle with a B‑spline shape function that spans three cells.  Its contribution to the charge density at cell $i$ is
+where \( w_p = nL/N \), with \( L \) the domain length and \( N \) the number of pseudo-particles.  
+The domain is divided into \( N_x \) uniform cells with spacing \( \Delta x \) and advanced in time by \( \Delta t \).
 
-\begin{equation}
-\rho(x_p) =
-\begin{cases}
-\displaystyle
-\frac{q}{\Delta x}
-\left(
-\frac{3}{4}
-- \frac{(x_p - x_i)^2}{\Delta x^2}
-\right),
-& \text{if } \left| x_p - x_i \right| \le \frac{\Delta x}{2}, \\[10pt]
-\displaystyle
-\frac{q}{2 \Delta x}
-\left(
-\frac{3}{2}
-- \frac{\left| x_p - x_i \right|}{\Delta x}
-\right)^2,
-& \text{if } \frac{\Delta x}{2} < \left| x_p - x_i \right| \le \frac{3 \Delta x}{2}, \\[10pt]
-0, & \text{if } \left| x_p - x_i \right| > \frac{3 \Delta x}{2}.
-\end{cases}
-\end{equation}
+To reduce numerical noise, each pseudo-particle is represented by a **quadratic spline shape function** spanning three cells [@birdsall1991].  
+The current density \( j \) is computed through the **discrete continuity equation** to ensure charge conservation:
 
-Then, interpolation for fields is required as pseudo-particle weights span more than a single cell. Note, it is shifted by one cell due to ghost cells.
+\[
+j^n_i = \frac{\Delta x}{\Delta t} \sum_{k=i-3}^{i+2} \left( \rho^{n+1/2}_{k+1/2} - \rho^{n-1/2}_{k+1/2} \right).
+\]
 
-\begin{equation}
+This discrete form ensures exact charge conservation within each cell.  
+For stability, the **Courant–Friedrichs–Lewy (CFL)** condition ensures particles traverse at most one cell per step.
+
+![Demonstration of two time evolution algorithms.](figs/explicit.PNG){ width=49% }
+![Demonstration of two time evolution algorithms (implicit).](figs/implicit.PNG){ width=49% }
+
+We employ periodic boundary conditions, adding ghost cells at both ends of the spatial grid.  
+Because the particle shape function spans three grid points, three ghost cells are required in total: two on the left and one on the right.
+
+Field interpolation is also required since shape functions extend across multiple cells. For either the electric or magnetic field \( F \):
+
+\[
 F(x_p)=
 \frac{1}{2} F_{i-1} 
-(
+\left(
 \frac{1}{2} + \frac{x_i - x_p}{\Delta x}
-)^2
+\right)^2
 +
 F_i 
-(
+\left(
 \frac{3}{4} - \frac{(x_i - x_p)^2}{\Delta x^2}
-)
+\right)
 +
 \frac{1}{2} F_{i+1}
-(
+\left(
 \frac{1}{2} - \frac{x_i - x_p}{\Delta x}
-)^2.
-\label{field}
-\end{equation}
+\right)^2.
+\]
 
- We implement two standard methods, one explicit and one implicit. For explict method, we use the Boris Algorithm that have the following steps. 
+We implement two time-evolution methods:  
+(1) an **explicit** Boris algorithm, and  
+(2) an **implicit** Crank–Nicolson scheme** solved via Picard iteration.
 
-1: Initialization with $E_i^n,B_i^n,v_p^n,x_p^{n-\frac{1}{2}},x_p^n,x_p^{n+\frac{1}{2}}$
-
-2: Prepare the field $E(x_p^n),B(x_p^n)$ for the particle pusher by \autoref{field}
-
-3: Push the particle as follows from \autoref{pusher}. 
-
-(a) Electric half‑kick: $$v_p^{n+1/2}=v_p^n+\frac{q_p}{2m_p{\Delta t}} E(x_p^n) ,$$
-
-(b) Magnetic rotation with second electric half‑kick: 
-
-$${v_p^{n+1}} = \text{BorisRotate}(v_p^{n+1/2}, B(x_p^n))+\frac{q_p}{2m_p{\Delta t}} E(x_p^n),$$
-
-
-(c) Position update (with centered interpolation): 
-
-$$x_p^{n+\frac{3}{2}} = x_p^{n+\frac{1}{2}}+v_p^{n+1}{\Delta t}, x_p^{n+1}=\frac{1}{2}(x_p^{n+\frac{3}{2}}+x_p^{n+\frac{1}{2}})$$
-
-4: Update the field according to \autoref{half_E} and \autoref{half_B}. 
-
-(a) Electric half‑step:    
-
-$$E_i^{n+\frac{1}{2}}= E_i^n +(c^2\nabla_i\times B_i^n - \frac{j_i^n}{\epsilon_0})\frac{\Delta t}{2}$$
-
-(b) Magnetic full‑step:
-
-$$B_i^{n+1} = B_i^n - (\nabla_i\times E_i^{n+\frac{1}{2}})\Delta t$$
-
-(c) Electric half‑step:
-
-$$ E_i^{n+1} = E_i^{n+\frac{1}{2}} +(c^2\nabla_i\times B_i^{n+1} - \frac{j_i^{n+1}}{\epsilon_0})\frac{\Delta t}{2}. $$
-
-5: Save the carry for next step $E_i^{n+1},B_i^{n+1},v_p^{n+1},x_p^{n+\frac{1}{2}},x_p^{n+1},x_p^{n+\frac{3}{2}}$
-
-Implicit method is similar but run iteration to solve the exact system of equation through Picard iteration. For simplicity we will set magnetic field to 0 and the Crank–Nicolson step follows:
-
-1: Initialization with $E_i^n,v_p^n,x_p^n$
-
-2: Picard iteration with intial guess $x_p^{n+\frac{1}{2}}=x_p^n$
-
-
-(a) Prepare the field $E(x_p^{n+\frac{1}{2}})$ for the particle pusher
-
-(b) Push the particle as follows from \autoref{pusher}: 
-
-$$v_p^{n+1}=v_p^n+\frac{q_p}{m_p{\Delta t}} E(x_p^{n+\frac{1}{2}}), v_p^{n+\frac{1}{2}}=\frac{1}{2}(v_p^{n}+v_p^{n+1}),$$ 
-
-$$x_p^{n+1} = x_p^n+v_p^{n+1/2}\Delta t$$
-
-(c) Update the field according to \autoref{half_E}
-
-$$ E_i^{n+1} = E_i^n  - \frac{1}{\epsilon_0} j_i^{n+1} \Delta t.$$
-
-3: Check convergence. If $|E_\text{new}-E_\text{old}|<\text{tol}$, save  $E_i^{n+1},v_p^{n+1},x_p^{n+1}$ for next step. Otherwise, set $x_p^{n+\frac{1}{2}} = \frac{1}{2}\bigl(x_p^n + x_p^{n+1}\bigr)$ and return to step 2
+![Electric field energy evolution for Landau damping and two-stream instability. (a) Landau damping with analytical damping rate 
+$\gamma = 0.153$. 
+(b) Two-stream instability showing fitted exponential growth rate. 
+(c–d) Relative total energy deviation 
+$|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)$ 
+demonstrating energy conservation.](figs/output.png)
 
 # Capabilities
 
-Two-stream instability, Landau damping, and Weibel instability are used for testing the correctness of the algorithms.
+To verify the accuracy of the algorithms, we benchmarked **Landau damping** and **two-stream instability**.  
+The plasma is neutralized by a uniform ion background and confined within a periodic domain of length \( L \).  
+The initial distribution is
 
+\[
+f_e(x, v, t = 0) = f_{e0}(v)[ 1 + a \cos( k x)],
+\]
 
+where \( a \) is the perturbation amplitude and \( k \) the perturbation wavenumber.
 
-# Citations
+The warm plasma dispersion relation is
 
-Citations to entries in paper.bib should be in
-[rMarkdown](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html)
-format.
+\[
+1 + \frac{1}{2k^2\lambda_D^2}
+[  2 + \xi_1 Z(\xi_1)+\xi_2 Z(\xi_2)] =0, \quad
+\xi_i=\frac{\omega}{kv_{th}}-\frac{v_{b_i}}{v_{th}},
+\]
 
-If you want to cite a software repository URL (e.g. something on GitHub without a preferred
-citation) then you can do it with the example BibTeX entry below for @fidgit.
+where \( Z \) is the Fried–Conte plasma dispersion function.  
+The complex frequency \( \omega \) yields both oscillation and damping/growth rates.
 
-For a quick reference, the following citation commands can be used:
-- `@author:2001`  ->  "Author et al. (2001)"
-- `[@author:2001]` -> "(Author et al., 2001)"
-- `[@author1:2001; @author2:2001]` -> "(Author1 et al., 2001; Author2 et al., 2002)"
+For **Landau damping**:
+- \( a = 0.025 \), \( k\lambda_D = 1/2 \)
+- \( v_{b_1} = v_{b_2} = 0 \)
+- \( v_{th} = 0.35\,c \)
+- \( N = 40{,}000 \), \( N_x = 32 \), \( \Delta x = 0.4\lambda_D \)
+- \( \Delta t = 0.1\,\omega_{pe}^{-1} \)
 
-# Figures
+For **two-stream instability**:
+- \( v_{b_1} = -v_{b_2} = 0.2\,c \)
+- \( v_{th} = 0.05\,c \)
+- \( a = 5\times10^{-7} \), \( k\lambda_D = 1/8 \)
+- \( N = 10{,}000 \), \( N_x = 100 \), \( \Delta x = 0.5 \lambda_D \)
+- \( \Delta t = 0.1\,\omega_{pe}^{-1} \)
 
-Figures can be included like this:
-![Caption for example figure.\label{fig:example}](figure.png)
-and referenced from text using \autoref{fig:example}.
+![Comparison of total runtime between CPU and GPU. (b) Influence of pseudoparticle number on the two-stream instability sampling results. Growth rates extracted from exponential fits.](figs/Run_time.png)
 
-Figure sizes can be customized by adding an optional second parameter:
-![Caption for example figure.](figure.png){ width=20% }
+Although the results show good agreement with analytical predictions, the Landau damping simulation is highly sensitive to the initialization, particularly the perturbation amplitude.
 
-# Acknowledgements
+We then benchmarked performance by comparing CPU and GPU runtimes and examined how the total runtime scales with the number of pseudoparticles.  
+Ten drift velocities from the two-stream dispersion relation were simulated as representative test cases.
 
-We acknowledge contributions from Brigitta Sipocz, Syrtis Major, and Semyeong
-Oh, and support from Kathryn Johnston during the genesis of this project.
+Finally, we investigated the **Weibel instability**, which arises in anisotropic plasmas and leads to spontaneous magnetic field generation.  
+The plasma is initialized with anisotropic velocity distribution, and we track magnetic field evolution.
+
+During the instability, the magnetic field organizes into filamentary structures perpendicular to the velocity anisotropy. Initially, multiple small filaments form, and as the system evolves, they merge into larger-scale structures.
+
+![Evolution of the magnetic field during the Weibel instability. (a) Time evolution of total magnetic field energy. (b) Spatial profile of the magnetic field.](figs/Weibel.png)
 
 # References
