@@ -45,7 +45,7 @@ f_s(x, u) \approx \sum_{p \in s} w_p\, \delta(x - x_p)\, \delta(u - u_p),
 where \( w_p = nL/N \), with \( L \) the domain length and \( N \) the number of pseudo-particles.  
 The domain is divided into \( N_x \) uniform cells with spacing \( \Delta x \) and advanced in time by \( \Delta t \).
 
-To reduce numerical noise, each pseudo-particle is represented by a **quadratic spline shape function** spanning three cells [@birdsall1991].  
+To reduce numerical noise, each pseudo-particle is represented by a **quadratic spline shape function** spanning three cells.  
 The current density \( j \) is computed through the **discrete continuity equation** to ensure charge conservation:
 
 \[
