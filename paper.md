@@ -79,12 +79,14 @@ f_e(x, \mathbf{v}, t = 0) = f_{e0}(\mathbf{v})\left[ 1 + a \cos(kx)\right],
 where $a$ is the perturbation amplitude and $k$ the perturbation wavenumber and the velocities distribution reads
 
 \begin{equation}
-f_{e0}(\mathbf{v}) = \frac{n_0}{2 \, \pi^{3/2} v_{th,x} v_{th,y} v_{th,z}} 
-\left[ 
-\exp\Big(- \frac{(v_x - v_{b1})^2}{v_{th,x}^2} - \frac{v_y^2}{v_{th,y}^2} - \frac{v_z^2}{v_{th,z}^2} \Big) 
-+ 
+\begin{aligned}
+f_{e0}(\mathbf{v}) &= \frac{n_0}{2 \, \pi^{3/2} v_{th,x} v_{th,y} v_{th,z}} 
+\Bigg[ 
+\exp\Big(- \frac{(v_x - v_{b1})^2}{v_{th,x}^2} - \frac{v_y^2}{v_{th,y}^2} - \frac{v_z^2}{v_{th,z}^2} \Big) \\
+&\quad + 
 \exp\Big(- \frac{(v_x - v_{b2})^2}{v_{th,x}^2} - \frac{v_y^2}{v_{th,y}^2} - \frac{v_z^2}{v_{th,z}^2} \Big)
-\right].
+\Bigg].
+\end{aligned}
 \end{equation}
 
 where $v_b1,2$ are drift speeds along $x$ and $v_{th,i}$ is thermal velocities along each direction. By linearizing the Vlasov–Maxwell system around this initial distribution, assuming identical thermal velocities in all directions ($v_{th,x}=v_{th,y}=v_{th,z}$), one obtains the following dispersion relation:
