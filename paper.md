@@ -18,68 +18,51 @@ bibliography: paper.bib
 
 # Summary
 
-A plasma is a collection of free ions and electrons whose self-generated and external electromagnetic fields drive collective behavior. Particle-in-Cell (PIC) simulation is a powerful tool in plasma physics, offering a fully kinetic description and enabling exploration of complex interactions in fusion devices and astrophysical plasmas.
+A plasma is a collection of free ions and electrons whose self-generated and external electromagnetic fields drive collective behavior. Particle-in-Cell (PIC) simulation is a powerful tool in plasma physics, offering a fully kinetic description and enabling exploration of complex interactions in fusion devices and astrophysical plasmas[@birdsall1991plasma].
 
-Our code, **JAX-in-Cell**, implements a 1D3V PIC framework in JAX and is built to be open-source, user-friendly, and developer-friendly, written entirely in Python in contrast to many other PIC codes implemented in legacy languages such as Fortran or mixed-language frameworks. Utilizing JAX, the code achieves high performance through GPU acceleration, just-in-time compilation, vectorized operations, and automatic differentiation, and it is well-suited for both educational-scale demonstrations—such as reproducing Landau damping and two-stream instability—and research-scale simulations such as rapid optimization.
+Our code, **JAX-in-Cell**, implements a 1D3V PIC framework in JAX and is built to be open-source, user-friendly, and developer-friendly, written entirely in Python in contrast to many other PIC codes implemented in legacy languages such as Fortran[@epochPic] or mixed-language frameworks[@vpicLANL]. Utilizing JAX, the code achieves high performance through GPU acceleration, just-in-time compilation, vectorized operations, and automatic differentiation, and it is well-suited for both educational-scale demonstrations—such as reproducing Landau damping and two-stream instability—and research-scale simulations such as rapid optimization.
 
-Furthermore, although the classic Boris push is simple and robust, long-term PIC simulations can experience energy drift (numerical heating). To mitigate this, **JAX-in-Cell** implements both the standard Boris algorithm and an implicit, discretely energy-conserving method, providing improved energy conservation for extended simulations.
+Furthermore, although the classic Boris push is simple and robust, long-term PIC simulations can experience energy drift (numerical heating). To mitigate this, **JAX-in-Cell** implements both the standard Boris algorithm[@boris1970relativistic] and an implicit, discretely energy-conserving method[@chen2011energy], providing improved energy conservation for extended simulations.
 
 # Structure
 
-The core of our Particle-in-Cell (PIC) code is based on the **Vlasov–Maxwell system**, which governs the self-consistent evolution of the particle distribution function and electromagnetic fields:
+The core of our Particle-in-Cell (PIC) code is based on the Vlasov–Maxwell system, which governs the self-consistent evolution of the particle distribution function and electromagnetic fields:
 
 $$
-\partial_t f_s + v \cdot \nabla f_s + \frac{q_s}{m_s} (E + v \times B) \cdot \nabla_{\mathbf{u}} f_s = 0,
-$$
-
-$$
-\frac{\partial B}{\partial t} + \nabla \times E = 0,
+\partial_t f_s + \mathbf{v} \cdot \nabla f_s + \frac{q_s}{m_s} (\mathbf{E} + \mathbf{v} \times \mathbf{B}) \cdot \nabla_{\mathbf{v}} f_s = 0,
 $$
 
 $$
-\varepsilon_0 \frac{\partial E}{\partial t} - c^2 \nabla \times B + j = 0.
+\frac{\partial \mathbf{B}}{\partial t} + \nabla \times \mathbf{E} = 0,
 $$
 
-Here, $f_s$ denotes the distribution function for species $s$, $v$ is the particle velocity, $q_s$ and $m_s$ are the particle charge and mass, $E$ and $B$ are the electric and magnetic fields, $\varepsilon_0$ is the vacuum permittivity, and $j$ is the current density.
-
-In a typical PIC framework, the distribution function is discretized using pseudo-particles $p$ as
-
 $$
-f_s(x, u) \approx \sum_{p \in s} w_p\, \delta(x - x_p)\, \delta(u - u_p),
+\varepsilon_0 \frac{\partial \mathbf{E}}{\partial t} - c^2 \nabla \times \mathbf{B} + \mathbf{j} = 0.
 $$
 
-where weight $w_p = nL/N$, with $n$ number density, $L$ the spatial domain length and $N$ the number of pseudo-particles. Then, spatial domain is divided into $N_x$ uniform cells with spacing $\Delta x$ and advanced in time by $\Delta t$. To reduce numerical noise, each pseudo-particle is represented by a **quadratic spline shape function** spanning three cells. Under the **Courant–Friedrichs–Lewy (CFL)** condition, particles traverse at most one cell per timestep. Accordingly, current density $j$ is computed from **continuity equation** using a discretely charge-conserving scheme consistent with the shape function:
+Here, $f_s$ denotes the distribution function for species $s$, $\mathbf{v}$ is the particle velocity, $q_s$ and $m_s$ are the particle charge and mass, $\mathbf{E}$ and $\mathbf{B}$ are the electric and magnetic fields, $\varepsilon_0$ is the vacuum permittivity, and $\mathbf{j}$ is the current density.
+
+In a typical 1D3V PIC framework, the distribution function is discretized using pseudo-particles labeled $p$ as
+
+$$
+f_s(x, \mathbf{v}) \approx \sum_{p \in s} w_p\, \delta(x - x_p)\, \delta(\mathbf{v} - \mathbf{v_p}),
+$$
+
+where $x_p$ denotes the position, $\mathbf{v_p}$ denotes the three-component velocity, the weight is given by $w_p = n_0L/N$, with $n_0$ number density, $L$ the spatial domain length and $N$ the number of pseudo-particles for that species. Then, spatial domain is divided into $N_x$ uniform cells with spacing $\Delta x$ and advanced in time by $\Delta t$. To reduce numerical noise, each pseudo-particle is represented by a triangular shape function spanning three cells with particle to grid for charge density and field to particle interpolation[@hockney1988computer]. Under the Courant–Friedrichs–Lewy (CFL) condition, particles traverse at most one cell per timestep. Accordingly, current density $j$ is computed from continuity equation using a discretely charge-conserving scheme[@villasenor1992rigorous] consistent with the shape function:
 
 $$
 j^n_i = \frac{\Delta x}{\Delta t} \sum_{k=i-3}^{i+2} \left( \rho^{n+1/2}_{k+1/2} - \rho^{n-1/2}_{k+1/2} \right),
 $$
 
-where $i$ denote cell number and $n$ for timestep. Moreover, We employ periodic boundary conditions, adding ghost cells at both ends of the spatial grid. Because the particle shape function spans three grid points, three ghost cells are required in total: two on the left and one on the right. Field interpolation is also required since shape functions extend across multiple cells. For either the electric or magnetic field $F$ with ghost cells:
+where $i$ denote cell number, $n$ for timestep $\rho$ for charge density.
 
-$$
-F(x_p)=
-\frac{1}{2} F_{i-1} 
-\left(
-\frac{1}{2} + \frac{x_i - x_p}{\Delta x}
-\right)^2
-+
-F_i 
-\left(
-\frac{3}{4} - \frac{(x_i - x_p)^2}{\Delta x^2}
-\right)
-+
-\frac{1}{2} F_{i+1}
-\left(
-\frac{1}{2} - \frac{x_i - x_p}{\Delta x}
-\right)^2.
-$$
+We implement two time-evolution methods[ref:fig:algorithm]:  
+(1) an **explicit** Boris algorithm[@boris1970relativistic], and  
+(2) an **implicit** Crank–Nicolson scheme solved via Picard iteration[@chen2011energy].
 
-We implement two time-evolution methods:  
-(1) an **explicit** Boris algorithm, and  
-(2) an **implicit** Crank–Nicolson scheme solved via Picard iteration.
+![Demonstration of two time-evolution algorithms {#fig:algorithm}](figs/explicit.png){ width=49% }
+![](figs/implicit.png){ width=49% }
 
-![Demonstration of two time evolution algorithms.](figs/explicit.png){ width=49% }
-![Demonstration of two time evolution algorithms (implicit).](figs/implicit.png){ width=49% }
 
 
 # Capabilities
