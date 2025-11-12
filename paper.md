@@ -56,12 +56,12 @@ $$
 
 where $i$ denote cell number, $n$ for timestep $\rho$ for charge density.
 
-We implement two time-evolution methods[ref:fig:algorithm]:  
+We implement two time-evolution methods\autoref{fig:algorithm}:  
 (1) an **explicit** Boris algorithm[@boris1970relativistic], and  
 (2) an **implicit** Crank–Nicolson scheme solved via Picard iteration[@chen2011energy].
 
-![Demonstration of two time-evolution algorithms {#fig:algorithm}](figs/explicit.png){ width=49% }
-![](figs/implicit.png){ width=49% }
+![Demonstration of two time-evolution algorithms \label{fig:algorithm}](figs/two_alg.png)
+
 
 
 
