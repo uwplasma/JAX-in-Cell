@@ -17,7 +17,7 @@ bibliography: paper.bib
 ---
 
 # Summary
-JAX-in-Cell is a 1D3V Particle-in-Cell (PIC) code implemented entirely in JAX, providing a modern, Python-based alternative to traditional PIC frameworks. By using on JAX’s recommended functions,such as vmap, jit, and lax,for all core operations, the code achieves efficient vectorization and GPU acceleration. The resulting framework enables fast, fully kinetic plasma simulations suitable for both research applications and instructional settings.
+JAX-in-Cell is a 1D3V Particle-in-Cell (PIC) code implemented entirely in JAX, providing a modern, Python-based alternative to traditional PIC frameworks.By using on JAX’s recommended functions,such as vmap, jit, and lax,for all core operations, the code achieves efficient vectorization and GPU acceleration. The resulting framework enables fast, fully kinetic plasma simulations suitable for both research applications and instructional settings.
 
 # Statement of Need
 
@@ -83,7 +83,7 @@ f_{e0}(\mathbf{v}) &= \frac{n_0}{2 \, \pi^{3/2} v_{th,x} v_{th,y} v_{th,z}}
 \end{aligned}
 \end{equation}
 
-where $v_b{1,2}$ are drift speeds along $x$ and $v_{th,i}$ is thermal velocities along each direction. To validate these simulations, it is useful to compare with the corresponding linear theory. Linearizing the Vlasov–Maxwell system around this initial distribution (with equal thermal velocities $v_{th,x}=v_{th,y}=v_{th,z}$), yields the dispersion relation:
+where $v_{b1,2}$ are drift speeds along $x$ and $v_{th,i}$ is thermal velocities along each direction. To validate these simulations, it is useful to compare with the corresponding linear theory. Linearizing the Vlasov–Maxwell system around this initial distribution (with equal thermal velocities $v_{th,x}=v_{th,y}=v_{th,z}$), yields the dispersion relation:
 
 \begin{equation}
 1 + \frac{1}{2k^2\lambda_D^2}
@@ -111,7 +111,7 @@ Next, we investigated the Weibel instability, which arises in anisotropic plasma
 
 ![Evolution of the magnetic field during the Weibel instability. (a) Time evolution of total magnetic field energy. (b) Spatial profile of the magnetic field.](figs/Weibel.png)
 
-Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes and analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{fig:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation.
+Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes and analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{figs:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation.
 
 ![Comparison of total runtime between CPU and GPU. (b) Influence of pseudoparticle number on the two-stream instability sampling results. Growth rates extracted from exponential fits.](figs/Run_time.png)
 
