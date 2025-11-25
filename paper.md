@@ -17,7 +17,7 @@ bibliography: paper.bib
 ---
 
 # Summary
-JAX-in-Cell is a 1D3V Particle-in-Cell (PIC) code implemented entirely in JAX, providing a modern, Python-based alternative to traditional PIC frameworks.By using on JAX’s recommended functions,such as vmap, jit, and lax,for all core operations, the code achieves efficient vectorization and GPU acceleration. The resulting framework enables fast, fully kinetic plasma simulations suitable for both research applications and instructional settings.
+JAX-in-Cell is a 1D3V Particle-in-Cell (PIC) code implemented entirely in JAX, providing a modern, Python-based alternative to traditional PIC frameworks. By using on JAX’s recommended functions, such as vmap, jit, and lax, for all core operations, the code achieves efficient vectorization and GPU acceleration. The resulting framework enables fast, fully kinetic plasma simulations suitable for both research applications and instructional settings.
 
 # Statement of Need
 
@@ -103,17 +103,17 @@ For two-stream instability:
 (ii) Velocities: $v_{b_1} = -v_{b_2} = 0.2\,c$, $v_{th} = 0.05\,c$
 (iii) Discretization: $N = 10{,}000$, $N_x = 100$, $\Delta x = 0.5 \lambda_D$ and $\Delta t = 0.1\,\omega_{pe}^{-1}$
 
-![Electric field energy evolution for Landau damping and two-stream instability. (a) Landau damping with analytical damping rate $\gamma = 0.153$. (b) Two-stream instability showing fitted exponential growth rate. (c–d) Relative total energy deviation $|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)$ demonstrating energy conservation.](figs/output.png)
+![Electric field energy evolution for Landau damping and two-stream instability. (a) Landau damping with analytical damping rate $\gamma = 0.153$. (b) Two-stream instability showing fitted exponential growth rate. (c–d) Relative total energy deviation $|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)$ demonstrating energy conservation.\label{fig:output}](figs/output.png)
 
-The results (\autoref{fig:output}) show good agreement with analytical predictions; nevertheless, the Landau damping simulation exhibits high sensitivity to the initial conditions, in particular the choice of perturbation amplitude.
+The results in \autoref{fig:output} show good agreement with analytical predictions; nevertheless, the Landau damping simulation exhibits high sensitivity to the initial conditions, in particular the choice of perturbation amplitude.
 
-Next, we investigated the Weibel instability, which arises in anisotropic plasmas and leads to spontaneous magnetic field generation. The plasma is initialized with anisotropic velocity distribution, and we track magnetic field evolution. During the instability, the magnetic field organizes into filamentary structures perpendicular to the velocity anisotropy. Initially, multiple small filaments form, which subsequently merge into larger-scale structures as the system evolves \autoref{fig:Weibel}.
+Next, we investigated the Weibel instability, which arises in anisotropic plasmas and leads to spontaneous magnetic field generation. The plasma is initialized with anisotropic velocity distribution, and we track magnetic field evolution. During the instability, the magnetic field organizes into filamentary structures perpendicular to the velocity anisotropy. Initially, multiple small filaments form, which subsequently merge into larger-scale structures as the system evolves (\autoref{fig:Weibel}).
 
-![Evolution of the magnetic field during the Weibel instability. (a) Time evolution of total magnetic field energy. (b) Spatial profile of the magnetic field.](figs/Weibel.png)
+![Evolution of the magnetic field during the Weibel instability. (a) Time evolution of total magnetic field energy. (b) Spatial profile of the magnetic field.\label{fig:Weibel}](figs/Weibel.png)
 
-Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes and analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{figs:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation.
+Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes and analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{fig:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation.
 
-![Comparison of total runtime between CPU and GPU. (b) Influence of pseudoparticle number on the two-stream instability sampling results. Growth rates extracted from exponential fits.](figs/Run_time.png)
+![Comparison of total runtime between CPU and GPU. (b) Influence of pseudoparticle number on the two-stream instability sampling results. Growth rates extracted from exponential fits.\label{fig:Run_time}](figs/Run_time.png)
 
 These results demonstrate that a fully JAX-based PIC code can deliver both high physical fidelity and excellent computational efficiency, making it suitable for rapid exploratory studies as well as larger-scale plasma simulations.
 
