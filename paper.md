@@ -1,5 +1,5 @@
 ---
-title: "JAX-in-Cell"
+title: "JAX-in-Cell: A Differentiable Kinetic Plasma Code in JAX"
 tags:
   - plasma physics
   - particle-in-cell
@@ -111,13 +111,16 @@ Next, we investigated the Weibel instability, which arises in anisotropic plasma
 
 ![Evolution of the magnetic field during the Weibel instability. (a) Time evolution of total magnetic field energy. (b) Spatial profile of the magnetic field.\label{fig:Weibel}](figs/Weibel.png)
 
-Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes and analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{fig:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation.
+Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes and analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{fig:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation. The scan was performed with 32-bit floating point arithmetic, enabled by manually disabling JAX’s x64 mode, which reduces memory usage and provides an additional performance boost compared to double precision.
 
 ![Comparison of total runtime between CPU and GPU. (b) Influence of pseudoparticle number on the two-stream instability sampling results. Growth rates extracted from exponential fits.\label{fig:Run_time}](figs/Run_time.png)
 
 These results demonstrate that a fully JAX-based PIC code can deliver both high physical fidelity and excellent computational efficiency, making it suitable for rapid exploratory studies as well as larger-scale plasma simulations.
 
 # Acknowledgement
+
+This work was supported by the National Science Foundation under Grant No. PHY-2409066.
+This work used the Jetstream2 at Indiana University through allocation PHY240054 from the Advanced Cyberinfrastructure Coordination Ecosystem: Services \& Support (ACCESS) program which is supported by National Science Foundation grants \#213859, \#2138286, \#2138307, \#2137603 and \#2138296. This research used resources of the National Energy Research Scientific Computing Center, a DOE Office of Science User Facility supported by the Office of Science of the U.S. Department of Energy under Contract No. DE-AC02-05CH11231 using NERSC award NERSC DDR-ERCAP0030134.
 
 # References
 
