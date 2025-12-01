@@ -93,6 +93,7 @@ Plenty of examples are provided in the `examples` folder, and the documentation 
 	│   ├── scaling_energy_time.py
     │   └── optimize_two_stream_saturation.py
     ├── jaxincell
+    │   ├── algorithms.py
     │   ├── boundary_conditions.py
     │   ├── constants.py
     │   ├── diagnostics.py
