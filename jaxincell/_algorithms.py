@@ -22,11 +22,11 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
-    
+
     J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
     E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
-    
+
     # Add external fields
     total_E = E_field + parameters["external_electric_field"]
     total_B = B_field + parameters["external_magnetic_field"]
@@ -51,14 +51,14 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
         positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
         *box_size, particle_BC_left, particle_BC_right)
-    
+
     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
     J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
     E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
-    
+
     if field_solver != 0:
         charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
         switcher = {
@@ -80,7 +80,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # Collect data for storage
     charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
     step_data = (positions, velocities, E_field, B_field, J, charge_density)
-    
+
     return carry, step_data
 
 # Implicit Crank-Nicolson step
@@ -141,7 +141,7 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
             return (pos_new, vel_new, qs_new, ms_new, q_ms_new, pos_stag_arr), J_sub * dtau
 
-        # initial substep carry 
+        # initial substep carry
         sub_init = (
             pos_fix, vel_fix,
             qs_prev, ms_prev, q_ms_prev,
@@ -178,14 +178,14 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     picard_init = (E_old, E_new, positions, positions_new, velocities, velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
     state0 = (picard_init, jnp.zeros_like(E_new), delta_E0, iter_idx0)
-    
+
     def cond_fn(state):
         _, _, delta_E, i = state
         return jnp.logical_and(delta_E > tol, i < max_iter)
 
     def body_fn(state):
         carry, _, _, i = state
-        
+
         E_old = carry[0]
 
         new_carry, J_iter = picard_step(carry, None)
@@ -202,12 +202,12 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     B_field = B_new
     positions_plus1= positions_new
     velocities_plus1 = velocities_new
-    
+
     charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)
 
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
-    
+
     # Collect data
     step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
-    
+
     return carry, step_data
