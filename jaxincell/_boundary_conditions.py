@@ -117,7 +117,7 @@ def set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_
 
     x_n0 = jnp.where(
         x_n[0] < -box_size_x / 2,
-        jnp.where(BC_left == 0, (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2, 
+        jnp.where(BC_left == 0, (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2,
                   jnp.where(BC_left == 1, -box_size_x - x_n[0], grid[0] - 1.5 * dx)),  # Absorbing
         jnp.where(
             x_n[0] > box_size_x / 2,
@@ -148,8 +148,8 @@ def set_BC_positions(xs_n, qs, dx, grid, box_size_x, box_size_y, box_size_z, BC_
 @jit
 def field_ghost_cells_E(field_BC_left, field_BC_right, E_field, B_field):
     """
-    Set the ghost cells for the electric field at the boundaries of the simulation grid. 
-    The ghost cells are used to apply boundary conditions and extend the field in the 
+    Set the ghost cells for the electric field at the boundaries of the simulation grid.
+    The ghost cells are used to apply boundary conditions and extend the field in the
     simulation domain based on the selected boundary conditions.
 
     Args:
@@ -181,8 +181,8 @@ def field_ghost_cells_E(field_BC_left, field_BC_right, E_field, B_field):
 @jit
 def field_ghost_cells_B(field_BC_left, field_BC_right, B_field, E_field):
     """
-    Set the ghost cells for the magnetic field at the boundaries of the simulation grid. 
-    The ghost cells are used to apply boundary conditions and extend the magnetic field 
+    Set the ghost cells for the magnetic field at the boundaries of the simulation grid.
+    The ghost cells are used to apply boundary conditions and extend the magnetic field
     in the simulation domain based on the selected boundary conditions.
 
     Args:
@@ -209,13 +209,13 @@ def field_ghost_cells_B(field_BC_left, field_BC_right, B_field, E_field):
 @jit
 def field_2_ghost_cells(field_BC_left, field_BC_right, field):
     """
-    This function adds ghost cells to the field array, which is used for interpolation when 
-    accessing field values at particle positions. Ghost cells are added to the left and 
+    This function adds ghost cells to the field array, which is used for interpolation when
+    accessing field values at particle positions. Ghost cells are added to the left and
     right boundaries based on the specified boundary conditions for the particles.
 
-    Ghost cells are needed for simulations to handle boundary effects by using the appropriate 
-    field values at the boundaries. This is especially important in simulations where particles 
-    can cross boundary regions, and the electric and magnetic fields must be extended beyond 
+    Ghost cells are needed for simulations to handle boundary effects by using the appropriate
+    field values at the boundaries. This is especially important in simulations where particles
+    can cross boundary regions, and the electric and magnetic fields must be extended beyond
     the simulation domain.
 
     Args:
@@ -238,7 +238,7 @@ def field_2_ghost_cells(field_BC_left, field_BC_right, field):
                           jnp.where(field_BC_left==1,field[0],
                           jnp.where(field_BC_left==2,jnp.array([0,0,0]),
                                     jnp.array([0,0,0]))))
-    
+
     field_ghost_cell_R = jnp.where(field_BC_right==0,field[0],
                          jnp.where(field_BC_right==1,field[-1],
                          jnp.where(field_BC_right==2,jnp.array([0,0,0]),

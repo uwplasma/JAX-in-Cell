@@ -1,0 +1,160 @@
+# ---------------------------------------------------
+# bump-on-tail.toml
+# ---------------------------------------------------
+# For the following plasma:
+#     nbeam/n0 = 0.03
+#     vbeam = 0.25*c
+#     sqrt(Te/me) = 0.05 for both bulk and beam populations
+# Fastest-growing mode predicted by non-relativistic electrostatic dispersion
+# has parameters:
+#     Re(omega) = 1.0*omega_pe
+#     Im(omega) = 0.075*omega_pe
+#     k = 4.9*omega_pe/c
+# where omega_pe is the electron plasma frequency, k = 2*pi/wavelength is the
+# wavenumber, c is speed of light, vbeam is (non-relativistic) three-velocity,
+# nbeam is beam density, n0 = background (bulk) density.
+# ---------------------------------------------------
+
+[input_parameters]
+# -----------------------------
+# species intrinsic properties
+# -----------------------------
+ion_mass_over_proton_mass = 1e9
+ion_charge_over_elementary_charge = 1
+electron_charge_over_elementary_charge = -1
+# -----------------------------
+# particle spatial distribution
+# -----------------------------
+random_positions_x = true
+random_positions_y = false
+random_positions_z = false
+amplitude_perturbation_x = 0  # Amplitude of sinusoidal perturbation
+amplitude_perturbation_y = 0
+amplitude_perturbation_z = 0
+wavenumber_electrons_x = 0  # Wavenumber of sinusoidal density perturbation (factor of 2pi/length)
+wavenumber_electrons_y = 0
+wavenumber_electrons_z = 0
+wavenumber_ions_x = 0
+wavenumber_ions_y = 0
+wavenumber_ions_z = 0
+# ------------------------------
+# electron velocity distribution
+# ------------------------------
+vth_electrons_over_c_x = 0.07071067812  # sqrt(2*T/m)/c = sqrt(2)*0.05 
+vth_electrons_over_c_y = 0
+vth_electrons_over_c_z = 0
+electron_drift_speed_x = -2.25e6 # -0.25c * 3e-2  # drift in m/s; compensate bump drift so that j(t)=0
+electron_drift_speed_y = 0
+electron_drift_speed_z = 0
+velocity_plus_minus_electrons_x = false # create two groups of electrons moving in opposite directions in the x direction
+velocity_plus_minus_electrons_y = false
+velocity_plus_minus_electrons_z = false
+# ------------------------------
+# ion velocity distribution
+# ------------------------------
+ion_drift_speed_x = 0  # Drift speed of ions in the x direction
+ion_drift_speed_y = 0
+ion_drift_speed_z = 0
+ion_temperature_over_electron_temperature_x = 1e-9  # Temperature ratio of ions to electrons in the x direction
+ion_temperature_over_electron_temperature_y = 1e-9
+ion_temperature_over_electron_temperature_z = 1e-9
+velocity_plus_minus_ions_x = false  # create two groups of ions moving in opposite directions in the x direction
+velocity_plus_minus_ions_y = false
+velocity_plus_minus_ions_z = false
+# ------------------------------
+# domain, spacetime gridding
+# ------------------------------
+length = 1  # Simulation box size in meters (sets dimensionful normalization, but does not change dimensionless ratios?)
+grid_points_per_Debye_length = 2.565  # dx over Debye length (ignore the conflicting variable name)
+timestep_over_spatialstep_times_c = 1.0  # dt * speed_of_light / dx
+# particle_BC_left  = 0  # 0: periodic, 1: reflective, 2: absorbing
+# particle_BC_right = 0
+# field_BC_left  = 0  # 0: periodic, 1: reflective, 2: absorbing
+# field_BC_right = 0
+# ------------------------------
+# other controls
+# ------------------------------
+print_info = true
+relativistic = false  # Use relativistic Boris pusher
+seed = 250724  # Random seed for reproducibility
+tolerance_Picard_iterations_implicit_CN = 1e-6  # Tolerance for Picard iterations in implicit Crank-Nicholson method
+
+# ------------------------------
+# Additional Maxwellian particle populations with bulk drift.
+# To add new populations, copy this block and modify parameter values,
+# but don't change the header "[[species]]" or parameter names.
+# To only use default ion/electron plasma, comment out all [[species]] blocks.
+# All parameters must be specified; internal code doesn't set default values.
+# ------------------------------
+[[species]]
+mass_over_proton_mass = 0.0005446170199382714  # me/mp using values from jaxincell/_constants.py
+charge_over_elementary_charge = -1
+weight_ratio = 3e-2  # sets density ratio between bulk/beam, in combination with "number_pseudoparticles_species"
+# spatial distribution
+random_positions_x = true
+random_positions_y = false
+random_positions_z = false
+amplitude_perturbation_x = 0  # Amplitude of sinusoidal perturbation
+amplitude_perturbation_y = 0
+amplitude_perturbation_z = 0
+wavenumber_perturbation_x = 0  # Wavenumber of sinusoidal density perturbation (factor of 2pi/length)
+wavenumber_perturbation_y = 0
+wavenumber_perturbation_z = 0
+# velocity distribution
+vth_over_c_x = 0.07071067812  # sqrt(2*T/m)/c = sqrt(2)*0.05
+vth_over_c_y = 0
+vth_over_c_z = 0
+drift_speed_x = 7.5e7  # drift speed 0.25c converted to m/s
+drift_speed_y = 0
+drift_speed_z = 0
+# RNG control
+# "seed_position", "seed_position_override" parameters allow you to put
+# different particle species at identical positions, so as to ensure exact
+# charge neutrality at t=0 for multiple ion/electron populations.
+# WARNING: to avoid unphysically correlated coordinates, choose the position
+# seed to not coincide with RNG seeds used elsewhere in the program.
+seed_position_override = true
+seed_position = 10
+
+# enforce charge neutrality for the bump distribution
+[[species]]
+mass_over_proton_mass = 1e9
+charge_over_elementary_charge = 1
+weight_ratio = 3e-2
+# spatial distribution
+random_positions_x = true
+random_positions_y = false
+random_positions_z = false
+amplitude_perturbation_x = 0  # Amplitude of sinusoidal perturbation
+amplitude_perturbation_y = 0
+amplitude_perturbation_z = 0
+wavenumber_perturbation_x = 0  # Wavenumber of sinusoidal density perturbation (factor of 2pi/length)
+wavenumber_perturbation_y = 0
+wavenumber_perturbation_z = 0
+# velocity distribution
+vth_over_c_x = 1e-100
+vth_over_c_y = 1e-100
+vth_over_c_z = 1e-100
+drift_speed_x = 0
+drift_speed_y = 0
+drift_speed_z = 0
+# RNG control
+# "seed_position", "seed_position_override" parameters allow you to put
+# different particle species at identical positions, so as to ensure exact
+# charge neutrality at t=0 for multiple ion/electron populations.
+# WARNING: to avoid unphysically correlated coordinates, choose the position
+# seed to not coincide with RNG seeds used elsewhere in the program.
+seed_position_override = true
+seed_position = 10
+
+[solver_parameters]
+time_evolution_algorithm = 0  # 0: Boris solver, 1: implicit Crank-Nicholson
+max_number_of_Picard_iterations_implicit_CN = 30
+number_of_particle_substeps_implicit_CN = 2
+number_grid_points = 40  # number of grid CELLS, not edges/vertices
+field_solver = 0  # 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
+number_pseudoelectrons = 40000  # Total in entire domain
+total_steps = 1000  # Total number of time steps
+# number of particles for each additional species
+# provide one list value per [[species]] block
+number_pseudoparticles_species = [40000,40000,]
