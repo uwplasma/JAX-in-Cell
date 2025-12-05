@@ -9,6 +9,14 @@ tags:
 authors:
   - name: Longyu Ma
     affiliation: 1
+  - name: Aaron Tran
+    affiliation: 1
+  - name: Hongke Lu
+    affiliation: 1
+  - name: Christopher Woolford
+    affiliation: 1
+  - name: Rogerio Jorge
+    affiliation: 1
 affiliations:
   - name: University of Wisconsin–Madison
     index: 1
@@ -111,9 +119,9 @@ Next, we investigated the Weibel instability, which arises in anisotropic plasma
 
 ![Evolution of the magnetic field during the Weibel instability. (a) Time evolution of total magnetic field energy. (b) Spatial profile of the magnetic field.\label{fig:Weibel}](figs/Weibel.png)
 
-Additionally, to demonstrate the multi-species capability of our code, we study the bump-on-tail instability. This instability arises when a high-velocity electron beam creates a positive slope in the electron velocity distribution. We initialize the plasma with a bulk Maxwellian electron population and a tenuous, high-velocity beam that produces a pronounced bump in the tail of the distribution, and we track the evolution of the phase-space density and the associated electric field. During the linear growth phase, resonant electrons exchange energy with Langmuir waves, leading to exponential amplification of the electric field. As the instability evolves, the initially smooth electron distribution develops coherent phase-space structures, illustrating the code’s ability to capture nonlinear wave–particle interactions.
+Additionally, to demonstrate the multi-species capability of our code, we study the bump-on-tail instability. This instability arises when a high-velocity electron beam creates a positive slope in the electron velocity distribution. We initialize the plasma with a bulk Maxwellian electron population and a tenuous, high-velocity beam that produces a pronounced bump in the tail of the distribution, and we track the evolution of the phase-space density and the associated electric field. During the linear growth phase, resonant electrons exchange energy with Langmuir waves, leading to exponential amplification of the electric field. As the instability evolves, the initially smooth electron distribution develops coherent phase-space structures, illustrating the code’s ability to capture nonlinear wave–particle interactions (\autoref{fig:bump-on-tail}).
 
-![Simulation of the bump-on-tail instability. The numbers of pseudo-particles in the bulk and beam populations are equal, with a beam-to-bulk weight ratio of $3\times10^{-2}$. (a) Snapshot of phase space at $80\,\omega_p^{-1}$. (b) Time evolution of the electric field energy. \label{fig:bump-on-tail}](figs/bump-on-tail.png)
+![Simulation of the bump-on-tail instability. The numbers of pseudo-particles in the bulk and beam populations are equal, with a beam-to-bulk weight ratio of $3\times10^{-2}$. (a) Snapshot of phase space at $80\,\omega_pe^{-1}$. (b) Time evolution of the electric field energy. \label{fig:bump-on-tail}](figs/bump-on-tail.png)
 
 
 Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes and analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{fig:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation. Our benchmarks also indicate that GPU results depend on floating-point precision: running in 32-bit mode by manually disabling JAX’s x64 option reduces memory usage and improves speed, but can introduce deviations when compared to 64-bit results. Some of these differences also depend on details of the fitting range used to extract growth rates. For high-accuracy studies, we therefore recommend using the default 64-bit mode, with 32-bit remaining a useful option for rapid exploratory runs.
@@ -128,5 +136,4 @@ This work was supported by the National Science Foundation under Grant No. PHY-2
 This work used the Jetstream2 at Indiana University through allocation PHY240054 from the Advanced Cyberinfrastructure Coordination Ecosystem: Services \& Support (ACCESS) program which is supported by National Science Foundation grants \#213859, \#2138286, \#2138307, \#2137603 and \#2138296. This research used resources of the National Energy Research Scientific Computing Center, a DOE Office of Science User Facility supported by the Office of Science of the U.S. Department of Energy under Contract No. DE-AC02-05CH11231 using NERSC award NERSC DDR-ERCAP0030134.
 
 # References
-
 
