@@ -8,21 +8,31 @@ import matplotlib.pyplot as plt
 from jax import jit, grad, lax, block_until_ready, debug
 from jaxincell import simulation, load_parameters
 
-# Read from input.toml
-input_parameters, solver_parameters = load_parameters('input.toml')
+# Read from input.toml (assuming it's in the same directory as this script)
+input_file = 'input.toml'
+current_directory = os.path.dirname(os.path.abspath(__file__))
+input_toml_path = os.path.join(current_directory, input_file)
+
+input_parameters, solver_parameters = load_parameters(input_toml_path)
+
+input_parameters["print_info"] = False
+solver_parameters["total_steps"] = 400
+solver_parameters["number_grid_points"] = 60
+solver_parameters["number_pseudoelectrons"] = 3000
 
 @jit
 def mean_electric_field(electron_drift_speed):
     input_parameters["electron_drift_speed_x"] = electron_drift_speed
     output = block_until_ready(simulation(input_parameters, **solver_parameters))
-    electric_field = jnp.mean(output['electric_field_x'][:, :, 0], axis=1)
+    electric_field = jnp.mean(output['electric_field'][:, :, 0], axis=1)
     mean_E = jnp.mean(lax.slice(electric_field, [solver_parameters["total_steps"]//2], [solver_parameters["total_steps"]]))
     return mean_E
 
 # Calculate the derivative of the plasma frequency with respect to the wavenumber
 electron_drift_speed = 1e8
-epsilon_array = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
+epsilon_array = [1e-11, 1e-9, 1e-7, 1e-5, 1e-3, 1e-1]
 E_field = mean_electric_field(electron_drift_speed)
+print(f"Mean electric field at drift speed {electron_drift_speed} m/s: {E_field}")
 start = time.time()
 derivative_JAX = grad(mean_electric_field)(electron_drift_speed)
 time_JAX_derivative = time.time()-start

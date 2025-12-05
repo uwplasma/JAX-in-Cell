@@ -1,13 +1,20 @@
 ## two_stream_saturation.py
 # Optimize the non-linear saturation of the two_stream_instabiltity to be as small as possible
+import os
 import jax.numpy as jnp
 from jax import jit, grad
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
-from jaxincell import simulation, epsilon_0, load_parameters
+from jaxincell import simulation, epsilon_0, load_parameters, diagnostics
 
-# Read from input.toml
-input_parameters, solver_parameters = load_parameters('input.toml')
+# Read from input.toml (assuming it's in the same directory as this script)
+input_file = 'input.toml'
+current_directory = os.path.dirname(os.path.abspath(__file__))
+input_toml_path = os.path.join(current_directory, input_file)
+
+input_parameters, solver_parameters = load_parameters(input_toml_path)
+
+input_parameters["print_info"] = False
 
 steps_to_average = 800 # only take the mean of these last steps
 minimum_Ti = -2
@@ -33,6 +40,7 @@ jac = jit(grad(objective_function))
 print(f'Perform a first run to see one objective function')
 input_parameters["ion_temperature_over_electron_temperature_x"] = x0_optimization
 output = simulation(input_parameters, **solver_parameters)
+diagnostics(output)
 objective = objective_function(x0_optimization)
 plt.figure(figsize=(8,6))
 plt.plot(output['time_array']*output['plasma_frequency'],output['electric_field_energy'], label='Electric Field Energy')

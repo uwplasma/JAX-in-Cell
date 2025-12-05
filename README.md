@@ -54,14 +54,16 @@ JAX-in-Cell is an open-source project in Python that uses JAX to speedup simulat
    pip install jaxincell
    ```
 
-Alternatively, you can install the Python dependencies `jax`, `jax_tqdm` and `matplotlib`, and run the [example script](example_script.py) in the repository after downloading it as
+Alternatively, you can install the Python dependencies `jax`, `jax_tqdm` and `matplotlib`, and run an [example script](examples/two-stream_instability.py) in the repository after downloading it as
 
    ```sh
    git clone https://github.com/uwplasma/JAX-in-Cell
-   python example_script.py
+   python examples/two-stream_instability.py
    ```
 
 This allows JAX-in-Cell to be run without any installation.
+
+An example without the use of an input toml file can be seen in the [Weibel instability example](examples/Weibel_instability.py)
 
 The project can be downloaded in its [GitHub repository](https://github.com/uwplasma/JAX-in-Cell)
 </code>
