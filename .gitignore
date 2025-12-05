@@ -161,11 +161,11 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 *.DS_Store*
-examples/scaling_energy_error.pdf
-examples/scaling_time.pdf
-examples/differentiability.png
-examples/objective_function_landscape_twostream.pdf
-examples/objective_function_onerun_twostream.pdf
+*scaling_energy_error.pdf
+*scaling_time.pdf
+*differentiability.png
+*objective_function_landscape_twostream.pdf
+*objective_function_onerun_twostream.pdf
 jaxincell/version.py
 *.xml
 .vscode/settings.json

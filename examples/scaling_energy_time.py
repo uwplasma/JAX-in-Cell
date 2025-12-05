@@ -17,7 +17,7 @@ input_parameters = {
 "grid_points_per_Debye_length"   : 2,     # dx over Debye length
 "vth_electrons_over_c_x"         : 0.05,  # thermal velocity of electrons over speed of light
 "ion_temperature_over_electron_temperature_x": 1e-2, # Temperature of ions over temperature of electrons
-"timestep_over_spatialstep_times_c": 0.2, # dt * speed_of_light / dx
+"timestep_over_spatialstep_times_c": 0.3, # dt * speed_of_light / dx
 "velocity_plus_minus_electrons_x": False, # create two groups of electrons moving in opposite directions
 "print_info"                     : False,  # print information about the simulation
 "external_electric_field_amplitude": 0, # External electric field value (V/m)
@@ -28,10 +28,10 @@ input_parameters = {
 }
 
 solver_parameters = {
-    "field_solver"           : 1,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
-    "number_grid_points"     : 50,   # Number of grid points
-    "number_pseudoelectrons" : 1500, # Number of pseudoelectrons
-    "total_steps"            : 2000, # Total number of time steps
+    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
+    "number_grid_points"     : 60,   # Number of grid points
+    "number_pseudoelectrons" : 3500, # Number of pseudoelectrons
+    "total_steps"            : 1500, # Total number of time steps
 }
 
 increase_factor = 1.5 # Factor by which to increase the parameters
