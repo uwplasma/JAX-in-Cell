@@ -60,23 +60,35 @@ def diagnostics(output):
     del output["masses"]
     del output["charges"]
 
-    # --- All your existing energy/FFT/diagnostics code continues below unchanged ---
-    E_field_over_time = output['electric_field']
-    grid              = output['grid']
-    dt                = output['dt']
-    total_steps       = output['total_steps']
-    
     # CHANGED: Use reshape(-1) to flatten shape from (N, 1) to (N,)
     # This allows broadcasting against velocity array of shape (Time, N)
     mass_electrons_array = output["mass_electrons"].reshape(-1)
     mass_ions_array      = output["mass_ions"].reshape(-1)
 
+    # --- All your existing energy/FFT/diagnostics code continues below unchanged ---
+    E_field_over_time = output['electric_field']
+    grid              = output['grid']
+
+    # Make sure these are plain Python scalars for indexing / fftfreq
+    total_steps_val = output['total_steps']
+    dt_val          = output['dt']
+
+    # Coerce JAX scalars or numpy scalars to Python ints/floats
+    total_steps = int(total_steps_val)
+    dt          = float(dt_val)
+
+    # Now safe to use in len/indexing/XLA primitives on all Python versions
+    # (including 3.8)
+    # ------------------------------------------------------------------
+    # FFT-based dominant frequency at the middle grid point
     array_to_do_fft_on = E_field_over_time[:, len(grid)//2, 0]
     array_to_do_fft_on = (array_to_do_fft_on - jnp.mean(array_to_do_fft_on)) / jnp.max(array_to_do_fft_on)
     plasma_frequency = output['plasma_frequency']
 
-    fft_values = lax.slice(fft(array_to_do_fft_on), (0,), (total_steps//2,))
-    freqs = fftfreq(total_steps, d=dt)[:total_steps//2]*2*jnp.pi
+    half = total_steps // 2
+    fft_full = fft(array_to_do_fft_on)
+    fft_values = lax.slice(fft_full, (0,), (half,))
+    freqs = fftfreq(total_steps, d=dt)[:half] * 2 * jnp.pi
     magnitude = jnp.abs(fft_values)
     peak_index = jnp.argmax(magnitude)
     dominant_frequency = jnp.abs(freqs[peak_index])
