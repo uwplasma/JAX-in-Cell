@@ -153,8 +153,8 @@ max_number_of_Picard_iterations_implicit_CN = 30
 number_of_particle_substeps_implicit_CN = 2
 number_grid_points = 40  # number of grid CELLS, not edges/vertices
 field_solver = 0  # 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
-number_pseudoelectrons = 40000  # Total in entire domain
+number_pseudoelectrons = 60000  # Total in entire domain
 total_steps = 1000  # Total number of time steps
 # number of particles for each additional species
 # provide one list value per [[species]] block
-number_pseudoparticles_species = [40000,40000,]
+number_pseudoparticles_species = [60000,60000,]

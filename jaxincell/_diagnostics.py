@@ -2,6 +2,7 @@ from jax import lax
 import jax.numpy as jnp
 from jax.numpy.fft import fft, fftfreq
 from ._constants import epsilon_0, mu_0
+from jax.debug import print as jprint
 
 __all__ = ['diagnostics']
 
@@ -64,8 +65,11 @@ def diagnostics(output):
     grid              = output['grid']
     dt                = output['dt']
     total_steps       = output['total_steps']
-    mass_electrons    = output["mass_electrons"][0]
-    mass_ions         = output["mass_ions"][0]
+    
+    # CHANGED: Use reshape(-1) to flatten shape from (N, 1) to (N,)
+    # This allows broadcasting against velocity array of shape (Time, N)
+    mass_electrons_array = output["mass_electrons"].reshape(-1)
+    mass_ions_array      = output["mass_ions"].reshape(-1)
 
     array_to_do_fft_on = E_field_over_time[:, len(grid)//2, 0]
     array_to_do_fft_on = (array_to_do_fft_on - jnp.mean(array_to_do_fft_on)) / jnp.max(array_to_do_fft_on)
@@ -90,19 +94,33 @@ def diagnostics(output):
     integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
     integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
 
-    v_electrons_squared = jnp.sum(jnp.sum(output['velocity_electrons']**2, axis=-1), axis=-1)
-    v_ions_squared      = jnp.sum(jnp.sum(output['velocity_ions']**2     , axis=-1), axis=-1)
+    # CHANGED: Calculate v^2 per particle (sum over spatial dims x,y,z only)
+    # Shape becomes (Time, N_particles)
+    v_sq_electrons_per_particle = jnp.sum(output['velocity_electrons']**2, axis=-1)
+    v_sq_ions_per_particle      = jnp.sum(output['velocity_ions']**2,      axis=-1)
 
-    output.update({
+    # CHANGED: Calculate KE = sum(0.5 * m_i * v_i^2)
+    # Mass (N,) broadcasts against V_sq (Time, N) -> Result (Time, N)
+    # Sum over axis=-1 (particles) -> Result (Time,)
+    total_ke_electrons = 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle, axis=-1)
+    total_ke_ions      = 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle,      axis=-1)
+    
+    # Debug print (optional, can be removed)
+    # print(mass_electrons_array) 
+
+    output.update({ 
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
         'electric_field_energy':         (epsilon_0/2) * integral_E_squared,
         'magnetic_field_energy_density': 1/(2*mu_0)    * abs_B_squared,
         'magnetic_field_energy':         1/(2*mu_0)    * integral_B_squared,
         'dominant_frequency': dominant_frequency,
         'plasma_frequency':   plasma_frequency,
-        'kinetic_energy':     (1/2) * mass_electrons * v_electrons_squared + (1/2) * mass_ions * v_ions_squared,
-        'kinetic_energy_electrons': (1/2) * mass_electrons * v_electrons_squared,
-        'kinetic_energy_ions':      (1/2) * mass_ions      * v_ions_squared,
+        
+        # Updated kinetic energy keys to use the corrected totals
+        'kinetic_energy':           total_ke_electrons + total_ke_ions,
+        'kinetic_energy_electrons': total_ke_electrons,
+        'kinetic_energy_ions':      total_ke_ions,
+        
         'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
         'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
         'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,

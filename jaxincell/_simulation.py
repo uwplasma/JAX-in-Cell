@@ -1,5 +1,4 @@
 import jax.numpy as jnp
-from ._external_fields import resolve_external_fields_top_level_inplace  # NEW
 from jax.lax import cond
 from functools import partial
 from jax_tqdm import scan_tqdm
@@ -59,11 +58,6 @@ def load_parameters(input_file):
     except KeyError:
         solver_parameters['number_pseudoparticles_species'] = ()
     G = solver_parameters["number_grid_points"]
-    resolve_external_fields_top_level_inplace(parameters, G)
-    for k in ("external_magnetic_field", "external_electric_field"):
-        if k in parameters and isinstance(parameters[k], dict):
-            # parameters[k] looks like {"B": (G,3)} or {"E": (G,3)} now
-            input_parameters[k] = parameters[k]
     return input_parameters, solver_parameters
 
 def initialize_simulation_parameters(user_parameters={}):
@@ -375,7 +369,6 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     
     charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
     E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
-    jprint("***hello***")
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
     fields = (E_field, B_field)
     # --- External fields (arrays if provided at top-level; else zeros)
