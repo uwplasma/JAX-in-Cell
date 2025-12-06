@@ -9,11 +9,11 @@ tags:
 authors:
   - name: Longyu Ma
     affiliation: 1
-  - name: Aaron Tran
-    affiliation: 1
   - name: Hongke Lu
     affiliation: 1
   - name: Christopher Woolford
+    affiliation: 1
+  - name: Aaron Tran
     affiliation: 1
   - name: Rogerio Jorge
     affiliation: 1
@@ -25,13 +25,13 @@ bibliography: paper.bib
 ---
 
 # Summary
-JAX-in-Cell is a 1D3V Particle-in-Cell (PIC) code implemented entirely in JAX, providing a modern, Python-based alternative to traditional PIC frameworks. By using on JAX’s recommended functions, such as vmap, jit, and lax, for all core operations, the code achieves efficient vectorization and GPU acceleration. The resulting framework enables fast, fully kinetic plasma simulations suitable for both research applications and instructional settings.
+JAX-in-Cell is a 1D3V Particle-in-Cell (PIC) code implemented entirely in JAX, providing a modern, Python-based alternative to traditional PIC frameworks. By using JAX’s recommended functions, such as vmap, jit, and lax, for all core operations, the code achieves efficient vectorization and GPU acceleration. The resulting framework enables fast, fully kinetic plasma simulations suitable for both research applications and instructional settings.
 
 # Statement of Need
 
 A plasma is a collection of free ions and electrons whose self-generated and external electromagnetic fields drive collective behavior. PIC simulation is a powerful tool in plasma physics, offering a fully kinetic description and enabling exploration of complex interactions in fusion devices and astrophysical plasmas[@birdsall1991plasma].
 
-Our code, JAX-in-Cell, implements a 1D3V PIC framework in JAX and is built to be open-source, user-friendly, and developer-friendly, written entirely in Python in contrast to many other PIC codes implemented in legacy languages such as Fortran[@epochPic] or mixed-language frameworks[@vpicLANL]. Utilizing JAX, the code achieves high performance through GPU acceleration, just-in-time compilation, vectorized operations, and automatic differentiation, and it is well-suited for both educational-scale demonstrations—such as reproducing Landau damping and two-stream instability—and research-scale simulations such as rapid optimization.
+Our code, JAX-in-Cell, implements a 1D3V PIC framework in JAX and is built to be open-source, user-friendly, and developer-friendly, written entirely in Python in contrast to many other PIC codes implemented in legacy languages such as Fortran[@epochPic] or complex compiled architectures[@bowers2008ultrahigh]. Utilizing JAX, the code achieves high performance through GPU acceleration, just-in-time compilation, vectorized operations, and automatic differentiation, and it is well-suited for both educational-scale demonstrations—such as reproducing Landau damping and two-stream instability—and research-scale simulations such as rapid optimization.
 
 Furthermore, although the classic Boris push is simple and robust, long-term PIC simulations can experience energy drift (numerical heating). To mitigate this, JAX-in-Cell implements both the standard Boris algorithm[@boris1970relativistic] and an implicit, discretely energy-conserving method[@chen2011energy], providing improved energy conservation for extended simulations.
 
@@ -40,35 +40,31 @@ Furthermore, although the classic Boris push is simple and robust, long-term PIC
 The core of our PIC code is based on the Vlasov–Maxwell system, which self-consistently evolves particle distribution functions and electromagnetic fields. For each species $s$, the distribution function satisfies the Vlasov equation,
 
 \begin{equation}
-\partial_t f_s + \mathbf{v} \cdot \nabla f_s + \frac{q_s}{m_s} (\mathbf{E} + \mathbf{v} \times \mathbf{B}) \cdot \nabla_{\mathbf{v}} f_s = 0,
+\partial_t f_s + \mathbf{v}\cdot\nabla f_s
++ \frac{q_s}{m_s} \left( \mathbf{E} + \mathbf{v} \times \mathbf{B} \right)
+\cdot \nabla_{\mathbf{u}} f_s = 0,
 \end{equation}
 
-with the electromagnetic fields governed by the standard Maxwell equations. Here, $f_s$ denotes the distribution function, $\mathbf{v}$ is the particle velocity, $q_s$ and $m_s$ are the particle charge and mass, $\mathbf{E}$ and $\mathbf{B}$ are the electric and magnetic fields, $\varepsilon_0$ is the vacuum permittivity.
+with the electromagnetic fields governed by the standard Maxwell equations. Here, $f_s$ denotes the distribution function, $\mathbf{v}$ is the particle velocity, $q_s$ and $m_s$ are the particle charge and mass, $\mathbf{E}$ and $\mathbf{B}$ are the electric and magnetic fields, $ \mathbf{u} = \mathbf{v}\gamma $ is the proper velocity, and $ \gamma = \sqrt{1 + u^2/c^2} $ is the Lorentz factor, with $ c $ the speed of light..
 
 In a typical 1D3V PIC framework, the distribution function is discretized using pseudo-particles labeled $p$ as
 
 \begin{equation}
-f_s(x, \mathbf{v}) \approx \sum_{p \in s} w_p\, \delta(x - x_p)\, \delta(\mathbf{v} - \mathbf{v_p}),
+f_s(x, \mathbf{v}) \approx \sum_{p} w_p\, \delta(x - x_p)\, \delta(\mathbf{v} - \mathbf{v_p}),
 \end{equation}
 
-where $x_p$ denotes the position, $\mathbf{v_p}$ denotes the three-component velocity, the weight is given by $w_p = n_0L/N$, with $n_0$ number density, $L$ the spatial domain length and $N$ the number of pseudo-particles for that species. Then, spatial domain is divided into $N_x$ uniform cells with spacing $\Delta x$ and advanced in time by $\Delta t$. To mitigate numerical noise, each pseudo-particle is represented by a triangular shape function spanning three grid cells, and same kernel is used consistently for both the particle-to-grid charge deposition and the grid-to-particle field interpolation [@hockney1988computer]. Under the Courant–Friedrichs–Lewy (CFL) condition, particles traverse at most one cell per timestep. Accordingly, current density $j$ is computed from continuity equation using a discretely charge-conserving scheme[@villasenor1992rigorous] consistent with the shape function:
-
-\begin{equation}
-j^n_i = \frac{\Delta x}{\Delta t} \sum_{k=i-3}^{i+2} \left( \rho^{n+1/2}_{k+1/2} - \rho^{n-1/2}_{k+1/2} \right),
-\end{equation}
-
-where $i$ denote cell number, $n$ for timestep $\rho$ for charge density.
+where $x_p$ denotes the position, $\mathbf{v_p}$ denotes the three-component velocity, the weight is given by $w_p = n_0L/N$, with $n_0$ number density, $L$ the spatial domain length and $N$ the number of pseudo-particles for that species. Then, spatial domain is divided into $N_x$ uniform cells with spacing $\Delta x$ and advanced in time by $\Delta t$. To mitigate numerical noise, each pseudo-particle is represented by a triangular shape function spanning three grid cells, and same kernel is used consistently for both the particle-to-grid charge deposition and the grid-to-particle field interpolation [@hockney1988computer]. Accordingly, current density $j$ is computed from continuity equation using a discretely charge-conserving scheme[@villasenor1992rigorous] consistent with the shape function.
 
 We implement two time-evolution methods. See \autoref{fig:algorithm}.
 (1) an explicit Boris algorithm[@boris1970relativistic], and  (2) an implicit Crank–Nicolson scheme solved via Picard iteration[@chen2011energy].
 
-![Demonstration of two time-evolution algorithms \label{fig:algorithm}](figs/two_alg.png)
+![Demonstration of two time-evolution algorithms steps. Each step start with initialization quantities or extract last step data including particle position and velocity with fields on the grid. \label{fig:algorithm}](figs/two_alg.png)
 
 
 
 
 # Capabilities
-The code is designed to simulate plasma dynamics, giving users full control over a wide range of physical and numerical parameters, including particle distributions, thermal velocities, drift speeds, boundary conditions, external fields, number of particles species, and numerical tolerances. It supports both relativistic and non-relativistic particle dynamics and offers flexible options for initializing perturbations and multi-stream velocity configurations.
+The code is designed to simulate plasma dynamics, giving users full control over a wide range of physical and numerical parameters, including particle distributions, thermal velocities, drift speeds, external fields, number of particle species, and numerical tolerances. It also offers flexible options for initializing perturbations and multi-stream velocity configurations. Additionally, explicit algorithm also support relativistic particle dynamics and relfective or absorbing boundary conditons.
 
 To facilitate analysis, the code automatically computes key quantities such as spatial scales (e.g., Debye length, skin depth), plasma frequency, and diagnostics of electric and magnetic field energies, as well as kinetic energies of electrons and ions to monitor energy conservation.
 
@@ -99,7 +95,7 @@ where $v_{b1,2}$ are drift speeds along $x$ and $v_{th,i}$ is thermal velocities
 \xi_i=\frac{\omega}{kv_{th}}-\frac{v_{b_i}}{v_{th}},
 \end{equation}
 
-where $\lambda_D$ is Debye length and $Z$ is the Fried–Conte plasma dispersion function. The complex frequency $\omega$ determines both the oscillation frequency and the damping or growth rate $\gamma$. With this theoretical prediction established, the following parameter choices demonstrate two representative test cases:
+where $\lambda_D$ is Debye length and $Z$ is the Fried–Conte plasma dispersion function. The complex frequency $\omega$ determines both the oscillation frequency and the damping or growth rate $\gamma$. With this theoretical prediction established, the following parameter choices demonstrate two representative test cases using non-relativistic algorithms:
 
 For Landau damping:
 (i) Perturbation: $a = 0.025$, $k\lambda_D = 1/2$
@@ -111,7 +107,7 @@ For two-stream instability:
 (ii) Velocities: $v_{b_1} = -v_{b_2} = 0.2\,c$, $v_{th} = 0.05\,c$
 (iii) Discretization: $N = 10{,}000$, $N_x = 100$, $\Delta x = 0.5 \lambda_D$ and $\Delta t = 0.1\,\omega_{pe}^{-1}$
 
-![Electric field energy evolution for Landau damping and two-stream instability. (a) Landau damping with analytical damping rate $\gamma = 0.153$. (b) Two-stream instability showing fitted exponential growth rate. (c–d) Relative total energy deviation $|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)$ demonstrating energy conservation.\label{fig:output}](figs/output.png)
+![Electric field energy evolution for Landau damping and two-stream instability. (a) Landau damping with analytical damping rate $\gamma = 0.153\omega_{pe}$. (b) Two-stream instability showing fitted exponential growth rate. (c–d) Relative total energy deviation $|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)$ demonstrating energy conservation.\label{fig:output}](figs/output.png)
 
 The results in \autoref{fig:output} show good agreement with analytical predictions; nevertheless, the Landau damping simulation exhibits high sensitivity to the initial conditions, in particular the choice of perturbation amplitude.
 
@@ -121,19 +117,19 @@ Next, we investigated the Weibel instability, which arises in anisotropic plasma
 
 Additionally, to demonstrate the multi-species capability of our code, we study the bump-on-tail instability. This instability arises when a high-velocity electron beam creates a positive slope in the electron velocity distribution. We initialize the plasma with a bulk Maxwellian electron population and a tenuous, high-velocity beam that produces a pronounced bump in the tail of the distribution, and we track the evolution of the phase-space density and the associated electric field. During the linear growth phase, resonant electrons exchange energy with Langmuir waves, leading to exponential amplification of the electric field. As the instability evolves, the initially smooth electron distribution develops coherent phase-space structures, illustrating the code’s ability to capture nonlinear wave–particle interactions (\autoref{fig:bump-on-tail}).
 
-![Simulation of the bump-on-tail instability. The numbers of pseudo-particles in the bulk and beam populations are equal, with a beam-to-bulk weight ratio of $3\times10^{-2}$. (a) Snapshot of phase space at $80\,\omega_pe^{-1}$. (b) Time evolution of the electric field energy. \label{fig:bump-on-tail}](figs/bump-on-tail.png)
+![Simulation of the bump-on-tail instability. The numbers of pseudo-particles in the bulk and beam populations are equal, with a beam-to-bulk weight ratio of $3\times10^{-2}$. (a) Time evolution of the electric field energy. (b) Snapshot of phase space at $80\,\omega_{pe}^{-1}$. \label{fig:bump-on-tail}](figs/bump-on-tail.png)
 
 
-Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes and analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{fig:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation. Our benchmarks also indicate that GPU results depend on floating-point precision: running in 32-bit mode by manually disabling JAX’s x64 option reduces memory usage and improves speed, but can introduce deviations when compared to 64-bit results. Some of these differences also depend on details of the fitting range used to extract growth rates. For high-accuracy studies, we therefore recommend using the default 64-bit mode, with 32-bit remaining a useful option for rapid exploratory runs.
+Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes on an AMD EPYC 7763 CPU and an NVIDIA A100 GPU, analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{fig:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation. Our benchmarks also indicate that GPU results depend on floating-point precision: running in 32-bit mode by manually disabling JAX’s x64 option reduces memory usage and improves speed, but can introduce deviations when compared to 64-bit results. Some of these differences also depend on details of the fitting range used to extract growth rates. For high-accuracy studies, we therefore recommend using the default 64-bit mode, with 32-bit remaining a useful option for rapid exploratory runs.
 
-![Comparison of total runtime between CPU and GPU. (b) Influence of pseudoparticle number on the two-stream instability sampling results. Growth rates extracted from exponential fits.\label{fig:Run_time}](figs/Run_time.png)
+![(a) Comparison of total runtime between CPU and GPU. (b) Influence of pseudoparticle number on the two-stream instability sampling results. Growth rates extracted from exponential fits.\label{fig:Run_time}](figs/Run_time.png)
 
 These results demonstrate that a fully JAX-based PIC code can deliver both high physical fidelity and excellent computational efficiency, making it suitable for rapid exploratory studies as well as larger-scale plasma simulations.
 
 # Acknowledgement
 
 This work was supported by the National Science Foundation under Grant No. PHY-2409066.
-This work used the Jetstream2 at Indiana University through allocation PHY240054 from the Advanced Cyberinfrastructure Coordination Ecosystem: Services \& Support (ACCESS) program which is supported by National Science Foundation grants \#213859, \#2138286, \#2138307, \#2137603 and \#2138296. This research used resources of the National Energy Research Scientific Computing Center, a DOE Office of Science User Facility supported by the Office of Science of the U.S. Department of Energy under Contract No. DE-AC02-05CH11231 using NERSC award NERSC DDR-ERCAP0030134.
+This work used the Jetstream2 at Indiana University through allocation PHY240054 from the Advanced Cyberinfrastructure Coordination Ecosystem: Services \& Support (ACCESS) program which is supported by National Science Foundation grants \#213859, \#2138286, \#2138307, \#2137603 and \#2138296. This research used resources of the National Energy Research Scientific Computing Center, a DOE Office of Science User Facility supported by the Office of Science of the U.S. Department of Energy under Contract No. DE-AC02-05CH11231 using NERSC award NERSC DDR-ERCAP0030134. Aaron Tran was supported by the DOE Fusion Energy Sciences Postdoctoral Research Program, administered by the Oak Ridge Institute for Science and Education (ORISE) and Oak Ridge Associated Universities (ORAU) under DOE contract DE-SC0014664.
 
 # References
 
