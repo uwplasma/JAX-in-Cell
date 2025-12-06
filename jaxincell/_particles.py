@@ -2,8 +2,8 @@ from jax import vmap, jit
 import jax.numpy as jnp
 from ._boundary_conditions import field_2_ghost_cells
 from ._constants import speed_of_light as c
-
-__all__ = ['fields_to_particles_grid', 'rotation', 'boris_step', 'boris_step_relativistic']
+from ._sources import get_S2_weights_and_indices_periodic_CN
+__all__ = ['fields_to_particles_grid', 'fields_to_particles_periodic_CN','boris_velocity_CN','rotation', 'boris_step', 'boris_step_relativistic']
 
 @jit
 def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):
@@ -44,6 +44,48 @@ def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, fi
     
     return fields_n
 
+@jit
+def fields_to_particles_periodic_CN(x_n, field, dx, grid_start):
+    """
+    Interpolates field to particle using Periodic BCs.
+    Args:
+        field: The field array (size N).
+        grid_start: Physical position of field[0].
+    """
+    x = x_n[0]
+    grid_size = len(field)
+    
+    # Get wrapped indices and weights
+    indices, weights = get_S2_weights_and_indices_periodic_CN(x, dx, grid_start, grid_size)
+    
+    # Gather (Dot Product)
+    # Since indices are already wrapped (0 to N-1), this is safe.
+    E_particle = jnp.dot(weights, field[indices])
+    
+    return E_particle
+
+
+def boris_velocity_CN(v_old, E, B, dt_sub, q_m):
+    """
+    Algebraically solves the implicit velocity equation:
+    (v_new - v_old)/dt = q/m * (E + (v_new + v_old)/2 x B)
+    """
+    # t vector: q/m * B * dt/2
+    t = (q_m * B) * (0.5 * dt_sub)
+    t_mag_sq = jnp.sum(t**2, axis=-1, keepdims=True)
+    s = 2.0 * t / (1.0 + t_mag_sq)
+
+    # v_minus: First half electric push
+    v_minus = v_old + (q_m * E) * (0.5 * dt_sub)
+
+    # Rotation
+    v_prime = v_minus + jnp.cross(v_minus, t)
+    v_plus  = v_minus + jnp.cross(v_prime, s)
+
+    # v_new: Second half electric push
+    v_new = v_plus + (q_m * E) * (0.5 * dt_sub)
+    
+    return v_new
 
 @jit
 def rotation(dt, B, vsub, q_m):
