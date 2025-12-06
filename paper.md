@@ -45,7 +45,7 @@ The core of our PIC code is based on the Vlasov–Maxwell system, which self-con
 \cdot \nabla_{\mathbf{u}} f_s = 0,
 \end{equation}
 
-with the electromagnetic fields governed by the standard Maxwell equations. Here, $f_s$ denotes the distribution function, $\mathbf{v}$ is the particle velocity, $q_s$ and $m_s$ are the particle charge and mass, $\mathbf{E}$ and $\mathbf{B}$ are the electric and magnetic fields, $ \mathbf{u} = \mathbf{v}\gamma $ is the proper velocity, and $ \gamma = \sqrt{1 + u^2/c^2} $ is the Lorentz factor, with $ c $ the speed of light..
+with the electromagnetic fields governed by the standard Maxwell equations. Here, $f_s$ denotes the distribution function, $\mathbf{v}$ is the particle velocity, $q_s$ and $m_s$ are the particle charge and mass, $\mathbf{E}$ and $\mathbf{B}$ are the electric and magnetic fields, $\mathbf{u} = \mathbf{v}\gamma$ is the proper velocity, and $\gamma = \sqrt{1 + u^2/c^2}$ is the Lorentz factor, with $c$ the speed of light.
 
 In a typical 1D3V PIC framework, the distribution function is discretized using pseudo-particles labeled $p$ as
 
@@ -64,7 +64,7 @@ We implement two time-evolution methods. See \autoref{fig:algorithm}.
 
 
 # Capabilities
-The code is designed to simulate plasma dynamics, giving users full control over a wide range of physical and numerical parameters, including particle distributions, thermal velocities, drift speeds, external fields, number of particle species, and numerical tolerances. It also offers flexible options for initializing perturbations and multi-stream velocity configurations. Additionally, explicit algorithm also support relativistic particle dynamics and relfective or absorbing boundary conditons.
+The code is designed to simulate plasma dynamics, giving users full control over a wide range of physical and numerical parameters, including particle distributions, thermal velocities, drift speeds, external fields, number of particle species, and numerical tolerances. It also offers flexible options for initializing perturbations and multi-stream velocity configurations. Additionally, explicit algorithm also support relativistic particle dynamics and reflective or absorbing boundary conditions.
 
 To facilitate analysis, the code automatically computes key quantities such as spatial scales (e.g., Debye length, skin depth), plasma frequency, and diagnostics of electric and magnetic field energies, as well as kinetic energies of electrons and ions to monitor energy conservation.
 
