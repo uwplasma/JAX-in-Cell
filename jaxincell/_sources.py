@@ -1,8 +1,43 @@
 import jax.numpy as jnp
 from jax import jit, vmap
 from jax.lax import dynamic_update_slice
+from functools import partial
 
-__all__ = ['charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density']
+__all__ = ['get_S2_weights_and_indices_periodic_CN','charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density', 'current_density_periodic_CN']
+
+@jit
+def get_S2_weights_and_indices_periodic_CN(x, dx, grid_start, grid_size):
+    """
+    Calculates weights and indices for Quadratic Spline (S2).
+    Applies Periodic Wrapping to indices immediately.
+    """
+    # 1. Normalize position
+    x_norm = (x - grid_start) / dx
+    
+    # 2. Nearest node index k
+    k = jnp.round(x_norm).astype(int)
+    
+    # 3. Raw Indices [k-1, k, k+1]
+    # We apply modulo (%) here to handle wrapping automatically.
+    # e.g., if k=0, k-1=-1, which wraps to grid_size-1.
+    indices = jnp.array([k - 1, k, k + 1]) % grid_size
+    
+    # 4. Distance d from node k
+    d = x_norm - k  # d in [-0.5, 0.5]
+    
+    # 5. Continuous S2 Weights
+    # Center (at k):
+    w_cen = 0.75 - d**2
+    
+    # Left (at k-1): Distance is (1 + d)
+    w_left = 0.5 * (0.5 - d)**2
+    
+    # Right (at k+1): Distance is (1 - d)
+    w_right = 0.5 * (0.5 + d)**2
+    
+    weights = jnp.array([w_left, w_cen, w_right])
+    
+    return indices, weights
 
 @jit
 def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, charge):
@@ -162,3 +197,48 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
     current_dens_z = jnp.sum(current_dens_z, axis=0)
 
     return jnp.stack([current_dens_x, current_dens_y, current_dens_z], axis=0).T
+
+
+@partial(jit, static_argnames=('grid_size',))
+def current_density_periodic_CN(xs_n, vs_n, qs, dx, grid_start, grid_size):
+    """
+    Deposits Current J using Periodic BCs.
+    Note: We removed xs_nminushalf/plus half arguments as we use the midpoint 
+    approximation (xs_n, vs_n) consistent with CN.
+    """
+    
+    def compute_single_particle_J(i):
+        x = xs_n[i, 0]
+        q = qs[i, 0]
+        
+        # Variational Current: J = (q/dx) * v * S(x)
+        vx = vs_n[i, 0] * (q / dx)
+        vy = vs_n[i, 1] * (q / dx)
+        vz = vs_n[i, 2] * (q / dx)
+        
+        # Get wrapped indices and weights
+        indices, weights = get_S2_weights_and_indices_periodic_CN(x, dx, grid_start, grid_size)
+        
+        # Calculate contributions
+        jx_contrib = weights * vx
+        jy_contrib = weights * vy
+        jz_contrib = weights * vz
+        
+        return indices, jx_contrib, jy_contrib, jz_contrib
+
+    # Vectorize over particles
+    batch_indices, batch_Jx, batch_Jy, batch_Jz = vmap(compute_single_particle_J)(jnp.arange(len(xs_n)))
+    
+    # Flatten
+    batch_indices = batch_indices.flatten()
+    batch_Jx = batch_Jx.flatten()
+    batch_Jy = batch_Jy.flatten()
+    batch_Jz = batch_Jz.flatten()
+    
+    # Accumulate onto grid
+    # .at[indices].add() handles collisions (multiple particles in same cell) correctly
+    J_x = jnp.zeros(grid_size).at[batch_indices].add(batch_Jx)
+    J_y = jnp.zeros(grid_size).at[batch_indices].add(batch_Jy)
+    J_z = jnp.zeros(grid_size).at[batch_indices].add(batch_Jz)
+    
+    return jnp.stack([J_x, J_y, J_z], axis=1)
