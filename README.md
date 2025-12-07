@@ -80,6 +80,12 @@ magnetic field $\mathbf B$ using the full Maxwell curl equations on a staggered 
 electromagnetic PIC* scheme: it supports electrostatic and electromagnetic waves, beam instabilities
 (two-stream, Weibel), and field propagation at the speed of light.
 
+**Shape functions and digital filtering.** Charge and current are deposited with a quadratic (TSC) shape
+function, and can be further smoothed by configurable digital filters applied to both charge density and
+current density. The filter is controlled by three knobs in the input/TOML:
+`filter_passes`, `filter_alpha`, and `filter_strides`, providing a standard Birdsall–Langdon-style way
+to reduce grid-scale noise without changing the core EM PIC scheme.
+
 In PIC terminology:
 
 - **Full EM PIC** (what JAX-in-Cell implements by default) solves the coupled particle + Maxwell system
@@ -218,9 +224,10 @@ The main numerical “knobs” exposed by `simulation()` and the TOML input are:
   - `time_evolution_algorithm = 0` — **Explicit EM PIC (default).** Leapfrog scheme with Boris pusher
     (non-relativistic or relativistic) and explicit Maxwell curl update. CFL-limited by
     $c \, \Delta t / \Delta x \lesssim 1$.
-  - `time_evolution_algorithm = 1` — **Implicit Crank–Nicolson step.** Uses an implicit solve for the
-    electric field with substepping in time (currently electrostatic-only for the field update), useful
-    as a prototype for stiff electrostatic problems.
+    
+  - `time_evolution_algorithm = 1` — **Implicit Crank–Nicolson step (electrostatic field update).** Uses an
+  implicit solve for the longitudinal electric field with particle substepping in time (no curlE/curlB EM
+  update in this mode), useful as a prototype for stiff electrostatic problems.
 
 - `relativistic` (bool, in `input_parameters`)
 
@@ -228,8 +235,26 @@ The main numerical “knobs” exposed by `simulation()` and the TOML input are:
   - `True` — Use a relativistic Boris pusher that advances particle momentum and enforces
     $|\mathbf v| < c$ consistently.
 
-Other important physics knobs include the thermal speeds (`vth_electrons_over_c_*`),
-temperature ratios (`ion_temperature_over_electron_temperature_*`), and drift velocities
+- `filter_passes`, `filter_alpha`, `filter_strides` (in `input_parameters`)
+
+  Control a configurable digital filter applied to both the charge density and current density on the grid:
+
+  - `filter_passes` — number of times the filter is applied (more passes ⇒ stronger smoothing).
+  - `filter_alpha` — filter strength in each pass (typically between 0 and 1).
+  - `filter_strides` — tuple of integer strides (e.g. `(1, 2, 4)`) for multi-scale smoothing.
+
+  Together, these act as a Birdsall–Langdon-style low-pass filter on ρ and J, complementary to the
+  built-in quadratic (TSC) particle shape functions.
+
+- `species` and `number_pseudoparticles_species` (optional additional populations)
+
+  In the TOML (or directly in `simulation(...)`) you can specify extra species under a `species` table,
+  each with its own charge, mass, thermal velocities and drift speeds. The corresponding
+  `number_pseudoparticles_species` tuple in `solver_parameters` controls how many macro-particles are
+  used for each additional species.
+
+Other important physics knobs include the thermal speeds (`vth_electrons_over_c_x,y,z`),
+temperature ratios (`ion_temperature_over_electron_temperature_x,y,z`), and drift velocities
 (`electron_drift_speed_*`, `ion_drift_speed_*`), which control the initial plasma state in the
 provided example scripts (Landau damping, Langmuir waves, ion-acoustic waves, Weibel, etc.).
 

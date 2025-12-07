@@ -35,6 +35,9 @@ def test_diagnostics_basic_energy_and_species():
     magnetic_field = jnp.zeros_like(electric_field)
     external_magnetic_field = jnp.zeros_like(electric_field)
 
+    # Charge density: for this toy test, set it to zero everywhere
+    charge_density = jnp.zeros((T, G))
+
     # Positions are not used in energy, but needed for species splitting
     positions = jnp.zeros((T, N, 3))
 
@@ -65,6 +68,7 @@ def test_diagnostics_basic_energy_and_species():
         "total_steps": T,
         "dx": dx,
         "plasma_frequency": plasma_frequency,
+        "charge_density": charge_density,
     }
 
     diagnostics(output)

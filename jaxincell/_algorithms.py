@@ -7,6 +7,7 @@ from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
 from ._fields import (field_update1, field_update2, project_E_to_satisfy_Gauss)
+from ._filters import filter_vector_field
 
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
@@ -20,6 +21,10 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     (E_field, B_field, positions_minus1_2, positions,
      positions_plus1_2, velocities, qs, ms, q_ms) = carry
+    
+    fpasses  = parameters["filter_passes"]
+    falpha   = parameters["filter_alpha"]
+    fstrides = parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
 
     # ------------------------------------------------------------------
     # 1) Half-step current and Maxwell update (Faraday + Ampère–Maxwell)
@@ -29,6 +34,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
         qs, dx, dt, grid, grid[0] - dx / 2,
         particle_BC_left, particle_BC_right
     )
+    J_half1 = filter_vector_field(J_half1, passes=fpasses, alpha=falpha, strides=fstrides)
 
     # First half EM step: update E and B by dt/2
     # EM = full Maxwell (no Poisson here)
@@ -43,18 +49,16 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # Add external fields
     total_E = E_field + parameters["external_electric_field"]
     total_B = B_field + parameters["external_magnetic_field"]
+    
+    interp_E = partial(fields_to_particles_grid,
+                       dx=dx, grid=grid + dx/2, grid_start=grid[0],
+                       field_BC_left=field_BC_left, field_BC_right=field_BC_right)
+    interp_B = partial(fields_to_particles_grid,
+                       dx=dx, grid=grid, grid_start=grid[0] - dx/2,
+                       field_BC_left=field_BC_left, field_BC_right=field_BC_right)
 
     def interpolate_fields(x_n):
-        # E defined at grid + dx/2, B at grid (staggering)
-        E = fields_to_particles_grid(
-            x_n, total_E, dx, grid + dx/2, grid[0],
-            field_BC_left, field_BC_right
-        )
-        B = fields_to_particles_grid(
-            x_n, total_B, dx, grid, grid[0] - dx/2,
-            field_BC_left, field_BC_right
-        )
-        return E, B
+        return interp_E(x_n, total_E), interp_B(x_n, total_B)
 
     E_field_at_x, B_field_at_x = vmap(interpolate_fields)(positions_plus1_2)
 
@@ -96,6 +100,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
         qs, dx, dt, grid, grid[0] - dx / 2,
         particle_BC_left, particle_BC_right
     )
+    J_half2 = filter_vector_field(J_half2, passes=fpasses, alpha=falpha, strides=fstrides)
 
     E_field, B_field = field_update2(
         E_field, B_field, dx, dt/2, J_half2,
@@ -108,7 +113,9 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     if field_solver != 0:
         charge_density = calculate_charge_density(
             positions_plus1, qs, dx, grid,
-            particle_BC_left, particle_BC_right
+            particle_BC_left, particle_BC_right,
+            filter_passes=fpasses, filter_alpha=falpha,
+            filter_strides=fstrides
         )
         # 1: FFT projection, 2: Cartesian, 3: FFT alias
         E_field = project_E_to_satisfy_Gauss(
@@ -132,7 +139,9 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # Diagnostics at whole time n+1
     charge_density = calculate_charge_density(
         positions, qs, dx, grid,
-        particle_BC_left, particle_BC_right
+        particle_BC_left, particle_BC_right,
+        filter_passes=fpasses, filter_alpha=falpha,
+        filter_strides=fstrides
     )
     step_data = (positions, velocities, E_field, B_field, J_half2, charge_density)
 
@@ -145,6 +154,27 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
                                   field_BC_left, field_BC_right, num_substeps):
     (E_field, B_field, positions,
     velocities, qs, ms, q_ms) = carry
+    
+    fpasses  = parameters["filter_passes"]
+    falpha   = parameters["filter_alpha"]
+    fstrides = parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
+    
+    # -------------------- hoisted constants / closures --------------------
+    dtau = dt / num_substeps
+    grid_for_E   = grid + dx/2        # E stagger
+    start_for_E  = grid[0]            # left start for E
+    grid_for_J   = grid               # for current deposition
+    start_for_J  = grid[0] - dx/2     # J stagger
+    t_n = step_index * dt * parameters["plasma_frequency"]
+    metric_cfg = parameters.get("metric", {"kind": 0, "params": {}})
+
+    # Prebuild interpolation closure once
+    interp_E = partial(
+        fields_to_particles_grid,
+        dx=dx, grid=grid_for_E, grid_start=start_for_E,
+        field_BC_left=field_BC_left, field_BC_right=field_BC_right,
+    )
+    # ---------------------------------------------------------------------
 
     E_new=E_field
     B_new=B_field
@@ -158,11 +188,6 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     def picard_step(pic_carry, _):
         _, E_new, pos_fix, _, vel_fix, _, qs_prev, ms_prev, q_ms_prev, pos_stag_arr = pic_carry
         E_avg = 0.5 * (E_field + E_new)
-        dtau  = dt / num_substeps
-
-
-        interp_E = partial(fields_to_particles_grid, dx=dx, grid=grid + dx/2, grid_start=grid[0],
-                        field_BC_left=field_BC_left, field_BC_right=field_BC_right)
         # substepping
         def substep_loop(sub_carry, step_idx):
             pos_sub, vel_sub, qs_sub, ms_sub, q_ms_sub, pos_stag_arr = sub_carry
@@ -193,7 +218,7 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
                 pos_sub, pos_stag_new, pos_new, vel_mid, qs_new, dx, dtau, grid,
                 grid[0] - dx/2, particle_BC_left, particle_BC_right
             )
-
+            J_sub = filter_vector_field(J_sub, passes=fpasses, alpha=falpha, strides=fstrides)
             return (pos_new, vel_new, qs_new, ms_new, q_ms_new, pos_stag_arr), J_sub * dtau
 
         # initial substep carry 
@@ -258,7 +283,8 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     positions_plus1= positions_new
     velocities_plus1 = velocities_new
     
-    charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)
+    charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right,
+                                              filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
 
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
     

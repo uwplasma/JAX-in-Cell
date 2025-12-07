@@ -132,12 +132,24 @@ def initialize_simulation_parameters(user_parameters={}):
         "external_electric_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
         "external_magnetic_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
+        
+        # Filtering parameters for current and charge density (digital smoothing)
+        "filter_passes": 5,       # number of passes of the digital filter applied to ρ and J
+        "filter_alpha": 0.5,      # filter strength (0 < alpha < 1)
+        "filter_strides": (1, 2, 4),  # multi-scale strides for filtering
 
         "weight": 0,
     }
 
     # Merge user-provided parameters into the default dictionary
     parameters = {**default_parameters, **user_parameters}
+
+    # Backward compatibility: allow scalar ion_temperature_over_electron_temperature
+    if "ion_temperature_over_electron_temperature" in user_parameters:
+        val = user_parameters["ion_temperature_over_electron_temperature"]
+        parameters["ion_temperature_over_electron_temperature_x"] = val
+        parameters["ion_temperature_over_electron_temperature_y"] = val
+        parameters["ion_temperature_over_electron_temperature_z"] = val
 
     # Compute derived parameters based on user-provided or default values
     for key, value in parameters.items():
@@ -359,8 +371,11 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     # **Fields Initialization**
     B_field = jnp.zeros((grid.size, 3))
     E_field = jnp.zeros((grid.size, 3))
+    field_dtype = E_field.dtype
     
-    charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
+    charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"],
+                                              parameters["particle_BC_right"], filter_passes=parameters["filter_passes"],
+                                              filter_alpha=parameters["filter_alpha"], filter_strides=parameters["filter_strides"])
     E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
     fields = (E_field, B_field)
@@ -369,16 +384,15 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     secB = input_parameters.get("external_magnetic_field")
     secE = input_parameters.get("external_electric_field")
-    # print(secB["B"])
     if isinstance(secB, dict) and "B" in secB:
-        parameters["external_magnetic_field"] = jnp.asarray(secB["B"], dtype=jnp.float32)
+        parameters["external_magnetic_field"] = jnp.asarray(secB["B"], dtype=field_dtype)
     else:
-        parameters["external_magnetic_field"] = jnp.zeros((G, 3), dtype=jnp.float32)
+        parameters["external_magnetic_field"] = jnp.zeros((G, 3), dtype=field_dtype)
 
     if isinstance(secE, dict) and "E" in secE:
-        parameters["external_electric_field"] = jnp.asarray(secE["E"], dtype=jnp.float32)
+        parameters["external_electric_field"] = jnp.asarray(secE["E"], dtype=field_dtype)
     else:
-        parameters["external_electric_field"] = jnp.zeros((G, 3), dtype=jnp.float32)
+        parameters["external_electric_field"] = jnp.zeros((G, 3), dtype=field_dtype)
 
     # external_E_field_x = parameters["external_electric_field_amplitude"] * jnp.cos(parameters["external_electric_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
     # external_B_field_x = parameters["external_magnetic_field_amplitude"] * jnp.cos(parameters["external_magnetic_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))

@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 from jax import jit, vmap
 from jax.lax import dynamic_update_slice
+from ._filters import filter_scalar_field
 
 __all__ = ['charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density']
 
@@ -62,10 +63,15 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
         array: The charge density contribution on the grid.
     """
     # Compute charge density using a quadratic shape function
-    grid_noBCs =  (q/dx)*jnp.where(abs(x-grid)<=dx/2,3/4-(x-grid)**2/(dx**2),
-                         jnp.where((dx/2<abs(x-grid))&(abs(x-grid)<=3*dx/2),
-                                    0.5*(3/2-abs(x-grid)/dx)**2,
-                                    jnp.zeros(len(grid))))
+    grid_noBCs = (q / dx) * jnp.where(
+        jnp.abs(x - grid) <= dx / 2,
+        3/4 - (x - grid)**2 / (dx**2),
+        jnp.where(
+            (dx/2 < jnp.abs(x - grid)) & (jnp.abs(x - grid) <= 3*dx/2),
+            0.5 * (3/2 - jnp.abs(x - grid) / dx)**2,
+            jnp.zeros(len(grid))
+        )
+    )
 
     # Handle boundary conditions
     chargedens_for_L, chargedens_for_R = charge_density_BCs(particle_BC_left, particle_BC_right, x, dx, grid, q)
@@ -74,20 +80,24 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
     return grid_BCs
 
 @jit
-def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right):
+def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right, filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4)):
     """
     Computes the total charge density on the grid by summing contributions from all particles.
 
     Args:
-        xs_n (array): Particle positions at the current timestep, shape (N, 1).
+        xs_n (array): Particle positions at the current timestep, shape (N, 3). Only xs_n[:, 0]
+            (the x coordinate) is used for deposition.
         qs (array): Particle charges, shape (N, 1).
         dx (float): The grid spacing.
         grid (array): The grid points.
-        BC_left (int): Left boundary condition type.
-        BC_right (int): Right boundary condition type.
+        particle_BC_left (int): Left boundary condition type.
+        particle_BC_right (int): Right boundary condition type.
+        filter_passes (int): Number of smoothing passes applied to the total charge density.
+        filter_alpha (float): Smoothing strength for the digital filter.
+        filter_strides (tuple[int]): Strides for multi-scale filtering.
 
     Returns:
-        array: Total charge density on the grid.
+        array: Total (filtered) charge density on the grid, shape (G,).
     """
     # Vectorize over particles
     chargedens_contrib = vmap(single_particle_charge_density, in_axes=(0, 0, None, None, None, None))
@@ -97,6 +107,7 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
 
     # Sum the contributions across all particles
     total_chargedens = jnp.sum(chargedens, axis=0)
+    total_chargedens = filter_scalar_field(total_chargedens, passes=filter_passes, alpha=filter_alpha, strides=filter_strides)
 
     return total_chargedens
 
@@ -106,11 +117,11 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
     Computes the current density `j` on the grid from particle motion.
 
     Args:
-        xs_nminushalf (array): Particle positions at the half timestep before the current one, shape (N, 1).
-        xs_n (array): Particle positions at the current timestep, shape (N, 1).
-        xs_nplushalf (array): Particle positions at the half timestep after the current one, shape (N, 1).
-        vs_n (array): Particle velocities at the current timestep, shape (N, 3).
-        qs (array): Particle charges, shape (N, 1).
+        xs_nminushalf (array): Particle positions at t = n-1/2, shape (N, 3). Only [:, 0] is used.
+        xs_n          (array): Particle positions at t = n,     shape (N, 3). Only [:, 0] is used.
+        xs_nplushalf  (array): Particle positions at t = n+1/2, shape (N, 3). Only [:, 0] is used.
+        vs_n          (array): Particle velocities at the current timestep, shape (N, 3).
+        qs            (array): Particle charges, shape (N, 1).
         dx (float): The grid spacing.
         dt (float): The time step size.
         grid (array): The grid points.
