@@ -3,7 +3,7 @@
 </p>
 <!-- <p align="center"><h3 align="center">JAX-IN-CELL</h1></p> -->
 <p align="center">
-	<em><code>❯ jaxincell: 1D3V particle-in-cell code in JAX to perform simulation of plasmas</code></em>
+	<em><code>❯ jaxincell: 1D3V full electromagnetic (EM) particle-in-cell code in JAX to simulate plasmas</code></em>
 </p>
 <p align="center">
 	<img src="https://img.shields.io/github/license/uwplasma/JAX-in-Cell?style=default&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
@@ -48,7 +48,7 @@
 
 ##  Overview
 
-JAX-in-Cell is an open-source project in Python that uses JAX to speedup simulations, leading to a simple to use, fast and concise code. It can be imported in a Python script using the **jaxincell** package, or run directly in the command line as `jaxincell`. To install it, use
+JAX-in-Cell is an open-source 1D3V full electromagnetic (EM) particle-in-cell (PIC) code written in Python/JAX. It uses JAX for just-in-time compilation, automatic differentiation and GPU/TPU support, leading to a simple to use, fast and concise research code. It can be imported in a Python script using the **jaxincell** package, or run directly in the command line as `jaxincell`. To install it, use
 
    ```sh
    pip install jaxincell
@@ -74,7 +74,22 @@ The project can be downloaded in its [GitHub repository](https://github.com/uwpl
 
 JAX-in-Cell can run in CPUs, GPUs and TPUs, has autodifferentiation and just-in-time compilation capabilities, is based on rigorous testing, uses CI/CD via GitHub actions and has detailed documentation.
 
-Currently, it evolves particles using the non-relativisic Lorentz force $\mathbf F = q (\mathbf E + \mathbf v \times \mathbf B)$, and evolves the electric $\mathbf E$ and magnetic $\mathbf B$ field using Maxwell's equations.
+**Full EM PIC.** By default, JAX-in-Cell advances particles with the (optionally relativistic) Lorentz force
+$\mathbf F = q (\mathbf E + \mathbf v \times \mathbf B)$ and updates both the electric field $\mathbf E$ and
+magnetic field $\mathbf B$ using the full Maxwell curl equations on a staggered 1D grid. This is a *full
+electromagnetic PIC* scheme: it supports electrostatic and electromagnetic waves, beam instabilities
+(two-stream, Weibel), and field propagation at the speed of light.
+
+In PIC terminology:
+
+- **Full EM PIC** (what JAX-in-Cell implements by default) solves the coupled particle + Maxwell system
+  (Ampère–Maxwell and Faraday laws) so that both $\mathbf E$ and $\mathbf B$ evolve in time.
+- **Electrostatic PIC** would instead solve only Gauss/Poisson for $\mathbf E$ with $\mathbf B = 0$; this is
+  effectively recovered in JAX-in-Cell by starting from $\mathbf B = 0$ and focusing on the longitudinal
+  electric field.
+- More advanced reduced models (Darwin, quasi-static, etc.) are not yet implemented; the code is designed
+  so that such extensions can be added on top of the full EM formulation.
+
 
 Plenty of examples are provided in the `examples` folder, and the documentation can be found in [Read the Docs](https://jax-in-cell.readthedocs.io/).
 
@@ -173,6 +188,50 @@ There, you can find most of the input parameters needed to run many test cases, 
 The `jaxincell` package has a single function `simulation()` that takes as arguments a dictionary input_parameters, the number of grid points, number of pseudoelectrons, total number of time steps, and the field solver to use.
 
 In the [example script](example_script.py) file we write as inline comments the meaning of each input parameter.
+
+#### Physics / numerical knobs
+
+The main numerical “knobs” exposed by `simulation()` and the TOML input are:
+
+- `field_solver` (int, in `solver_parameters`)
+
+  During time-stepping, JAX-in-Cell **always** updates the fields via the full EM Maxwell curl equations.
+  The `field_solver` flag controls how Gauss’s law
+  \[
+    \nabla\cdot \mathbf E = \rho / \varepsilon_0
+  \]
+  is enforced for the longitudinal electric field $E_x$ after each full EM update:
+
+  - `field_solver = 0` — **No Gauss projection.** Pure Maxwell curl update (Yee-like). Gauss’s law is only
+    satisfied to the accuracy of the charge/current deposition. Useful for quick tests, but Gauss and
+    total-energy diagnostics may drift more.
+  - `field_solver = 1` — **FFT-based Gauss projection (periodic).** After each field update, the code
+    projects $E_x$ in Fourier space so that the *discrete* divergence (the same backward-difference used in
+    the diagnostics) matches $\rho / \varepsilon_0$ on a periodic 1D grid. This is the recommended default
+    for periodic Landau damping, Langmuir waves, and two-stream instability.
+  - `field_solver = 2` — **Real-space (Cartesian) Gauss projection.** Enforces the same discrete Gauss law
+    in physical space using a cumulative-sum solver. This is a good cross-check of the FFT projector and a
+    template for more general boundary conditions.
+
+- `time_evolution_algorithm` (int, in `solver_parameters`)
+
+  - `time_evolution_algorithm = 0` — **Explicit EM PIC (default).** Leapfrog scheme with Boris pusher
+    (non-relativistic or relativistic) and explicit Maxwell curl update. CFL-limited by
+    $c \, \Delta t / \Delta x \lesssim 1$.
+  - `time_evolution_algorithm = 1` — **Implicit Crank–Nicolson step.** Uses an implicit solve for the
+    electric field with substepping in time (currently electrostatic-only for the field update), useful
+    as a prototype for stiff electrostatic problems.
+
+- `relativistic` (bool, in `input_parameters`)
+
+  - `False` — Use the standard non-relativistic Boris pusher.
+  - `True` — Use a relativistic Boris pusher that advances particle momentum and enforces
+    $|\mathbf v| < c$ consistently.
+
+Other important physics knobs include the thermal speeds (`vth_electrons_over_c_*`),
+temperature ratios (`ion_temperature_over_electron_temperature_*`), and drift velocities
+(`electron_drift_speed_*`, `ion_drift_speed_*`), which control the initial plasma state in the
+provided example scripts (Landau damping, Langmuir waves, ion-acoustic waves, Weibel, etc.).
 
 ###  Testing
 Run the test suite using the following command:

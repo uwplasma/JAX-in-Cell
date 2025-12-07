@@ -153,16 +153,36 @@ def plot(output, direction="x", threshold=1e-12):
 
     if total_axes >= used_axes + 1:
         energy_ax = axes_flat[used_axes]
-        energy_ax.plot(time, output["total_energy"],          label="Total energy")
+        energy_ax.plot(time, output["total_energy"],             label="Total energy")
         energy_ax.plot(time, output["kinetic_energy_electrons"], label="Kinetic energy electrons")
-        energy_ax.plot(time, output["kinetic_energy_ions"],   label="Kinetic energy ions")
-        energy_ax.plot(time, output["electric_field_energy"], label="Electric field energy")
+        energy_ax.plot(time, output["kinetic_energy_ions"],      label="Kinetic energy ions")
+        energy_ax.plot(time, output["electric_field_energy"],    label="Electric field energy")
         if jnp.max(output["magnetic_field_energy"]) > 1e-10:
             energy_ax.plot(time, output["magnetic_field_energy"], label="Magnetic field energy")
-        energy_ax.plot(time[2:], jnp.abs(jnp.mean(output["charge_density"][2:], axis=-1))*1e13, label=r"Mean $\rho \times 10^{13}$")
-        energy_ax.plot(time[1:], jnp.abs(output["total_energy"][1:] - output["total_energy"][0]) / output["total_energy"][0], label="Relative energy error")
-        energy_ax.set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)",
-                    ylabel="Energy (J)", yscale="log", ylim=[1e-7, None])
+        mean_charge_density = jnp.abs(jnp.mean(output["charge_density"][2:], axis=-1))
+        energy_ax.plot(
+            time[2:], 1e-4 * mean_charge_density / jnp.max(mean_charge_density),
+            label=rf"Mean $\rho \times$ {1e-4/jnp.max(mean_charge_density):.1e}",
+        )
+        energy_ax.plot(
+            time[1:],
+            jnp.abs(output["total_energy"][1:] - output["total_energy"][0]) / output["total_energy"][0],
+            label="Relative energy error",
+        )
+
+        # --- NEW: Gauss-law error (L2 norm over x) on same log axis ---
+        if "gauss_error_L2" in output:
+            gauss_error_Linf = output["gauss_error_Linf"]
+            max_gauss_Linf = jnp.max(gauss_error_Linf)
+            energy_ax.plot(time, 1e-4 * gauss_error_Linf / max_gauss_Linf, label=rf"Gauss error (L∞) $\times {1e-4/max_gauss_Linf:.1e}$")
+
+        energy_ax.set(
+            title="Energy & Gauss-law Error",
+            xlabel=r"Time ($\omega_{pe}^{-1}$)",
+            ylabel="Energy / Error (log scale)",
+            yscale="log",
+            ylim=[1e-7, None],
+        )
         energy_ax.legend(fontsize=7)
     
     if second_direction:
