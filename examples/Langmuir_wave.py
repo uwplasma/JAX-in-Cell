@@ -1,7 +1,7 @@
 ## Langmuir_wave.py
 # Example of plasma oscillations of electrons
 from jaxincell import plot
-from jaxincell import simulation
+from jaxincell import simulation, diagnostics
 import jax.numpy as jnp
 from jax import block_until_ready
 
@@ -18,13 +18,16 @@ input_parameters = {
 }
 
 solver_parameters = {
-    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
+    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT,
     "number_grid_points"     : 33,  # Number of grid points
     "number_pseudoelectrons" : 3000, # Number of pseudoelectrons
     "total_steps"            : 1000, # Total number of time steps
 }
 
 output = block_until_ready(simulation(input_parameters, **solver_parameters))
+
+# Post-process: segregate ions/electrons, compute energies, compute FFT
+diagnostics(output)
 
 print(f"Dominant FFT frequency (f): {output['dominant_frequency']} Hz")
 print(f"Plasma frequency (w_p):     {output['plasma_frequency']} Hz")
