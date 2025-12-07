@@ -18,7 +18,7 @@ relativistic = false
 tolerance_Picard_iterations_implicit_CN = 1e-5
 
 [solver_parameters]
-field_solver = 0                 # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT,
+field_solver = 1                 # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT,
 time_evolution_algorithm = 0     # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson (electrostatic)
 number_grid_points = 75          # Number of grid points
 number_pseudoelectrons = 4500    # Number of pseudoelectrons
