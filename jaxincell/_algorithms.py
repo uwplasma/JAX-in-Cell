@@ -163,10 +163,6 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     dtau = dt / num_substeps
     grid_for_E   = grid + dx/2        # E stagger
     start_for_E  = grid[0]            # left start for E
-    grid_for_J   = grid               # for current deposition
-    start_for_J  = grid[0] - dx/2     # J stagger
-    t_n = step_index * dt * parameters["plasma_frequency"]
-    metric_cfg = parameters.get("metric", {"kind": 0, "params": {}})
 
     # Prebuild interpolation closure once
     interp_E = partial(
