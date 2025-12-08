@@ -2,6 +2,7 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from jax.lax import dynamic_update_slice
 from functools import partial
+from ._filters import filter_scalar_field, filter_vector_field
 
 __all__ = ['get_S2_weights_and_indices_periodic_CN','charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density', 'current_density_periodic_CN']
 
@@ -109,7 +110,7 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
     return grid_BCs
 
 @jit
-def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right):
+def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right, filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4)):
     """
     Computes the total charge density on the grid by summing contributions from all particles.
 
@@ -132,11 +133,12 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
 
     # Sum the contributions across all particles
     total_chargedens = jnp.sum(chargedens, axis=0)
+    total_chargedens = filter_scalar_field(total_chargedens, passes=filter_passes, alpha=filter_alpha, strides=filter_strides)
 
     return total_chargedens
 
 @jit
-def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, grid_start, particle_BC_left, particle_BC_right):
+def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, grid_start, particle_BC_left, particle_BC_right, filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4)):
     """
     Computes the current density `j` on the grid from particle motion.
 
@@ -196,11 +198,13 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
     current_dens_y = jnp.sum(current_dens_y, axis=0)
     current_dens_z = jnp.sum(current_dens_z, axis=0)
 
-    return jnp.stack([current_dens_x, current_dens_y, current_dens_z], axis=0).T
+    current_density = jnp.stack([current_dens_x, current_dens_y, current_dens_z], axis=0).T
+    current_density = filter_vector_field(current_density, passes=filter_passes, alpha=filter_alpha, strides=filter_strides)
+    return current_density
 
 
 @partial(jit, static_argnames=('grid_size',))
-def current_density_periodic_CN(xs_n, vs_n, qs, dx, grid_start, grid_size):
+def current_density_periodic_CN(xs_n, vs_n, qs, dx, grid_start, grid_size, filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4)):
     """
     Deposits Current J using Periodic BCs.
     Note: We removed xs_nminushalf/plus half arguments as we use the midpoint 
@@ -240,5 +244,8 @@ def current_density_periodic_CN(xs_n, vs_n, qs, dx, grid_start, grid_size):
     J_x = jnp.zeros(grid_size).at[batch_indices].add(batch_Jx)
     J_y = jnp.zeros(grid_size).at[batch_indices].add(batch_Jy)
     J_z = jnp.zeros(grid_size).at[batch_indices].add(batch_Jz)
+
+    current_density_periodic = jnp.stack([J_x, J_y, J_z], axis=1)
+    # current_density_periodic = filter_vector_field(current_density_periodic, passes=filter_passes, alpha=filter_alpha, strides=filter_strides)
     
-    return jnp.stack([J_x, J_y, J_z], axis=1)
+    return current_density_periodic

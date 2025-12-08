@@ -69,6 +69,24 @@ def diagnostics(output):
     E_field_over_time = output['electric_field']
     grid              = output['grid']
 
+    # ----------------------------------------------------------
+    # Gauss's law diagnostic: ||∂E_x/∂x - ρ/ε₀|| over time
+    # Uses the same backward-difference style as _project_E_cartesian
+    # ----------------------------------------------------------
+    dx   = output['dx']
+    rho  = output['charge_density']          # shape (Time, G)
+    Ex   = E_field_over_time[..., 0]         # shape (Time, G)
+
+    # periodic backward difference in x: divE = (E_i - E_{i-1}) / dx
+    Ex_m1 = jnp.roll(Ex, 1, axis=1)          # roll along grid axis
+    divE  = (Ex - Ex_m1) / dx                # shape (Time, G)
+
+    gauss_residual = divE - rho / epsilon_0  # shape (Time, G)
+
+    # Two simple norms vs time: L∞ and L2 over x
+    gauss_error_Linf = jnp.max(jnp.abs(gauss_residual), axis=1)
+    gauss_error_L2   = jnp.sqrt(jnp.mean(gauss_residual**2, axis=1))
+
     # Make sure these are plain Python scalars for indexing / fftfreq
     total_steps_val = output['total_steps']
     dt_val          = output['dt']
@@ -130,6 +148,10 @@ def diagnostics(output):
         'magnetic_field_energy':         1/(2*mu_0)    * integral_B_squared,
         'dominant_frequency': dominant_frequency,
         'plasma_frequency':   plasma_frequency,
+
+        # Gauss-law diagnostics
+        'gauss_error_Linf': gauss_error_Linf,
+        'gauss_error_L2':   gauss_error_L2,
         
         # Updated kinetic energy keys to use the corrected totals
         'kinetic_energy':           total_ke_electrons + total_ke_ions,

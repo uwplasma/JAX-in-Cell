@@ -23,6 +23,9 @@ input_parameters = {
 "timestep_over_spatialstep_times_c": 0.5, # dt * speed_of_light / dx
 "relativistic": False,  # Use relativistic equations of motion
 "tolerance_Picard_iterations_implicit_CN": 1e-12, # Tolerance for Picard iterations
+"filter_passes": 5,       # number of passes of the digital filter applied to ρ and J
+"filter_alpha": 0.5,      # filter strength (0 < alpha < 1)
+"filter_strides": (1, 2, 4),  # multi-scale strides for filtering
 }
 
 solver_parameters = {
@@ -30,7 +33,7 @@ solver_parameters = {
     "number_grid_points"     : 201,  # Number of grid points
     "number_pseudoelectrons" : 3000, # Number of pseudoelectrons
     "total_steps"            : 6000, # Total number of time steps
-    "time_evolution_algorithm": 1,  # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson
+    "time_evolution_algorithm": 0,  # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson
     "max_number_of_Picard_iterations_implicit_CN": 100, # Maximum number of iterations for Picard iteration converging
     "number_of_particle_substeps_implicit_CN": 1, # The number of substep for one time eletric field update
 }

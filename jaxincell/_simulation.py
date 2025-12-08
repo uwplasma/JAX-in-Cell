@@ -134,6 +134,11 @@ def initialize_simulation_parameters(user_parameters={}):
         "external_magnetic_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
 
+        # Filtering parameters for current and charge density (digital smoothing)
+        "filter_passes": 5,       # number of passes of the digital filter applied to ρ and J
+        "filter_alpha": 0.5,      # filter strength (0 < alpha < 1)
+        "filter_strides": (1, 2, 4),  # multi-scale strides for filtering
+
         "weight": 0,
     }
 

@@ -22,9 +22,14 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
+
+    fpasses  = parameters["filter_passes"]
+    falpha   = parameters["filter_alpha"]
+    fstrides = parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
     
     J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+                filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
     E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
     # Add external fields
@@ -56,11 +61,13 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
     J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+                filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
     E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
     if field_solver != 0:
-        charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
+        charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right,
+            filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
         switcher = {
             1: E_from_Gauss_1D_FFT,
             2: E_from_Gauss_1D_Cartesian,
@@ -78,7 +85,8 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
             positions_plus1_2, velocities, qs, ms, q_ms)
 
     # Collect data for storage
-    charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
+    charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right, 
+        filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
     step_data = (positions, velocities, E_field, B_field, J, charge_density)
     
     return carry, step_data
@@ -92,6 +100,10 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
                                   field_BC_left, field_BC_right, num_substeps):
     (E_field, B_field, positions,
     velocities, qs, ms, q_ms) = carry
+
+    fpasses  = parameters["filter_passes"]
+    falpha   = parameters["filter_alpha"]
+    fstrides = parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
     
     # Grid Definitions (Staggered)
     E_grid_start = grid[0] + dx/2  # E at i + 1/2
@@ -159,7 +171,8 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
             # Current Deposition
             J_sub = current_density_periodic_CN(
                             pos_stag_prev, vel_mid, qs, dx, 
-                            E_grid_start, grid_size
+                            E_grid_start, grid_size, filter_passes=fpasses,
+                            filter_alpha=falpha, filter_strides=fstrides
                         )
 
             return (pos_new, vel_new, qs_new, ms_new, q_ms_new, pos_stag_arr), J_sub * dtau
@@ -218,7 +231,8 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     positions_plus1 = positions_new
     velocities_plus1 = velocities_new
     
-    charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)
+    charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right,
+                                              filter_passes=0, filter_alpha=falpha, filter_strides=fstrides)
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
     step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
     
