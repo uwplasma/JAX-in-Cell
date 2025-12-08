@@ -26,11 +26,12 @@ def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, fi
         array: The interpolated field values at the particle positions, shape (N,).
     """
     # Add ghost cells for the boundaries using provided boundary conditions
-    ghost_cell_L2, ghost_cell_L1, ghost_cell_R = field_2_ghost_cells(field_BC_left,field_BC_right,field)
-    field = jnp.insert(field,0,ghost_cell_L2,axis=0)
-    field = jnp.insert(field,0,ghost_cell_L1,axis=0)
-    field = jnp.append(field,jnp.array([ghost_cell_R]),axis=0)
-    x = x_n[0]
+    ghost_cell_L2, ghost_cell_L1, ghost_cell_R = field_2_ghost_cells(field_BC_left, field_BC_right, field)
+    # Insert INNER ghost (L1) first, then OUTER (L2) so final order is [L2, L1, f0, ...]
+    field = jnp.insert(field, 0, ghost_cell_L1, axis=0)
+    field = jnp.insert(field, 0, ghost_cell_L2, axis=0)
+    field = jnp.append(field, jnp.array([ghost_cell_R]), axis=0)
+    x = x_n[0]  # see note below
     
     # Adjust the grid to accommodate particles at the first half grid cell (staggered grid)
     #If using a staggered grid, particles at first half cell will be out of grid, so add extra cell

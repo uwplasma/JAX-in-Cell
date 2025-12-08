@@ -1,64 +1,19 @@
-from jax import jit
+from jax import jit, lax
 import jax.numpy as jnp
+from functools import partial
 from ._sources import calculate_charge_density
 from ._boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
 from ._constants import epsilon_0, speed_of_light
 
-__all__ = ['E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cartesian', 'curlE', 'curlB', 'field_update', 'field_update1', 'field_update2']
-
-@jit
-def E_from_Gauss_1D_FFT(charge_density, dx):
-    """
-    Solve for the electric field E = -d(phi)/dx using FFT, 
-    where phi is derived from the 1D Gauss' law equation.
-    Parameters:
-    charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
-    dx : float, grid spacing in the x-direction
-    Returns:
-    E : 1D numpy array, electric field
-    """
-    # Get the number of grid points
-    nx = len(charge_density)
-    # Create wavenumbers in Fourier space (k_x)
-    kx = jnp.fft.fftfreq(nx, d=dx) * 2 * jnp.pi
-    # Perform 1D FFT of the source term
-    charge_density_k = jnp.fft.fft(charge_density)
-    # Avoid division by zero for the k = 0 mode
-    kx = kx.at[0].set(1.0)  # Prevent division by zero
-    # Solve for the electric field in Fourier space
-    E_k = -1j * charge_density_k / kx / epsilon_0  # Electric field in Fourier space
-    # Inverse FFT to transform back to spatial domain
-    E = jnp.fft.ifft(E_k).real
-    return E
-
-@jit
-def E_from_Poisson_1D_FFT(charge_density, dx):
-    """
-    Solve for the electric field E = -d(phi)/dx using FFT, 
-    where phi is derived from the 1D Poisson equation.
-    Parameters:
-    charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
-    dx : float, grid spacing in the x-direction
-    Returns:
-    E : 1D numpy array, electric field
-    """
-    # Get the number of grid points
-    nx = len(charge_density)
-    # Create wavenumbers in Fourier space (k_x)
-    kx = jnp.fft.fftfreq(nx, d=dx) * 2 * jnp.pi
-    # Perform 1D FFT of the source term
-    charge_density_k = jnp.fft.fft(charge_density)
-    # Avoid division by zero for the k = 0 mode
-    kx = kx.at[0].set(1.0)  # Prevent division by zero
-    # Solve Poisson equation in Fourier space
-    phi_k = -charge_density_k / kx**2 / epsilon_0
-    # Set the k = 0 mode of phi_k to 0 to ensure a zero-average solution
-    phi_k = phi_k.at[0].set(0.0)
-    # Compute electric field from potential in Fourier space
-    E_k = 1j * kx * phi_k
-    # Inverse FFT to transform back to spatial domain
-    E = jnp.fft.ifft(E_k).real
-    return E
+__all__ = [
+    'E_from_Gauss_1D_Cartesian',
+    'curlE',
+    'curlB',
+    'field_update',
+    'field_update1',
+    'field_update2',
+    'project_E_to_satisfy_Gauss',
+]
 
 @jit
 def E_from_Gauss_1D_Cartesian(charge_density, dx):
@@ -192,3 +147,127 @@ def field_update2(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
     curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
     E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
     return E_fields,B_fields
+
+
+# ---------------------------------------------------------------------------
+#  Projection of E_x to enforce Gauss's law after a full EM Maxwell update
+# ---------------------------------------------------------------------------
+
+@jit
+def _project_E_fft(E_field, charge_density, dx):
+    """
+    FFT-based Gauss projection in 1D (periodic), but using the SAME
+    discrete divergence operator as in diagnostics/_project_E_cartesian:
+
+        div(E)_i = (E_i - E_{i-1}) / dx
+
+    In Fourier space, the symbol of this backward-difference operator is
+        D(k) = (1 - exp(-i k dx)) / dx.
+
+    We enforce  D(k) * E_k = rho_k / epsilon_0  for k != 0,
+    and keep the k=0 (DC) Ex mode unchanged.
+    """
+
+    Ex = E_field[:, 0]            # (G,)
+    nx = Ex.shape[0]
+
+    # Wavenumbers
+    kx = jnp.fft.fftfreq(nx, d=dx) * 2.0 * jnp.pi
+
+    # Backward-difference symbol in Fourier space
+    D = (1.0 - jnp.exp(-1j * kx * dx)) / dx  # shape (G,)
+
+    # FFT of Ex and rho
+    Ex_k  = jnp.fft.fft(Ex)
+    rho_k = jnp.fft.fft(charge_density)
+
+    # Avoid division by zero at k=0
+    D_safe = jnp.where(jnp.abs(D) == 0.0, 1.0 + 0.0j, D)
+
+    # Solve D(k) * Ex_new_k = rho_k / epsilon_0
+    Ex_new_k = rho_k / (epsilon_0 * D_safe)
+
+    # Preserve the DC component from the original Ex (does not affect Gauss)
+    Ex_new_k = Ex_new_k.at[0].set(Ex_k[0])
+
+    # Back to real space
+    Ex_new = jnp.fft.ifft(Ex_new_k).real
+
+    # Optional: preserve mean Ex to avoid artificial DC changes
+    Ex_new = Ex_new - jnp.mean(Ex_new) + jnp.mean(Ex)
+
+    return E_field.at[:, 0].set(Ex_new)
+
+@jit
+def _project_E_cartesian(E_field, charge_density, dx):
+    Ex = E_field[:, 0]
+    nx = Ex.shape[0]
+
+    # Build the same D Ex as in E_from_Gauss_1D_Cartesian, but without forming the matrix
+    def div_op(E):
+        # periodic backward difference
+        Em1 = jnp.roll(E, 1)
+        return E - Em1
+
+    divE_star = div_op(Ex)
+    rhs = (dx / epsilon_0) * charge_density
+
+    # We want D (Ex + deltaE) = rhs => D deltaE = rhs - D Ex
+    s = rhs - divE_star
+
+    # Enforce compatibility (sum s = 0) by removing the mean
+    s = s - jnp.mean(s)
+
+    # Solve D deltaE = s with cumulative sum:
+    # deltaE_0 = 0, deltaE_i = deltaE_{i-1} + s_i
+    deltaE = jnp.cumsum(s)
+
+    # Remove the mean of deltaE to avoid introducing a DC shift
+    deltaE = deltaE - jnp.mean(deltaE)
+
+    Ex_new = Ex + deltaE
+    return E_field.at[:, 0].set(Ex_new)
+
+
+@partial(jit, static_argnums=(3,))
+def project_E_to_satisfy_Gauss(E_field, charge_density, dx, method):
+    """
+    Full EM + Gauss projection step.
+
+    Parameters
+    ----------
+    E_field : (G, 3) array
+        Electric field after a full Maxwell update (Ampère + Faraday).
+    charge_density : (G,) array
+        Charge density ρ at the same time level as this E_field.
+    dx : float
+        Grid spacing.
+    method : int
+        0 : no projection (NOT used here; handled in caller)
+        1 : FFT-based projection (spectral divergence / Laplacian)
+        2 : direct-space projection (divergence matrix, Cartesian)
+        3 : alias for 1 (FFT) for backward compatibility
+
+    Returns
+    -------
+    E_field_projected : (G, 3) array
+        Same as E_field but with E_x minimally corrected so that
+        ∇·E = ρ/ε₀ (in the chosen discrete sense).
+    """
+    # Map method -> index for lax.switch:
+    #   1 -> 0  (FFT)
+    #   2 -> 1  (Cartesian)
+    #   3 -> 2  (FFT again, as alias)
+    idx = jnp.clip(method - 1, 0, 2)
+
+    return lax.switch(
+        idx,
+        (
+            _project_E_fft,        # idx 0 => method 1
+            _project_E_cartesian,  # idx 1 => method 2
+            _project_E_fft,        # idx 2 => method 3 (alias FFT)
+        ),
+        E_field,
+        charge_density,
+        dx,
+    )
