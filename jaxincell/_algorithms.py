@@ -4,10 +4,10 @@ from functools import partial
 from jax.debug import print as jprint
 from ._sources import current_density_periodic_CN, calculate_charge_density, current_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
-from ._particles import fields_to_particles_periodic_CN,fields_to_particles_grid, boris_step, boris_step_relativistic, boris_velocity_CN
+from ._particles import fields_to_particles_periodic_CN,fields_to_particles_grid, boris_step, boris_step_relativistic
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
 from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
-                      E_from_Poisson_1D_FFT, field_update1, field_update2, curlB_periodic_CN)
+                      E_from_Poisson_1D_FFT, field_update1, field_update2, curlB,curlE)
 
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
@@ -83,20 +83,6 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     
     return carry, step_data
 
-@jit
-def curlE_periodic(E_field, dx):
-    """
-    Computes Curl(E) to update B.
-    - E is defined at half-integer steps (i + 1/2).
-    - B is defined at integer steps (i).
-    - To get the derivative at 'i', we use BACKWARD difference: (E[i] - E[i-1])
-    """
-    # E[i] - E[i-1] (Periodic via roll)
-    dFy_dx = (E_field[:, 1] - jnp.roll(E_field[:, 1], 1, axis=0)) / dx
-    dFz_dx = (E_field[:, 2] - jnp.roll(E_field[:, 2], 1, axis=0)) / dx
-    
-    # Curl = (0, -dEz/dx, dEy/dx)
-    return jnp.stack([jnp.zeros_like(E_field[:, 0]), -dFz_dx, dFy_dx], axis=-1)
 
 
 # Implicit Crank-Nicolson step
@@ -134,15 +120,15 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
         E_avg_for_Faraday = 0.5 * (E_field + E_guess)
         
         # Use Periodic Backward Difference for E -> B
-        curl_E = curlE_periodic(E_avg_for_Faraday, dx)
+        curl_E = curlE(E_avg_for_Faraday, B_field, dx, dt, field_BC_left, field_BC_right)
         B_next = B_field - dt * curl_E
         
         # ---------------------------------------------------------------------
         # 2. Particle Push
         # ---------------------------------------------------------------------
         B_avg_for_Push = 0.5 * (B_field + B_next)
-        
         interp_E_fn = partial(fields_to_particles_periodic_CN, dx=dx, grid_start=E_grid_start)
+        # interp_E_fn = partial(fields_to_particles_grid, dx=dx, grid=grid, grid_start=E_grid_start, field_BC_left=field_BC_left, field_BC_right=field_BC_right)
         interp_B_fn = partial(fields_to_particles_periodic_CN, dx=dx, grid_start=B_grid_start)
         
         def substep_loop(sub_carry, step_idx):
@@ -154,7 +140,7 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
             B_mid = vmap(interp_B_fn, in_axes=(0, None))(pos_stag_prev, B_avg_for_Push)
             
             # Boris Velocity Update (Rotation + Push)
-            vel_new = boris_velocity_CN(vel_sub, E_mid, B_mid, dtau, q_ms_sub)
+            _,vel_new = boris_step(dtau, pos_stag_prev, vel_sub, q_ms, E_mid, B_mid)
             
             vel_mid = 0.5 * (vel_sub + vel_new)
             pos_new = pos_sub + vel_mid * dtau
@@ -190,8 +176,7 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
         # 3. Ampere's Law: E^{n+1} = E^n + dt * c^2 * Curl(B^{n+1/2}) - ...
         # ---------------------------------------------------------------------
         # Use Periodic Forward Difference for B -> E
-        curl_B = curlB_periodic_CN(B_avg_for_Push, dx)
-        
+        curl_B = curlB(B_avg_for_Push, E_field, dx, dt, field_BC_left, field_BC_right)
         E_next = E_field + dt * (c_sq * curl_B - (1/epsilon_0) * (J_iter - mean_J))
 
         return (

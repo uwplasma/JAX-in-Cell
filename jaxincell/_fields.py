@@ -4,23 +4,9 @@ from ._sources import calculate_charge_density
 from ._boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
 from ._constants import epsilon_0, speed_of_light
 
-__all__ = ['curlB_periodic_CN','E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cartesian', 'curlE', 'curlB', 'field_update', 'field_update1', 'field_update2']
+__all__ = ['E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cartesian', 'curlE', 'curlB', 'field_update', 'field_update1', 'field_update2']
 
 
-@jit
-def curlB_periodic_CN(B_field, dx):
-    """
-    Computes Curl(B) to update E.
-    - B is defined at integer steps (i).
-    - E is defined at half-integer steps (i + 1/2).
-    - To get the derivative at 'i + 1/2', we use FORWARD difference: (B[i+1] - B[i])
-    """
-    # B[i+1] - B[i] (Periodic via roll)
-    dFy_dx = (jnp.roll(B_field[:, 1], -1, axis=0) - B_field[:, 1]) / dx
-    dFz_dx = (jnp.roll(B_field[:, 2], -1, axis=0) - B_field[:, 2]) / dx
-    
-    # Curl = (0, -dBz/dx, dBy/dx)
-    return jnp.stack([jnp.zeros_like(B_field[:, 0]), -dFz_dx, dFy_dx], axis=-1)
 
 @jit
 def E_from_Gauss_1D_FFT(charge_density, dx):

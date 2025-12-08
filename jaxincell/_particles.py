@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from ._boundary_conditions import field_2_ghost_cells
 from ._constants import speed_of_light as c
 from ._sources import get_S2_weights_and_indices_periodic_CN
-__all__ = ['fields_to_particles_grid', 'fields_to_particles_periodic_CN','boris_velocity_CN','rotation', 'boris_step', 'boris_step_relativistic']
+__all__ = ['fields_to_particles_grid', 'fields_to_particles_periodic_CN','rotation', 'boris_step', 'boris_step_relativistic']
 
 @jit
 def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):
@@ -26,7 +26,7 @@ def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, fi
         array: The interpolated field values at the particle positions, shape (N,).
     """
     # Add ghost cells for the boundaries using provided boundary conditions
-    ghost_cell_L1, ghost_cell_L2, ghost_cell_R = field_2_ghost_cells(field_BC_left,field_BC_right,field)
+    ghost_cell_L2, ghost_cell_L1, ghost_cell_R = field_2_ghost_cells(field_BC_left,field_BC_right,field)
     field = jnp.insert(field,0,ghost_cell_L2,axis=0)
     field = jnp.insert(field,0,ghost_cell_L1,axis=0)
     field = jnp.append(field,jnp.array([ghost_cell_R]),axis=0)
@@ -64,28 +64,6 @@ def fields_to_particles_periodic_CN(x_n, field, dx, grid_start):
     
     return E_particle
 
-
-def boris_velocity_CN(v_old, E, B, dt_sub, q_m):
-    """
-    Algebraically solves the implicit velocity equation:
-    (v_new - v_old)/dt = q/m * (E + (v_new + v_old)/2 x B)
-    """
-    # t vector: q/m * B * dt/2
-    t = (q_m * B) * (0.5 * dt_sub)
-    t_mag_sq = jnp.sum(t**2, axis=-1, keepdims=True)
-    s = 2.0 * t / (1.0 + t_mag_sq)
-
-    # v_minus: First half electric push
-    v_minus = v_old + (q_m * E) * (0.5 * dt_sub)
-
-    # Rotation
-    v_prime = v_minus + jnp.cross(v_minus, t)
-    v_plus  = v_minus + jnp.cross(v_prime, s)
-
-    # v_new: Second half electric push
-    v_new = v_plus + (q_m * E) * (0.5 * dt_sub)
-    
-    return v_new
 
 @jit
 def rotation(dt, B, vsub, q_m):
