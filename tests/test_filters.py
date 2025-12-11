@@ -334,6 +334,9 @@ def test_filter_scalar_field_nonperiodic_bcs_dont_wrap():
     """
     For absorbing BCs, high-frequency content at one edge should not
     wrap around to the other edge, unlike periodic filtering.
+
+    We use passes >= 2 so that the filter actually touches neighbors
+    (passes=1 is intentionally an identity in _repeat_filter).
     """
     G = 16
     scalar = jnp.zeros(G).at[0].set(1.0)  # spike at left boundary
@@ -341,7 +344,7 @@ def test_filter_scalar_field_nonperiodic_bcs_dont_wrap():
     # Periodic filtering can wrap influence to the right edge
     y_periodic = filter_scalar_field(
         scalar,
-        passes=1,
+        passes=2, 
         alpha=0.0,
         strides=(1,),
         bc_left=0,
@@ -351,7 +354,7 @@ def test_filter_scalar_field_nonperiodic_bcs_dont_wrap():
     # Absorbing filtering should not wrap; the last cell sees no contribution
     y_absorbing = filter_scalar_field(
         scalar,
-        passes=1,
+        passes=2,  
         alpha=0.0,
         strides=(1,),
         bc_left=2,
@@ -366,6 +369,7 @@ def test_filter_scalar_field_nonperiodic_bcs_dont_wrap():
 
     # With absorbing BCs, last cell should be ~0 for this pattern
     assert abs(float(y_absorbing[-1])) < 1e-12
+
 
 def test_filter_vector_field_with_nonperiodic_bcs():
     """
