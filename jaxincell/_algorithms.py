@@ -30,7 +30,8 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     
     J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
-                filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
+                filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
+                field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
     # Add external fields
@@ -63,12 +64,14 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
-                filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
+                filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
+                field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
     if field_solver != 0:
         charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right,
-                                                  filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
+                                                  filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
+                                                  field_BC_left=field_BC_left, field_BC_right=field_BC_right)
         switcher = {
             1: E_from_Gauss_1D_FFT,
             2: E_from_Gauss_1D_Cartesian,
@@ -87,7 +90,8 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     # Collect data for storage
     charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right,
-                                              filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides)
+                                              filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
+                                              field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     step_data = (positions, velocities, E_field, B_field, J, charge_density)
     
     return carry, step_data
@@ -230,7 +234,9 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     positions_plus1 = positions_new
     velocities_plus1 = velocities_new
     
-    charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)
+    charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right,
+                                              filter_passes=0, filter_alpha=0.5, filter_strides=(1, 2, 4),
+                                              field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
     step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
     

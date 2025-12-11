@@ -98,9 +98,9 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
         array: The charge density contribution on the grid.
     """
     # Compute charge density using a quadratic shape function
-    grid_noBCs =  (q/dx)*jnp.where(abs(x-grid)<=dx/2,3/4-(x-grid)**2/(dx**2),
-                         jnp.where((dx/2<abs(x-grid))&(abs(x-grid)<=3*dx/2),
-                                    0.5*(3/2-abs(x-grid)/dx)**2,
+    grid_noBCs =  (q/dx)*jnp.where(jnp.abs(x-grid)<=dx/2,3/4-(x-grid)**2/(dx**2),
+                         jnp.where((dx/2<jnp.abs(x-grid))&(jnp.abs(x-grid)<=3*dx/2),
+                                    0.5*(3/2-jnp.abs(x-grid)/dx)**2,
                                     jnp.zeros(len(grid))))
 
     # Handle boundary conditions
@@ -111,7 +111,8 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
 
 @jit
 def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right,
-                             filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4)):
+                             filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4),
+                             field_BC_left=0, field_BC_right=0):
     """
     Computes the total charge density on the grid by summing contributions from all particles.
 
@@ -136,13 +137,23 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
     total_chargedens = jnp.sum(chargedens, axis=0)
 
     # Apply digital filtering to the total charge density
-    total_chargedens = filter_scalar_field(total_chargedens, passes=filter_passes, alpha=filter_alpha, strides=filter_strides)
+    total_chargedens = filter_scalar_field(
+        total_chargedens,
+        passes=filter_passes,
+        alpha=filter_alpha,
+        strides=filter_strides,
+        bc_left=field_BC_left,
+        bc_right=field_BC_right,
+    )
 
     return total_chargedens
 
 @jit
-def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, grid_start, particle_BC_left, particle_BC_right,
-                    filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4)):
+def current_density(xs_nminushalf, xs_n, xs_nplushalf,
+                    vs_n, qs, dx, dt, grid, grid_start,
+                    particle_BC_left, particle_BC_right,
+                    filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4),
+                    field_BC_left=0, field_BC_right=0):
     """
     Computes the current density `j` on the grid from particle motion.
 
@@ -205,7 +216,14 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
     current_density = jnp.stack([current_dens_x, current_dens_y, current_dens_z], axis=0).T
 
     # Apply digital filtering to the current density
-    current_density = filter_vector_field(current_density, passes=filter_passes, alpha=filter_alpha, strides=filter_strides)
+    current_density = filter_vector_field(
+        current_density,
+        passes=filter_passes,
+        alpha=filter_alpha,
+        strides=filter_strides,
+        bc_left=field_BC_left,
+        bc_right=field_BC_right,
+    )
     
     return current_density
 

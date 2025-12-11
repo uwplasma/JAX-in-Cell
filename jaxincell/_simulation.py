@@ -366,7 +366,10 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     B_field = jnp.zeros((grid.size, 3))
     E_field = jnp.zeros((grid.size, 3))
     
-    charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
+    charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"],
+                                              parameters["filter_passes"], parameters["filter_alpha"], parameters["filter_strides"],
+                                              field_BC_left=parameters["field_BC_left"], field_BC_right=parameters["field_BC_right"])
+    # Initial E field from charge density via Gauss's law
     E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
     fields = (E_field, B_field)

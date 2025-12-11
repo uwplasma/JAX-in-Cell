@@ -211,7 +211,14 @@ def test_filter_scalar_field_jit_and_grad_compatible():
     x0 = random.normal(key, shape=(32,))
 
     def loss_fn(x):
-        y = filter_scalar_field(x, passes=3, alpha=0.4, strides=(1, 2))
+        y = filter_scalar_field(
+            x,
+            passes=3,
+            alpha=0.4,
+            strides=(1, 2),
+            bc_left=1,
+            bc_right=2,
+        )
         return jnp.sum(y**2)
 
     loss_jit = jit(loss_fn)
@@ -238,7 +245,14 @@ def test_filter_vector_field_jit_and_grad_compatible():
 
     def loss_fn(flat):
         F = flat.reshape(G, C)
-        Ff = filter_vector_field(F, passes=4, alpha=0.3, strides=(1, 2, 4))
+        Ff = filter_vector_field(
+            F,
+            passes=4,
+            alpha=0.3,
+            strides=(1, 2, 4),
+            bc_left=1,
+            bc_right=2,
+        )
         return jnp.sum(Ff**2)
 
     loss_jit = jit(loss_fn)
@@ -250,3 +264,141 @@ def test_filter_vector_field_jit_and_grad_compatible():
     assert jnp.isscalar(loss_val)
     assert jnp.all(jnp.isfinite(grad_val))
     assert grad_val.shape == flat0.shape
+
+
+def test_binomial_filter_3point_reflective_bc_clamps_edges():
+    """
+    For reflective BCs (bc_left=bc_right=1), neighbors beyond the edge
+    are clamped to the boundary values.
+    """
+    x = jnp.arange(5.0)  # [0,1,2,3,4]
+    alpha = 0.5
+    stride = 1
+
+    # Manual reflective implementation
+    def manual_reflective(x):
+        n = x.shape[0]
+        out = []
+        for j in range(n):
+            jm = max(j - stride, 0)
+            jp = min(j + stride, n - 1)
+            val = alpha * x[j] + (1 - alpha) * 0.5 * (x[jm] + x[jp])
+            out.append(val)
+        return jnp.array(out)
+
+    y_ref = manual_reflective(x)
+    y = binomial_filter_3point(
+        x,
+        alpha=alpha,
+        stride=stride,
+        bc_left=1,
+        bc_right=1,
+    )
+
+    np.testing.assert_allclose(np.array(y), np.array(y_ref), rtol=0, atol=1e-12)
+
+def test_binomial_filter_3point_absorbing_bc_zeros_outside():
+    """
+    For absorbing BCs (bc_left=bc_right=2), neighbors beyond the domain
+    are treated as zero, not wrapped or clamped.
+    """
+    x = jnp.array([1.0, 2.0, 3.0, 4.0])
+    alpha = 0.5
+    stride = 1
+
+    # Manual absorbing implementation
+    def manual_absorbing(x):
+        n = x.shape[0]
+        out = []
+        for j in range(n):
+            jm = j - stride
+            jp = j + stride
+            left = x[jm] if jm >= 0 else 0.0
+            right = x[jp] if jp < n else 0.0
+            val = alpha * x[j] + (1 - alpha) * 0.5 * (left + right)
+            out.append(val)
+        return jnp.array(out)
+
+    y_ref = manual_absorbing(x)
+    y = binomial_filter_3point(
+        x,
+        alpha=alpha,
+        stride=stride,
+        bc_left=2,
+        bc_right=2,
+    )
+
+    np.testing.assert_allclose(np.array(y), np.array(y_ref), rtol=0, atol=1e-12)
+
+def test_filter_scalar_field_nonperiodic_bcs_dont_wrap():
+    """
+    For absorbing BCs, high-frequency content at one edge should not
+    wrap around to the other edge, unlike periodic filtering.
+    """
+    G = 16
+    scalar = jnp.zeros(G).at[0].set(1.0)  # spike at left boundary
+
+    # Periodic filtering can wrap influence to the right edge
+    y_periodic = filter_scalar_field(
+        scalar,
+        passes=1,
+        alpha=0.0,
+        strides=(1,),
+        bc_left=0,
+        bc_right=0,
+    )
+
+    # Absorbing filtering should not wrap; the last cell sees no contribution
+    y_absorbing = filter_scalar_field(
+        scalar,
+        passes=1,
+        alpha=0.0,
+        strides=(1,),
+        bc_left=2,
+        bc_right=2,
+    )
+
+    # Last cell should differ between periodic and absorbing
+    assert not np.allclose(
+        np.array(y_periodic[-1]),
+        np.array(y_absorbing[-1]),
+    )
+
+    # With absorbing BCs, last cell should be ~0 for this pattern
+    assert abs(float(y_absorbing[-1])) < 1e-12
+
+def test_filter_vector_field_with_nonperiodic_bcs():
+    """
+    Basic shape and finiteness check for vector field filtering
+    with non-periodic boundary conditions.
+    """
+    G, C = 10, 3
+    grid = jnp.linspace(0.0, 1.0, G)
+    F = jnp.stack(
+        [jnp.sin(2.0 * jnp.pi * grid),
+         jnp.cos(4.0 * jnp.pi * grid),
+         jnp.linspace(-1.0, 1.0, G)],
+        axis=1,
+    )
+
+    Ff_reflective = filter_vector_field(
+        F,
+        passes=3,
+        alpha=0.5,
+        strides=(1, 2),
+        bc_left=1,
+        bc_right=1,
+    )
+    Ff_absorbing = filter_vector_field(
+        F,
+        passes=3,
+        alpha=0.5,
+        strides=(1, 2),
+        bc_left=2,
+        bc_right=2,
+    )
+
+    assert Ff_reflective.shape == F.shape
+    assert Ff_absorbing.shape == F.shape
+    assert jnp.all(jnp.isfinite(Ff_reflective))
+    assert jnp.all(jnp.isfinite(Ff_absorbing))
