@@ -2,6 +2,7 @@
 import sys
 from ._plot import plot
 from ._simulation import simulation, load_parameters
+from ._diagnostics import diagnostics
 
 def main(cl_args=sys.argv[1:]):
     """Run the main JAX-in-Cell code from the command line.
@@ -16,6 +17,7 @@ def main(cl_args=sys.argv[1:]):
     else:
         input_parameters, solver_parameters = load_parameters(cl_args[0])
         output = simulation(input_parameters, **solver_parameters)
+    diagnostics(output)
     plot(output)
 
 if __name__ == "__main__":
