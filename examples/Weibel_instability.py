@@ -22,14 +22,17 @@ input_parameters = {
 "vth_electrons_over_c_z": 0.10,           # Thermal velocity of electrons over speed of light
 "timestep_over_spatialstep_times_c": 0.5, # dt * speed_of_light / dx
 "relativistic": False,  # Use relativistic equations of motion
+"tolerance_Picard_iterations_implicit_CN": 1e-12, # Tolerance for Picard iterations
 }
 
 solver_parameters = {
-    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT,
+    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
     "number_grid_points"     : 201,  # Number of grid points
     "number_pseudoelectrons" : 3000, # Number of pseudoelectrons
     "total_steps"            : 6000, # Total number of time steps
-    "time_evolution_algorithm": 0,  # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson (electrostatic)
+    "time_evolution_algorithm": 1,  # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson
+    "max_number_of_Picard_iterations_implicit_CN": 100, # Maximum number of iterations for Picard iteration converging
+    "number_of_particle_substeps_implicit_CN": 1, # The number of substep for one time eletric field update
 }
 
 output = block_until_ready(simulation(input_parameters, **solver_parameters))

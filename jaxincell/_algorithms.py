@@ -1,13 +1,13 @@
 import jax.numpy as jnp
 from jax import lax,  vmap, jit
 from functools import partial
-
-from ._sources import current_density, calculate_charge_density
+from jax.debug import print as jprint
+from ._sources import current_density_periodic_CN, calculate_charge_density, current_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
-from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic
+from ._particles import fields_to_particles_periodic_CN,fields_to_particles_grid, boris_step, boris_step_relativistic
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
 from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
-                      E_from_Poisson_1D_FFT, field_update1, field_update2)
+                      E_from_Poisson_1D_FFT, field_update1, field_update2, curlB,curlE)
 
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
@@ -83,6 +83,8 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     
     return carry, step_data
 
+
+
 # Implicit Crank-Nicolson step
 @partial(jit, static_argnames=('num_substeps', 'particle_BC_left', 'particle_BC_right', 'field_BC_left', 'field_BC_right'))
 def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
@@ -90,94 +92,106 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
                                   field_BC_left, field_BC_right, num_substeps):
     (E_field, B_field, positions,
     velocities, qs, ms, q_ms) = carry
-
-    E_new=E_field
-    B_new=B_field
-    positions_new=positions+ (dt) * velocities
-    velocities_new=velocities
-    # initialize the array of half-substep positions for Picard iterations
+    
+    # Grid Definitions (Staggered)
+    E_grid_start = grid[0] + dx/2  # E at i + 1/2
+    B_grid_start = grid[0] - dx/2  # B at i (shifted by -1/2 relative to E-grid logic)
+    grid_size = len(grid)
+    
+    # Initial Guess (Predictor)
+    E_new = E_field
+    B_new = B_field
+    positions_new = positions + dt * velocities
+    velocities_new = velocities
+    
+    # Init substep array
     positions_sub1_2_all_init = jnp.repeat(positions[None, ...], num_substeps, axis=0)
-
-    # Picard iteration of solution for next step
     substep_indices = jnp.arange(num_substeps)
+    
+    c_sq = speed_of_light**2
+    dtau = dt / num_substeps
+
     def picard_step(pic_carry, _):
-        _, E_new, pos_fix, _, vel_fix, _, qs_prev, ms_prev, q_ms_prev, pos_stag_arr = pic_carry
-        E_avg = 0.5 * (E_field + E_new)
-        dtau  = dt / num_substeps
-
-
-        interp_E = partial(fields_to_particles_grid, dx=dx, grid=grid + dx/2, grid_start=grid[0],
-                        field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-        # substepping
+        _, E_guess, B_guess, pos_fix, _, vel_fix, _, qs_prev, ms_prev, q_ms_prev, pos_stag_arr = pic_carry
+        
+        # ---------------------------------------------------------------------
+        # 1. Faraday's Law: B^{n+1} = B^n - dt * Curl(E^{n+1/2})
+        # ---------------------------------------------------------------------
+        E_avg_for_Faraday = 0.5 * (E_field + E_guess)
+        
+        # Use Periodic Backward Difference for E -> B
+        curl_E = curlE(E_avg_for_Faraday, B_field, dx, dt, field_BC_left, field_BC_right)
+        B_next = B_field - dt * curl_E
+        
+        # ---------------------------------------------------------------------
+        # 2. Particle Push
+        # ---------------------------------------------------------------------
+        B_avg_for_Push = 0.5 * (B_field + B_next)
+        interp_E_fn = partial(fields_to_particles_periodic_CN, dx=dx, grid_start=E_grid_start)
+        # interp_E_fn = partial(fields_to_particles_grid, dx=dx, grid=grid, grid_start=E_grid_start, field_BC_left=field_BC_left, field_BC_right=field_BC_right)
+        interp_B_fn = partial(fields_to_particles_periodic_CN, dx=dx, grid_start=B_grid_start)
+        
         def substep_loop(sub_carry, step_idx):
             pos_sub, vel_sub, qs_sub, ms_sub, q_ms_sub, pos_stag_arr = sub_carry
             pos_stag_prev = pos_stag_arr[step_idx]
 
-            E_mid = vmap(interp_E, in_axes=(0, None))(pos_stag_prev, E_avg)
-
-            vel_new = vel_sub + (q_ms_sub * E_mid) * dtau
+            # Gather
+            E_mid = vmap(interp_E_fn, in_axes=(0, None))(pos_stag_prev, E_avg_for_Faraday)
+            B_mid = vmap(interp_B_fn, in_axes=(0, None))(pos_stag_prev, B_avg_for_Push)
+            
+            # Boris Velocity Update (Rotation + Push)
+            _,vel_new = boris_step(dtau, pos_stag_prev, vel_sub, q_ms, E_mid, B_mid)
+            
             vel_mid = 0.5 * (vel_sub + vel_new)
             pos_new = pos_sub + vel_mid * dtau
 
-            # Apply boundary conditions
+            # BCs
             pos_new, vel_mid, qs_new, ms_new, q_ms_new = set_BC_particles(
                 pos_new, vel_mid, qs_sub, ms_sub, q_ms_sub,
                 dx, grid, *box_size, particle_BC_left, particle_BC_right
             )
-
             pos_stag_new = set_BC_positions(
                 pos_new - 0.5*dtau*vel_mid,
-                qs_new, dx, grid,
-                *box_size, particle_BC_left, particle_BC_right
+                qs_new, dx, grid, *box_size, particle_BC_left, particle_BC_right
             )
-            # Update half substep positions
             pos_stag_arr = pos_stag_arr.at[step_idx].set(pos_stag_new)
 
-            # half step current density
-            J_sub = current_density(
-                pos_sub, pos_stag_new, pos_new, vel_mid, qs_new, dx, dtau, grid,
-                grid[0] - dx/2, particle_BC_left, particle_BC_right
-            )
+            # Current Deposition
+            J_sub = current_density_periodic_CN(
+                            pos_stag_prev, vel_mid, qs, dx, 
+                            E_grid_start, grid_size
+                        )
 
             return (pos_new, vel_new, qs_new, ms_new, q_ms_new, pos_stag_arr), J_sub * dtau
 
-        # initial substep carry 
-        sub_init = (
-            pos_fix, vel_fix,
-            qs_prev, ms_prev, q_ms_prev,
-            pos_stag_arr
+        sub_init = (pos_fix, vel_fix, qs_prev, ms_prev, q_ms_prev, pos_stag_arr)
+        (pos_final, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr_new), J_accs = lax.scan(
+            substep_loop, sub_init, substep_indices
         )
 
-        # run through all substeps
-        (pos_final, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr), J_accs = lax.scan(
-            substep_loop,
-            sub_init,
-            substep_indices
-        )
-
-        # Sum over substep to get next step current with eletric field
         J_iter = jnp.sum(J_accs, axis=0) / dt
         mean_J = jnp.mean(J_iter, axis=0)
-        E_next = E_field - (dt / epsilon_0) * (J_iter - mean_J)
+        
+        # ---------------------------------------------------------------------
+        # 3. Ampere's Law: E^{n+1} = E^n + dt * c^2 * Curl(B^{n+1/2}) - ...
+        # ---------------------------------------------------------------------
+        # Use Periodic Forward Difference for B -> E
+        curl_B = curlB(B_avg_for_Push, E_field, dx, dt, field_BC_left, field_BC_right)
+        E_next = E_field + dt * (c_sq * curl_B - (1/epsilon_0) * (J_iter - mean_J))
 
         return (
-            (E_new, E_next, pos_fix, pos_final, vel_fix, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr),
+            (E_guess, E_next, B_next, pos_fix, pos_final, vel_fix, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr_new),
             J_iter
         )
 
-
-    # Picard iteration
-    picard_init = (E_new, positions, positions_new, velocities,velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
+    # --- Picard Loop ---
+    picard_init = (E_new, E_new, B_new, positions, positions_new, velocities, velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
+    
     tol = parameters["tolerance_Picard_iterations_implicit_CN"]
     max_iter = parameters["max_number_of_Picard_iterations_implicit_CN"]
 
-    positions_sub1_2_all_init = jnp.tile(positions[None, ...], (num_substeps, 1, 1))
-    E_old = E_new
-    delta_E0 = jnp.array(jnp.inf)
-    iter_idx0 = jnp.array(0)
-
-    picard_init = (E_old, E_new, positions, positions_new, velocities, velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
-    state0 = (picard_init, jnp.zeros_like(E_new), delta_E0, iter_idx0)
+    # Initial state
+    state0 = (picard_init, jnp.zeros_like(E_new), jnp.array(jnp.inf), jnp.array(0))
     
     def cond_fn(state):
         _, _, delta_E, i = state
@@ -185,29 +199,27 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     def body_fn(state):
         carry, _, _, i = state
-        
-        E_old = carry[0]
+        E_guess = carry[1]
 
         new_carry, J_iter = picard_step(carry, None)
-        E_next = new_carry[1]
+        E_calculated = new_carry[1]
 
-        delta_E = jnp.abs(jnp.max(E_next - E_old)) / (jnp.max(jnp.abs(E_next)))
+        delta_E = jnp.abs(jnp.max(E_calculated - E_guess)) / (jnp.max(jnp.abs(E_calculated)) + 1e-12)
+        
         return (new_carry, J_iter, delta_E, i + 1)
 
     final_carry, J, _, _ = lax.while_loop(cond_fn, body_fn, state0)
-    (E_old, E_new, _, positions_new, _, velocities_new, _, _, _, _) = final_carry
+    
+    (E_prev, E_final, B_final, _, positions_new, _, velocities_new, _, _, _, _) = final_carry
 
-    # Update carrys for next step
-    E_field = E_new
-    B_field = B_new
-    positions_plus1= positions_new
+    # Store Data
+    E_field = E_final
+    B_field = B_final
+    positions_plus1 = positions_new
     velocities_plus1 = velocities_new
     
     charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)
-
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
-    
-    # Collect data
     step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
     
     return carry, step_data

@@ -2,8 +2,8 @@ from jax import vmap, jit
 import jax.numpy as jnp
 from ._boundary_conditions import field_2_ghost_cells
 from ._constants import speed_of_light as c
-
-__all__ = ['fields_to_particles_grid', 'rotation', 'boris_step', 'boris_step_relativistic']
+from ._sources import get_S2_weights_and_indices_periodic_CN
+__all__ = ['fields_to_particles_grid', 'fields_to_particles_periodic_CN','rotation', 'boris_step', 'boris_step_relativistic']
 
 @jit
 def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):
@@ -27,8 +27,8 @@ def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, fi
     """
     # Add ghost cells for the boundaries using provided boundary conditions
     ghost_cell_L2, ghost_cell_L1, ghost_cell_R = field_2_ghost_cells(field_BC_left,field_BC_right,field)
-    field = jnp.insert(field,0,ghost_cell_L2,axis=0)
     field = jnp.insert(field,0,ghost_cell_L1,axis=0)
+    field = jnp.insert(field,0,ghost_cell_L2,axis=0)
     field = jnp.append(field,jnp.array([ghost_cell_R]),axis=0)
     x = x_n[0]
     
@@ -43,6 +43,26 @@ def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, fi
     fields_n = 0.5*field[i]*(0.5+(grid[i]-x)/dx)**2 + field[i+1]*(0.75-(grid[i]-x)**2/dx**2) + 0.5*field[i+2]*(0.5-(grid[i]-x)/dx)**2
     
     return fields_n
+
+@jit
+def fields_to_particles_periodic_CN(x_n, field, dx, grid_start):
+    """
+    Interpolates field to particle using Periodic BCs.
+    Args:
+        field: The field array (size N).
+        grid_start: Physical position of field[0].
+    """
+    x = x_n[0]
+    grid_size = len(field)
+    
+    # Get wrapped indices and weights
+    indices, weights = get_S2_weights_and_indices_periodic_CN(x, dx, grid_start, grid_size)
+    
+    # Gather (Dot Product)
+    # Since indices are already wrapped (0 to N-1), this is safe.
+    E_particle = jnp.dot(weights, field[indices])
+    
+    return E_particle
 
 
 @jit

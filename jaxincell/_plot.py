@@ -70,10 +70,10 @@ def plot(output, direction="x", threshold=1e-12):
 
     # Compute phase space histograms
     sqrtmemi = jnp.sqrt(output["mass_electrons"][0] / output["mass_ions"][0])
-    max_velocity_electrons_1 = max(1.0 * jnp.max(output["velocity_electrons"][:, :, direction_index1]),
+    max_velocity_electrons_1 = max(1.0 * jnp.max(jnp.abs(output["velocity_electrons"][:, :, direction_index1])),
                                  2.5 * jnp.abs(vth_e_1)
                                  + jnp.abs(output[f"electron_drift_speed_{direction1}"]))
-    max_velocity_ions_1      = max(1.0 * jnp.max(output["velocity_ions"][:, :, direction_index1]),
+    max_velocity_ions_1      = max(1.0 * jnp.max(jnp.abs(output["velocity_ions"][:, :, direction_index1])),
                                  sqrtmemi * 0.3 * jnp.abs(vth_i_1) * jnp.sqrt(output[f"ion_temperature_over_electron_temperature_{direction1}"])
                                  + jnp.abs(output[f"ion_drift_speed_{direction1}"]))
     max_velocity_ions_1 = float(jnp.asarray(max_velocity_ions_1))
@@ -100,8 +100,10 @@ def plot(output, direction="x", threshold=1e-12):
     fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 2.5 * nrows), squeeze=False)
 
     def plot_field(ax, field_data, title, xlabel, ylabel, cbar_label):
+        max_val = jnp.max(jnp.abs(field_data))
         im = ax.imshow(field_data, aspect="auto", cmap="RdBu", origin="lower",
-                       extent=[grid[0], grid[-1], time[0], time[-1]])
+                       extent=[grid[0], grid[-1], time[0], time[-1]], 
+                       vmin=-max_val, vmax=max_val)
         ax.set(title=title, xlabel=xlabel, ylabel=ylabel)
         fig.colorbar(im, ax=ax, label=cbar_label)
         return im
@@ -159,10 +161,10 @@ def plot(output, direction="x", threshold=1e-12):
         energy_ax.plot(time, output["electric_field_energy"], label="Electric field energy")
         if jnp.max(output["magnetic_field_energy"]) > 1e-10:
             energy_ax.plot(time, output["magnetic_field_energy"], label="Magnetic field energy")
-        energy_ax.plot(time[2:], jnp.abs(jnp.mean(output["charge_density"][2:], axis=-1))*1e13, label=r"Mean $\rho \times 10^{13}$")
+        # energy_ax.plot(time[2:], jnp.abs(jnp.mean(output["charge_density"][2:], axis=-1))*1e13, label=r"Mean $\rho \times 10^{13}$")
         energy_ax.plot(time[1:], jnp.abs(output["total_energy"][1:] - output["total_energy"][0]) / output["total_energy"][0], label="Relative energy error")
         energy_ax.set(title="Energy", xlabel=r"Time ($\omega_{pe}^{-1}$)",
-                    ylabel="Energy (J)", yscale="log", ylim=[1e-7, None])
+                    ylabel="Energy (J)", yscale="log", ylim=[None, None])
         energy_ax.legend(fontsize=7)
     
     if second_direction:
