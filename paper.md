@@ -9,13 +9,13 @@ tags:
 authors:
   - name: Longyu Ma
     affiliation: 1
-  - name: Hongke Lu
+  - name: Rogerio Jorge
     affiliation: 1
-  - name: Christopher Woolford
+  - name: Hongke Lu
     affiliation: 1
   - name: Aaron Tran
     affiliation: 1
-  - name: Rogerio Jorge
+  - name: Christopher Woolford
     affiliation: 1
 affiliations:
   - name: University of Wisconsin–Madison
@@ -25,15 +25,16 @@ bibliography: paper.bib
 ---
 
 # Summary
-JAX-in-Cell is a 1D3V Particle-in-Cell (PIC) code implemented entirely in JAX, providing a modern, Python-based alternative to traditional PIC frameworks. By using JAX’s recommended functions, such as vmap, jit, and lax, for all core operations, the code achieves efficient vectorization and GPU acceleration. The resulting framework enables fast, fully kinetic plasma simulations suitable for both research applications and instructional settings.
+JAX-in-Cell is a fully electromagnetic, multispecies, and relativistic 1D3V Particle-in-Cell (PIC) framework implemented entirely in JAX. It provides a modern, Python-based alternative to traditional PIC frameworks. It leverages Just-In-Time (JIT) compilation and automatic vectorization to achieve the performance of traditional compiled codes on CPUs, GPUs, and TPUs. The resulting framework bridges the gap between educational scripts and production codes, providing a testbed for differentiable physics and AI integration that enables end-to-end gradient-based optimization. The code solves the Vlasov-Maxwell system on a staggered Yee lattice with either periodic, reflective, or absorbing boundary conditions, allowing both an explicit Boris solver and an implicit Crank-Nicolson method via Picard iteration to ensure energy conservation. Here, we detail the numerical methods employed, validate against standard benchmarks, and compare computational times in different hardware architectures, with and without JIT compilation.
 
 # Statement of Need
 
-A plasma is a collection of free ions and electrons whose self-generated and external electromagnetic fields drive collective behavior. PIC simulation is a powerful tool in plasma physics, offering a fully kinetic description and enabling exploration of complex interactions in fusion devices and astrophysical plasmas[@birdsall1991plasma].
+A plasma is a collection of free ions and electrons whose self-generated and external electromagnetic fields drive collective behavior. Such behavior can be modelled using PIC simulations, which offer a fully kinetic description and enable exploration of complex interactions in modern plasma physics research, such as fusion devices, laser-plasma interactions, and astrophysical plasmas[@birdsall1991plasma].
 
-Our code, JAX-in-Cell, implements a 1D3V PIC framework in JAX and is built to be open-source, user-friendly, and developer-friendly, written entirely in Python in contrast to many other PIC codes implemented in legacy languages such as Fortran[@epochPic] or complex compiled architectures[@bowers2008ultrahigh]. Utilizing JAX, the code achieves high performance through GPU acceleration, just-in-time compilation, vectorized operations, and automatic differentiation, and it is well-suited for both educational-scale demonstrations—such as reproducing Landau damping and two-stream instability—and research-scale simulations such as rapid optimization.
+However, such simulations can be computationally very expensive, often requiring hardware-specific implementations in low-level languages. The current landscape of high-performance production codes such as OSIRIS[@10.1007/3-540-47789-6_36], EPOCH[@Smith2021], VPIC[@10.1063/5.0146529], and WARPX[@WarpX], which are written in C++ or Fortran with MPI/CUDA backends, are highly optimized for massively parallel simulations, often with complex compilation chains, and require external adjoint implementations for optimization. This imposes a steep barrier to entry for new developers, making it cumbersome to test new algorithms, as well as to integrate with modern data science workflows.
 
-Furthermore, although the classic Boris push is simple and robust, long-term PIC simulations can experience energy drift (numerical heating). To mitigate this, JAX-in-Cell implements both the standard Boris algorithm[@boris1970relativistic] and an implicit, discretely energy-conserving method[@chen2011energy], providing improved energy conservation for extended simulations.
+JAX-in-Cell is able to fill this gap by implementing a 1D3V PIC framework entirely within the JAX ecosystem[@jax2018github]. It is open-source, user-friendly, and developer-friendly, written entirely in Python. It addresses three specific needs not met by existing codes: 1) hardware-agnostic high performance; 2) unified explicit and implicit solvers; 3) differentiable physics and AI integration. This is achieved using JAX's Just-In-Time (JIT) compilation via XLA, which allows us to achieve performance parity with compiled languages on CPUs, GPUs, and TPUs. Therefore, researchers can prototype new algorithms in Python and immediately use them on complex situations and accelerated hardware. Furthermore, JAX-in-Cell is inherently differentiable due to its automatic differentiation (AD) capabilities. This allows for new research directions such as optimization of laser pulse shapes, parameter discovery from experimental data, or embedding PIC simulations in Physics-Informed Neural Network loops. Finally, both an explicit scheme using the standard Boris algorithm[@boris1970relativistic] and a fully implicit, energy-conserving scheme[@chen2011energy] are available to cross-verify results and perform long simulations with large time steps, a capability often lacking in lightweight tools.
+
 
 # Structure
 
@@ -107,7 +108,7 @@ For two-stream instability:
 (ii) Velocities: $v_{b_1} = -v_{b_2} = 0.2\,c$, $v_{th} = 0.05\,c$
 (iii) Discretization: $N = 10{,}000$, $N_x = 100$, $\Delta x = 0.5 \lambda_D$ and $\Delta t = 0.1\,\omega_{pe}^{-1}$
 
-![Electric field energy evolution for Landau damping and two-stream instability. (a) Landau damping with analytical damping rate $\gamma = 0.153\omega_{pe}$. (b) Two-stream instability showing fitted exponential growth rate. (c–d) Relative total energy deviation $|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)$ demonstrating energy conservation.\label{fig:output}](figs/output.png)
+![Electric field energy evolution for Landau damping and two-stream instability. (a) Landau damping with analytical damping rate. (b) Two-stream instability showing fitted exponential growth rate. (c–d) Relative total energy deviation $|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)$ demonstrating energy conservation.\label{fig:output}](figs/output.png)
 
 The results in \autoref{fig:output} show good agreement with analytical predictions; nevertheless, the Landau damping simulation exhibits high sensitivity to the initial conditions, in particular the choice of perturbation amplitude.
 
