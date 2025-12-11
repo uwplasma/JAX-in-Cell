@@ -9,12 +9,10 @@ def binomial_filter_3point(x, alpha=0.5, stride=1):
         jnp.roll(x, stride, axis=0) + jnp.roll(x, -stride, axis=0)
     )
 
-
 # Maximum number of "regular" filter passes we support.
 # This keeps the scan length static so grad() and jit() are happy,
 # while still covering all reasonable use cases (default is 5).
 _MAX_FILTER_PASSES = 16
-
 
 @jit
 def _repeat_filter(y, stride, passes, alpha):
@@ -26,10 +24,18 @@ def _repeat_filter(y, stride, passes, alpha):
           (up to a static maximum _MAX_FILTER_PASSES),
         * then a final compensation pass with comp_alpha = passes - alpha*(passes - 1).
     This is fully jit- and grad-safe even when `passes` is a traced value.
+
+    Note: The number of regular filter passes is internally capped at _MAX_FILTER_PASSES (16).
+    If passes > _MAX_FILTER_PASSES + 1, the function will only apply _MAX_FILTER_PASSES regular
+    passes plus one compensation pass, which may not match the expected filtering behavior.
+    For typical use cases (default is 5), this limit should not be reached.
     """
 
     passes_f = jnp.asarray(passes)
     num_regular = jnp.maximum(passes_f - 1, 0)
+
+    # This makes the capping behavior explicit in the code
+    num_regular = jnp.minimum(num_regular, _MAX_FILTER_PASSES)
 
     def do_filter(y0):
         # Static-length scan; we mask out iterations beyond num_regular.
@@ -60,6 +66,19 @@ def _repeat_filter(y, stride, passes, alpha):
 
 @jit
 def filter_scalar_field(scalar_field, passes=5, alpha=0.5, strides=(1, 2, 4)):
+    """
+    Apply a multi-pass 3-point binomial digital filter to a scalar field.
+    
+    Args:
+        phi: Input scalar field array to be filtered.
+        passes: Number of filter passes (default: 5). Note: internally capped at 17 
+                (16 regular passes + 1 compensation pass).
+        alpha: Filter strength parameter (default: 0.5).
+        strides: Tuple/list of stride values for filtering (default: (1, 2, 4)).
+    
+    Returns:
+        Filtered scalar field array.
+    """
     # Accept strides as tuple/list/array; convert to JAX array so it's OK as a dynamic arg.
     s = jnp.asarray(strides)
 
@@ -75,6 +94,16 @@ def filter_vector_field(F, passes=5, alpha=0.5, strides=(1, 2, 4)):
     """
     Apply digital filter along the grid axis (axis=0) for each component.
     F has shape (G, C), typically (grid_points, 3) for a vector field.
+
+    Args:
+        F: Input vector field array, shape (G, C), typically (grid_points, 3).
+        passes: Number of filter passes (default: 5). Note: internally capped at 17 
+                (16 regular passes + 1 compensation pass).
+        alpha: Filter strength parameter (default: 0.5).
+        strides: Tuple/list of stride values for filtering (default: (1, 2, 4)).
+    
+    Returns:
+        Filtered vector field array with the same shape as input.
     """
     s = jnp.asarray(strides)
 
