@@ -59,14 +59,14 @@ def _repeat_filter(y, stride, passes, alpha):
 
 
 @jit
-def filter_scalar_field(phi, passes=5, alpha=0.5, strides=(1, 2, 4)):
+def filter_scalar_field(scalar_field, passes=5, alpha=0.5, strides=(1, 2, 4)):
     # Accept strides as tuple/list/array; convert to JAX array so it's OK as a dynamic arg.
     s = jnp.asarray(strides)
 
     def body(y, stride):
         return _repeat_filter(y, stride, passes, alpha), None
 
-    y, _ = lax.scan(body, phi, s)
+    y, _ = lax.scan(body, scalar_field, s)
     return y
 
 
