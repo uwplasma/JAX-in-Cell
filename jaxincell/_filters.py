@@ -32,6 +32,7 @@ def _repeat_filter(y, stride, passes, alpha):
     """
 
     passes_f = jnp.asarray(passes)
+    passes_clamped = jnp.minimum(passes_f, _MAX_FILTER_PASSES + 1)
     num_regular = jnp.maximum(passes_f - 1, 0)
 
     # This makes the capping behavior explicit in the code
@@ -51,7 +52,7 @@ def _repeat_filter(y, stride, passes, alpha):
         y1, _ = lax.scan(body, y0, indices)
 
         # compensation pass - sharp cutoff in k-space
-        comp_alpha = passes_f - alpha * (passes_f - 1)
+        comp_alpha = passes_clamped - alpha * (passes_clamped - 1)
         y2 = binomial_filter_3point(y1, comp_alpha, stride=stride)
         return y2
 

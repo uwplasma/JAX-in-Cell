@@ -22,7 +22,7 @@ filter_strides = [1, 2, 4]
 
 [solver_parameters]
 field_solver = 0                 # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT,
-time_evolution_algorithm = 1     # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson (electrostatic)
+time_evolution_algorithm = 0     # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson
 number_grid_points = 70          # Number of grid points
 number_pseudoelectrons = 3500    # Number of pseudoelectrons
 total_steps = 1100               # Total number of time steps
