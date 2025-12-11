@@ -38,29 +38,41 @@ JAX-in-Cell is able to fill this gap by implementing a 1D3V PIC framework entire
 
 # Structure
 
-The core of our PIC code is based on the Vlasov–Maxwell system, which self-consistently evolves particle distribution functions and electromagnetic fields. For each species $s$, the distribution function satisfies the Vlasov equation,
-
+Kinetic simulations can be performed using either a particle (or Lagrangian) approach, based on PIC simulations, or a continuum (or Eulerian) approach. While the former follows individual particles, these are down-sampled by following pseudo-particles, labeled $p$, leading to numerical noise that scales inversely with the square root of the mean number of particles[@birdsall1991plasma]. Nevertheless, PIC codes use an Eulerian grid for the fields and moments of the particle distribution function of species $s$, $f_s$, using therefore a mixed Eulerian/Lagrangian discretization. Particles are advanced along characteristics of the Vlasov equation
+%
 \begin{equation}
 \partial_t f_s + \mathbf{v}\cdot\nabla f_s
 + \frac{q_s}{m_s} \left( \mathbf{E} + \mathbf{v} \times \mathbf{B} \right)
 \cdot \nabla_{\mathbf{u}} f_s = 0,
 \end{equation}
-
-with the electromagnetic fields governed by the standard Maxwell equations. Here, $f_s$ denotes the distribution function, $\mathbf{v}$ is the particle velocity, $q_s$ and $m_s$ are the particle charge and mass, $\mathbf{E}$ and $\mathbf{B}$ are the electric and magnetic fields, $\mathbf{u} = \mathbf{v}\gamma$ is the proper velocity, and $\gamma = \sqrt{1 + u^2/c^2}$ is the Lorentz factor, with $c$ the speed of light.
-
-In a typical 1D3V PIC framework, the distribution function is discretized using pseudo-particles labeled $p$ as
-
+%
+with the electromagnetic fields governed by the standard Maxwell equations
+equations. Here, \(\mathbf{v}\) is velocity, \(q_s\) and \(m_s\) are the
+particle charge and mass, \(\mathbf{E}\) and \(\mathbf{B}\) are the
+electric and magnetic fields, \(\mathbf{u} = \mathbf{v}\gamma\) is the
+proper velocity, and \(\gamma = \sqrt{1 + u^2/c^2}\) is the Lorentz
+factor, with \(c\) the speed of light.
+The distribution function $f_s$ is discretized as
+%
 \begin{equation}
-f_s(x, \mathbf{v}) \approx \sum_{p} w_p\, \delta(x - x_p)\, \delta(\mathbf{v} - \mathbf{v_p}),
+f_s(\mathbf{x}, \mathbf{v}) \approx \sum_{p} w_p\, \delta(\mathbf{x} - \mathbf{x_p})\, \delta(\mathbf{v} - \mathbf{v_p}),
 \end{equation}
+%
+where \(x_p\) denotes the position of each pseudo-particle, \(\mathbf{v_p}\) denotes the velocity of each pseudo-particle, the weight is given by \(w_p = n_0L/N\), with
+\(n_0\) number density, \(L\) the spatial domain length and \(N\) the number of pseudo-particles for that species. Then, the spatial domain is divided into \(N_x\) uniform cells with spacing \(\Delta x\) and advanced in time by \(\Delta t\). To mitigate numerical noise, each pseudo-particle is represented by a triangular shape function spanning three grid cells, and the same kernel is used consistently for both the
+particle-to-grid charge deposition and the grid-to-particle field interpolation[@hockney1988computer]. Accordingly, the current density \(j\) is computed from
+the continuity equation using a discretely charge-conserving scheme[@villasenor1992rigorous] consistent with the shape function.
+Continuum Eulerian methods discretize the distribution function in six dimensions of phase space, making them computationally more costly, but, on the other hand, they are not subject to noise and can be cast in conservation law form so as to preserve the velocity moments of the distribution function.
 
-where $x_p$ denotes the position, $\mathbf{v_p}$ denotes the three-component velocity, the weight is given by $w_p = n_0L/N$, with $n_0$ number density, $L$ the spatial domain length and $N$ the number of pseudo-particles for that species. Then, spatial domain is divided into $N_x$ uniform cells with spacing $\Delta x$ and advanced in time by $\Delta t$. To mitigate numerical noise, each pseudo-particle is represented by a triangular shape function spanning three grid cells, and same kernel is used consistently for both the particle-to-grid charge deposition and the grid-to-particle field interpolation [@hockney1988computer]. Accordingly, current density $j$ is computed from continuity equation using a discretely charge-conserving scheme[@villasenor1992rigorous] consistent with the shape function.
+The core logic of JAX-in-Cell is distributed along six specific modules. The first one is \texttt{simulation.py}, which serves as the high-level entry point, handling parameter initialization (via TOML parsing), memory allocation for particle and field arrays, and the execution of the main loop. The time-stepping is performed using a JAX primitive \texttt{jax.lax.scan}, which allows it to be optimized by the XLA compiler. Then, \texttt{algorithms.py} implements the time integration schemes, which advance the system state by one timestep $\Delta t$ by a sequence of operations, namely particle push, source deposition, and field update. We implement two time-evolution methods (see Fig.~ autoref{fig:algorithm}), an explicit Boris algorithm \cite{boris1970relativistic}, and an implicit Crank--Nicolson scheme solved via Picard iteration \cite{CHEN20142391}. The JIT-compiled particle dynamics is present in \texttt{particles.py}, which includes the relativistic and non-relativistic Boris rotation and the field interpolation routines, which are heavily vectorized using \texttt{jax.vmap}. The electromagnetic solvers are present in \texttt{fields.py}, which include the finite-difference curl operators for the Faraday and Ampère laws, as well as the divergence cleaning routines that enforce charge conservation. The deposition of charge and current densities from particle positions onto the grid is handled by \texttt{sources.py}, which implements high-order spline interpolation and digital filtering to mitigate aliasing noise. Finally, \texttt{boundary\_conditions.py} is the centralized module to enforce boundary constraints, including routines for particle reflection/absorption and ghost-cell updates for the electromagnetic fields.
 
-We implement two time-evolution methods. See \autoref{fig:algorithm}.
-(1) an explicit Boris algorithm[@boris1970relativistic], and  (2) an implicit Crank–Nicolson scheme solved via Picard iteration[@chen2011energy].
+Due to its simplified design, JAX-in-Cell is able to pass the entire simulation state between functions, which is maintained as an immutable tuple referred to in the code as the \texttt{carry}$=(\mathbf E, \mathbf B, \mathbf x_p, \mathbf v_p, q, m)$.
+This allows the entire simulation to be treated as a single differentiable function, which can facilitate the integration of automatic differentiation workflows.
+The code can be run in two different ways: 1) directly called from the command line as \texttt{jaxincell}, pointing to a given TOML file, 2) from a Python driver script, either loading a TOML file using the \texttt{load\_parameters} function or using a dictionary of input parameters. While the code uses SI units internally, it allows initialization via dimensionless ratios common in plasma physics literature. Functions for diagnostics and plotting are available to compute and show phase-space structure, energy partition, and the evolution of the electromagnetic fields and sources.
 
-![Demonstration of two time-evolution algorithms steps. Each step start with initialization quantities or extract last step data including particle position and velocity with fields on the grid. \label{fig:algorithm}](figs/two_alg.png)
+![Time-stepping algorithms in JAX-in-Cell. Left: explicit Boris time-stepper and a Finite-Difference Time-Domain (FDTD) method using a staggered Yee grid for the electromagnetic fields. Right: implicit Crank-Nicolson time stepper using a Picard iteration for the electromagnetic system.\label{fig:algorithm}](figs/JAX-in-Cell_algorithm.pdf)
 
+In order to reduce kernel launch overheads on GPUs, as well as the vector lengths for different populations, JAX-in-Cell adopts a monolithic array formulation of the multi-species architecture optimized for the Single-Instruction-Multiple-Data (SIMD) paradigm of JAX. That is, the simulation state, \texttt{carry}, is a single concatenated state of unified, global arrays, regardless of the number of physical species defined in the input configuration. This is a different approach than the one used in traditional PIC codes, which employ an object-oriented design with different species stored in separate containers and iterated over sequentially. During initialization, the code parses the TOML configuration file for the list of species and, for each population, the function \texttt{make\_particles} generates each phase-space distribution and weights at the initial time, which are then appended to the global state vectors. This allows load balancing across GPU cores and minimizes warp divergence.
 
 
 
