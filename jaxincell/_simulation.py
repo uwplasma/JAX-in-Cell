@@ -134,6 +134,11 @@ def initialize_simulation_parameters(user_parameters={}):
         "external_magnetic_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
 
+        # Filtering parameters for current and charge density (digital smoothing)
+        "filter_passes": 5,       # number of passes of the digital filter applied to ρ and J
+        "filter_alpha": 0.5,      # filter strength (0 < alpha < 1)
+        "filter_strides": (1, 2, 4),  # multi-scale strides for filtering
+
         "weight": 0,
     }
 
@@ -149,7 +154,7 @@ def initialize_simulation_parameters(user_parameters={}):
 
 def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500,
                                 number_pseudoparticles_species=None, total_steps=350
-                                ,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
+                                ,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
 
@@ -507,7 +512,7 @@ def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
                                "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
 def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000,
                number_pseudoparticles_species=None, total_steps=1000,
-               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
+               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
