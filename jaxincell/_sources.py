@@ -46,8 +46,8 @@ def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, 
     Compute the charge contribution to the boundary points based on particle positions and boundary conditions.
 
     Args:
-        BC_left (int): Boundary condition for the left edge (0: periodic, 1: reflective, 2: absorbing).
-        BC_right (int): Boundary condition for the right edge (0: periodic, 1: reflective, 2: absorbing).
+        particle_BC_left (int): Boundary condition for the left edge (0: periodic, 1: reflective, 2: absorbing).
+        particle_BC_right (int): Boundary condition for the right edge (0: periodic, 1: reflective, 2: absorbing).
         position (float): Position of the particle.
         dx (float): Grid spacing.
         grid (array-like): Grid points as a 1D array.
