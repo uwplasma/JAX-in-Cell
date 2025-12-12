@@ -2,7 +2,6 @@ import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from jax import vmap
-from jax.debug import print as jprint
 from ._constants import speed_of_light
 from matplotlib.animation import FuncAnimation
 

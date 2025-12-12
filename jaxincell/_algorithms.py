@@ -1,14 +1,12 @@
 import jax.numpy as jnp
 from jax import lax,  vmap, jit
 from functools import partial
-from jax.debug import print as jprint
 from ._sources import current_density_periodic_CN, calculate_charge_density, current_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._particles import fields_to_particles_periodic_CN,fields_to_particles_grid, boris_step, boris_step_relativistic
-from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
-from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
-                      E_from_Poisson_1D_FFT, field_update1, field_update2, curlB,curlE)
-from ._filters import filter_vector_field, filter_scalar_field
+from ._constants import speed_of_light, epsilon_0
+from ._fields import (E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, curlB,curlE,
+                      E_from_Poisson_1D_FFT, field_update1, field_update2)
 
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib

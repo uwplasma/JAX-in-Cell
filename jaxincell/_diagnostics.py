@@ -2,7 +2,6 @@ from jax import lax
 import jax.numpy as jnp
 from jax.numpy.fft import fft, fftfreq
 from ._constants import epsilon_0, mu_0
-from jax.debug import print as jprint
 
 __all__ = ['diagnostics']
 
