@@ -170,3 +170,4 @@ jaxincell/version.py
 *.xml
 .vscode/settings.json
 *.npz
+*.png
