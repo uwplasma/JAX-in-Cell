@@ -228,7 +228,9 @@ def test_filter_scalar_field_jit_and_grad_compatible():
     loss_val = loss_jit(x0)
     grad_val = grad_loss(x0)
 
-    assert jnp.isscalar(loss_val)
+    # JAX "scalars" are 0-d arrays; this is stable across versions.
+    assert loss_val.shape == () or getattr(loss_val, "ndim", None) == 0
+
     assert jnp.all(jnp.isfinite(grad_val))
     assert grad_val.shape == x0.shape
 
@@ -261,7 +263,8 @@ def test_filter_vector_field_jit_and_grad_compatible():
     loss_val = loss_jit(flat0)
     grad_val = grad_loss(flat0)
 
-    assert jnp.isscalar(loss_val)
+    assert loss_val.shape == () or getattr(loss_val, "ndim", None) == 0
+
     assert jnp.all(jnp.isfinite(grad_val))
     assert grad_val.shape == flat0.shape
 
