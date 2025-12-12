@@ -40,21 +40,21 @@ JAX-in-Cell is able to fill this gap by implementing a 1D3V PIC framework entire
 # Structure
 
 Kinetic simulations can be performed using either a particle (or Lagrangian) approach, based on PIC simulations, or a continuum (or Eulerian) approach. While the former follows individual particles, these are down-sampled by following pseudo-particles, labeled $p$, leading to numerical noise that scales inversely with the square root of the mean number of particles[@birdsall1991plasma]. Nevertheless, PIC codes use an Eulerian grid for the fields and moments of the particle distribution function of species $s$, $f_s$, using therefore a mixed Eulerian/Lagrangian discretization. Particles are advanced along characteristics of the Vlasov equation
-%
+
 \begin{equation}
 \partial_t f_s + \mathbf{v}\cdot\nabla f_s
 + \frac{q_s}{m_s} \left( \mathbf{E} + \mathbf{v} \times \mathbf{B} \right)
 \cdot \nabla_{\mathbf{u}} f_s = 0,
 \end{equation}
-%
+
 with the electromagnetic fields governed by the standard Maxwell equations equations. Here, $\mathbf{v}$ is velocity, $q_s$ and $m_s$ are the
 particle charge and mass, $\mathbf{E}$ and $\mathbf{B}$ are the electric and magnetic fields, $\mathbf{u} = \mathbf{v}\gamma$ is the
 proper velocity, and $\gamma = \sqrt{1 + u^2/c^2}$ is the Lorentz factor, with $c$ the speed of light. The distribution function $f_s$ is discretized as
-%
+
 \begin{equation}
 f_s(\mathbf{x}, \mathbf{v}) \approx \sum_{p} w_p\, \delta(\mathbf{x} - \mathbf{x_p})\, \delta(\mathbf{v} - \mathbf{v_p}),
 \end{equation}
-%
+
 where $x_p$ denotes the position of each pseudo-particle, $\mathbf{v_p}$ denotes the velocity of each pseudo-particle, the weight is given by $w_p = n_0L/N$, with $n_0$ number density, $L$ the spatial domain length and $N$ the number of pseudo-particles for that species. Then, the spatial domain is divided into $N_x$ uniform cells with spacing $\Delta x$ and advanced in time by $\Delta t$.  To mitigate numerical noise, each pseudo-particle is represented by a triangular shape function spanning three grid cells, and the same kernel is used consistently for both the
 particle-to-grid charge deposition and the grid-to-particle field interpolation[@hockney1988computer]. Accordingly, the current density $\mathbf j$ is computed from the continuity equation using a discretely charge-conserving scheme[@villasenor1992rigorous] consistent with the shape function. Continuum Eulerian methods discretize the distribution function in six dimensions of phase space, making them computationally more costly, but, on the other hand, they are not subject to noise and can be cast in conservation law form so as to preserve the velocity moments of the distribution function.
 
@@ -79,24 +79,24 @@ To facilitate analysis, the code automatically computes key quantities such as s
 
 The electromagnetic fields are defined on a staggered Yee lattice. The code then solves the Ampere and Faraday equations
 
-%
+
 \begin{equation}
     \frac{\partial \mathbf E}{\partial t}=c^2 \nabla \times \mathbf B - \frac{\mathbf j}{\epsilon_0},~ \frac{\partial \mathbf B}{\partial t} = - \nabla \times \mathbf E,
 \end{equation}
-%
+
 which, in the 1D geometry ($\partial/\partial y = \partial/\partial z = 0$), reduces the curl operator to spatial derivatives along the $x$ lattice. The discrete spatial derivative operator uses central differences for internal points, with ghost cells handling the boundary conditions (periodic, reflective, or absorbing). JAX-in-Cell allows flexible boundary conditions by handling particle trajectories and electromagnetic fields independently at the domain edges.
 Charge conservation is ensured using a divergence cleaning step, where the longitudinal component $E_x$ is projected to satisfy Gauss' law, $\nabla \cdot \mathbf E = \rho/\epsilon_0$.
 The charge density $\rho$ and current density $\mathbf j$ are deposited onto the grid using a quadratic (3-point) spline shape function $S(x)$, where a multi-pass binomial digital filter is applied to the source terms to mitigate grid-heating instability. This effectively suppresses high wavenumbers near the Nyquist limit while preserving the macroscopic (low wave-number) plasma dynamics.
 
 While the user can initialize their own distribution functions, JAX-in-Cell allows users to use a predefined perturbed Maxwellian
-%
+
 \begin{equation}
 f_s(x, \mathbf{v}, t = 0) = f_{s0}(\mathbf{v})\left[ 1 + a \cos\left(\frac{2 \pi k x}{L}\right)\right],
 \end{equation}
-%
-where \(a\) is the perturbation amplitude and \(k\) the perturbation
+
+where $a$ is the perturbation amplitude and $k$ the perturbation
 wavenumber. The Maxwellian background $f_{s0}$ is given by the following anisotropic, drifting distribution
-%
+
 \begin{equation}
 \begin{aligned}
 f_{s0}(\mathbf{v}) &= \frac{n_0}{2 \, \pi^{3/2} v^3} 
@@ -107,50 +107,46 @@ e^{- \frac{(v_x - v_{bx})^2}{v_{th,x}^2} - \frac{(v_y - v_{by})^2}{v_{th,y}^2} -
 \right],
 \end{aligned}
 \end{equation}
-%
+
 with $v^3 = v_{th,x} v_{th,y} v_{th,z}$ the product of each thermal velocity along $(x,y,z)$ directions, $v_{bi}$ the drift velocities along each direction $i$, and $n_0$ the background density. The addition of an opposite sign drift velocity $\pm v_b$ is controlled using the`velocity\_plus\_minus` input parameter.
-%
+
 Such a perturbed Maxwellian allows us to perform many benchmark simulations, such as Landau damping, the two-stream instability, the bump-on-tail instability, and the Weibel instability.
 
-We first validate JAX-in-Cell by performing such simulations in a periodic boundary of length $L$, and compare with the corresponding linear theory. Linearizing the Vlasov--Maxwell system around this initial distribution (with equal thermal velocities \(v_{th,x}=v_{th,y}=v_{th,z}\)), yields the dispersion relation
-%
+We first validate JAX-in-Cell by performing such simulations in a periodic boundary of length $L$, and compare with the corresponding linear theory. Linearizing the Vlasov--Maxwell system around this initial distribution (with equal thermal velocities $v_{th,x}=v_{th,y}=v_{th,z}$), yields the dispersion relation
+
 \begin{equation}
 1 + \frac{1}{2k^2\lambda_D^2}
 \left[  2 + \xi_1 Z(\xi_1)+\xi_2 Z(\xi_2)\right] = 0, \quad
 \xi_i=\frac{\omega}{kv_{th}}-\frac{v_{b_i}}{v_{th}},
 \end{equation}
-%
-
-where $\lambda_D$ is Debye length and $Z$ is the Fried–Conte plasma dispersion function. The complex frequency $\omega$ determines both the oscillation frequency and the damping or growth rate $\gamma$. With this theoretical prediction established, the following parameter choices demonstrate two representative test cases using non-relativistic algorithms:
-
-For Landau damping:
-(i) Perturbation: $a = 0.025$, $k\lambda_D = 1/2$
-(ii) Velocities: $v_{b_1} = v_{b_2} = 0$, $v_{th} = 0.35\,c$
-(iii) Discretization: $N = 40{,}000$, $N_x = 32$, $\Delta x = 0.4\lambda_D$ and $\Delta t = 0.1\,\omega_{pe}^{-1}$
-
-For two-stream instability:
-(i) Perturbation: $a = 5\times10^{-7}$, $k\lambda_D = 1/8$
-(ii) Velocities: $v_{b_1} = -v_{b_2} = 0.2\,c$, $v_{th} = 0.05\,c$
-(iii) Discretization: $N = 10{,}000$, $N_x = 100$, $\Delta x = 0.5 \lambda_D$ and $\Delta t = 0.1\,\omega_{pe}^{-1}$
-
-![Electric field energy evolution for Landau damping and two-stream instability. (a) Landau damping with analytical damping rate. (b) Two-stream instability showing fitted exponential growth rate. (c–d) Relative total energy deviation $|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)$ demonstrating energy conservation.\label{fig:output}](figs/output.png)
-
-The results in \autoref{fig:output} show good agreement with analytical predictions; nevertheless, the Landau damping simulation exhibits high sensitivity to the initial conditions, in particular the choice of perturbation amplitude.
-
-Next, we investigated the Weibel instability, which arises in anisotropic plasmas and leads to spontaneous magnetic field generation. The plasma is initialized with anisotropic velocity distribution, and we track magnetic field evolution. During the instability, the magnetic field organizes into filamentary structures perpendicular to the velocity anisotropy. Initially, multiple small filaments form, which subsequently merge into larger-scale structures as the system evolves (\autoref{fig:Weibel}).
-
-![Evolution of the magnetic field during the Weibel instability. (a) Time evolution of total magnetic field energy. (b) Spatial profile of the magnetic field.\label{fig:Weibel}](figs/Weibel.png)
-
-Additionally, to demonstrate the multi-species capability of our code, we study the bump-on-tail instability. This instability arises when a high-velocity electron beam creates a positive slope in the electron velocity distribution. We initialize the plasma with a bulk Maxwellian electron population and a tenuous, high-velocity beam that produces a pronounced bump in the tail of the distribution, and we track the evolution of the phase-space density and the associated electric field. During the linear growth phase, resonant electrons exchange energy with Langmuir waves, leading to exponential amplification of the electric field. As the instability evolves, the initially smooth electron distribution develops coherent phase-space structures, illustrating the code’s ability to capture nonlinear wave–particle interactions (\autoref{fig:bump-on-tail}).
-
-![Simulation of the bump-on-tail instability. The numbers of pseudo-particles in the bulk and beam populations are equal, with a beam-to-bulk weight ratio of $3\times10^{-2}$. (a) Time evolution of the electric field energy. (b) Snapshot of phase space at $80\,\omega_{pe}^{-1}$. \label{fig:bump-on-tail}](figs/bump-on-tail.png)
 
 
-Finally, we evaluated the computational performance of our implementation by comparing CPU and GPU runtimes on an AMD EPYC 7763 CPU and an NVIDIA A100 GPU, analyzing how the total runtime scales with the number of pseudoparticles. As a representative benchmark, we simulated ten drift velocities drawn from the two-stream dispersion relation (\autoref{fig:Run_time}). The results confirm the strong advantage of GPU acceleration: for the same workload, the GPU executes the simulation roughly two orders of magnitude faster than the CPU. In particular, for a system of 64,000 pseudoparticles, the GPU completes the full drift-scan in about six seconds after the initial compilation. Our benchmarks also indicate that GPU results depend on floating-point precision: running in 32-bit mode by manually disabling JAX’s x64 option reduces memory usage and improves speed, but can introduce deviations when compared to 64-bit results. Some of these differences also depend on details of the fitting range used to extract growth rates. For high-accuracy studies, we therefore recommend using the default 64-bit mode, with 32-bit remaining a useful option for rapid exploratory runs.
+where $\lambda_D$ is Debye length and $Z$ is the Fried--Conte plasma dispersion function. The complex frequency $\omega$ determines both the oscillation frequency and the damping or growth rate $\gamma$.
+We use such a theoretical model to demonstrate two representative test cases using non-relativistic algorithms. 1) Landau damping using a perturbation: $a = 0.025$,
+$k\lambda_D = 1/2$, zero drift velocities $v_{b_x} = v_{b_y} = v_{b_z} = 0$,
+$v_{th} = 0.35\,c$, resolution of $N = 40000$ particles, $N_x = 32$ grid cells, $\Delta x = 0.4\lambda_D$ gird spacing and $\Delta t = 0.1\,\omega_{pe}^{-1}$ timestep; 2) two-stream instability using a perturbation $a = 5\times10^{-7}$,
+$k\lambda_D = 1/8$, velocities $v_{b_x} = 0.2\,c$ with \texttt{velocity\_plus\_minus} set to true, $v_{th} = 0.05\,c$, $N = 10000$, $N_x = 100$, $\Delta x = 0.5 \lambda_D$ and $\Delta t = 0.1\,\omega_{pe}^{-1}$
 
-![(a) Comparison of total runtime between CPU and GPU. (b) Influence of pseudoparticle number on the two-stream instability sampling results. Growth rates extracted from exponential fits.\label{fig:Run_time}](figs/Run_time.png)
+We show in \autoref{fig:output} (top) the evolution of the electric field energy, as well as the fitted damping/growth rates, showing good agreement with the analytical prediction. We also show in \autoref{fig:output} (bottom) the resulting relative energy error between the explicit and implicit methods to demonstrate the precision of the implicit method.
 
-These results demonstrate that a fully JAX-based PIC code can deliver both high physical fidelity and excellent computational efficiency, making it suitable for rapid exploratory studies as well as larger-scale plasma simulations.
+![Electric field energy evolution for Landau damping and the two-stream instability. (a) Landau damping with analytical damping rate \(\gamma = 0.153\omega_{pe}\). (b) Two-stream instability showing fitted exponential growth rate. (c--d) Relative total energy deviation \(|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)\) demonstrating energy conservation.\label{fig:output}](figs/output.png)
+
+Next, we perform a simulation of the Weibel instability, which arises in anisotropic plasmas and may be a mechanism for magnetic field generation and application. The plasma is initialized with an anisotropic velocity distribution with $v_{thz}/v_{thx}=\sqrt{T_z/T_x}=10$. We show in \autoref{fig:Weibel} the evolution of the magnetic field energy and the energy relative error (left) and the magnetic field strength in the $y$ direction (right). As expected, the magnetic field organizes into filamentary structures perpendicular to the velocity anisotropy. Initially, multiple small filaments form, which subsequently merge into larger-scale structures as the system evolves. In this case, the implicit method shows a bounded relative energy error of at most $10^-11$, while the explicit method appears to have unbounded energy errors.
+
+![Weibel instability. (a) Evolution of the magnetic field energy and the relative energy error of the simulation during the Weibel instability. (b) Spatial profile of the magnetic field $B_y$.\label{fig:Weibel}](figs/Weibel.png)
+
+We demonstrate the multi-species capability of JAX-in-Cell by performing a simulation of the bump-on-tail instability (\autoref{fig:bump-on-tail}). This instability arises when a high-velocity electron beam creates a positive slope in the electron velocity distribution. We initialize the plasma with a bulk Maxwellian electron population and a small, high-velocity beam that produces a pronounced bump in the tail of the distribution, and we track the evolution of the phase-space density and the associated electric field. During the linear growth phase, resonant electrons exchange energy with Langmuir waves, leading to exponential amplification of the electric field. As the instability evolves, the initially smooth electron distribution develops coherent phase-space structures, illustrating the code's ability to capture nonlinear wave--particle interactions.
+
+![Simulation of the bump-on-tail instability. The number of pseudo-particles in the bulk and beam populations is equal, with a beam-to-bulk weight ratio of $3\times10^{-2}$. (a) Time evolution of the electric field energy and relative energy error. (b) Snapshot of phase space at $80\,\omega_{pe}^{-1}$. \label{fig:bump-on-tail}](figs/bump-on-tail.png)
+
+
+Additionally, we evaluate the computational performance of the code by comparing CPU and GPU run times. For this test, we use the hardware present in the NERSC Perlmutter HPE Cray EX supercomputer, that is, an AMD EPYC 7763 CPU and an NVIDIA A100 GPU. We assess how the total runtime scales with the number of pseudo-particles. As a representative benchmark, we simulate ten drift velocities drawn from the two-stream dispersion relation. The results are shown in \autoref{fig:Run_time}. We find that, for the same workload, the GPU executes the simulation approximately two orders of magnitude faster than the CPU. In particular, for a system of 64000 pseudo-particles, the GPU completes the full drift-scan in about six seconds after the initial compilation. The benchmarks also indicate that GPU results depend on floating-point precision: running in 32-bit mode by manually disabling JAX's x64 option reduces memory usage and improves speed, but can introduce deviations when compared to 64-bit results. Some of these differences also depend on details of the fitting range used to extract growth rates. Finally, we note that JIT compilation of such runs typically takes a few seconds.
+
+![(a) Comparison of total runtime between CPU and GPU. (b) Influence of pseudo-particle number on the two-stream instability sampling results. Growth rates computed from exponential fits.\label{fig:Run_time}](figs/Run_time.png)
+
+Finally, we showcase in \autoref{fig:two_stream_inverse} one of the central motivations for JAX-in-Cell, that is, to make plasma physics simulations natively differentiable. This allows us to take gradients of high-level parameters used for diagnostics with respect to any number of physical or numerical parameters without resorting to finite differencing. Such a capability is increasingly important for tasks such as Bayesian inference of transport coefficients, real-time control, design of laser pulses, and training of hybrid physics-ML surrogates for fusion devices or astrophysical plasmas. However, we note that automatic differentiation in PIC codes might be challenging due to noise, integer indexing, and discontinuous shape functions. We show in \autoref{fig:two_stream_inverse} how some of these challenges can be overcome. We optimize the dimensionless growth rate $\hat \gamma = \gamma/\omega_{pe}$ of the two-stream instability by applying a damped Newton update to the drift velocity $v_d$ using JAX to evaluate both $\hat \gamma(v_d)$ and its derivative $d\hat \gamma/d v_d$ via a single forward-mode Jacobian-vector product, which allows for efficient memory handling. The drift speed (squares) converge from $2 \times 10^7$ m/s to $3.95 \times 10^7$ m/s in six iterations, while $\hat \gamma$ (circles) rapidly approaches the target growth rate, and the sensitivity $|d \hat \gamma/dv_d|$ (diamonds) decreases as the optimizer approaches the solution. Each iteration involves a full PIC run, but requires no hand-derived adjoint equations or finite differencing. Future work will involve generalizing such an optimization to inverse problems, parameter-estimation studies, as the possibility of forward-modelling electron beams responsible for Type III solar radio bursts, and the design of new experiments.
+
+![Demonstration of autodifferentiation capabilities in JAX-in-Cell for optimization using the two-stream instability. Left: time evolution of the electric field energy for the true drift speed $v_d$ (solid), a different initial guess (dashed), and the optimized value obtained using optimization (dash–dot). Right: optimization history of the drift speed $v_d$ (squares, left axis), the dimensionless growth rate $\hat{\gamma}=\gamma/\omega_p$ (circles, left axis), and the magnitude of the sensitivity $|d\hat{\gamma}/dv_d|$ calculated using auto-differentiation (diamonds, right axis). Starting from $v_d = 2\times10^7\,\mathrm{m/s}$, the algorithm converges in six iterations to $v_d \approx 3.95\times10^7\,\mathrm{m/s}$, close to the true value of $4.0\times10^7\,\mathrm{m/s}$.\label{fig:two_stream_inverse}](figs/two_stream_two_panel.png)
 
 # Acknowledgement
 
