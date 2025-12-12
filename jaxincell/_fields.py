@@ -1,12 +1,9 @@
 from jax import jit
 import jax.numpy as jnp
-from ._sources import calculate_charge_density
 from ._boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
 from ._constants import epsilon_0, speed_of_light
 
 __all__ = ['E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cartesian', 'curlE', 'curlB', 'field_update', 'field_update1', 'field_update2']
-
-
 
 @jit
 def E_from_Gauss_1D_FFT(charge_density, dx):

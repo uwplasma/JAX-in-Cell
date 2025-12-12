@@ -2,6 +2,7 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from jax.lax import dynamic_update_slice
 from functools import partial
+from ._filters import filter_scalar_field, filter_vector_field
 
 __all__ = ['get_S2_weights_and_indices_periodic_CN','charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density', 'current_density_periodic_CN']
 
@@ -45,8 +46,8 @@ def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, 
     Compute the charge contribution to the boundary points based on particle positions and boundary conditions.
 
     Args:
-        BC_left (int): Boundary condition for the left edge (0: periodic, 1: reflective, 2: absorbing).
-        BC_right (int): Boundary condition for the right edge (0: periodic, 1: reflective, 2: absorbing).
+        particle_BC_left (int): Boundary condition for the left edge (0: periodic, 1: reflective, 2: absorbing).
+        particle_BC_right (int): Boundary condition for the right edge (0: periodic, 1: reflective, 2: absorbing).
         position (float): Position of the particle.
         dx (float): Grid spacing.
         grid (array-like): Grid points as a 1D array.
@@ -90,16 +91,16 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
         q (float): The particle charge.
         dx (float): The grid spacing.
         grid (array): The grid points.
-        BC_left (int): Left boundary condition type.
-        BC_right (int): Right boundary condition type.
+        particle_BC_left (int): Left boundary condition type (0: periodic, 1: reflective, 2: absorbing).
+        particle_BC_right (int): Right boundary condition type (0: periodic, 1: reflective, 2: absorbing).
 
     Returns:
         array: The charge density contribution on the grid.
     """
     # Compute charge density using a quadratic shape function
-    grid_noBCs =  (q/dx)*jnp.where(abs(x-grid)<=dx/2,3/4-(x-grid)**2/(dx**2),
-                         jnp.where((dx/2<abs(x-grid))&(abs(x-grid)<=3*dx/2),
-                                    0.5*(3/2-abs(x-grid)/dx)**2,
+    grid_noBCs =  (q/dx)*jnp.where(jnp.abs(x-grid)<=dx/2,3/4-(x-grid)**2/(dx**2),
+                         jnp.where((dx/2<jnp.abs(x-grid))&(jnp.abs(x-grid)<=3*dx/2),
+                                    0.5*(3/2-jnp.abs(x-grid)/dx)**2,
                                     jnp.zeros(len(grid))))
 
     # Handle boundary conditions
@@ -109,7 +110,9 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
     return grid_BCs
 
 @jit
-def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right):
+def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right,
+                             filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4),
+                             field_BC_left=0, field_BC_right=0):
     """
     Computes the total charge density on the grid by summing contributions from all particles.
 
@@ -118,8 +121,13 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
         qs (array): Particle charges, shape (N, 1).
         dx (float): The grid spacing.
         grid (array): The grid points.
-        BC_left (int): Left boundary condition type.
-        BC_right (int): Right boundary condition type.
+        particle_BC_left (int): Left particle boundary condition type (0: periodic, 1: reflective, 2: absorbing).
+        particle_BC_right (int): Right particle boundary condition type (0: periodic, 1: reflective, 2: absorbing).
+        filter_passes (int): Number of digital filter passes to apply (default: 5). Internally capped at 17.
+        filter_alpha (float): Filter strength parameter (default: 0.5). Controls the weight of the center point in the 3-point filter.
+        filter_strides (tuple): Tuple of stride values for multi-scale filtering (default: (1, 2, 4)).
+        field_BC_left (int): Left boundary condition for filtering (default: 0: periodic, 1: reflective, 2: absorbing).
+        field_BC_right (int): Right boundary condition for filtering (default: 0: periodic, 1: reflective, 2: absorbing).
 
     Returns:
         array: Total charge density on the grid.
@@ -133,10 +141,24 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
     # Sum the contributions across all particles
     total_chargedens = jnp.sum(chargedens, axis=0)
 
+    # Apply digital filtering to the total charge density
+    total_chargedens = filter_scalar_field(
+        total_chargedens,
+        passes=filter_passes,
+        alpha=filter_alpha,
+        strides=filter_strides,
+        bc_left=field_BC_left,
+        bc_right=field_BC_right,
+    )
+
     return total_chargedens
 
 @jit
-def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, grid_start, particle_BC_left, particle_BC_right):
+def current_density(xs_nminushalf, xs_n, xs_nplushalf,
+                    vs_n, qs, dx, dt, grid, grid_start,
+                    particle_BC_left, particle_BC_right,
+                    filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4),
+                    field_BC_left=0, field_BC_right=0):
     """
     Computes the current density `j` on the grid from particle motion.
 
@@ -150,9 +172,13 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
         dt (float): The time step size.
         grid (array): The grid points.
         grid_start (float): The starting position of the grid.
-        BC_left (int): Left boundary condition type.
-        BC_right (int): Right boundary condition type.
-
+        particle_BC_left (int): Left particle boundary condition type (0: periodic, 1: reflective, 2: absorbing).
+        particle_BC_right (int): Right particle boundary condition type (0: periodic, 1: reflective, 2: absorbing).
+        filter_passes (int): Number of digital filter passes to apply (default: 5). Internally capped at 17.
+        filter_alpha (float): Filter strength parameter (default: 0.5). Controls the weight of the center point in the 3-point filter.
+        filter_strides (tuple): Tuple of stride values for multi-scale filtering (default: (1, 2, 4)).
+        field_BC_left (int): Left boundary condition for filtering (default: 0: periodic, 1: reflective, 2: absorbing).
+        field_BC_right (int): Right boundary condition for filtering (default: 0: periodic, 1: reflective, 2: absorbing).
     Returns:
         array: Current density on the grid, shape (G, 3), where G is the number of grid points.
     """
@@ -196,7 +222,19 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf, vs_n, qs, dx, dt, grid, g
     current_dens_y = jnp.sum(current_dens_y, axis=0)
     current_dens_z = jnp.sum(current_dens_z, axis=0)
 
-    return jnp.stack([current_dens_x, current_dens_y, current_dens_z], axis=0).T
+    current_density = jnp.stack([current_dens_x, current_dens_y, current_dens_z], axis=0).T
+
+    # Apply digital filtering to the current density
+    current_density = filter_vector_field(
+        current_density,
+        passes=filter_passes,
+        alpha=filter_alpha,
+        strides=filter_strides,
+        bc_left=field_BC_left,
+        bc_right=field_BC_right,
+    )
+    
+    return current_density
 
 
 @partial(jit, static_argnames=('grid_size',))

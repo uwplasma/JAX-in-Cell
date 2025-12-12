@@ -1,13 +1,12 @@
 import jax.numpy as jnp
 from jax import lax,  vmap, jit
 from functools import partial
-from jax.debug import print as jprint
 from ._sources import current_density_periodic_CN, calculate_charge_density, current_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._particles import fields_to_particles_periodic_CN,fields_to_particles_grid, boris_step, boris_step_relativistic
-from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
-from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
-                      E_from_Poisson_1D_FFT, field_update1, field_update2, curlB,curlE)
+from ._constants import speed_of_light, epsilon_0
+from ._fields import (E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, curlB,curlE,
+                      E_from_Poisson_1D_FFT, field_update1, field_update2)
 
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
@@ -22,9 +21,15 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
+
+    fpasses  = parameters["filter_passes"]
+    falpha   = parameters["filter_alpha"]
+    fstrides = parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
     
     J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+                filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
+                field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
     # Add external fields
@@ -56,11 +61,15 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
     J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right)
+                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+                filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
+                field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
     if field_solver != 0:
-        charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right)
+        charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right,
+                                                  filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
+                                                  field_BC_left=field_BC_left, field_BC_right=field_BC_right)
         switcher = {
             1: E_from_Gauss_1D_FFT,
             2: E_from_Gauss_1D_Cartesian,
@@ -78,7 +87,9 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
             positions_plus1_2, velocities, qs, ms, q_ms)
 
     # Collect data for storage
-    charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right)
+    charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right,
+                                              filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
+                                              field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     step_data = (positions, velocities, E_field, B_field, J, charge_density)
     
     return carry, step_data
@@ -93,6 +104,9 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     (E_field, B_field, positions,
     velocities, qs, ms, q_ms) = carry
     
+    # Implicit method does not have digital filtering for ρ and J
+    # Filtering parameters are ignored here
+
     # Grid Definitions (Staggered)
     E_grid_start = grid[0] + dx/2  # E at i + 1/2
     B_grid_start = grid[0] - dx/2  # B at i (shifted by -1/2 relative to E-grid logic)
@@ -218,7 +232,9 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     positions_plus1 = positions_new
     velocities_plus1 = velocities_new
     
-    charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right)
+    charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right,
+                                              filter_passes=0, filter_alpha=0.5, filter_strides=(1, 2, 4),
+                                              field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
     step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
     

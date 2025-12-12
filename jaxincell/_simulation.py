@@ -3,16 +3,13 @@ from jax.lax import cond
 from functools import partial
 from jax_tqdm import scan_tqdm
 from jax.debug import print as jprint
-from jax import lax, jit, vmap, config
+from jax import lax, jit, config
 from jax.random import PRNGKey, uniform, normal
 
-from ._diagnostics import diagnostics
-from ._sources import current_density, calculate_charge_density
+from ._sources import calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
-from ._particles import fields_to_particles_grid, boris_step, boris_step_relativistic
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
-from ._fields import (field_update, E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT,
-                      E_from_Poisson_1D_FFT, field_update1, field_update2)
+from ._fields import E_from_Gauss_1D_Cartesian
 from ._algorithms import Boris_step, CN_step
 
 try: import tomllib
@@ -134,6 +131,11 @@ def initialize_simulation_parameters(user_parameters={}):
         "external_magnetic_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_magnetic_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
 
+        # Filtering parameters for current and charge density (digital smoothing)
+        "filter_passes": 5,       # number of passes of the digital filter applied to ρ and J
+        "filter_alpha": 0.5,      # filter strength (0 < alpha < 1)
+        "filter_strides": (1, 2, 4),  # multi-scale strides for filtering
+
         "weight": 0,
     }
 
@@ -149,7 +151,7 @@ def initialize_simulation_parameters(user_parameters={}):
 
 def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500,
                                 number_pseudoparticles_species=None, total_steps=350
-                                ,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
+                                ,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
 
@@ -361,7 +363,10 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     B_field = jnp.zeros((grid.size, 3))
     E_field = jnp.zeros((grid.size, 3))
     
-    charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"])
+    charge_density = calculate_charge_density(positions, charges, dx, grid, parameters["particle_BC_left"], parameters["particle_BC_right"],
+                                              parameters["filter_passes"], parameters["filter_alpha"], parameters["filter_strides"],
+                                              field_BC_left=parameters["field_BC_left"], field_BC_right=parameters["field_BC_right"])
+    # Initial E field from charge density via Gauss's law
     E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
     fields = (E_field, B_field)
@@ -507,7 +512,7 @@ def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
                                "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
 def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000,
                number_pseudoparticles_species=None, total_steps=1000,
-               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=7, number_of_particle_substeps_implicit_CN=2):
+               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
