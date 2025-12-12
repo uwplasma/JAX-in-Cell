@@ -1,5 +1,5 @@
 ---
-title: "JAX-in-Cell: A Differentiable Kinetic Plasma Code"
+title: "JAX-in-Cell: A Differentiable Particle-in-Cell Code for Plasma Physics Applications"
 tags:
   - plasma physics
   - particle-in-cell
@@ -18,7 +18,7 @@ authors:
   - name: Christopher Woolford
     affiliation: 1
 affiliations:
-  - name: University of Wisconsin–Madison
+  - name: University of Wisconsin–Madison, United States
     index: 1
 date: July 2025
 bibliography: paper.bib
@@ -32,6 +32,7 @@ JAX-in-Cell is a fully electromagnetic, multispecies, and relativistic 1D3V Part
 A plasma is a collection of free ions and electrons whose self-generated and external electromagnetic fields drive collective behavior. Such behavior can be modelled using PIC simulations, which offer a fully kinetic description and enable exploration of complex interactions in modern plasma physics research, such as fusion devices, laser-plasma interactions, and astrophysical plasmas[@birdsall1991plasma].
 
 However, such simulations can be computationally very expensive, often requiring hardware-specific implementations in low-level languages. The current landscape of high-performance production codes such as OSIRIS[@10.1007/3-540-47789-6_36], EPOCH[@Smith2021], VPIC[@10.1063/5.0146529], and WARPX[@WarpX], which are written in C++ or Fortran with MPI/CUDA backends, are highly optimized for massively parallel simulations, often with complex compilation chains, and require external adjoint implementations for optimization. This imposes a steep barrier to entry for new developers, making it cumbersome to test new algorithms, as well as to integrate with modern data science workflows.
+On the other hand, open-source educational Python scripts typically lack the performance and capabilities needed to perform cutting-edge research.
 
 JAX-in-Cell is able to fill this gap by implementing a 1D3V PIC framework entirely within the JAX ecosystem[@jax2018github]. It is open-source, user-friendly, and developer-friendly, written entirely in Python. It addresses three specific needs not met by existing codes: 1) hardware-agnostic high performance; 2) unified explicit and implicit solvers; 3) differentiable physics and AI integration. This is achieved using JAX's Just-In-Time (JIT) compilation via XLA, which allows us to achieve performance parity with compiled languages on CPUs, GPUs, and TPUs. Therefore, researchers can prototype new algorithms in Python and immediately use them on complex situations and accelerated hardware. Furthermore, JAX-in-Cell is inherently differentiable due to its automatic differentiation (AD) capabilities. This allows for new research directions such as optimization of laser pulse shapes, parameter discovery from experimental data, or embedding PIC simulations in Physics-Informed Neural Network loops. Finally, both an explicit scheme using the standard Boris algorithm[@boris1970relativistic] and a fully implicit, energy-conserving scheme[@CHEN20142391] are available to cross-verify results and perform long simulations with large time steps, a capability often lacking in lightweight tools.
 
@@ -54,51 +55,71 @@ proper velocity, and $\gamma = \sqrt{1 + u^2/c^2}$ is the Lorentz factor, with $
 f_s(\mathbf{x}, \mathbf{v}) \approx \sum_{p} w_p\, \delta(\mathbf{x} - \mathbf{x_p})\, \delta(\mathbf{v} - \mathbf{v_p}),
 \end{equation}
 %
-where $x_p$ denotes the position of each pseudo-particle, $\mathbf{v_p}$ denotes the velocity of each pseudo-particle, the weight is given by $w_p = n_0L/N$, with $n_0$ number density, $L$ the spatial domain length and $N$ the number of pseudo-particles for that species. Then, the spatial domain is divided into $N_x$ uniform cells with spacing $\Delta x$ and advanced in time by $\Delta t$. To mitigate numerical noise, each pseudo-particle is represented by a triangular shape function spanning three grid cells, and the same kernel is used consistently for both the particle-to-grid charge deposition and the grid-to-particle field interpolation[@hockney1988computer]. Accordingly, the current density $j$ is computed from the continuity equation using a discretely charge-conserving scheme[@villasenor1992rigorous] consistent with the shape function. Continuum Eulerian methods discretize the distribution function in six dimensions of phase space, making them computationally more costly, but, on the other hand, they are not subject to noise and can be cast in conservation law form so as to preserve the velocity moments of the distribution function.
+where $x_p$ denotes the position of each pseudo-particle, $\mathbf{v_p}$ denotes the velocity of each pseudo-particle, the weight is given by $w_p = n_0L/N$, with $n_0$ number density, $L$ the spatial domain length and $N$ the number of pseudo-particles for that species. Then, the spatial domain is divided into $N_x$ uniform cells with spacing $\Delta x$ and advanced in time by $\Delta t$.  To mitigate numerical noise, each pseudo-particle is represented by a triangular shape function spanning three grid cells, and the same kernel is used consistently for both the
+particle-to-grid charge deposition and the grid-to-particle field interpolation[@hockney1988computer]. Accordingly, the current density $\mathbf j$ is computed from the continuity equation using a discretely charge-conserving scheme[@villasenor1992rigorous] consistent with the shape function. Continuum Eulerian methods discretize the distribution function in six dimensions of phase space, making them computationally more costly, but, on the other hand, they are not subject to noise and can be cast in conservation law form so as to preserve the velocity moments of the distribution function.
 
-The core logic of JAX-in-Cell is distributed along six specific modules. The first one is $\texttt{simulation.py}$, which serves as the high-level entry point, handling parameter initialization (via TOML parsing), memory allocation for particle and field arrays, and the execution of the main loop. The time-stepping is performed using a JAX primitive $\texttt{jax.lax.scan}$, which allows it to be optimized by the XLA compiler. Then, $\texttt{algorithms.py}$ implements the time integration schemes, which advance the system state by one timestep $\Delta t$ by a sequence of operations, namely particle push, source deposition, and field update. We implement two time-evolution methods (see \autoref{fig:algorithm}), an explicit Boris algorithm[@boris1970relativistic], and an implicit Crank--Nicolson scheme solved via Picard iteration[@CHEN20142391]. The JIT-compiled particle dynamics is present in $\texttt{particles.py}$, which includes the relativistic and non-relativistic Boris rotation and the field interpolation routines, which are heavily vectorized using $\texttt{jax.vmap}$. The electromagnetic solvers are present in $\texttt{fields.py}$, which include the finite-difference curl operators for the Faraday and Ampère laws, as well as the divergence cleaning routines that enforce charge conservation. The deposition of charge and current densities from particle positions onto the grid is handled by $\texttt{sources.py}$, which implements high-order spline interpolation and digital filtering to mitigate aliasing noise. Finally, $\texttt{boundary\_conditions.py}$ is the centralized module to enforce boundary constraints, including routines for particle reflection/absorption and ghost-cell updates for the electromagnetic fields.
-
-Due to its simplified design, JAX-in-Cell is able to pass the entire simulation state between functions, which is maintained as an immutable tuple referred to in the code as the $\texttt{carry}=(\mathbf E, \mathbf B, \mathbf x_p, \mathbf v_p, q, m)$.
-This allows the entire simulation to be treated as a single differentiable function, which can facilitate the integration of automatic differentiation workflows.
-The code can be run in two different ways: 1) directly called from the command line as $\texttt{jaxincell}$, pointing to a given TOML file, 2) from a Python driver script, either loading a TOML file using the \texttt{load\_parameters} function or using a dictionary of input parameters. While the code uses SI units internally, it allows initialization via dimensionless ratios common in plasma physics literature. Functions for diagnostics and plotting are available to compute and show phase-space structure, energy partition, and the evolution of the electromagnetic fields and sources.
+The core logic of JAX-in-Cell is distributed along six specific modules. The first one is 'simulation.py', which serves as the high-level entry point, handling parameter initialization (via TOML parsing), memory allocation for particle and field arrays, and the execution of the main loop. The time-stepping is performed using a JAX primitive 'jax.lax.scan', which allows it to be optimized by the XLA compiler. Then, 'algorithms.py' implements the time integration schemes, which advance the system state by one timestep $\Delta t$ by a sequence of operations, namely particle push, source deposition, and field update. We implement two time-evolution methods (see \autoref{fig:algorithm}), an explicit Boris algorithm[@boris1970relativistic], and an implicit Crank--Nicolson scheme solved via Picard iteration[@CHEN20142391]. The JIT-compiled particle dynamics is present in 'particles.py', which includes the relativistic and non-relativistic Boris rotation and the field interpolation routines, which are heavily vectorized using 'jax.vmap'. The electromagnetic solvers are present in 'fields.py', which include the finite-difference curl operators for the Faraday and Ampère laws, as well as the divergence cleaning routines that enforce charge conservation. The deposition of charge and current densities from particle positions onto the grid is handled by 'sources.py', which implements high-order spline interpolation and digital filtering to mitigate aliasing noise. Finally, 'boundary\_conditions.py' is the centralized module to enforce boundary constraints, including routines for particle reflection/absorption and ghost-cell updates for the electromagnetic fields.
 
 ![Time-stepping algorithms in JAX-in-Cell. Left: explicit Boris time-stepper and a Finite-Difference Time-Domain (FDTD) method using a staggered Yee grid for the electromagnetic fields. Right: implicit Crank-Nicolson time stepper using a Picard iteration for the electromagnetic system.\label{fig:algorithm}](figs/JAX-in-Cell_algorithm.pdf)
 
-In order to reduce kernel launch overheads on GPUs, as well as the vector lengths for different populations, JAX-in-Cell adopts a monolithic array formulation of the multi-species architecture optimized for the Single-Instruction-Multiple-Data (SIMD) paradigm of JAX. That is, the simulation state, $\texttt{carry}$, is a single concatenated state of unified, global arrays, regardless of the number of physical species defined in the input configuration. This is a different approach than the one used in traditional PIC codes, which employ an object-oriented design with different species stored in separate containers and iterated over sequentially. During initialization, the code parses the TOML configuration file for the list of species and, for each population, the function $\texttt{make\_particles}$ generates each phase-space distribution and weights at the initial time, which are then appended to the global state vectors. This allows load balancing across GPU cores and minimizes warp divergence.
+Due to its simplified design, JAX-in-Cell is able to pass the entire simulation state between functions, which is maintained as an immutable tuple referred to in the code as the 'carry'=$(\mathbf E, \mathbf B, \mathbf x_p, \mathbf v_p, q, m)$.
+This allows the entire simulation to be treated as a single differentiable function, which can facilitate the integration of automatic differentiation workflows.
+In order to reduce kernel launch overheads on GPUs, as well as the vector lengths for different populations, JAX-in-Cell adopts a monolithic array formulation of the multi-species architecture optimized for the Single-Instruction-Multiple-Data (SIMD) paradigm of JAX. That is, the simulation state, \texttt{carry}, is a single concatenated state of unified, global arrays, regardless of the number of physical species defined in the input configuration. This is a different approach than the one used in traditional PIC codes, which employ an object-oriented design with different species stored in separate containers and iterated over sequentially. During initialization, the code parses the TOML configuration file for the list of species and, for each population, the function \texttt{make\_particles} generates each phase-space distribution and weights at the initial time, which are then appended to the global state vectors. This allows load balancing across GPU cores and minimizes warp divergence.
+
+The code can be run in two different ways: 1) directly called from the command line as \texttt{jaxincell}, pointing to a given TOML file, 2) from a Python driver script, either loading a TOML file using the \texttt{load\_parameters} function or using a dictionary of input parameters. While the code uses SI units internally, it allows initialization via dimensionless ratios common in plasma physics literature. Functions for diagnostics and plotting are available to compute and show phase-space structure, energy partition, and the evolution of the electromagnetic fields and sources.
+
+A comprehensive set of \texttt{pytest}-based unit and integration tests is included in JAX-in-Cell. Core functionalities such as particle pushers, boundary-condition operators, electromagnetic field solvers, and physical constants have dedicated tests to verify their shape invariants, and reproducibility of the expected formulas. Additional tests include small simulations to check the consistency and deterministic behavior of the main driver for fixed random seeds, correct species splitting in the diagnostics, and functionality of the command-line interface. The test suite is part of a continuous integration workflow on GitHub actions across multiple Python and JAX versions, and uploads coverage reports to Codecov.
 
 
 
 # Capabilities
-The code is designed to simulate plasma dynamics, giving users full control over a wide range of physical and numerical parameters, including particle distributions, thermal velocities, drift speeds, external fields, number of particle species, and numerical tolerances. It also offers flexible options for initializing perturbations and multi-stream velocity configurations. Additionally, explicit algorithm also support relativistic particle dynamics and reflective or absorbing boundary conditions.
-
+The code is designed to simulate plasma dynamics, giving users full control over a wide range of physical and numerical parameters, including particle distributions, thermal velocities, drift speeds, external fields, number of particle species, and numerical tolerances. It also offers flexible options for initializing perturbations and multi-stream velocity configurations. Additionally, the explicit time-stepping algorithm also supports relativistic particle dynamics and reflective or absorbing
+boundary conditions.
 To facilitate analysis, the code automatically computes key quantities such as spatial scales (e.g., Debye length, skin depth), plasma frequency, and diagnostics of electric and magnetic field energies, as well as kinetic energies of electrons and ions to monitor energy conservation.
 
-For example, the code can simulate phenomena such as Landau damping, the two-stream instability, and the Weibel instability. In these simulations, the plasma is neutralized by a uniform ion background and confined within a periodic domain of length $L$. The initial electron distribution with a position perturbation is given by
+The electromagnetic fields are defined on a staggered Yee lattice. The code then solves the Ampere and Faraday equations
 
+%
 \begin{equation}
-f_e(x, \mathbf{v}, t = 0) = f_{e0}(\mathbf{v})\left[ 1 + a \cos(kx)\right],
+    \frac{\partial \mathbf E}{\partial t}=c^2 \nabla \times \mathbf B - \frac{\mathbf j}{\epsilon_0},~ \frac{\partial \mathbf B}{\partial t} = - \nabla \times \mathbf E,
 \end{equation}
+%
+which, in the 1D geometry ($\partial/\partial y = \partial/\partial z = 0$), reduces the curl operator to spatial derivatives along the $x$ lattice. The discrete spatial derivative operator uses central differences for internal points, with ghost cells handling the boundary conditions (periodic, reflective, or absorbing). JAX-in-Cell allows flexible boundary conditions by handling particle trajectories and electromagnetic fields independently at the domain edges.
+Charge conservation is ensured using a divergence cleaning step, where the longitudinal component $E_x$ is projected to satisfy Gauss' law, $\nabla \cdot \mathbf E = \rho/\epsilon_0$.
+The charge density $\rho$ and current density $\mathbf j$ are deposited onto the grid using a quadratic (3-point) spline shape function $S(x)$, where a multi-pass binomial digital filter is applied to the source terms to mitigate grid-heating instability. This effectively suppresses high wavenumbers near the Nyquist limit while preserving the macroscopic (low wave-number) plasma dynamics.
 
-where $a$ is the perturbation amplitude and $k$ the perturbation wavenumber and the velocities distribution reads
-
+While the user can initialize their own distribution functions, JAX-in-Cell allows users to use a predefined perturbed Maxwellian
+%
+\begin{equation}
+f_s(x, \mathbf{v}, t = 0) = f_{s0}(\mathbf{v})\left[ 1 + a \cos\left(\frac{2 \pi k x}{L}\right)\right],
+\end{equation}
+%
+where \(a\) is the perturbation amplitude and \(k\) the perturbation
+wavenumber. The Maxwellian background $f_{s0}$ is given by the following anisotropic, drifting distribution
+%
 \begin{equation}
 \begin{aligned}
-f_{e0}(\mathbf{v}) &= \frac{n_0}{2 \, \pi^{3/2} v_{th,x} v_{th,y} v_{th,z}} 
-\Bigg[ 
-\exp\Big(- \frac{(v_x - v_{b1})^2}{v_{th,x}^2} - \frac{v_y^2}{v_{th,y}^2} - \frac{v_z^2}{v_{th,z}^2} \Big) \\
+f_{s0}(\mathbf{v}) &= \frac{n_0}{2 \, \pi^{3/2} v^3} 
+\left[ 
+e^{- \frac{(v_x - v_{bx})^2}{v_{th,x}^2} - \frac{(v_y - v_{by})^2}{v_{th,y}^2} - \frac{(v_z - v_{bz})^2}{v_{th,z}^2}}\right. \\
 &\quad + 
-\exp\Big(- \frac{(v_x - v_{b2})^2}{v_{th,x}^2} - \frac{v_y^2}{v_{th,y}^2} - \frac{v_z^2}{v_{th,z}^2} \Big)
-\Bigg].
+\left.e^{- \frac{(v_x + v_{bx})^2}{v_{th,x}^2} - \frac{(v_y + v_{by})^2}{v_{th,y}^2} - \frac{(v_z + v_{bz})^2}{v_{th,z}^2}}
+\right],
 \end{aligned}
 \end{equation}
+%
+with $v^3 = v_{th,x} v_{th,y} v_{th,z}$ the product of each thermal velocity along $(x,y,z)$ directions, $v_{bi}$ the drift velocities along each direction $i$, and $n_0$ the background density. The addition of an opposite sign drift velocity $\pm v_b$ is controlled using the'velocity\_plus\_minus' input parameter.
+%
+Such a perturbed Maxwellian allows us to perform many benchmark simulations, such as Landau damping, the two-stream instability, the bump-on-tail instability, and the Weibel instability.
 
-where $v_{b1,2}$ are drift speeds along $x$ and $v_{th,i}$ is thermal velocities along each direction. To validate these simulations, it is useful to compare with the corresponding linear theory. Linearizing the Vlasov–Maxwell system around this initial distribution (with equal thermal velocities $v_{th,x}=v_{th,y}=v_{th,z}$), yields the dispersion relation:
-
+We first validate JAX-in-Cell by performing such simulations in a periodic boundary of length $L$, and compare with the corresponding linear theory. Linearizing the Vlasov--Maxwell system around this initial distribution (with equal thermal velocities \(v_{th,x}=v_{th,y}=v_{th,z}\)), yields the dispersion relation
+%
 \begin{equation}
 1 + \frac{1}{2k^2\lambda_D^2}
 \left[  2 + \xi_1 Z(\xi_1)+\xi_2 Z(\xi_2)\right] = 0, \quad
 \xi_i=\frac{\omega}{kv_{th}}-\frac{v_{b_i}}{v_{th}},
 \end{equation}
+%
 
 where $\lambda_D$ is Debye length and $Z$ is the Fried–Conte plasma dispersion function. The complex frequency $\omega$ determines both the oscillation frequency and the damping or growth rate $\gamma$. With this theoretical prediction established, the following parameter choices demonstrate two representative test cases using non-relativistic algorithms:
 
