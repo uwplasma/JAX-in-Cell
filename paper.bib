@@ -14,6 +14,59 @@
   edition   = {1st}
 }
 
+@misc{epochPic,
+  author    = {Warwick Plasma Group},
+  title     = {EPOCH: Particle-in-Cell code for plasma physics},
+  year      = {2024},
+  publisher = {GitHub},
+  journal   = {GitHub repository},
+  url       = {https://github.com/Warwick-Plasma/epoch}
+}
+
+@article{bowers2008ultrahigh,
+  title={Ultrahigh performance three-dimensional electromagnetic relativistic kinetic plasma simulation},
+  author={Bergen, B},
+  journal={Physics of Plasmas},
+  volume={15},
+  number={5},
+  year={2008},
+  publisher={AIP Publishing}
+}
+
+@article{CHEN20142391,
+title = {An energy- and charge-conserving, nonlinearly implicit, electromagnetic 1D-3V Vlasov–Darwin particle-in-cell algorithm},
+journal = {Computer Physics Communications},
+volume = {185},
+number = {10},
+pages = {2391-2402},
+year = {2014},
+issn = {0010-4655},
+doi = {https://doi.org/10.1016/j.cpc.2014.05.010},
+url = {https://www.sciencedirect.com/science/article/pii/S0010465514001647},
+author = {G. Chen and L. Chacón},
+keywords = {Discrete global energy, Local charge and canonical momentum conservation, Nonlinearly implicit PIC, Darwin model, Jacobian-free Newton–Krylov solver, Physics-based preconditioner, Nonlinear elimination, Particle-in-cell},
+abstract = {A recent proof-of-principle study proposes a nonlinear electrostatic implicit particle-in-cell (PIC) algorithm in one dimension (Chen et al., 2011). The algorithm employs a kinetically enslaved Jacobian-free Newton–Krylov (JFNK) method, and conserves energy and charge to numerical round-off. In this study, we generalize the method to electromagnetic simulations in 1D using the Darwin approximation to Maxwell’s equations, which avoids radiative noise issues by ordering out the light wave. An implicit, orbit-averaged, time–space-centered finite difference scheme is employed in both the 1D Darwin field equations (in potential form) and the 1D-3V particle orbit equations to produce a discrete system that remains exactly charge- and energy-conserving. Furthermore, enabled by the implicit Darwin equations, exact conservation of the canonical momentum per particle in any ignorable direction is enforced via a suitable scattering rule for the magnetic field. We have developed a simple preconditioner that targets electrostatic waves and skin currents, and allows us to employ time steps O(mi/mec/veT) larger than the explicit CFL. Several 1D numerical experiments demonstrate the accuracy, performance, and conservation properties of the algorithm. In particular, the scheme is shown to be second-order accurate, and CPU speedups of more than three orders of magnitude vs. an explicit Vlasov–Maxwell solver are demonstrated in the “cold” plasma regime (where kλD≪1).}
+}
+
+@inproceedings{boris1970relativistic,
+  title={Relativistic plasma simulation-optimization of a hybrid code},
+  author={Boris, Jay P and others},
+  booktitle={Proc. Fourth Conf. Num. Sim. Plasmas},
+  pages={3--67},
+  year={1970}
+}
+
+@article{villasenor1992rigorous,
+  title={Rigorous charge conservation for local electromagnetic field solvers},
+  author={Villasenor, John and Buneman, Oscar},
+  journal={Computer Physics Communications},
+  volume={69},
+  number={2-3},
+  pages={306--316},
+  year={1992},
+  publisher={Elsevier}
+}
+
 @InProceedings{10.1007/3-540-47789-6_36,
 author="Fonseca, R. A.
 and Silva, L. O.
@@ -130,7 +183,7 @@ isbn="978-3-540-47789-1"
     howpublished = {https://blast-warpx.github.io}
  }
 
- @misc{jax2018github,
+@misc{jax2018github,
   author = {James Bradbury and Roy Frostig and Peter Hawkins and Matthew James Johnson and Chris Leary and Dougal Maclaurin and George Necula and Adam Paszke and Jake Vander{P}las and Skye Wanderman-{M}ilne and Qiao Zhang},
   title = {{JAX}: composable transformations of {P}ython+{N}um{P}y programs},
   url = {http://github.com/jax-ml/jax},
@@ -138,48 +191,4 @@ isbn="978-3-540-47789-1"
   howpublished = {https://docs.jax.dev/en/latest/},
   version = {0.3.13},
   year = {2018},
-}
-
-@article{bowers2008ultrahigh,
-  title={Ultrahigh performance three-dimensional electromagnetic relativistic kinetic plasma simulation},
-  author={Bergen, B},
-  journal={Physics of Plasmas},
-  volume={15},
-  number={5},
-  year={2008},
-  publisher={AIP Publishing}
-}
-
-@article{CHEN20142391,
-title = {An energy- and charge-conserving, nonlinearly implicit, electromagnetic 1D-3V Vlasov–Darwin particle-in-cell algorithm},
-journal = {Computer Physics Communications},
-volume = {185},
-number = {10},
-pages = {2391-2402},
-year = {2014},
-issn = {0010-4655},
-doi = {https://doi.org/10.1016/j.cpc.2014.05.010},
-url = {https://www.sciencedirect.com/science/article/pii/S0010465514001647},
-author = {G. Chen and L. Chacón},
-keywords = {Discrete global energy, Local charge and canonical momentum conservation, Nonlinearly implicit PIC, Darwin model, Jacobian-free Newton–Krylov solver, Physics-based preconditioner, Nonlinear elimination, Particle-in-cell},
-abstract = {A recent proof-of-principle study proposes a nonlinear electrostatic implicit particle-in-cell (PIC) algorithm in one dimension (Chen et al., 2011). The algorithm employs a kinetically enslaved Jacobian-free Newton–Krylov (JFNK) method, and conserves energy and charge to numerical round-off. In this study, we generalize the method to electromagnetic simulations in 1D using the Darwin approximation to Maxwell’s equations, which avoids radiative noise issues by ordering out the light wave. An implicit, orbit-averaged, time–space-centered finite difference scheme is employed in both the 1D Darwin field equations (in potential form) and the 1D-3V particle orbit equations to produce a discrete system that remains exactly charge- and energy-conserving. Furthermore, enabled by the implicit Darwin equations, exact conservation of the canonical momentum per particle in any ignorable direction is enforced via a suitable scattering rule for the magnetic field. We have developed a simple preconditioner that targets electrostatic waves and skin currents, and allows us to employ time steps O(mi/mec/veT) larger than the explicit CFL. Several 1D numerical experiments demonstrate the accuracy, performance, and conservation properties of the algorithm. In particular, the scheme is shown to be second-order accurate, and CPU speedups of more than three orders of magnitude vs. an explicit Vlasov–Maxwell solver are demonstrated in the “cold” plasma regime (where kλD≪1).}
-}
-
-@inproceedings{boris1970relativistic,
-  title={Relativistic plasma simulation-optimization of a hybrid code},
-  author={Boris, Jay P and others},
-  booktitle={Proc. Fourth Conf. Num. Sim. Plasmas},
-  pages={3--67},
-  year={1970}
-}
-
-@article{villasenor1992rigorous,
-  title={Rigorous charge conservation for local electromagnetic field solvers},
-  author={Villasenor, John and Buneman, Oscar},
-  journal={Computer Physics Communications},
-  volume={69},
-  number={2-3},
-  pages={306--316},
-  year={1992},
-  publisher={Elsevier}
 }
