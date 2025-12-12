@@ -121,8 +121,13 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
         qs (array): Particle charges, shape (N, 1).
         dx (float): The grid spacing.
         grid (array): The grid points.
-        particle_BC_left (int): Left boundary condition type.
-        particle_BC_right (int): Right boundary condition type.
+        particle_BC_left (int): Left boundary condition type for particle deposition.
+        particle_BC_right (int): Right boundary condition type for particle deposition.
+        filter_passes (int): Number of digital filter passes to apply (default: 5). Internally capped at 17.
+        filter_alpha (float): Filter strength parameter (default: 0.5).
+        filter_strides (tuple): Tuple of stride values for multi-scale filtering (default: (1, 2, 4)).
+        field_BC_left (int): Left boundary condition for filtering (0: periodic, 1: reflective, 2: absorbing).
+        field_BC_right (int): Right boundary condition for filtering (0: periodic, 1: reflective, 2: absorbing).
 
     Returns:
         array: Total charge density on the grid.
@@ -167,8 +172,13 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf,
         dt (float): The time step size.
         grid (array): The grid points.
         grid_start (float): The starting position of the grid.
-        particle_BC_left (int): Left boundary condition type.
-        particle_BC_right (int): Right boundary condition type.
+        particle_BC_left (int): Left boundary condition type for particle deposition.
+        particle_BC_right (int): Right boundary condition type for particle deposition.
+        filter_passes (int): Number of digital filter passes to apply (default: 5). Internally capped at 17.
+        filter_alpha (float): Filter strength parameter (default: 0.5).
+        filter_strides (tuple): Tuple of stride values for multi-scale filtering (default: (1, 2, 4)).
+        field_BC_left (int): Left boundary condition for filtering (0: periodic, 1: reflective, 2: absorbing).
+        field_BC_right (int): Right boundary condition for filtering (0: periodic, 1: reflective, 2: absorbing).
 
     Returns:
         array: Current density on the grid, shape (G, 3), where G is the number of grid points.
