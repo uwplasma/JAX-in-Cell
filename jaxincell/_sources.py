@@ -46,8 +46,8 @@ def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, 
     Compute the charge contribution to the boundary points based on particle positions and boundary conditions.
 
     Args:
-        BC_left (int): Boundary condition for the left edge (0: periodic, 1: reflective, 2: absorbing).
-        BC_right (int): Boundary condition for the right edge (0: periodic, 1: reflective, 2: absorbing).
+        particle_BC_left (int): Boundary condition for the left edge (0: periodic, 1: reflective, 2: absorbing).
+        particle_BC_right (int): Boundary condition for the right edge (0: periodic, 1: reflective, 2: absorbing).
         position (float): Position of the particle.
         dx (float): Grid spacing.
         grid (array-like): Grid points as a 1D array.
@@ -91,8 +91,8 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
         q (float): The particle charge.
         dx (float): The grid spacing.
         grid (array): The grid points.
-        BC_left (int): Left boundary condition type.
-        BC_right (int): Right boundary condition type.
+        particle_BC_left (int): Left boundary condition type.
+        particle_BC_right (int): Right boundary condition type.
 
     Returns:
         array: The charge density contribution on the grid.
@@ -121,8 +121,8 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
         qs (array): Particle charges, shape (N, 1).
         dx (float): The grid spacing.
         grid (array): The grid points.
-        BC_left (int): Left boundary condition type.
-        BC_right (int): Right boundary condition type.
+        particle_BC_left (int): Left boundary condition type.
+        particle_BC_right (int): Right boundary condition type.
 
     Returns:
         array: Total charge density on the grid.
@@ -167,8 +167,8 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf,
         dt (float): The time step size.
         grid (array): The grid points.
         grid_start (float): The starting position of the grid.
-        BC_left (int): Left boundary condition type.
-        BC_right (int): Right boundary condition type.
+        particle_BC_left (int): Left boundary condition type.
+        particle_BC_right (int): Right boundary condition type.
 
     Returns:
         array: Current density on the grid, shape (G, 3), where G is the number of grid points.
