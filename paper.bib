@@ -150,15 +150,19 @@ isbn="978-3-540-47789-1"
   publisher={AIP Publishing}
 }
 
-@article{chen2011energy,
-  title={An energy-and charge-conserving, implicit, electrostatic particle-in-cell algorithm},
-  author={Chen, Guangye and Chac{\'o}n, Luis and Barnes, Daniel C},
-  journal={Journal of Computational Physics},
-  volume={230},
-  number={18},
-  pages={7018--7036},
-  year={2011},
-  publisher={Elsevier}
+@article{CHEN20142391,
+title = {An energy- and charge-conserving, nonlinearly implicit, electromagnetic 1D-3V Vlasov–Darwin particle-in-cell algorithm},
+journal = {Computer Physics Communications},
+volume = {185},
+number = {10},
+pages = {2391-2402},
+year = {2014},
+issn = {0010-4655},
+doi = {https://doi.org/10.1016/j.cpc.2014.05.010},
+url = {https://www.sciencedirect.com/science/article/pii/S0010465514001647},
+author = {G. Chen and L. Chacón},
+keywords = {Discrete global energy, Local charge and canonical momentum conservation, Nonlinearly implicit PIC, Darwin model, Jacobian-free Newton–Krylov solver, Physics-based preconditioner, Nonlinear elimination, Particle-in-cell},
+abstract = {A recent proof-of-principle study proposes a nonlinear electrostatic implicit particle-in-cell (PIC) algorithm in one dimension (Chen et al., 2011). The algorithm employs a kinetically enslaved Jacobian-free Newton–Krylov (JFNK) method, and conserves energy and charge to numerical round-off. In this study, we generalize the method to electromagnetic simulations in 1D using the Darwin approximation to Maxwell’s equations, which avoids radiative noise issues by ordering out the light wave. An implicit, orbit-averaged, time–space-centered finite difference scheme is employed in both the 1D Darwin field equations (in potential form) and the 1D-3V particle orbit equations to produce a discrete system that remains exactly charge- and energy-conserving. Furthermore, enabled by the implicit Darwin equations, exact conservation of the canonical momentum per particle in any ignorable direction is enforced via a suitable scattering rule for the magnetic field. We have developed a simple preconditioner that targets electrostatic waves and skin currents, and allows us to employ time steps O(mi/mec/veT) larger than the explicit CFL. Several 1D numerical experiments demonstrate the accuracy, performance, and conservation properties of the algorithm. In particular, the scheme is shown to be second-order accurate, and CPU speedups of more than three orders of magnitude vs. an explicit Vlasov–Maxwell solver are demonstrated in the “cold” plasma regime (where kλD≪1).}
 }
 
 @inproceedings{boris1970relativistic,
