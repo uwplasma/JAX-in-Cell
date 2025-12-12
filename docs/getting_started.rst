@@ -1,33 +1,52 @@
-Getting started
-=====
+Getting Started
+===============
 
-.. _installation:
+Prerequisites
+-------------
+
+- **Programming Language:** Python  
+- Libraries: ``jax``, ``jax_tqdm``, ``matplotlib``
 
 Installation
 ------------
 
-To use JAX-in-Cell, there is no need to install it.
-You can simply clone the repository and install the dependencies using the following command:
+**Using PyPi:**
 
 .. code-block:: console
 
-    $ git clone https://github.com/uwplasma/JAX-in-Cell.git
-    $ cd JAX-in-Cell
-    $ pip install -r requirements.txt
+    pip install jaxincell
 
-these are
-
-    - jax
-    - jax_tqdm
-    - matplotlib
-
-Run an example
---------------
-
-To run the main example, use the following command:
+**Build from source:**
 
 .. code-block:: console
 
-    python main.py
+    git clone https://github.com/uwplasma/JAX-in-Cell
+    cd JAX-in-Cell
+    pip install -r /path/to/requirements.txt
+    pip install -e .
 
-More examples are in the `examples` folder.
+Usage
+-----
+
+.. code-block:: console
+
+    jaxincell
+
+To run using an input TOML file:
+
+.. code-block:: console
+
+    jaxincell example_input.toml
+
+Run example script:
+
+.. code-block:: console
+
+    python example_script.py
+
+Testing
+-------
+
+.. code-block:: console
+
+    pytest .
