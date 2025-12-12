@@ -66,7 +66,7 @@ velocity_plus_minus_ions_z = false
 # ------------------------------
 length = 1  # Simulation box size in meters (sets dimensionful normalization, but does not change dimensionless ratios?)
 grid_points_per_Debye_length = 2.565  # dx over Debye length (ignore the conflicting variable name)
-timestep_over_spatialstep_times_c = 2.5  # dt * speed_of_light / dx
+timestep_over_spatialstep_times_c = 3.0  # dt * speed_of_light / dx
 # particle_BC_left  = 0  # 0: periodic, 1: reflective, 2: absorbing
 # particle_BC_right = 0
 # field_BC_left  = 0  # 0: periodic, 1: reflective, 2: absorbing
@@ -78,7 +78,7 @@ print_info = true
 relativistic = false  # Use relativistic Boris pusher
 seed = 250724  # Random seed for reproducibility
 tolerance_Picard_iterations_implicit_CN = 1e-10  # Tolerance for Picard iterations in implicit Crank-Nicholson method
-filter_passes = 1
+filter_passes = 0
 filter_alpha =  0.5
 filter_strides = [1, 2, 4]
 
@@ -154,10 +154,10 @@ seed_position = 10
 time_evolution_algorithm = 0  # 0: Boris solver, 1: implicit Crank-Nicholson
 max_number_of_Picard_iterations_implicit_CN = 20
 number_of_particle_substeps_implicit_CN = 2
-number_grid_points = 40  # number of grid CELLS, not edges/vertices
+number_grid_points = 70  # number of grid CELLS, not edges/vertices
 field_solver = 0  # 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
-number_pseudoelectrons = 10000  # Total in entire domain
-total_steps = 1200  # Total number of time steps
+number_pseudoelectrons = 12000  # Total in entire domain
+total_steps = 500  # Total number of time steps
 # number of particles for each additional species
 # provide one list value per [[species]] block
-number_pseudoparticles_species = [10000,10000,]
+number_pseudoparticles_species = [12000,12000,]

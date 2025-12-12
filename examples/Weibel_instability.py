@@ -43,4 +43,6 @@ output = block_until_ready(simulation(input_parameters, **solver_parameters))
 # Post-process: segregate ions/electrons, compute energies, compute FFT
 diagnostics(output)
 
-plot(output, direction="xz")  # Plot the results in x and z direction
+# plot(output, direction="xz")  # Plot the results in x and z direction
+# Save the animation as an mp4 file (takes longer)
+plot(output, save_mp4="weibel_instability.mp4", direction="xz", fps=50, dpi=150, save_dpi=60, save_crf=32, save_stride=5, show=False)
