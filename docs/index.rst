@@ -16,15 +16,23 @@
 
 -------------------------
 
-JAX-in-Cell documentation
+JAX-in-Cell Documentation
 =========================
 
-Welcome to JAX-in-Cell!
-This is a Python package in JAX to perform plasma simulations
-using the Particle-In-Cell (PIC) method.
+Welcome to **JAX-in-Cell**, an open-source JAX-based Particle-in-Cell (PIC) framework
+for simulating plasmas with GPU/TPU acceleration, autodifferentiation, and JIT compilation.
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
+   overview
+   features
+   project_structure
    getting_started
+   usage
+   testing
+   roadmap
+   contributing
+   license
+   acknowledgments
