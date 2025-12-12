@@ -179,7 +179,6 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf,
         filter_strides (tuple): Tuple of stride values for multi-scale filtering (default: (1, 2, 4)).
         field_BC_left (int): Left boundary condition for filtering (default: 0: periodic, 1: reflective, 2: absorbing).
         field_BC_right (int): Right boundary condition for filtering (default: 0: periodic, 1: reflective, 2: absorbing).
-
     Returns:
         array: Current density on the grid, shape (G, 3), where G is the number of grid points.
     """
