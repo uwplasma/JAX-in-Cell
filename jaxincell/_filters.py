@@ -129,11 +129,15 @@ def filter_scalar_field(scalar_field, passes=5, alpha=0.5, strides=(1, 2, 4),
     Apply a multi-pass 3-point binomial digital filter to a scalar field.
     
     Args:
-        phi: Input scalar field array to be filtered.
+        scalar_field: Input scalar field array to be filtered.
         passes: Number of filter passes (default: 5). Note: internally capped at 17 
                 (16 regular passes + 1 compensation pass).
         alpha: Filter strength parameter (default: 0.5).
         strides: Tuple/list of stride values for filtering (default: (1, 2, 4)).
+        bc_left: Boundary condition for the left side (default: 0).
+                 0: periodic, 1: reflective, 2: absorbing.
+        bc_right: Boundary condition for the right side (default: 0).
+                  0: periodic, 1: reflective, 2: absorbing.
     
     Returns:
         Filtered scalar field array.
