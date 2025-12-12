@@ -101,8 +101,7 @@ wavenumber. The Maxwellian background $f_{s0}$ is given by the following anisotr
 \begin{aligned}
 f_{s0}(\mathbf{v}) = \frac{n_0}{2 \, \pi^{3/2} v^3} 
 \left[ 
-e^{- \frac{(v_x - v_{bx})^2}{v_{th,x}^2} - \frac{(v_y - v_{by})^2}{v_{th,y}^2} - \frac{(v_z - v_{bz})^2}{v_{th,z}^2}}\right. 
-\quad + 
+e^{- \frac{(v_x - v_{bx})^2}{v_{th,x}^2} - \frac{(v_y - v_{by})^2}{v_{th,y}^2} - \frac{(v_z - v_{bz})^2}{v_{th,z}^2}}\right. + 
 \left.e^{- \frac{(v_x + v_{bx})^2}{v_{th,x}^2} - \frac{(v_y + v_{by})^2}{v_{th,y}^2} - \frac{(v_z + v_{bz})^2}{v_{th,z}^2}}
 \right],
 \end{aligned}
@@ -127,9 +126,9 @@ $k\lambda_D = 1/2$, zero drift velocities $v_{b_x} = v_{b_y} = v_{b_z} = 0$,
 $v_{th} = 0.35\,c$, resolution of $N = 40000$ particles, $N_x = 32$ grid cells, $\Delta x = 0.4\lambda_D$ gird spacing and $\Delta t = 0.1\,\omega_{pe}^{-1}$ timestep; 2) two-stream instability using a perturbation $a = 5\times10^{-7}$,
 $k\lambda_D = 1/8$, velocities $v_{b_x} = 0.2\,c$ with \texttt{velocity\_plus\_minus} set to true, $v_{th} = 0.05\,c$, $N = 10000$, $N_x = 100$, $\Delta x = 0.5 \lambda_D$ and $\Delta t = 0.1\,\omega_{pe}^{-1}$
 
-We show in \autoref{fig:output} (top) the evolution of the electric field energy, as well as the fitted damping/growth rates, showing good agreement with the analytical prediction. We also show in \autoref{fig:output} (bottom) the resulting relative energy error between the explicit and implicit methods to demonstrate the precision of the implicit method.
-
 ![Electric field energy evolution for Landau damping and the two-stream instability. (a) Landau damping with analytical damping rate $\gamma = 0.153\omega_{pe}$. (b) Two-stream instability showing fitted exponential growth rate. (c--d) Relative total energy deviation $|E_{\text{total}} - E_{\text{total}}(0)| / E_{\text{total}}(0)$ demonstrating energy conservation.\label{fig:output}](figs/output.png)
+
+We show in \autoref{fig:output} (top) the evolution of the electric field energy, as well as the fitted damping/growth rates, showing good agreement with the analytical prediction. We also show in \autoref{fig:output} (bottom) the resulting relative energy error between the explicit and implicit methods to demonstrate the precision of the implicit method.
 
 Next, we perform a simulation of the Weibel instability, which arises in anisotropic plasmas and may be a mechanism for magnetic field generation and application. The plasma is initialized with an anisotropic velocity distribution with $v_{thz}/v_{thx}=\sqrt{T_z/T_x}=10$. We show in \autoref{fig:Weibel} the evolution of the magnetic field energy and the energy relative error (left) and the magnetic field strength in the $y$ direction (right). As expected, the magnetic field organizes into filamentary structures perpendicular to the velocity anisotropy. Initially, multiple small filaments form, which subsequently merge into larger-scale structures as the system evolves. In this case, the implicit method shows a bounded relative energy error of at most $10^-11$, while the explicit method appears to have unbounded energy errors.
 
