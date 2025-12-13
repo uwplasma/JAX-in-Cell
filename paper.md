@@ -43,7 +43,7 @@ $$
 + \frac{q_s}{m_s} \left( \mathbf{E} + \mathbf{v} \times \mathbf{B} \right)
 \cdot \nabla_{\mathbf{u}} f_s = 0,
 $$
-with the electromagnetic fields governed by the standard Maxwell equations equations. Here, $\mathbf{v}$ is velocity, $q_s$ and $m_s$ are the particle charge and mass, $\mathbf{E}$ and $\mathbf{B}$ are the electric and magnetic fields, $\mathbf{u} = \mathbf{v}\gamma$ is the proper velocity, and $\gamma = \sqrt{1 + u^2/c^2}$ is the Lorentz factor, with $c$ the speed of light. The distribution function $f_s$ is discretized as
+with the electromagnetic fields governed by the standard Maxwell equations. Here, $\mathbf{v}$ is velocity, $q_s$ and $m_s$ are the particle charge and mass, $\mathbf{E}$ and $\mathbf{B}$ are the electric and magnetic fields, $\mathbf{u} = \mathbf{v}\gamma$ is the proper velocity, and $\gamma = \sqrt{1 + u^2/c^2}$ is the Lorentz factor, with $c$ the speed of light. The distribution function $f_s$ is discretized as
 $$
 f_s(\mathbf{x}, \mathbf{v}) \approx \sum_{p} w_p\, \delta(\mathbf{x} - \mathbf{x_p})\, \delta(\mathbf{v} - \mathbf{v_p}),
 $$
