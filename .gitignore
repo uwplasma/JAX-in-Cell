@@ -170,4 +170,5 @@ jaxincell/version.py
 *.xml
 .vscode/settings.json
 *.npz
+*.mp4
 *.png

@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from jaxincell._simulation import simulation
 from jaxincell._diagnostics import diagnostics
-
+from jaxincell._simulation import load_parameters, initialize_simulation_parameters
 
 def _run_small_simulation(total_steps=10, number_grid_points=8, number_pseudoelectrons=20):
     """
@@ -317,4 +317,157 @@ def test_simulation_rejects_mismatched_positions_shape():
             field_solver=0,
             positions=bad_positions,
             velocities=bad_velocities,
+        )
+
+def test_load_parameters_parses_toml_and_converts_number_pseudoparticles_species_to_tuple(tmp_path):
+    """
+    Exercise load_parameters():
+      - TOML parsing
+      - input_parameters['species'] present when provided
+      - solver_parameters['number_pseudoparticles_species'] converted to tuple (hashable)
+      - returns (input_parameters, solver_parameters)
+    """
+    toml_text = """
+[input_parameters]
+length = 0.01
+print_info = false
+
+[[species]]
+charge_over_elementary_charge = 2.0
+mass_over_proton_mass = 4.0
+vth_over_c_x = 0.01
+vth_over_c_y = 0.0
+vth_over_c_z = 0.0
+random_positions_x = true
+random_positions_y = true
+random_positions_z = true
+amplitude_perturbation_x = 0.0
+amplitude_perturbation_y = 0.0
+amplitude_perturbation_z = 0.0
+wavenumber_perturbation_x = 0.0
+wavenumber_perturbation_y = 0.0
+wavenumber_perturbation_z = 0.0
+drift_speed_x = 0.0
+drift_speed_y = 0.0
+drift_speed_z = 0.0
+weight_ratio = 1.0
+seed_position_override = false
+seed_position = 0
+
+[solver_parameters]
+number_grid_points = 8
+number_pseudoelectrons = 20
+total_steps = 5
+number_pseudoparticles_species = [4]
+"""
+    p = tmp_path / "params.toml"
+    p.write_text(toml_text)
+
+    input_params, solver_params = load_parameters(str(p))
+
+    assert isinstance(input_params, dict)
+    assert isinstance(solver_params, dict)
+
+    assert "species" in input_params
+    assert isinstance(input_params["species"], list)
+    assert len(input_params["species"]) == 1
+
+    assert "number_pseudoparticles_species" in solver_params
+    assert solver_params["number_pseudoparticles_species"] == (4,)
+    assert isinstance(solver_params["number_pseudoparticles_species"], tuple)
+
+    # also ensure key copied over correctly
+    assert solver_params["number_grid_points"] == 8
+
+
+def test_load_parameters_adds_species_key_when_missing(tmp_path):
+    """
+    load_parameters() should add input_parameters['species']=[] if TOML has no [species] section.
+    Also covers the KeyError branch where number_pseudoparticles_species is absent -> ().
+    """
+    toml_text = """
+[input_parameters]
+length = 0.01
+print_info = false
+
+[solver_parameters]
+number_grid_points = 6
+number_pseudoelectrons = 10
+total_steps = 3
+"""
+    p = tmp_path / "params2.toml"
+    p.write_text(toml_text)
+
+    input_params, solver_params = load_parameters(str(p))
+
+    assert "species" in input_params
+    assert input_params["species"] == []
+
+    assert "number_pseudoparticles_species" in solver_params
+    assert solver_params["number_pseudoparticles_species"] == ()
+    assert isinstance(solver_params["number_pseudoparticles_species"], tuple)
+
+
+def test_initialize_simulation_parameters_evaluates_callable_derived_values():
+    """
+    Directly exercises the loop:
+        for key, value in parameters.items():
+            if callable(value):
+                parameters[key] = value(parameters)
+
+    We inject a callable into user_parameters and verify it is evaluated.
+    """
+    user = {
+        "length": 0.02,
+        "grid_points_per_Debye_length": 3.0,
+        "print_info": False,
+        # Derived parameter computed from other parameters:
+        "derived_test_value": lambda p: 2.0 * p["length"] + p["grid_points_per_Debye_length"],
+    }
+    params = initialize_simulation_parameters(user)
+
+    assert "derived_test_value" in params
+    assert np.isclose(params["derived_test_value"], 2.0 * 0.02 + 3.0)
+
+
+def test_simulation_rejects_mismatched_velocities_shape():
+    """
+    Covers the velocity-shape mismatch ValueError branch:
+        if velocities.shape != parameters["initial_velocities"].shape: raise ValueError(...)
+    """
+    total_steps = 2
+    G = 4
+    N_e = 4
+
+    base_params = {
+        "length": 0.01,
+        "grid_points_per_Debye_length": 1.0,
+        "print_info": False,
+    }
+
+    # Run once to obtain correct shapes from returned params
+    base_output = simulation(
+        base_params,
+        number_grid_points=G,
+        number_pseudoelectrons=N_e,
+        total_steps=total_steps,
+        field_solver=0,
+    )
+
+    good_pos = base_output["initial_positions"]
+    good_vel = base_output["initial_velocities"]
+    assert good_pos.shape == good_vel.shape
+
+    # Keep positions correct, break velocities shape
+    bad_vel = jnp.zeros((good_vel.shape[0], good_vel.shape[1] + 1))
+
+    with pytest.raises(ValueError, match=r"Expected velocities shape"):
+        simulation(
+            base_params,
+            number_grid_points=G,
+            number_pseudoelectrons=N_e,
+            total_steps=total_steps,
+            field_solver=0,
+            positions=good_pos,
+            velocities=bad_vel,
         )

@@ -74,7 +74,7 @@ def E_from_Gauss_1D_Cartesian(charge_density, dx):
     """
     # Construct divergence matrix for solving Gauss' Law
     divergence_matrix = jnp.diag(jnp.ones(len(charge_density)))-jnp.diag(jnp.ones(len(charge_density)-1),k=-1)
-    divergence_matrix.at[0,-1].set(-1)
+    # divergence_matrix = divergence_matrix.at[0, -1].set(-1.0)
     
     # Solve for the electric field using Gauss' law in the 1D case
     E_field_from_Gauss = (dx / epsilon_0) * jnp.linalg.solve(divergence_matrix, charge_density)
