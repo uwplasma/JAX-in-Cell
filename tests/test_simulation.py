@@ -459,7 +459,7 @@ def test_simulation_rejects_mismatched_velocities_shape():
     assert good_pos.shape == good_vel.shape
 
     # Keep positions correct, break velocities shape
-    bad_vel = jnp.zeros((good_vel.shape[0], good_vel.shape[1], good_vel.shape[2] + 1))
+    bad_vel = jnp.zeros((good_vel.shape[0], good_vel.shape[1] + 1))
 
     with pytest.raises(ValueError, match=r"Expected velocities shape"):
         simulation(
