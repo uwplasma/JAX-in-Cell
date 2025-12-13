@@ -60,6 +60,27 @@ def _robust_vmax_from_samples(v_tn: np.ndarray, q: float = 99.5, pad: float = 1.
     val = np.percentile(np.abs(v_tn), q)
     return float(max(pad * val, eps))
 
+def _robust_vmax_clipped(
+    v_tn: np.ndarray,
+    q: float = 99.0,
+    pad: float = 1.20,
+    clip_multiple_of_median: float = 25.0,
+    eps: float = 1e-30,
+) -> float:
+    """
+    Robust symmetric velocity span that *clips* the percentile using a multiple of the median(|v|).
+
+    Why: if 0.01% of ions get fast (numerical heating / rare acceleration), a plain percentile can
+    still get too large and wash out the bulk ion dynamics visually.
+    """
+    a = np.abs(np.asarray(v_tn, dtype=np.float64)).ravel()
+    if a.size == 0:
+        return eps
+    med = float(np.median(a))
+    p = float(np.percentile(a, q))
+    cap = clip_multiple_of_median * max(med, eps)
+    return float(max(pad * min(p, cap), eps))
+
 
 def _make_overlay_axes(fig: plt.Figure, ax_base: plt.Axes) -> plt.Axes:
     """
@@ -286,6 +307,43 @@ class _PrecomputedPDF:
     scale_e0: float
     scale_i0: float
 
+def _pick_best_component_field(
+    output: dict,
+    field: str,
+    threshold: float,
+    allowed_axes: Optional[set[str]] = None,
+) -> Optional[Tuple[str, np.ndarray]]:
+    """
+    Pick the component (x/y/z) of a vector field with the largest robust amplitude.
+    Optionally restrict to allowed_axes (e.g. set(dirs)).
+    Returns (component_letter, data_2d) or None if field missing/all ~0.
+    """
+    if field not in output:
+        return None
+
+    best = None
+    best_score = -np.inf
+
+    for comp_i, axis in enumerate("xyz"):
+        if allowed_axes is not None and axis not in allowed_axes:
+            continue
+        data = np.asarray(output[field][:, :, comp_i])
+        if np.max(np.abs(data)) <= threshold:
+            continue
+        score = _robust_abs_max(data, q=99.0)
+        if score > best_score:
+            best_score = score
+            best = (axis, data)
+
+    return best
+
+def _cbar_label_top(cb, text: str, fontsize: Optional[int] = None, pad: float = 6):
+    cb.ax.set_title(text, pad=pad)
+    # cb.set_label(text, rotation=0, labelpad=pad)
+    # cb.ax.xaxis.set_label_position("top")
+    # cb.ax.xaxis.set_ticks_position("default")
+    if fontsize is not None:
+        cb.ax.xaxis.label.set_size(fontsize)
 
 # ======================================================================================
 # Main plot()
@@ -368,10 +426,11 @@ def plot(
     # ----------------------------
     heatmaps = []
 
-    def add_vector_field(field: str, unit: str, label_prefix: str):
+    def add_vector_field(field: str, unit: str, label_prefix: str, components: str = "xyz"):
         if field not in output:
             return
-        for comp_i, axis in enumerate("xyz"):
+        for axis in components:
+            comp_i = _AXIS_TO_INDEX[axis]
             data = output[field][:, :, comp_i]
             if _is_nonzero(data, threshold):
                 heatmaps.append(
@@ -382,12 +441,30 @@ def plot(
                         title=f"{label_prefix} in the {axis} direction",
                         xlabel="x Position (m)",
                         ylabel=r"Time ($\omega_{pe}^{-1}$)",
-                        cbar=f"{label_prefix} ({unit})",
+                        cbar=f"({unit})",
                     )
                 )
 
-    add_vector_field("electric_field", "V/m", "Electric Field")
-    add_vector_field("magnetic_field", "T", "Magnetic Field")
+    add_vector_field("electric_field", "V/m", "Electric Field", components="xyz")
+    add_vector_field("magnetic_field", "T", "Magnetic Field", components="xyz")
+
+    # Add ONE current-density panel ONLY if magnetic-field is also plotted in these directions
+    has_B = any(hm["field"] == "magnetic_field" for hm in heatmaps)
+    if has_B:
+        best_J = _pick_best_component_field(output, "current_density", threshold, allowed_axes=None)
+        if best_J is not None:
+            axis, data = best_J
+            heatmaps.append(
+                dict(
+                    field="current_density",
+                    component=axis,
+                    data=data,
+                    title=f"Current Density in the {axis} direction",
+                    xlabel="x Position (m)",
+                    ylabel=r"Time ($\omega_{pe}^{-1}$)",
+                    cbar=r"(A/m$^2$)",
+                )
+            )
 
     # charge density always
     if "charge_density" in output:
@@ -399,7 +476,7 @@ def plot(
                 title="Charge Density",
                 xlabel="x Position (m)",
                 ylabel=r"Time ($\omega_{pe}^{-1}$)",
-                cbar=r"Charge density (C/m$^3$)",
+                cbar=r"(C/m$^3$)",
             )
         )
 
@@ -417,8 +494,11 @@ def plot(
         vi = np.asarray(vel_i[:, :, di])
 
         # Robust velocity spans (THIS fixes ion "no dynamics" view)
-        vmax_e = max(_robust_vmax_from_samples(ve, q=99.5, pad=1.25), 1e-30)
-        vmax_i = max(_robust_vmax_from_samples(vi, q=99.5, pad=1.25), 1e-30)
+        # electrons: keep wide enough (fast physics)
+        vmax_e = _robust_vmax_from_samples(ve, q=99.5, pad=1.25)
+
+        # ions: tighter, clipped to avoid rare fast-ion outliers destroying contrast
+        vmax_i = _robust_vmax_clipped(vi, q=99.0, pad=1.20, clip_multiple_of_median=25.0)
 
         v_edges_e = np.linspace(-vmax_e, vmax_e, bins_v + 1)
         v_edges_i = np.linspace(-vmax_i, vmax_i, bins_v + 1)
@@ -495,9 +575,16 @@ def plot(
     n_total = n_heat + n_fv + n_ps + n_energy
     nrows = int(np.ceil(n_total / ncols))
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 2.8 * nrows), squeeze=False)
+    base_w = 5.5   # per column
+    base_h = 3.0  # per row
+    fig_w = min(15.0, base_w * ncols)  # ncols=3 -> ~11.7
+    fig_h = min(9.0, base_h * nrows)   # cap height so it fits
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(fig_w, fig_h), squeeze=False)
 
     # ---- draw heatmaps with fixed clim (robust over the whole run) ----
+    B_heat_axes: Dict[Tuple[str, str], plt.Axes] = {}
+    J_heat_axes: Dict[Tuple[str, str], plt.Axes] = {}
     E_heat_axes: Dict[Tuple[str, str], plt.Axes] = {}  # (field, component) -> ax
     heatmap_images = []
     idx = 0
@@ -519,13 +606,17 @@ def plot(
         ax.set_title(hm["title"])
         ax.set_xlabel(hm["xlabel"])
         ax.set_ylabel(hm["ylabel"])
-        cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        cb.set_label(hm["cbar"])
+        cb = fig.colorbar(im, ax=ax, fraction=0.038, pad=0.02)
+        _cbar_label_top(cb, hm["cbar"])
 
         heatmap_images.append(im)
 
         if hm["field"] == "electric_field" and hm["component"] is not None:
             E_heat_axes[(hm["field"], hm["component"])] = ax
+        if hm["field"] == "magnetic_field" and hm["component"] is not None:
+            B_heat_axes[(hm["field"], hm["component"])] = ax
+        if hm["field"] == "current_density" and hm["component"] is not None:
+            J_heat_axes[(hm["field"], hm["component"])] = ax
 
         idx += 1
 
@@ -534,6 +625,8 @@ def plot(
     fv_lines: Dict[str, Dict[str, plt.Line2D]] = {}  # d -> {"e":..., "i":..., "e0":..., "i0":...}
     fv_time_text: Dict[str, plt.Text] = {}
 
+    # global velocity extent for f(v) x-axes (use the largest across requested components)
+    vmax_global_fv = max(float(np.max(np.abs(pre_pdf[d].v_centers))) for d in dirs)
     for d in dirs:
         r, c = divmod(idx, ncols)
         ax = axes[r, c]
@@ -555,9 +648,11 @@ def plot(
         ax.set_ylabel(r"$f(v)/\max(f_0)$")
         ax.set_ylim(0.0, 1.10)
         ax.legend(fontsize=8, frameon=False, loc="upper right")
+        ax.set_xlim(-vmax_global_fv, vmax_global_fv)
+        ax.set_xticks(np.linspace(-vmax_global_fv, vmax_global_fv, 5))
 
         txt = ax.text(
-            0.5, 0.92, "", transform=ax.transAxes,
+            0.15, 0.92, "", transform=ax.transAxes,
             ha="center", va="top", fontsize=11,
             bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
         )
@@ -593,8 +688,8 @@ def plot(
         ax_e.set_title(rf"Electron phase space $(x, v_{d})$")
         ax_e.set_xlabel("x (m)")
         ax_e.set_ylabel(rf"$v_{d}$ (m/s)")
-        cb = fig.colorbar(im_e, ax=ax_e, fraction=0.046, pad=0.04)
-        cb.set_label("counts (log)")
+        cb = fig.colorbar(im_e, ax=ax_e, fraction=0.038, pad=0.02)
+        _cbar_label_top(cb, "counts")
 
         idx += 1
 
@@ -614,15 +709,15 @@ def plot(
         ax_i.set_title(rf"Ion phase space $(x, v_{d})$")
         ax_i.set_xlabel("x (m)")
         ax_i.set_ylabel(rf"$v_{d}$ (m/s)")
-        cb = fig.colorbar(im_i, ax=ax_i, fraction=0.046, pad=0.04)
-        cb.set_label("counts (log)")
+        cb = fig.colorbar(im_i, ax=ax_i, fraction=0.038, pad=0.02)
+        _cbar_label_top(cb, "counts")
 
         idx += 1
 
         # one shared time label (put it on electron panel of the first direction)
         if d == dirs[0]:
             txt = ax_e.text(
-                0.5, 0.92, "", transform=ax_e.transAxes,
+                0.15, 0.92, "", transform=ax_e.transAxes,
                 ha="center", va="top", fontsize=11,
                 bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
             )
@@ -664,32 +759,39 @@ def plot(
     # Tight layout BEFORE overlays (prevents the "not centered" + overlay misalignment issues)
     fig.tight_layout()
     fig.canvas.draw()
+    fig.subplots_adjust(wspace=0.25, hspace=0.75)
+    fig.canvas.draw()
 
     # ----------------------------
-    # E(x,t) overlays on E heatmaps (thicker + high-contrast)
+    # Instantaneous overlays on heatmaps: E, B, J
     # ----------------------------
-    E_overlays: List[Tuple[plt.Line2D, np.ndarray, plt.Text]] = []
-    # Precompute normalized E lines only for rendered frames (fast update)
-    for (field, comp), ax in E_heat_axes.items():
-        comp_i = _AXIS_TO_INDEX[comp]
-        E_all = np.asarray(output["electric_field"][:, :, comp_i])  # (T, X)
-        E_scale = _robust_abs_max(E_all, q=99.0)  # FIXED over whole run => growth visible
-        E_lines = np.clip(E_all / E_scale, -1.0, 1.0)      # (T, X)
+    Field_overlays: List[Tuple[plt.Line2D, np.ndarray, plt.Text]] = []
 
-        ax_ov = _make_overlay_axes(fig, ax)
-        (line,) = ax_ov.plot(grid, E_lines[0], color="black", linewidth=2.6, alpha=0.95)
-        ax_ov.set_xlim(grid[0], grid[-1])
-        ax_ov.set_ylim(-1.05, 1.05)
+    def _add_overlays_for(field_name: str, axes_dict: Dict[Tuple[str, str], plt.Axes]):
+        for (_, comp), ax in axes_dict.items():
+            comp_i = _AXIS_TO_INDEX[comp]
+            F_all = np.asarray(output[field_name][:, :, comp_i])  # (T, X)
+            F_scale = _robust_abs_max(F_all, q=99.0)
+            F_lines = np.clip(F_all / F_scale, -1.0, 1.0)
 
-        txt = ax_ov.text(
-            0.5, 0.92, "", transform=ax_ov.transAxes,
-            ha="center", va="top", fontsize=11,
-            bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
-        )
+            ax_ov = _make_overlay_axes(fig, ax)
+            (line,) = ax_ov.plot(grid, F_lines[0], color="black", linewidth=2.4, alpha=0.95)
+            ax_ov.set_xlim(grid[0], grid[-1])
+            ax_ov.set_ylim(-1.05, 1.05)
 
-        line.set_animated(True)
-        txt.set_animated(True)
-        E_overlays.append((line, E_lines, txt))
+            txt = ax_ov.text(
+                0.15, 0.92, "", transform=ax_ov.transAxes,
+                ha="center", va="top", fontsize=10,
+                bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+            )
+
+            line.set_animated(True)
+            txt.set_animated(True)
+            Field_overlays.append((line, F_lines, txt))
+
+    _add_overlays_for("electric_field", E_heat_axes)
+    _add_overlays_for("magnetic_field", B_heat_axes)
+    _add_overlays_for("current_density", J_heat_axes)
 
     # ----------------------------
     # Animation update
@@ -719,8 +821,8 @@ def plot(
             artists += [fv_lines[d]["e0"], fv_lines[d]["i0"]]
 
         # E overlays
-        for line, E_lines, txt in E_overlays:
-            line.set_ydata(E_lines[t])
+        for line, F_lines, txt in Field_overlays:
+            line.set_ydata(F_lines[t])
             txt.set_text(f"t = {time[t]:.2f} ωₚ")
             artists += [line, txt]
 

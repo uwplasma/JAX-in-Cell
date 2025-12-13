@@ -16,7 +16,7 @@ input_toml_path = os.path.join(current_directory, input_file)
 
 input_parameters, solver_parameters = load_parameters(input_toml_path)
 
-simulation_type = 2
+simulation_type = 3
 if simulation_type == 0:
     print("Running bump-on-tail with periodic BCs (default)...")
     save_mp4_name = "bump_on_tail_explicit_periodic.mp4"
