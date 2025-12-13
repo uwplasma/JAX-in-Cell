@@ -71,9 +71,9 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
                                                   filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                                                   field_BC_left=field_BC_left, field_BC_right=field_BC_right)
         switcher = {
-            1: E_from_Gauss_1D_FFT,
-            2: E_from_Gauss_1D_Cartesian,
-            3: E_from_Poisson_1D_FFT,
+            1: lambda rho, dx: E_from_Gauss_1D_FFT(rho, dx),
+            2: lambda rho, dx: E_from_Gauss_1D_Cartesian(rho, dx, field_BC_left, field_BC_right),
+            3: lambda rho, dx: E_from_Poisson_1D_FFT(rho, dx),
         }
         E_field = E_field.at[:,0].set(switcher[field_solver](charge_density, dx))
 

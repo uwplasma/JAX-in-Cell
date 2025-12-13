@@ -32,6 +32,15 @@ from jaxincell._constants import epsilon_0, speed_of_light
 def _zero_mean(x):
     return x - jnp.mean(x)
 
+def _project_zero_and_nyquist(rho):
+    """Project out k=0 and Nyquist (even N) to match FFT Gauss/Poisson solvers."""
+    n = rho.shape[0]
+    rk = jnp.fft.fft(rho)
+    rk = rk.at[0].set(0.0)
+    if n % 2 == 0:
+        rk = rk.at[n // 2].set(0.0)
+    return jnp.fft.ifft(rk).real
+
 def _finite_diff_grad_scalar(fun, x, idx, eps=1e-6):
     """
     Central finite difference for scalar fun(x) with respect to x[idx].
@@ -57,16 +66,12 @@ def test_gauss_fft_satisfies_gauss_law_periodic_zero_mean():
 
     rho = jax.random.normal(key, (nx,))
     rho = _zero_mean(rho)  # k=0 is special; make it clean
+    rho = _project_zero_and_nyquist(rho)
 
     E = E_from_Gauss_1D_FFT(rho, dx)
 
-    # Check: dE/dx = rho / epsilon_0 (periodic), using spectral derivative.
-    kx = jnp.fft.fftfreq(nx, d=dx) * 2 * jnp.pi
-    Ek = jnp.fft.fft(E)
-    dE_dx = jnp.fft.ifft(1j * kx * Ek).real
-
-    # k=0 derivative is 0 anyway; with zero-mean rho this should match well.
-    assert jnp.allclose(dE_dx, rho / epsilon_0, rtol=1e-5, atol=1e-5)
+    dE_dx = (E - jnp.roll(E, 1)) / dx
+    assert jnp.allclose(dE_dx, rho / epsilon_0, rtol=1e-6, atol=1e-6)
 
 
 def test_poisson_fft_matches_gauss_fft_for_zero_mean_rho():
@@ -84,17 +89,13 @@ def test_poisson_fft_matches_gauss_fft_for_zero_mean_rho():
 
 
 def test_cartesian_gauss_matches_fft_up_to_constant_offset():
-    """
-    This assumes you've FIXED the bug in E_from_Gauss_1D_Cartesian:
-        divergence_matrix = divergence_matrix.at[0, -1].set(-1.0)
-    Without that fix, this test should fail (correctly).
-    """
     nx = 16
     dx = 0.03
     key = jax.random.PRNGKey(2)
 
     rho = jax.random.normal(key, (nx,))
     rho = _zero_mean(rho)
+    rho = _project_zero_and_nyquist(rho)
 
     E_fft = E_from_Gauss_1D_FFT(rho, dx)
     E_cart = E_from_Gauss_1D_Cartesian(rho, dx)
