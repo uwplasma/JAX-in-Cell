@@ -2,6 +2,8 @@
 import numpy as np
 import pytest
 import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.animation as mpl_anim
 
 matplotlib.use("Agg")
 
@@ -218,3 +220,154 @@ def test_plot_save_mp4_failure_warns(monkeypatch, tmp_path):
     out_path = tmp_path / "anim.mp4"
     with pytest.warns(RuntimeWarning):
         plot_mod.plot(out, direction="x", show=False, save_mp4=str(out_path))
+
+
+class _DummyWriter:
+    def __init__(self, fps, codec, bitrate, extra_args):
+        self.fps = fps
+        self.codec = codec
+        self.bitrate = bitrate
+        self.extra_args = list(extra_args)
+
+
+def test_ffmpeg_encoders_text_exception_branch(monkeypatch):
+    plot_mod._ffmpeg_encoders_text.cache_clear()
+    monkeypatch.setattr(plot_mod.shutil, "which", lambda _: "/usr/bin/ffmpeg")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("ffmpeg broken")
+
+    monkeypatch.setattr(plot_mod.subprocess, "check_output", boom)
+    assert plot_mod._ffmpeg_encoders_text() == ""
+
+
+def test_auto_codec_order_for_mp4_filters_and_keeps_order(monkeypatch):
+    # Make only these encoders "available"
+    available = {"h264_videotoolbox", "libx264", "libx265"}
+
+    monkeypatch.setattr(plot_mod, "_ffmpeg_has_encoder", lambda name: name in available)
+    got = plot_mod._auto_codec_order_for_mp4()
+
+    # Must preserve the candidate ordering from the function:
+    # h264_videotoolbox ... libx264 ... libx265
+    assert got == ["h264_videotoolbox", "libx264", "libx265"]
+
+
+def test_make_ffmpeg_writer_webm_vp9(monkeypatch):
+    # Force VP9 branch
+    monkeypatch.setattr(plot_mod, "_ffmpeg_has_encoder", lambda name: name == "libvpx-vp9")
+    monkeypatch.setattr(mpl_anim, "FFMpegWriter", _DummyWriter)
+
+    w = plot_mod._make_ffmpeg_writer_auto(out_path="out.webm", fps=12, crf=None, preset=None)
+    assert isinstance(w, _DummyWriter)
+    assert w.codec == "libvpx-vp9"
+    # default q for vp9 is 38 when crf=None
+    assert "-crf" in w.extra_args
+    assert "38" in w.extra_args
+    assert "-row-mt" in w.extra_args
+    assert "-speed" in w.extra_args
+    assert "-pix_fmt" in w.extra_args
+
+
+def test_make_ffmpeg_writer_webm_fallback_libx264(monkeypatch):
+    # VP9 unavailable => fallback to libx264 in webm branch
+    monkeypatch.setattr(plot_mod, "_ffmpeg_has_encoder", lambda name: False)
+    monkeypatch.setattr(mpl_anim, "FFMpegWriter", _DummyWriter)
+
+    w = plot_mod._make_ffmpeg_writer_auto(out_path="out.webm", fps=20, crf=None, preset=None)
+    assert w.codec == "libx264"
+    # webm fallback uses basic vf_even + pix_fmt
+    assert "-vf" in w.extra_args
+    assert "-pix_fmt" in w.extra_args
+
+
+def test_make_ffmpeg_writer_mp4_auto_libx264_adds_avc1_and_crf_preset(monkeypatch):
+    monkeypatch.setattr(plot_mod, "_auto_codec_order_for_mp4", lambda: ["libx264"])
+    monkeypatch.setattr(mpl_anim, "FFMpegWriter", _DummyWriter)
+
+    w = plot_mod._make_ffmpeg_writer_auto(out_path="out.mp4", fps=30, crf=None, preset=None)
+    assert w.codec == "libx264"
+
+    # defaults for libx264: preset veryfast, crf 30
+    # (order in list matters; just check inclusion)
+    assert "-preset" in w.extra_args
+    assert "veryfast" in w.extra_args
+    assert "-crf" in w.extra_args
+    assert "30" in w.extra_args
+
+    # QuickTime tag for H.264 in mp4
+    assert "-tag:v" in w.extra_args
+    assert "avc1" in w.extra_args
+
+    # even-dimension filter + faststart always on mp4
+    assert "+faststart" in w.extra_args
+
+
+def test_make_ffmpeg_writer_mp4_auto_libx265_adds_hvc1_and_crf_preset(monkeypatch):
+    monkeypatch.setattr(plot_mod, "_auto_codec_order_for_mp4", lambda: ["libx265"])
+    monkeypatch.setattr(mpl_anim, "FFMpegWriter", _DummyWriter)
+
+    w = plot_mod._make_ffmpeg_writer_auto(out_path="out.mp4", fps=30, crf=None, preset=None)
+    assert w.codec == "libx265"
+
+    # defaults for HEVC/libx265: crf 32
+    assert "-preset" in w.extra_args
+    assert "veryfast" in w.extra_args
+    assert "-crf" in w.extra_args
+    assert "32" in w.extra_args
+
+    # QuickTime tag for HEVC in mp4
+    assert "-tag:v" in w.extra_args
+    assert "hvc1" in w.extra_args
+
+
+def test_make_ffmpeg_writer_mp4_hardware_encoder_hits_pass_branch(monkeypatch):
+    # This hits the "hardware encoders: ... pass" branch
+    monkeypatch.setattr(plot_mod, "_auto_codec_order_for_mp4", lambda: ["h264_videotoolbox"])
+    monkeypatch.setattr(mpl_anim, "FFMpegWriter", _DummyWriter)
+
+    w = plot_mod._make_ffmpeg_writer_auto(out_path="out.mp4", fps=30, crf=None, preset=None)
+    assert w.codec == "h264_videotoolbox"
+
+    # Should still include mp4 compatibility args
+    assert "-movflags" in w.extra_args
+    assert "+faststart" in w.extra_args
+    assert "-tag:v" in w.extra_args
+    assert "avc1" in w.extra_args
+
+    # Hardware branch should NOT prepend crf/preset like libx264/libx265
+    assert "-crf" not in w.extra_args
+    assert "-preset" not in w.extra_args
+
+
+def test_make_ffmpeg_writer_mp4_codec_override_missing_raises(monkeypatch):
+    monkeypatch.setattr(plot_mod, "_ffmpeg_has_encoder", lambda name: False)
+    with pytest.raises(RuntimeError):
+        plot_mod._make_ffmpeg_writer_auto(
+            out_path="out.mp4",
+            fps=30,
+            crf=None,
+            preset=None,
+            codec_override="libx264",
+        )
+
+
+def test_cbar_label_top_fontsize_branch():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.arange(4).reshape(2, 2))
+    cb = fig.colorbar(im, ax=ax)
+    plot_mod._cbar_label_top(cb, "counts", fontsize=9, pad=6)
+    plt.close(fig)
+
+
+def test_plot_show_true_calls_show(monkeypatch):
+    out = _synthetic_output(use_species=True, include_B=True, include_J=True, include_energy=True)
+
+    # Make animation cheap + deterministic
+    monkeypatch.setattr(plot_mod, "FuncAnimation", _FakeAnimation)
+
+    called = {"n": 0}
+    monkeypatch.setattr(plot_mod.plt, "show", lambda: called.__setitem__("n", called["n"] + 1))
+
+    plot_mod.plot(out, direction="x", show=True, save_mp4=None)
+    assert called["n"] == 1
