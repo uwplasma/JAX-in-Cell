@@ -6,7 +6,7 @@ from functools import lru_cache
 
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -311,7 +311,7 @@ def _pick_best_component_field(
     output: dict,
     field: str,
     threshold: float,
-    allowed_axes: Optional[set[str]] = None,
+    allowed_axes: Optional[Set[str]] = None,
 ) -> Optional[Tuple[str, np.ndarray]]:
     """
     Pick the component (x/y/z) of a vector field with the largest robust amplitude.
@@ -353,7 +353,7 @@ def plot(
     output,
     direction: str = "x",
     threshold: float = 1e-12,
-    save_mp4: str | None = None,
+    save_mp4: Optional[str] = None,
     fps: int = 30,
     dpi: int = 150,
     show: bool = True,
