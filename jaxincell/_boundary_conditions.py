@@ -2,86 +2,10 @@ from jax import jit, vmap
 import jax.numpy as jnp
 from ._constants import speed_of_light
 
-__all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
-
-def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
-    """
-    Applies boundary conditions (BCs) to a single particle's position and velocity.
-
-    Args:
-        x_n (jnp.ndarray): Particle position as a 1D array [x, y, z].
-        v_n (jnp.ndarray): Particle velocity as a 1D array [vx, vy, vz].
-        q (float): Particle charge.
-        q_m (float): Charge-to-mass ratio of the particle.
-        dx (float): Grid spacing.
-        grid (jnp.ndarray): Discretized grid positions.
-        box_size_x, box_size_y, box_size_z (float): Box dimensions in x, y, and z directions.
-        BC_left, BC_right (int): Boundary conditions for left and right boundaries in the x-direction.
-            0: Periodic
-            1: Reflective
-            2: Absorbing
-
-    Returns:
-        tuple: Updated position (x_n), velocity (v_n), charge (q), and charge-to-mass ratio (q_m).
-    """
-    # Apply periodic BCs in y and z directions
-    x_n1 = (x_n[1] + box_size_y / 2) % box_size_y - box_size_y / 2
-    x_n2 = (x_n[2] + box_size_z / 2) % box_size_z - box_size_z / 2
-
-    # Apply boundary conditions in x-direction
-    x_n0 = jnp.where(
-        x_n[0] < -box_size_x / 2,
-        jnp.where(
-            BC_left == 0,  # Periodic
-            (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2,
-            jnp.where(
-                BC_left == 1,  # Reflective
-                -box_size_x - x_n[0],
-                jnp.where(BC_left == 2, grid[0] - 1.5 * dx, x_n[0]),  # Absorbing
-            ),
-        ),
-        jnp.where(
-            x_n[0] > box_size_x / 2,
-            jnp.where(
-                BC_right == 0,  # Periodic
-                (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2,
-                jnp.where(
-                    BC_right == 1,  # Reflective
-                    box_size_x - x_n[0],
-                    jnp.where(BC_right == 2, grid[-1] + 3 * dx, x_n[0]),  # Absorbing
-                ),
-            ),
-            x_n[0],
-        ),
-    )
-
-    # Update velocities for reflective or absorbing boundaries
-    v_n = jnp.where(
-        x_n[0] < -box_size_x / 2,
-        jnp.where(
-            BC_left == 0,  # Periodic
-            v_n,
-            jnp.where(BC_left == 1, v_n * jnp.array([-1, 1, 1]), jnp.array([0, 0, 0])),  # Reflective or Absorbing
-        ),
-        jnp.where(
-            x_n[0] > box_size_x / 2,
-            jnp.where(
-                BC_right == 0,  # Periodic
-                v_n,
-                jnp.where(BC_right == 1, v_n * jnp.array([-1, 1, 1]), jnp.array([0, 0, 0])),  # Reflective or Absorbing
-            ),
-            v_n,
-        ),
-    )
-
-    # Nullify charges and charge-to-mass ratio for absorbing BCs
-    q   = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q)
-    q_m = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q_m)
-
-    return jnp.array([x_n0, x_n1, x_n2]), v_n, q, q_m
+__all__ = ['set_BC_particles', 'set_BC_positions']
 
 @jit
-def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
+def set_BC_particles(xs, vs, qs, ms, q_ms, dx, grid, Lx, Ly, Lz, BC_left, BC_right):
     """
     Applies boundary conditions to all particles in parallel.
 
@@ -96,52 +20,97 @@ def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y,
     Returns:
         tuple: Updated positions, velocities, charges, masses, and charge-to-mass ratios for all particles.
     """
-    xs_n, vs_n, qs, q_ms = vmap(
-        lambda x_n, v_n, q, q_m: set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right)
-    )(xs_n, vs_n, qs, q_ms)
-    return xs_n, vs_n, qs, ms, q_ms
+    x, y, z = xs[:,0], xs[:,1], xs[:,2]
 
-def set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
-    """
-    Applies boundary conditions to particle positions only (used for half-step updates).
+    # periodic y/z
+    y = (y + Ly/2) % Ly - Ly/2
+    z = (z + Lz/2) % Lz - Lz/2
 
-    Args:
-        x_n (jnp.ndarray): Particle position as a 1D array [x, y, z].
-        Other parameters: Same as set_BCs.
+    left  = x < -Lx/2
+    right = x >  Lx/2
 
-    Returns:
-        jnp.ndarray: Updated particle position [x, y, z].
-    """
-    x_n1 = (x_n[1] + box_size_y / 2) % box_size_y - box_size_y / 2
-    x_n2 = (x_n[2] + box_size_z / 2) % box_size_z - box_size_z / 2
+    # periodic wrap for x (only where out of bounds)
+    x_per = (x + Lx/2) % Lx - Lx/2
 
-    x_n0 = jnp.where(
-        x_n[0] < -box_size_x / 2,
-        jnp.where(BC_left == 0, (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2, 
-                  jnp.where(BC_left == 1, -box_size_x - x_n[0], grid[0] - 1.5 * dx)),  # Absorbing
-        jnp.where(
-            x_n[0] > box_size_x / 2,
-            jnp.where(BC_right == 0, (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2,
-                      jnp.where(BC_right == 1, box_size_x - x_n[0], grid[-1] + 3 * dx)),  # Absorbing
-            x_n[0],
-        ),
-    )
-    return jnp.array([x_n0, x_n1, x_n2])
+    # reflective
+    x_ref_left  = -Lx - x
+    x_ref_right =  Lx - x
+
+    # absorbing “park outside”
+    x_abs_left  = grid[0] - 1.5*dx
+    x_abs_right = grid[-1] + 3.0*dx
+
+    # choose per side
+    xL = jnp.where(BC_left == 0, x_per,
+         jnp.where(BC_left == 1, x_ref_left,  x_abs_left))
+    xR = jnp.where(BC_right == 0, x_per,
+         jnp.where(BC_right == 1, x_ref_right, x_abs_right))
+
+    x = jnp.where(left,  xL, x)
+    x = jnp.where(right, xR, x)
+
+    # velocity update on reflective / absorbing
+    flipx = jnp.array([-1.0, 1.0, 1.0])
+    vL = jnp.where(BC_left  == 1, vs * flipx, jnp.zeros_like(vs))
+    vR = jnp.where(BC_right == 1, vs * flipx, jnp.zeros_like(vs))
+    vs = jnp.where(left[:,None],  jnp.where(BC_left==0, vs, vL), vs)
+    vs = jnp.where(right[:,None], jnp.where(BC_right==0, vs, vR), vs)
+
+    # zero charge/qm if absorbing
+    absorb = (left & (BC_left==2)) | (right & (BC_right==2))
+    qs   = jnp.where(absorb[:,None], 0.0, qs)
+    q_ms = jnp.where(absorb[:,None], 0.0, q_ms)
+
+    xs = jnp.stack([x,y,z], axis=1)
+    return xs, vs, qs, ms, q_ms
+
 
 @jit
-def set_BC_positions(xs_n, qs, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
+def set_BC_positions(xs_n, qs, dx, grid, Lx, Ly, Lz, BC_left, BC_right,
+                     zero_q_on_absorb=False):
     """
-    Applies boundary conditions to particle positions for all particles during a half-step update.
-
-    Args:
-        xs_n (jnp.ndarray): Positions of all particles, shape (N, 3).
-        qs (jnp.ndarray): Charges of all particles, shape (N,).
-        Other parameters: Same as set_BCs.
-
-    Returns:
-        jnp.ndarray: Updated positions of all particles, shape (N, 3).
+    Vectorized positions-only BCs (half-step). Same logic as set_BC_particles,
+    but only updates xs (and optionally qs if absorbing).
+    xs_n: (N,3)
+    qs:   (N,) or (N,1)  (only used if zero_q_on_absorb=True)
     """
-    xs_n = vmap(lambda x_n: set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right))(xs_n)
+    x, y, z = xs_n[:, 0], xs_n[:, 1], xs_n[:, 2]
+
+    # periodic y/z
+    y = (y + Ly / 2) % Ly - Ly / 2
+    z = (z + Lz / 2) % Lz - Lz / 2
+
+    left  = x < -Lx / 2
+    right = x >  Lx / 2
+
+    # periodic wrap for x
+    x_per = (x + Lx / 2) % Lx - Lx / 2
+
+    # reflective maps
+    x_ref_left  = -Lx - x
+    x_ref_right =  Lx - x
+
+    # absorbing “park outside”
+    x_abs_left  = grid[0]  - 1.5 * dx
+    x_abs_right = grid[-1] + 3.0 * dx
+
+    # choose x value for each side depending on BC type
+    xL = jnp.where(BC_left  == 0, x_per,
+         jnp.where(BC_left  == 1, x_ref_left,  x_abs_left))
+    xR = jnp.where(BC_right == 0, x_per,
+         jnp.where(BC_right == 1, x_ref_right, x_abs_right))
+
+    x = jnp.where(left,  xL, x)
+    x = jnp.where(right, xR, x)
+
+    xs_n = jnp.stack([x, y, z], axis=1)
+
+    # Optional: zero charge for absorbing (useful if you “kill” particles at half-step)
+    if zero_q_on_absorb:
+        absorb = (left & (BC_left == 2)) | (right & (BC_right == 2))
+        qs = jnp.where(absorb.reshape(-1, 1) if qs.ndim == 2 else absorb, 0.0, qs)
+        return xs_n, qs
+
     return xs_n
 
 
@@ -205,43 +174,3 @@ def field_ghost_cells_B(field_BC_left, field_BC_right, B_field, E_field):
                          jnp.where(field_BC_right == 2, jnp.array([0, -(2 / speed_of_light) * E_field[-1, 2] - B_field[-1, 1], (2 / speed_of_light) * E_field[-1, 1] - B_field[-1, 2]]),
                                    jnp.array([0, 0, 0]))))
     return field_ghost_cell_L, field_ghost_cell_R
-
-@jit
-def field_2_ghost_cells(field_BC_left, field_BC_right, field):
-    """
-    This function adds ghost cells to the field array, which is used for interpolation when 
-    accessing field values at particle positions. Ghost cells are added to the left and 
-    right boundaries based on the specified boundary conditions for the particles.
-
-    Ghost cells are needed for simulations to handle boundary effects by using the appropriate 
-    field values at the boundaries. This is especially important in simulations where particles 
-    can cross boundary regions, and the electric and magnetic fields must be extended beyond 
-    the simulation domain.
-
-    Args:
-        field_BC_left  (array): Boundary condition values for the left boundary of the particle grid, shape (N,).
-        field_BC_right (array): Boundary condition values for the right boundary of the particle grid, shape (N,).
-        field (array): The field values on the grid, shape (G, 3), where G is the number of grid points.
-
-    Returns:
-        tuple: A tuple containing:
-            - field_ghost_cell_L2 (array): Ghost cell field values for the left boundary, shape (3,).
-            - field_ghost_cell_L1 (array): Ghost cell field values for the left boundary, shape (3,).
-            - field_ghost_cell_R (array): Ghost cell field values for the right boundary, shape (3,).
-    """
-
-    field_ghost_cell_L2 = jnp.where(field_BC_left==0,field[-2],
-                          jnp.where(field_BC_left==1,field[1],
-                          jnp.where(field_BC_left==2,jnp.array([0,0,0]),
-                                    jnp.array([0,0,0]))))
-    field_ghost_cell_L1 = jnp.where(field_BC_left==0,field[-1],
-                          jnp.where(field_BC_left==1,field[0],
-                          jnp.where(field_BC_left==2,jnp.array([0,0,0]),
-                                    jnp.array([0,0,0]))))
-    
-    field_ghost_cell_R = jnp.where(field_BC_right==0,field[0],
-                         jnp.where(field_BC_right==1,field[-1],
-                         jnp.where(field_BC_right==2,jnp.array([0,0,0]),
-                                   jnp.array([0,0,0]))))
-
-    return field_ghost_cell_L2, field_ghost_cell_L1, field_ghost_cell_R

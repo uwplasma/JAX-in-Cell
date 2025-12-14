@@ -155,7 +155,6 @@ time_evolution_algorithm = 0  # 0: Boris solver, 1: implicit Crank-Nicholson
 max_number_of_Picard_iterations_implicit_CN = 20
 number_of_particle_substeps_implicit_CN = 2
 number_grid_points = 70  # number of grid CELLS, not edges/vertices
-field_solver = 0  # 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
 number_pseudoelectrons = 12000  # Total in entire domain
 total_steps = 500  # Total number of time steps
 # number of particles for each additional species

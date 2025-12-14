@@ -745,6 +745,11 @@ def plot(
         denom = float(max(abs(te[0]), 1e-30))
         ax_en.plot(time[1:], np.abs(te[1:] - te[0]) / denom, label="Relative energy error")
 
+        # --- Gauss-law error on same log axis ---
+        gauss_error_Linf = output["gauss_error_Linf"]
+        if np.max(gauss_error_Linf) < 1e-3:
+            ax_en.plot(time, gauss_error_Linf, label=rf"Gauss $\nabla \cdot E=\rho/\epsilon_0$ L∞ error")
+
         ax_en.set_title("Energy")
         ax_en.set_xlabel(r"Time ($\omega_{pe}^{-1}$)")
         ax_en.set_ylabel("Energy (J)")
