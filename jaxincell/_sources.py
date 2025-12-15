@@ -1,10 +1,36 @@
 import jax.numpy as jnp
-from jax import jit, vmap
-from jax.lax import dynamic_update_slice
+from jax import jit, vmap, lax
 from functools import partial
 from ._filters import filter_scalar_field, filter_vector_field
 
-__all__ = ['get_S2_weights_and_indices_periodic_CN','charge_density_BCs', 'single_particle_charge_density', 'calculate_charge_density', 'current_density', 'current_density_periodic_CN']
+__all__ = ['get_S2_weights_and_indices_periodic_CN', 'calculate_charge_density', 'current_density', 'current_density_periodic_CN']
+
+@jit
+def Jx_from_continuity_periodic_fft(rho_prev, rho_next, dx, dt):
+    """
+    Periodic solve for Jx enforcing discrete continuity with backward-diff div:
+        (Jx - roll(Jx,1))/dx = -(rho_next - rho_prev)/dt
+
+    Gauge: set k=0 mode of Jx to 0 (mean current is undetermined by continuity).
+    """
+    n = rho_prev.shape[0]
+    drho_dt = (rho_next - rho_prev) / dt
+
+    # Compatibility for periodic solve: mean(drho_dt) must be ~0; project it out robustly.
+    drho_dt = drho_dt - jnp.mean(drho_dt)
+
+    drho_k = jnp.fft.fft(drho_dt)
+    kx = jnp.fft.fftfreq(n, d=dx) * 2.0 * jnp.pi
+
+    # Backward-difference symbol Db(k) = (1 - e^{-ik dx})/dx
+    Db = (1.0 - jnp.exp(-1j * kx * dx)) / dx
+    Db = Db.at[0].set(1.0 + 0.0j)      # avoid divide-by-zero at k=0
+
+    Jx_k = -drho_k / Db
+    Jx_k = Jx_k.at[0].set(0.0 + 0.0j)  # choose zero-mean Jx gauge
+
+    Jx = jnp.fft.ifft(Jx_k).real
+    return Jx
 
 @jit
 def get_S2_weights_and_indices_periodic_CN(x, dx, grid_start, grid_size):
@@ -16,7 +42,7 @@ def get_S2_weights_and_indices_periodic_CN(x, dx, grid_start, grid_size):
     x_norm = (x - grid_start) / dx
     
     # 2. Nearest node index k
-    k = jnp.round(x_norm).astype(int)
+    k = jnp.floor(x_norm + 0.5).astype(jnp.int32)
     
     # 3. Raw Indices [k-1, k, k+1]
     # We apply modulo (%) here to handle wrapping automatically.
@@ -41,73 +67,125 @@ def get_S2_weights_and_indices_periodic_CN(x, dx, grid_start, grid_size):
     return indices, weights
 
 @jit
-def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, charge):
+def get_S2_weights_and_indices(x, dx, grid_start, grid_size, bc_left, bc_right):
     """
-    Compute the charge contribution to the boundary points based on particle positions and boundary conditions.
-
-    Args:
-        particle_BC_left (int): Boundary condition for the left edge (0: periodic, 1: reflective, 2: absorbing).
-        particle_BC_right (int): Boundary condition for the right edge (0: periodic, 1: reflective, 2: absorbing).
-        position (float): Position of the particle.
-        dx (float): Grid spacing.
-        grid (array-like): Grid points as a 1D array.
-        charge (float): Charge of the particle.
+    Quadratic spline (S2) indices+weights for a 1D grid with BC support.
 
     Returns:
-        tuple: Charge contributions to the left and right boundaries.
+      indices: (3,) int32
+      weights: (3,) float
+      active:  (3,) bool mask (False => this stencil point is inactive)
+
+    bc convention:
+      0 periodic: wrap indices
+      1 reflective: clamp indices (Neumann-like extension)
+      2 absorbing: outside domain -> inactive (for gather); deposition should renormalize
     """
-    # Compute charges outside the grid boundaries
-    extra_charge_left = (charge / dx) * jnp.where(
-        jnp.abs(position - grid[0]) <= dx / 2,
-        0.5 * (0.5 + (grid[0] - position) / dx) ** 2,
-        0
-    )
-    extra_charge_right = (charge / dx) * jnp.where(
-        jnp.abs(position - grid[-1]) <= dx / 2,
-        0.5 * (0.5 + (position - grid[-1]) / dx) ** 2,
-        0
-    )
+    x_norm = (x - grid_start) / dx
+    k = jnp.floor(x_norm + 0.5).astype(jnp.int32)
+    d = x_norm - k
 
-    # Apply boundary conditions
-    charge_left = jnp.select(
-        [particle_BC_left == 0, particle_BC_left == 1, particle_BC_left == 2],
-        [extra_charge_right, extra_charge_left, 0]
-    )
-    charge_right = jnp.select(
-        [particle_BC_right == 0, particle_BC_right == 1, particle_BC_right == 2],
-        [extra_charge_left, extra_charge_right, 0]
-    )
+    w_c = 0.75 - d**2
+    w_l = 0.5 * (0.5 - d)**2
+    w_r = 0.5 * (0.5 + d)**2
+    weights = jnp.array([w_l, w_c, w_r])
 
-    return charge_left, charge_right
+    raw = jnp.array([k - 1, k, k + 1], dtype=jnp.int32)
 
-@jit
-def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC_right):
+    periodic = (bc_left == 0) & (bc_right == 0)
+
+    def _periodic(_):
+        idx = raw % grid_size
+        active = jnp.ones((3,), dtype=bool)
+        return idx, weights, active
+
+    def _nonperiodic(_):
+        idx = jnp.clip(raw, 0, grid_size - 1)
+
+        # per-stencil-point out-of-range flags
+        out_left  = raw < 0
+        out_right = raw >= grid_size
+
+        # reflective: keep active, clamp does the reflection-like behavior
+        # absorbing: drop only the out-of-range stencil points
+        active = jnp.ones((3,), dtype=bool)
+        active = jnp.where((bc_left == 2),  active & (~out_left),  active)
+        active = jnp.where((bc_right == 2), active & (~out_right), active)
+
+        return idx, weights, active
+
+    return lax.cond(periodic, _periodic, _nonperiodic, operand=None)
+
+@partial(jit, static_argnames=('grid_size',))
+def deposit_S2_scalar(xs, qs, dx, grid_start, grid_size, bc_left, bc_right):
     """
-    Computes the charge density contribution of a single particle to the grid using a 
-    quadratic particle shape function.
-
-    Args:
-        x (float): The particle position.
-        q (float): The particle charge.
-        dx (float): The grid spacing.
-        grid (array): The grid points.
-        particle_BC_left (int): Left boundary condition type (0: periodic, 1: reflective, 2: absorbing).
-        particle_BC_right (int): Right boundary condition type (0: periodic, 1: reflective, 2: absorbing).
-
-    Returns:
-        array: The charge density contribution on the grid.
+    Fully vectorized S2 scalar deposition:
+      rho[idx] += (q/dx) * w
+    xs: (N,1), qs: (N,1)
     """
-    # Compute charge density using a quadratic shape function
-    grid_noBCs =  (q/dx)*jnp.where(jnp.abs(x-grid)<=dx/2,3/4-(x-grid)**2/(dx**2),
-                         jnp.where((dx/2<jnp.abs(x-grid))&(jnp.abs(x-grid)<=3*dx/2),
-                                    0.5*(3/2-jnp.abs(x-grid)/dx)**2,
-                                    jnp.zeros(len(grid))))
+    x = xs[:, 0]
+    q = qs[:, 0]
 
-    # Handle boundary conditions
-    chargedens_for_L, chargedens_for_R = charge_density_BCs(particle_BC_left, particle_BC_right, x, dx, grid, q)
-    grid_BCs = grid_noBCs.at[ 0].set(chargedens_for_L + grid_noBCs[ 0])
-    grid_BCs = grid_BCs  .at[-1].set(chargedens_for_R + grid_BCs  [-1])
-    return grid_BCs
+    idx, w, active = vmap(
+        get_S2_weights_and_indices,
+        in_axes=(0, None, None, None, None, None)
+    )(x, dx, grid_start, grid_size, bc_left, bc_right)    # idx,w,active: (N,3)
+
+    # apply active mask
+    w = jnp.where(active, w, 0.0)
+
+    # optional per-particle renorm for absorbing
+    renorm = (bc_left == 2) | (bc_right == 2)
+
+    def _renorm_all(w_in):
+        s = jnp.sum(w_in, axis=1, keepdims=True)          # (N,1)
+        return jnp.where(s > 0, w_in / s, w_in)
+
+    w = lax.cond(renorm, _renorm_all, lambda w_in: w_in, w)
+
+    contrib = (q / dx)[:, None] * w                       # (N,3)
+
+    idx_f = idx.reshape(-1)                               # (N*3,)
+    c_f   = contrib.reshape(-1)                           # (N*3,)
+
+    rho = jnp.zeros((grid_size,), dtype=contrib.dtype).at[idx_f].add(c_f)
+    return rho
+
+
+@partial(jit, static_argnames=('grid_size',))
+def deposit_S2_vector(xs, qs, vs, dx, grid_start, grid_size, bc_left, bc_right):
+    """
+    Fully vectorized S2 vector deposition:
+      J[idx] += (q/dx) * w * v
+    xs: (N,1), qs: (N,1), vs: (N,3)
+    """
+    x = xs[:, 0]
+    q = qs[:, 0]
+
+    idx, w, active = vmap(
+        get_S2_weights_and_indices,
+        in_axes=(0, None, None, None, None, None)
+    )(x, dx, grid_start, grid_size, bc_left, bc_right)    # (N,3)
+
+    w = jnp.where(active, w, 0.0)
+
+    renorm = (bc_left == 2) | (bc_right == 2)
+
+    def _renorm_all(w_in):
+        s = jnp.sum(w_in, axis=1, keepdims=True)
+        return jnp.where(s > 0, w_in / s, w_in)
+
+    w = lax.cond(renorm, _renorm_all, lambda w_in: w_in, w)
+
+    factor  = (q / dx)[:, None] * w                       # (N,3)
+    contrib = factor[:, :, None] * vs[:, None, :]         # (N,3,3)
+
+    idx_f = idx.reshape(-1)                               # (N*3,)
+    c_f   = contrib.reshape(-1, 3)                        # (N*3,3)
+
+    J = jnp.zeros((grid_size, 3), dtype=contrib.dtype).at[idx_f].add(c_f)
+    return J
+
 
 @jit
 def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right,
@@ -132,14 +210,14 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
     Returns:
         array: Total charge density on the grid.
     """
-    # Vectorize over particles
-    chargedens_contrib = vmap(single_particle_charge_density, in_axes=(0, 0, None, None, None, None))
+    grid_size = grid.shape[0]
+    grid_start = grid[0]
     
-    # Compute charge density for all particles
-    chargedens = chargedens_contrib(xs_n[:, 0], qs[:, 0], dx, grid, particle_BC_left, particle_BC_right)
-
     # Sum the contributions across all particles
-    total_chargedens = jnp.sum(chargedens, axis=0)
+    total_chargedens = deposit_S2_scalar(
+        xs_n, qs, dx, grid_start, grid_size,
+        particle_BC_left, particle_BC_right
+    )
 
     # Apply digital filtering to the total charge density
     total_chargedens = filter_scalar_field(
@@ -150,7 +228,6 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
         bc_left=field_BC_left,
         bc_right=field_BC_right,
     )
-
     return total_chargedens
 
 @jit
@@ -182,101 +259,101 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf,
     Returns:
         array: Current density on the grid, shape (G, 3), where G is the number of grid points.
     """
-    def compute_current(i):
-        # Compute x-component of the current density
-        x_nminushalf = xs_nminushalf[i, 0]
-        x_nplushalf = xs_nplushalf[i, 0]
-        q = qs[i, 0]
-        cell_no = ((x_nminushalf - grid_start) // dx).astype(int)
+    grid_size = grid.shape[0]
+    rho_grid_start = grid[0]      # centers (where rho lives)
+    J_grid_start   = grid_start   # edges (where E and J live)
 
-        # Compute the charge density difference over time
-        diff_chargedens_1particle_whole = (
-            single_particle_charge_density(x_nplushalf, q, dx, grid, particle_BC_left, particle_BC_right) -
-            single_particle_charge_density(x_nminushalf, q, dx, grid, particle_BC_left, particle_BC_right)
-        ) / dt
-
-        # Sweep only cells -3 to 2 relative to particle's initial position.
-        diff_chargedens_1particle_short = jnp.roll(diff_chargedens_1particle_whole, 3 - cell_no)[:6]
-        j_grid_short = jnp.cumsum(-diff_chargedens_1particle_short * dx)
-
-        # Copy 6-cell grid back onto proper grid
-        j_grid_x = jnp.zeros(len(grid))
-        j_grid_x = dynamic_update_slice(j_grid_x, j_grid_short, (0,))
-
-        # Roll back to its correct position on grid
-        j_grid_x = jnp.roll(j_grid_x, cell_no - 3)
-
-        # Compute y- and z-components of the current density
-        x_n = xs_n[i, 0]
-        vy_n = vs_n[i, 1]
-        vz_n = vs_n[i, 2]
-        chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
-
-        j_grid_y = chargedens * vy_n
-        j_grid_z = chargedens * vz_n
-
-        return j_grid_x, j_grid_y, j_grid_z  # Each output has shape (grid_size,)
- 
-    current_dens_x, current_dens_y, current_dens_z = vmap(compute_current)(jnp.arange(len(xs_nminushalf)))
-    current_dens_x = jnp.sum(current_dens_x, axis=0)
-    current_dens_y = jnp.sum(current_dens_y, axis=0)
-    current_dens_z = jnp.sum(current_dens_z, axis=0)
-
-    current_density = jnp.stack([current_dens_x, current_dens_y, current_dens_z], axis=0).T
-
-    # Apply digital filtering to the current density
-    current_density = filter_vector_field(
-        current_density,
-        passes=filter_passes,
-        alpha=filter_alpha,
-        strides=filter_strides,
-        bc_left=field_BC_left,
-        bc_right=field_BC_right,
+    # rho lives on cell centers (same indexing as `grid`);
+    # Ex/Jx live on right-edges (grid_start passed in as E_grid_start).
+    rho_prev = deposit_S2_scalar(
+        xs_nminushalf, qs, dx, rho_grid_start, grid_size,
+        particle_BC_left, particle_BC_right
     )
-    
+    rho_next = deposit_S2_scalar(
+        xs_nplushalf, qs, dx, rho_grid_start, grid_size,
+        particle_BC_left, particle_BC_right
+    )
+
+    periodic = (particle_BC_left == 0) & (particle_BC_right == 0)
+
+    # 2) Transverse + a "reference" Jx from ordinary deposition (for DC/current mean)
+    J_xyz = deposit_S2_vector(
+        xs_n, qs, vs_n, dx, J_grid_start, grid_size,
+        particle_BC_left, particle_BC_right
+    )
+
+    # 3) Optional continuity-preserving smoothing (see next section):
+    #    Smooth rho_prev & rho_next with the SAME linear filter, then compute Jx from them.
+    def _maybe_filter_rhos(r0, r1):
+        r0f = filter_scalar_field(r0, passes=filter_passes, alpha=filter_alpha, strides=filter_strides,
+                                 bc_left=field_BC_left, bc_right=field_BC_right)
+        r1f = filter_scalar_field(r1, passes=filter_passes, alpha=filter_alpha, strides=filter_strides,
+                                 bc_left=field_BC_left, bc_right=field_BC_right)
+        return r0f, r1f
+
+    rho_prev, rho_next = lax.cond(
+        filter_passes > 0,
+        lambda _: _maybe_filter_rhos(rho_prev, rho_next),
+        lambda _: (rho_prev, rho_next),
+        operand=None
+    )
+
+    # 4) Enforce continuity for Jx
+    def _Jx_periodic(_):
+        Jx_fluct = Jx_from_continuity_periodic_fft(rho_prev, rho_next, dx, dt)
+        Jx_mean = jnp.mean(J_xyz[:, 0])  # preserve DC current from standard deposition
+        return Jx_fluct + Jx_mean
+
+    def _Jx_nonperiodic(_):
+        # Correct nonperiodic backward-div integration:
+        # If ghost-left current is 0, then J[0] = -dx*drho_dt[0], J[i] = -dx*sum_{j<=i} drho_dt[j]
+        drho_dt = (rho_next - rho_prev) / dt
+        return -dx * jnp.cumsum(drho_dt)
+
+    Jx = lax.cond(periodic, _Jx_periodic, _Jx_nonperiodic, operand=None)
+
+    # 5) Assemble final J; only filter Jy/Jz (filtering Jx would break continuity)
+    current_density = J_xyz.at[:, 0].set(Jx)
+
+    def _filter_transverse(J):
+        J_yz = filter_vector_field(
+            J[:, 1:],
+            passes=filter_passes, alpha=filter_alpha, strides=filter_strides,
+            bc_left=field_BC_left, bc_right=field_BC_right,
+        )
+        return J.at[:, 1:].set(J_yz)
+
+    current_density = lax.cond(
+        filter_passes > 0,
+        lambda _: _filter_transverse(current_density),
+        lambda _: current_density,
+        operand=None
+    )
     return current_density
 
 
 @partial(jit, static_argnames=('grid_size',))
 def current_density_periodic_CN(xs_n, vs_n, qs, dx, grid_start, grid_size):
-    """
-    Deposits Current J using Periodic BCs.
-    Note: We removed xs_nminushalf/plus half arguments as we use the midpoint 
-    approximation (xs_n, vs_n) consistent with CN.
-    """
-    
-    def compute_single_particle_J(i):
-        x = xs_n[i, 0]
-        q = qs[i, 0]
-        
-        # Variational Current: J = (q/dx) * v * S(x)
-        vx = vs_n[i, 0] * (q / dx)
-        vy = vs_n[i, 1] * (q / dx)
-        vz = vs_n[i, 2] * (q / dx)
-        
-        # Get wrapped indices and weights
-        indices, weights = get_S2_weights_and_indices_periodic_CN(x, dx, grid_start, grid_size)
-        
-        # Calculate contributions
-        jx_contrib = weights * vx
-        jy_contrib = weights * vy
-        jz_contrib = weights * vz
-        
-        return indices, jx_contrib, jy_contrib, jz_contrib
+    x = xs_n[:, 0]
+    q = qs[:, 0]
 
-    # Vectorize over particles
-    batch_indices, batch_Jx, batch_Jy, batch_Jz = vmap(compute_single_particle_J)(jnp.arange(len(xs_n)))
-    
-    # Flatten
-    batch_indices = batch_indices.flatten()
-    batch_Jx = batch_Jx.flatten()
-    batch_Jy = batch_Jy.flatten()
-    batch_Jz = batch_Jz.flatten()
-    
-    # Accumulate onto grid
-    # .at[indices].add() handles collisions (multiple particles in same cell) correctly
-    J_x = jnp.zeros(grid_size).at[batch_indices].add(batch_Jx)
-    J_y = jnp.zeros(grid_size).at[batch_indices].add(batch_Jy)
-    J_z = jnp.zeros(grid_size).at[batch_indices].add(batch_Jz)
-    
-    return jnp.stack([J_x, J_y, J_z], axis=1)
+    x_norm = (x - grid_start) / dx
+    k = jnp.floor(x_norm + 0.5).astype(jnp.int32)
+    d = x_norm - k
+
+    w_c = 0.75 - d**2
+    w_l = 0.5 * (0.5 - d)**2
+    w_r = 0.5 * (0.5 + d)**2
+    w = jnp.stack([w_l, w_c, w_r], axis=1)  # (N,3)
+
+    idx = jnp.stack([k-1, k, k+1], axis=1) % grid_size  # (N,3)
+
+    # contrib: (N,3,3) = weights*(q/dx)*v
+    factor = (q / dx)[:, None] * w                       # (N,3)
+    contrib = factor[:, :, None] * vs_n[:, None, :]      # (N,3,3)
+
+    idx_f = idx.reshape(-1)                 # (N*3,)
+    contrib_f = contrib.reshape(-1, 3)      # (N*3,3)
+
+    J = jnp.zeros((grid_size, 3), dtype=xs_n.dtype).at[idx_f].add(contrib_f)
+    return J

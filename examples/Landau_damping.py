@@ -19,13 +19,12 @@ input_parameters = {
     "electron_drift_speed_x": 0.0, # Drift speed of electrons in x direction
     "ion_mass_over_proton_mass": 1e9,
     "relativistic": False, # Use relativistic equations of motion
-    "filter_passes": 5, # Number of passes of the smoothing filter to apply to the charge density
+    "filter_passes": 1, # Number of passes of the smoothing filter to apply to the charge density
     "filter_alpha": 0.5, # Smoothing filter parameter
     "filter_strides": [1, 2, 4], # Strides for multi-scale smoothing
 }
 
 solver_parameters = {
-    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
     "number_grid_points"     : 32,  # Number of grid points
     "number_pseudoelectrons" : 40000, # Number of pseudoelectrons
     "total_steps"            : 300, # Total number of time steps

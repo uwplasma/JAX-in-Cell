@@ -9,7 +9,7 @@ from jax.random import PRNGKey, uniform, normal
 from ._sources import calculate_charge_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
-from ._fields import E_from_Gauss_1D_Cartesian
+from ._fields import enforce_gauss_1d
 from ._algorithms import Boris_step, CN_step
 
 try: import tomllib
@@ -135,6 +135,10 @@ def initialize_simulation_parameters(user_parameters={}):
         "filter_passes": 5,       # number of passes of the digital filter applied to ρ and J
         "filter_alpha": 0.5,      # filter strength (0 < alpha < 1)
         "filter_strides": (1, 2, 4),  # multi-scale strides for filtering
+        
+        # Gauss law enforcement parameters
+        "gauss_relax": 1.0,
+        "gauss_neutralize_periodic": True,
 
         "weight": 0,
     }
@@ -313,7 +317,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Cap velocities at 99% the speed of light
     speed_limit = 0.99 * speed_of_light
-    velocities = jnp.where(jnp.abs(velocities) >= speed_limit, jnp.sign(velocities) * speed_limit, velocities)
+    velocities = jnp.clip(velocities, -speed_limit, speed_limit)
 
     # Grid setup
     dx = length / number_grid_points
@@ -367,24 +371,27 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
                                               parameters["filter_passes"], parameters["filter_alpha"], parameters["filter_strides"],
                                               field_BC_left=parameters["field_BC_left"], field_BC_right=parameters["field_BC_right"])
     # Initial E field from charge density via Gauss's law
-    E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
-    E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
+    E_field = enforce_gauss_1d(
+        E_field, charge_density, dx,
+        parameters["field_BC_left"], parameters["field_BC_right"],
+    )
     fields = (E_field, B_field)
     # --- External fields (arrays if provided at top-level; else zeros)
     G = number_grid_points
 
+    dtype = E_field.dtype
     secB = input_parameters.get("external_magnetic_field")
     secE = input_parameters.get("external_electric_field")
     # print(secB["B"])
     if isinstance(secB, dict) and "B" in secB:
-        parameters["external_magnetic_field"] = jnp.asarray(secB["B"], dtype=jnp.float32)
+        parameters["external_magnetic_field"] = jnp.asarray(secB["B"], dtype=dtype)
     else:
-        parameters["external_magnetic_field"] = jnp.zeros((G, 3), dtype=jnp.float32)
+        parameters["external_magnetic_field"] = jnp.zeros((G, 3), dtype=dtype)
 
     if isinstance(secE, dict) and "E" in secE:
-        parameters["external_electric_field"] = jnp.asarray(secE["E"], dtype=jnp.float32)
+        parameters["external_electric_field"] = jnp.asarray(secE["E"], dtype=dtype)
     else:
-        parameters["external_electric_field"] = jnp.zeros((G, 3), dtype=jnp.float32)
+        parameters["external_electric_field"] = jnp.zeros((G, 3), dtype=dtype)
 
     # external_E_field_x = parameters["external_electric_field_amplitude"] * jnp.cos(parameters["external_electric_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
     # external_B_field_x = parameters["external_magnetic_field_amplitude"] * jnp.cos(parameters["external_magnetic_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
@@ -508,11 +515,9 @@ def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
 
     return out
 
-@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'number_pseudoparticles_species', 'total_steps', 'field_solver', "time_evolution_algorithm",
-                               "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
+@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'number_pseudoparticles_species', 'total_steps', "time_evolution_algorithm", "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
 def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000,
-               number_pseudoparticles_species=None, total_steps=1000,
-               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
+               number_pseudoparticles_species=None, total_steps=1000, positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
@@ -592,7 +597,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         )
         step_func = lambda carry, step_index: Boris_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
-            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, field_solver
+            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right
         )
     else:
         initial_carry = (

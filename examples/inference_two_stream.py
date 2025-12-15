@@ -33,7 +33,6 @@ from jaxincell import simulation
 # 0. Global solver parameters (moderate size)
 # ---------------------------------------------------------------------------
 solver_parameters = {
-    "field_solver": 0,                 # Curl_EB
     "number_grid_points": 80,
     "number_pseudoelectrons": 4500,
     "total_steps": 400,

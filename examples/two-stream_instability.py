@@ -24,7 +24,9 @@ for i in range(n_simulations):
 diagnostics(output)
 
 # Plot the results
-plot(output)
+plot(output, animation_interval=5)
+# Save the animation as an mp4 file (takes longer)
+# plot(output, save_mp4="two_stream.mp4", fps=50, dpi=150, save_dpi=60, save_crf=32, save_stride=5, show=False)
 
 # # Save the output to a file
 # import numpy as np
