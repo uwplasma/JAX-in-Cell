@@ -548,10 +548,13 @@ def plot(
 
 
         # LogNorm for visibility at low counts (add 1 in the images)
-        e_vmax = float(max(np.percentile(e_counts + 1.0, 99.5), 2.0))
-        i_vmax = float(max(np.percentile(i_counts + 1.0, 99.5), 2.0))
-        norm_e = LogNorm(vmin=1.0, vmax=e_vmax)
-        norm_i = LogNorm(vmin=1.0, vmax=i_vmax)
+        # e_vmax = float(max(np.percentile(e_counts + 1.0, 99.5), 2.0))
+        # i_vmax = float(max(np.percentile(i_counts + 1.0, 99.5), 2.0))
+        # identity norms for now
+        norm_e = None
+        norm_i = None
+        # norm_e = LogNorm(vmin=1.0, vmax=e_vmax)
+        # norm_i = LogNorm(vmin=1.0, vmax=i_vmax)
 
         pre_ps[d] = _PrecomputedPhaseSpace(
             e_counts=e_counts,
@@ -746,9 +749,9 @@ def plot(
         ax_en.plot(time[1:], np.abs(te[1:] - te[0]) / denom, label="Relative energy error")
 
         # --- Gauss-law error on same log axis ---
-        gauss_error_Linf = output["gauss_error_Linf"]
-        if np.max(gauss_error_Linf) < 1e-3:
-            ax_en.plot(time, gauss_error_Linf, label=rf"Gauss $\nabla \cdot E=\rho/\epsilon_0$ L∞ error")
+        gauss_error_Linf = output["gauss_error_Linf_rel"]
+        # if np.max(gauss_error_Linf) < 1e-3:
+        ax_en.plot(time, gauss_error_Linf, label=rf"Gauss $\nabla \cdot E=\rho/\epsilon_0$ L∞ error")
 
         ax_en.set_title("Energy")
         ax_en.set_xlabel(r"Time ($\omega_{pe}^{-1}$)")

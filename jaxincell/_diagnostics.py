@@ -83,11 +83,19 @@ def diagnostics(output):
             return (Ex - Ex_m1) / dx
         return lax.cond(periodic, _per, _non, operand=None)
     divE = div_backward_1d(Ex, dx, output["field_BC_left"], output["field_BC_right"])
-    gauss_residual = divE - rho / epsilon_0
+    rhs = rho / epsilon_0
+    gauss_residual = divE - rhs
+    periodic = (int(output["field_BC_left"]) == 0) and (int(output["field_BC_right"]) == 0)
+    if periodic:
+        gauss_residual = gauss_residual - jnp.mean(gauss_residual, axis=1, keepdims=True)
+
     
     # Two simple norms vs time: L∞ and L2 over x
     gauss_error_Linf = jnp.max(jnp.abs(gauss_residual), axis=1)
     gauss_error_L2   = jnp.sqrt(jnp.mean(gauss_residual**2, axis=1))
+    
+    gauss_error_Linf_rel = jnp.max(jnp.abs(gauss_residual), axis=1) / (jnp.max(jnp.abs(rhs), axis=1) + 1e-30)
+    gauss_error_L2_rel   = jnp.sqrt(jnp.mean(gauss_residual**2, axis=1)) / (jnp.sqrt(jnp.mean(rhs**2, axis=1)) + 1e-30)
     
     # Make sure these are plain Python scalars for indexing / fftfreq
     total_steps_val = output['total_steps']
@@ -154,6 +162,8 @@ def diagnostics(output):
         # Gauss-law diagnostics
         'gauss_error_Linf': gauss_error_Linf,
         'gauss_error_L2':   gauss_error_L2,
+        'gauss_error_Linf_rel': gauss_error_Linf_rel,
+        'gauss_error_L2_rel':   gauss_error_L2_rel,
         
         # Updated kinetic energy keys to use the corrected totals
         'kinetic_energy':           total_ke_electrons + total_ke_ions,
