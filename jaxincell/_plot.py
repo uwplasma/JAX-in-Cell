@@ -260,7 +260,7 @@ def _make_ffmpeg_writer_auto(
     return FFMpegWriter(fps=fps, codec=codec, bitrate=-1, extra_args=extra_args)
 
 
-def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray) -> np.ndarray:
+def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray, weights: np.ndarray = None) -> np.ndarray:
     """
     PDF histogram for many frames, fast-ish numpy implementation.
 
@@ -275,10 +275,12 @@ def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray) -> np.ndar
     # bin index in [0, B-1]
     idx = np.searchsorted(edges, v, side="right") - 1
     idx = np.clip(idx, 0, B - 1)
+    if weights is None:
+        weights = np.ones_like(idx)
 
     counts = np.zeros((F, B), dtype=np.float32)
     f_idx = np.repeat(np.arange(F, dtype=np.int32), N)
-    np.add.at(counts, (f_idx, idx.reshape(-1)), 1.0)
+    np.add.at(counts, (f_idx, idx.reshape(-1)), weights.reshape(-1))
 
     widths = np.diff(edges).astype(np.float32)
     pdf = counts / (N * widths[None, :])
@@ -509,9 +511,13 @@ def plot(
         v_edges = np.linspace(-vmax_common, vmax_common, bins_v + 1)
         v_centers = 0.5 * (v_edges[:-1] + v_edges[1:])
 
+        # Get the number of each particle in the domain
+        electrons_in_domain = np.asarray(output["particles_in_domain_over_time"][:,output["species_index"].reshape(-1) == 0])
+        ions_in_domain      = np.asarray(output["particles_in_domain_over_time"][:,output["species_index"].reshape(-1) == 1])
+
         # PDFs over rendered frames only
-        e_pdf = _pdf_over_frames_numpy(ve, v_edges)
-        i_pdf = _pdf_over_frames_numpy(vi, v_edges)
+        e_pdf = _pdf_over_frames_numpy(ve, v_edges, weights=electrons_in_domain)
+        i_pdf = _pdf_over_frames_numpy(vi, v_edges, weights=ions_in_domain)
 
         # Scale each species by its INITIAL max (axis fixed; bump/drift shows naturally)
         scale_e0 = float(max(np.max(e_pdf[0]), 1e-30))
@@ -538,12 +544,14 @@ def plot(
                 x_e[t], ve[t],
                 bins=[bins_x, bins_v],
                 range=[x_range, v_range_e],
+                weights=np.asarray(output['charges_over_time'][:,:,0])[t][:output['number_pseudoelectrons']]/output['charges_over_time'][0,0,0]
             )[0].astype(np.float32)
 
             i_counts[t] = np.histogram2d(
                 x_i[t], vi[t],
                 bins=[bins_x, bins_v],
                 range=[x_range, v_range_i],
+                weights=np.asarray(output['charges_over_time'][:,:,0])[t][output['number_pseudoelectrons']:]/output['charges_over_time'][0,output['number_pseudoelectrons'],0]
             )[0].astype(np.float32)
 
 
@@ -731,12 +739,13 @@ def plot(
     # ---- energy panel (static) ----
     # If we ran out of axes, just skip.
     axes_flat = np.ravel(axes)
-    if idx < len(axes_flat) and all(k in output for k in ("total_energy", "electric_field_energy", "kinetic_energy_electrons", "kinetic_energy_ions")):
+    if idx < len(axes_flat) and all(k in output for k in ("total_energy", "electric_field_energy", "kinetic_energy_electrons", "kinetic_energy_ions", "energy_lost")):
         ax_en = axes_flat[idx]
         ax_en.plot(time, np.asarray(output["total_energy"]), label="Total energy")
         ax_en.plot(time, np.asarray(output["kinetic_energy_electrons"]), label="Kinetic energy electrons")
         ax_en.plot(time, np.asarray(output["kinetic_energy_ions"]), label="Kinetic energy ions")
         ax_en.plot(time, np.asarray(output["electric_field_energy"]), label="Electric field energy")
+        ax_en.plot(time, np.asarray(output["energy_lost"]), label="Energy lost to particles leaving domain")
         if "magnetic_field_energy" in output and np.max(np.asarray(output["magnetic_field_energy"])) > 1e-12:
             ax_en.plot(time, np.asarray(output["magnetic_field_energy"]), label="Magnetic field energy")
 

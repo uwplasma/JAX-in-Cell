@@ -1,9 +1,10 @@
+from jax import lax, jit, config
+config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from jax.lax import cond
 from functools import partial
 from jax_tqdm import scan_tqdm
 from jax.debug import print as jprint
-from jax import lax, jit, config
 from jax.random import PRNGKey, uniform, normal
 
 from ._sources import calculate_charge_density
@@ -15,7 +16,6 @@ from ._algorithms import Boris_step, CN_step
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
 
-config.update("jax_enable_x64", True)
 
 __all__ = ["initialize_simulation_parameters", "initialize_particles_fields", "simulation", "load_parameters"]
 
@@ -125,6 +125,19 @@ def initialize_simulation_parameters(user_parameters={}):
         "field_BC_left":     0,                   # Left boundary condition for fields
         "field_BC_right":    0,                   # Right boundary condition for fields
 
+        # Ion source terms
+        "source_term_active": 0,                  # Whether the source term is active or not
+        # 0 for electrons, 1 for ions, 2+ for extra species (sequential)
+        "source_species": 1,                 # Which species should have sources (all species must be defined and named in the input file previously)
+        "how_often_source_should_produce_quasiparticles": 20, # How many timesteps between each new quasiparticle produced by the source
+        "source_particles_per_second": 1e16,       # (tuple for multiple sources)
+        "location_of_source": 0,                  # Where the source term is (0 is center, 1 is left, 2 is right, 3 is whole domain) (tuple for multiple sources)
+        "width_of_source":    1,                  # How many grid points there should be sources on (will round to .5's if parity doesn't match with grid size on center location) (tuple for multiple sources)
+        "injection_speed_x": 1e7,                 # (tuple for multiple sources)
+        "injection_speed_y": 0,                 # (tuple for multiple sources)
+        "injection_speed_z": 0,                 # (tuple for multiple sources)
+        # Should add temps for maxwellian injection profiles, but will be constant for now
+
         # External fields (initialized to zero)
         "external_electric_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
         "external_electric_field_wavenumber": 0,  # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
@@ -177,6 +190,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     """
     # Merge user parameters with defaults
     parameters = initialize_simulation_parameters(input_parameters)
+    clean_source_inputs(parameters)
 
     # Simulation box dimensions
     length = parameters["length"]
@@ -267,10 +281,16 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         charge_electrons * weight * jnp.ones((number_pseudoelectrons, 1)),
         charge_ions   * weight * jnp.ones((number_pseudoelectrons, 1))
     ), axis=0)
+    initial_charges = charges
     masses = jnp.concatenate((
         mass_electrons * weight * jnp.ones((number_pseudoelectrons, 1)),
         mass_ions      * weight * jnp.ones((number_pseudoelectrons, 1))
     ), axis=0)
+    
+    # **Particle Index Numbers and Initialization Steps**
+    species_index = jnp.concatenate((jnp.zeros((number_pseudoelectrons, 1)), jnp.ones((number_pseudoelectrons, 1))), axis=0, dtype = jnp.int32)
+    step_index_to_initialize = -1 * jnp.ones_like(species_index, dtype = jnp.int32)
+    particles_in_domain = jnp.ones_like(step_index_to_initialize, dtype = jnp.int32)
 
     # **Particle Velocities**
     # Electron thermal velocities and drift speeds
@@ -307,6 +327,10 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         velocities = jnp.concatenate((velocities, plists['velocities']))
         charges    = jnp.concatenate((charges,    plists['charges']), axis=0)
         masses     = jnp.concatenate((masses,     plists['masses']), axis=0)
+        initial_charges = jnp.concatenate((initial_charges, plists['charges']), axis=0)
+        species_index = jnp.concatenate((species_index, jnp.full((number_pseudoparticles_species[ii], 1), ii + 2, dtype=jnp.int32)), axis=0)
+        step_index_to_initialize = jnp.concatenate((step_index_to_initialize, -1 * jnp.ones((number_pseudoparticles_species[ii], 1), dtype=jnp.int32)), axis=0)
+        particles_in_domain = jnp.concatenate((particles_in_domain, jnp.ones((number_pseudoparticles_species[ii], 1), dtype=jnp.int32)), axis=0)
 
     # After done adding all species
     charge_to_mass_ratios = charges / masses
@@ -319,6 +343,19 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     dx = length / number_grid_points
     grid = jnp.linspace(-length / 2 + dx / 2, length / 2 - dx / 2, number_grid_points)
     dt = parameters["timestep_over_spatialstep_times_c"] * dx / speed_of_light
+
+    # Introduce source particles
+    for ii, species in enumerate(parameters['source_species']):
+        splists = make_source_particles(parameters, species, grid, number_grid_points, total_steps, dt, ii)
+        positions                = jnp.concatenate((positions,  splists['positions']))
+        velocities               = jnp.concatenate((velocities, splists['velocities']))
+        initial_charges          = jnp.concatenate((initial_charges, splists['charges']), axis=0)
+        charges                  = jnp.concatenate((charges, jnp.zeros_like(splists['charges'])), axis=0)
+        masses                   = jnp.concatenate((masses, splists['masses']), axis=0)
+        charge_to_mass_ratios    = jnp.concatenate((charge_to_mass_ratios, jnp.zeros_like(splists['charges'])), axis=0)
+        step_index_to_initialize = jnp.concatenate((step_index_to_initialize, splists['step_index_to_initialize']), axis=0)
+        species_index            = jnp.concatenate((species_index, splists['species_index']))
+        particles_in_domain      = jnp.concatenate((particles_in_domain, jnp.ones_like(splists['species_index'])))
 
     # Print information about the simulation
     plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electrons**2)/jnp.sqrt(mass_electrons)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
@@ -395,8 +432,12 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "initial_positions": positions,
         "initial_velocities": velocities,
         "charges": charges,
+        "initial_charges": initial_charges,
         "masses": masses,
         "charge_to_mass_ratios": charge_to_mass_ratios,
+        "step_index_to_initialize": step_index_to_initialize,
+        "species_index": species_index,
+        "particles_in_domain": particles_in_domain,
         "fields": fields,
         "grid": grid,
         "dx": dx,
@@ -508,6 +549,165 @@ def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
 
     return out
 
+
+def make_source_particles(parameters, species, grid, number_grid_points, total_steps, dt, source_index):
+    """
+    Generate source particles based on user-defined parameters.
+
+    This function creates source particles according to the specifications provided
+    in the input parameters. It determines the number of particles to generate, their
+    initial positions, velocities, charges, and masses based on the source parameters
+    and the species they belong to.
+
+    Returns:
+    -------
+    source_particles : dict
+        Dictionary containing the properties of the generated source particles, such as:
+        - 'positions': Initial positions of the source particles.
+    """
+    # figure out how many quasiparticles are needed in total
+    """
+    if parameters['location_of_source'][source_index] == 0:
+        parity_difference = (parameters['width_of_source'][source_index] + number_grid_points) % 2
+        number_grid_sources = int(parameters['width_of_source'][source_index] + parity_difference)
+    elif parameters['location_of_source'][source_index] == 3:
+        number_grid_sources = int(number_grid_points)
+    else:
+        number_grid_sources = int(parameters['width_of_source'][source_index])
+    """
+
+    num = (parameters['width_of_source'][source_index] *number_grid_points // parameters['length']) * (total_steps // parameters['how_often_source_should_produce_quasiparticles'][source_index])
+    #weight_source_particles = jnp.zeros(num.astype(int))
+    weight_source_particles = jnp.zeros(parameters['number_pseudoelectrons'])
+
+    # workaround to avoid jax being angry about if statements that depend on user input parameters
+    parity_difference = (parameters['width_of_source'][source_index] + number_grid_points) % 2
+    number_grid_sources = jnp.where(parameters['location_of_source'][source_index] == 0,
+        parity_difference + parameters['width_of_source'][source_index],
+        jnp.where(parameters['location_of_source'][source_index] == 3,
+            number_grid_points,
+            parameters['width_of_source'][source_index]
+        )
+    )
+    timesteps_to_produce_quasiparticles = (total_steps / parameters['how_often_source_should_produce_quasiparticles'][source_index]).astype(int)
+
+    # figure out the weight of all the quasiparticles
+    # another workaround to avoid jax being angry about if statements that depend on user input parameters; this is to set the end caps of the source particle distribution to half weight if the source is in the center and has an off parity width, to ensure symmetry
+    #weight_source_particles = jnp.ones(number_grid_sources-2)
+    end_caps = jnp.where((parameters['location_of_source'][source_index] == 0) & (parity_difference == 1), jnp.array([0.5]), jnp.array([1.]))
+    #weight_source_particles = jnp.concatenate((end_caps, weight_source_particles, end_caps))
+    weight_source_particles = jnp.where((parameters['location_of_source'][source_index] == 0) & (parity_difference == 1), jnp.concatenate((jnp.array([0.5]), jnp.ones(number_grid_sources-2), jnp.array([0.5]))), jnp.ones(number_grid_sources))
+
+    weight_source_particles = parameters['source_particles_per_second'][source_index] * dt * parameters['how_often_source_should_produce_quasiparticles'][source_index] * jnp.tile(weight_source_particles, timesteps_to_produce_quasiparticles).reshape(-1, 1)
+
+    out = dict()
+    source_charge = jnp.where(species == 0, parameters["electron_charge_over_elementary_charge"] * elementary_charge,
+                    jnp.where(species == 1, parameters["ion_charge_over_elementary_charge"]      * elementary_charge,
+                        parameters['species'][species - 2]["charge_over_elementary_charge"] * elementary_charge))
+    source_mass = jnp.where(species == 0, mass_electron,
+                    jnp.where(species == 1, parameters["ion_mass_over_proton_mass"] * mass_proton,
+                        parameters['species'][species - 2]["mass_over_proton_mass"] * mass_proton))
+
+    # set charges and masses of quasiparticles based on their weight and the species they belong to
+    out['charges'] = source_charge * weight_source_particles
+    out['masses'] = source_mass * weight_source_particles
+    
+    # set the step index at which each quasiparticle should be initialized and the species index of each quasiparticle
+    out['source_step_index_to_initialize'] = jnp.repeat(jnp.arange(timesteps_to_produce_quasiparticles) * parameters['how_often_source_should_produce_quasiparticles'][source_index], number_grid_sources).reshape(-1, 1)
+    out['species_index'] = jnp.full_like(out['source_step_index_to_initialize'], species)
+
+    # figure out the initial positions of all the quasiparticles
+    center = int(number_grid_points / 2)
+    source_positions_x = jnp.where(parameters['location_of_source'][source_index] == 0,
+        grid[( center - int(number_grid_sources / 2) ):( center + int(number_grid_sources / 2) + (number_grid_points % 2) )],
+        jnp.where(parameters['location_of_source'][source_index] == 2,
+            grid[-number_grid_sources:],
+            grid[:number_grid_sources]
+        )
+    )
+
+    if parameters['location_of_source'][source_index] == 0:
+        source_positions_x = grid[( center - int(number_grid_sources / 2) ):( center + int(number_grid_sources / 2) + (number_grid_points % 2) )]
+    elif parameters['location_of_source'][source_index] == 1:
+        source_positions_x = grid[:number_grid_sources]
+    elif parameters['location_of_source'][source_index] == 2:
+        source_positions_x = grid[-number_grid_sources:]
+    elif parameters['location_of_source'][source_index] == 3:
+        source_positions_x = grid
+    source_positions_x = jnp.tile(source_positions_x, timesteps_to_produce_quasiparticles)
+    source_positions_y_z = jnp.zeros_like(source_positions_x)
+    out['positions'] = jnp.stack((source_positions_x, source_positions_y_z, source_positions_y_z), axis=1)
+
+    # set all source initial velocities to 0 (they shouldn't move before they exist)
+    out['velocities'] = jnp.zeros_like(out['positions'])
+
+    return out
+
+def clean_source_inputs(parameters):
+    """
+    Clean and validate user inputs related to source particles.
+
+    This function processes the user-provided input parameters for source particle
+    generation, ensuring that they are in the correct format and contain all necessary
+    information. It also applies default values where needed and checks for consistency.
+
+    Parameters:
+    ----------
+    input_parameters : dict
+        User-defined parameters for the simulation, which may include:
+        - 'source_species': List of species indices for which sources should be generated.
+    """
+    def make_tuple(thing_to_make_a_tuple):
+        if not isinstance(thing_to_make_a_tuple, (list, tuple)):
+            thing_to_make_a_tuple = (thing_to_make_a_tuple,)
+        else:
+            thing_to_make_a_tuple = tuple(thing_to_make_a_tuple)
+        return thing_to_make_a_tuple
+    
+    source_active = parameters['source_term_active']
+    # doesn't work because of jit, but leaving in for now in case we want to remove jit on simulation(...) or find a workaround
+    #assert source_active in [0, 1], f"Invalid value for 'source_term_active': {source_active}. Must be 0 or 1."
+
+    if 'source_species' not in parameters:
+        parameters['source_species'] = ()
+        assert parameters['source_term_active'] == 0, f"If 'source_species' is not provided, 'source_term_active' must be 0. Got {parameters['source_term_active']}."
+    else:
+        parameters['source_species'] = make_tuple(parameters['source_species'])# * source_active
+    
+    #for species in parameters['source_species']:
+    #    assert species in [0, 1] or (species - 2) < len(parameters['species']), f"Invalid source species index {species}. Must be 0 (electrons), 1 (ions), or an index corresponding to a user-defined species."
+
+    def match_size_to_source_species(parameter_to_match_sizes):
+        if not len(parameters[parameter_to_match_sizes]) == len(parameters['source_species']):
+            parameters[parameter_to_match_sizes] = parameters[parameter_to_match_sizes] * len(parameters['source_species']) * source_active
+        assert len(parameters[parameter_to_match_sizes]) == len(parameters['source_species']), f"Length of {parameter_to_match_sizes} must match length of 'source_species' or be a single value. Got {len(parameters[parameter_to_match_sizes])} and {len(parameters['source_species'])}."
+    
+    parameters['how_often_source_should_produce_quasiparticles'] = make_tuple(parameters['how_often_source_should_produce_quasiparticles'])
+    match_size_to_source_species('how_often_source_should_produce_quasiparticles')
+
+    parameters['source_particles_per_second'] = make_tuple(parameters['source_particles_per_second'])
+    match_size_to_source_species('source_particles_per_second')
+
+    parameters['location_of_source'] = make_tuple(parameters['location_of_source'])
+    match_size_to_source_species('location_of_source')
+
+    parameters['width_of_source'] = make_tuple(parameters['width_of_source'])
+    match_size_to_source_species('width_of_source')
+
+    parameters['injection_speed_x'] = make_tuple(parameters['injection_speed_x'])
+    match_size_to_source_species('injection_speed_x')
+
+    parameters['injection_speed_y'] = make_tuple(parameters['injection_speed_y'])
+    match_size_to_source_species('injection_speed_y')
+
+    parameters['injection_speed_z'] = make_tuple(parameters['injection_speed_z'])
+    match_size_to_source_species('injection_speed_z')
+
+    source_injection_velocities = []
+    for ii in range(len(parameters['injection_speed_x'])):
+        source_injection_velocities.append(jnp.array([parameters['injection_speed_x'][ii], parameters['injection_speed_y'][ii], parameters["injection_speed_z"][ii]]))
+    parameters['source_injection_velocities'] = jnp.array(source_injection_velocities)
+
 @partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'number_pseudoparticles_species', 'total_steps', 'field_solver', "time_evolution_algorithm",
                                "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
 def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000,
@@ -575,7 +775,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         raise ValueError(f"Expected velocities shape {parameters['initial_velocities'].shape}, got {velocities.shape}")
 
     # Leapfrog integration: positions at half-step before the start
-    positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
+    positions_plus1_2, velocities, qs, ms, q_ms, _ = set_BC_particles(
         positions + (dt / 2) * velocities, velocities,
         parameters["charges"], parameters["masses"], parameters["charge_to_mass_ratios"],
         dx, grid, *box_size, particle_BC_left, particle_BC_right)
@@ -615,7 +815,8 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
 
     # Unpack results
     positions_over_time, velocities_over_time, electric_field_over_time, \
-    magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+    magnetic_field_over_time, current_density_over_time, charge_density_over_time, \
+    psuedoparticles_charges_over_time, particles_in_domain_over_time = results
 
     # **Output results**
     temporary_output = {
@@ -632,6 +833,8 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         "positions": positions_over_time,
         "velocities": velocities_over_time,
         "masses": parameters["masses"],
+        "charges_over_time": psuedoparticles_charges_over_time,
+        "particles_in_domain_over_time": particles_in_domain_over_time,
         "charges": parameters["charges"],
         "electric_field":  electric_field_over_time,
         "magnetic_field":  magnetic_field_over_time,

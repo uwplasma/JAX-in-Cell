@@ -74,11 +74,30 @@ def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, b
         ),
     )
 
+    # Update whether in domain for absorbing boundaries
+    in_domain = jnp.where(
+        x_n[0] < -box_size_x / 2,
+        jnp.where(
+            BC_left == 0,  # Periodic
+            1,
+            jnp.where(BC_left == 1, 1, 0),  # Reflective or Absorbing
+        ),
+        jnp.where(
+            x_n[0] > box_size_x / 2,
+            jnp.where(
+                BC_right == 0,  # Periodic
+                1,
+                jnp.where(BC_right == 1, 1, 0),  # Reflective or Absorbing
+            ),
+            1,
+        ),
+    )
+
     # Nullify charges and charge-to-mass ratio for absorbing BCs
     q   = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q)
     q_m = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q_m)
 
-    return jnp.array([x_n0, x_n1, x_n2]), v_n, q, q_m
+    return jnp.array([x_n0, x_n1, x_n2]), v_n, q, q_m, in_domain
 
 @jit
 def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
@@ -96,10 +115,10 @@ def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y,
     Returns:
         tuple: Updated positions, velocities, charges, masses, and charge-to-mass ratios for all particles.
     """
-    xs_n, vs_n, qs, q_ms = vmap(
+    xs_n, vs_n, qs, q_ms, particles_in_domain = vmap(
         lambda x_n, v_n, q, q_m: set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right)
     )(xs_n, vs_n, qs, q_ms)
-    return xs_n, vs_n, qs, ms, q_ms
+    return xs_n, vs_n, qs, ms, q_ms, particles_in_domain
 
 def set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
     """

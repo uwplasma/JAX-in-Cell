@@ -22,6 +22,11 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
 
+    # Turn on source particles if they should be turned on this iteration
+    qs         = jnp.where(parameters['step_index_to_initialize'] == step_index, parameters['initial_charges'][parameters['species_index']].reshape(-1,1), qs)
+    q_ms       = jnp.where(parameters['step_index_to_initialize'] == step_index, (qs/ms)[parameters['species_index']].reshape(-1,1), q_ms)
+    #velocities = jnp.where(parameters['step_index_to_initialize'] == step_index, parameters['source_injection_velocities'][parameters['species_index']].reshape(-1, 3), velocities)
+
     fpasses  = parameters["filter_passes"]
     falpha   = parameters["filter_alpha"]
     fstrides = parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
@@ -53,7 +58,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     )
 
     # Apply boundary conditions
-    positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
+    positions_plus3_2, velocities_plus1, qs, ms, q_ms, particles_in_domain = set_BC_particles(
         positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
         *box_size, particle_BC_left, particle_BC_right)
     
@@ -90,7 +95,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right,
                                               filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                                               field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-    step_data = (positions, velocities, E_field, B_field, J, charge_density)
+    step_data = (positions, velocities, E_field, B_field, J, charge_density, qs, particles_in_domain)
     
     return carry, step_data
 

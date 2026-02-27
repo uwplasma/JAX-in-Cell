@@ -118,6 +118,14 @@ def diagnostics(output):
     # Sum over axis=-1 (particles) -> Result (Time,)
     total_ke_electrons = 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle, axis=-1)
     total_ke_ions      = 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle,      axis=-1)
+
+    # ADDED: Calculate energy lost in every time step due to particles leaving the domain (if using absorbing BCs)
+    assert jnp.min(output['particles_in_domain_over_time'][:-1,:] - output['particles_in_domain_over_time'][1:,:]) >= 0, "Particle count should only decrease or stay the same over time if using absorbing BCs"
+    particles_over_time_diff = output['particles_in_domain_over_time'][:-1,:] - output['particles_in_domain_over_time'][1:,:]
+    energy_lost_electrons_per_timestep = jnp.concatenate([jnp.array([0.0]), 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle[:-1,:] * particles_over_time_diff[:, output['species_index'].reshape(-1) == 0], axis=-1)])
+    energy_lost_ions_per_timestep      = jnp.concatenate([jnp.array([0.0]), 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle[:-1,:]      * particles_over_time_diff[:, output['species_index'].reshape(-1) == 1], axis=-1)])
+    energy_lost_electrons = jnp.cumsum(energy_lost_electrons_per_timestep)
+    energy_lost_ions      = jnp.cumsum(energy_lost_ions_per_timestep)
     
     # Debug print (optional, can be removed)
     # print(mass_electrons_array) 
@@ -134,6 +142,10 @@ def diagnostics(output):
         'kinetic_energy':           total_ke_electrons + total_ke_ions,
         'kinetic_energy_electrons': total_ke_electrons,
         'kinetic_energy_ions':      total_ke_ions,
+
+        'energy_lost': energy_lost_electrons + energy_lost_ions,
+        'energy_lost_electrons': energy_lost_electrons,
+        'energy_lost_ions':      energy_lost_ions,
         
         'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
         'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
@@ -143,6 +155,6 @@ def diagnostics(output):
 
     total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
                     output["magnetic_field_energy"] + output["external_magnetic_field_energy"] +
-                    output["kinetic_energy"])
+                    output["kinetic_energy"] + output["energy_lost"])
 
     output.update({'total_energy': total_energy})
