@@ -34,7 +34,7 @@ solver_parameters = {
     "number_of_particle_substeps_implicit_CN": 1, # The number of substep for one time eletric field update
 }
 
-output = block_until_ready(simulation(input_parameters, **solver_parameters))
+output = block_until_ready(simulation(input_parameters, solver_parameters))
 
 # Post-process: segregate ions/electrons, compute energies, compute FFT
 diagnostics(output)

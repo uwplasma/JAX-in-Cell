@@ -73,7 +73,7 @@ def run_two_stream(v_d: float):
     """Run JAX-in-Cell two-stream simulation and return the output dict."""
     print("\n=== Running two-stream simulation ===")
     print(f"electron_drift_speed_x = {v_d:.3e} m/s")
-    out = simulation(make_input_parameters(v_d), **solver_parameters)
+    out = simulation(make_input_parameters(v_d), solver_parameters)
     return out
 
 
@@ -186,7 +186,7 @@ def gamma_amp_from_vd(v_d: float):
       - calls energy_gamma_from_output(..., for_jit=True)
     """
     params = make_input_parameters(v_d, print_info=False)
-    out = simulation(params, **solver_parameters)
+    out = simulation(params, solver_parameters)
     info = energy_gamma_from_output(out, for_jit=True)
     return info["gamma_amp"]
 
@@ -201,7 +201,7 @@ def gamma_hat_from_vd(v_d: float):
     scales O(1) instead of O(1e10).
     """
     params = make_input_parameters(v_d, print_info=False)
-    out = simulation(params, **solver_parameters)
+    out = simulation(params, solver_parameters)
     info = energy_gamma_from_output(out, for_jit=True)
     return info["gamma_amp"] / info["omega_p"]
 
@@ -507,7 +507,7 @@ def make_two_panel_figure(
 
     def energy_trace(vd: float):
         params = make_input_parameters(vd, print_info=False)
-        out = simulation(params, **solver_parameters)
+        out = simulation(params, solver_parameters)
         info = energy_gamma_from_output(out, for_jit=False)
         t    = info["t"]
         tau  = t * float(info["omega_p"])
@@ -625,7 +625,7 @@ def main():
     # 3) Compute target γ from synthetic "experiment"
     print("\n=== Computing target gamma from synthetic experiment ===")
     params_true = make_input_parameters(v_true, print_info=True)
-    out_true = simulation(params_true, **solver_parameters)
+    out_true = simulation(params_true, solver_parameters)
     info_true = energy_gamma_from_output(out_true, for_jit=False)
     gamma_target = float(info_true["gamma_amp"])
     omega_p = float(info_true["omega_p"])

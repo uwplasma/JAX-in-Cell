@@ -38,7 +38,7 @@ elif simulation_type == 3:
 
 # Run the simulation
 started = datetime.now()
-output = block_until_ready(simulation(input_parameters, **solver_parameters))
+output = block_until_ready(simulation(input_parameters, solver_parameters))
 print("Simulation done, elapsed:", datetime.now()-started)
 
 # Post-process: segregate ions/electrons, compute energies, compute FFT

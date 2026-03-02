@@ -16,7 +16,7 @@ def main(cl_args=sys.argv[1:]):
         output = simulation()
     else:
         input_parameters, solver_parameters = load_parameters(cl_args[0])
-        output = simulation(input_parameters, **solver_parameters)
+        output = simulation(input_parameters, solver_parameters)
     diagnostics(output)
     plot(output)
 

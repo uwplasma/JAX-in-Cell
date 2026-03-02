@@ -48,6 +48,8 @@ def load_parameters(input_file):
         solver_parameters['number_pseudoparticles_species'] = tuple(solver_parameters['number_pseudoparticles_species'])
     except KeyError:
         solver_parameters['number_pseudoparticles_species'] = ()
+    if 'source_parameters' in parameters:
+        pass # currently no source parameters, but are added in a separate branch, so this is a placeholder for future loading of source parameters
     G = solver_parameters["number_grid_points"]
     return input_parameters, solver_parameters
 
@@ -149,9 +151,45 @@ def initialize_simulation_parameters(user_parameters={}):
 
     return parameters
 
-def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500,
-                                number_pseudoparticles_species=None, total_steps=350
-                                ,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
+def initialize_solver_parameters(solver_parameters={}):
+    """
+    Initialize solver parameters for the simulation, combining user-provided values with defaults.
+
+    This function ensures that all necessary solver parameters are set, providing default
+    values for any that are not specified by the user. It also allows for future expansion
+    of solver parameters without changing the function signature.
+
+    Parameters:
+    ----------
+    solver_parameters : dict
+        Dictionary containing user-specified solver parameters. Any parameter not provided
+        will default to predefined values.
+
+    Returns:
+    -------
+    parameters : dict
+        Dictionary containing all solver parameters, with user-provided values overriding defaults.
+    """
+    default_solver_parameters = {
+        "number_grid_points": 100,
+        "number_pseudoelectrons": 3000,
+        "number_pseudoparticles_species": None,
+        "total_steps": 1000,
+        "field_solver": 0,
+        "time_evolution_algorithm": 0,
+        "max_number_of_Picard_iterations_implicit_CN": 20,
+        "number_of_particle_substeps_implicit_CN": 2
+    }
+    parameters = {**default_solver_parameters, **solver_parameters}
+
+    # Compute derived parameters based on user-provided or default values
+    for key, value in parameters.items():
+        if callable(value):  # If the value is a lambda function, compute it
+            parameters[key] = value(parameters)
+    
+    return parameters
+
+def initialize_particles_fields(input_parameters={}, solver_parameters={}):
     """
     Initialize particles and electromagnetic fields for a Particle-in-Cell simulation.
 
@@ -177,6 +215,21 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     """
     # Merge user parameters with defaults
     parameters = initialize_simulation_parameters(input_parameters)
+    solver_parameters = initialize_solver_parameters(solver_parameters)
+
+    number_grid_points = solver_parameters["number_grid_points"]
+    number_pseudoelectrons = solver_parameters["number_pseudoelectrons"]
+    number_pseudoparticles_species = solver_parameters["number_pseudoparticles_species"]
+    total_steps = solver_parameters["total_steps"]
+
+    # For simulation(...) parameters specified via Python, not parsed TOML file
+    if 'species' not in parameters:
+        parameters['species'] = []
+    if not number_pseudoparticles_species:
+        number_pseudoparticles_species = ()
+    else:
+        number_pseudoparticles_species = tuple(number_pseudoparticles_species)
+    assert len(number_pseudoparticles_species) == len(parameters['species'])
 
     # Simulation box dimensions
     length = parameters["length"]
@@ -409,11 +462,11 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "number_grid_points": number_grid_points,
         "plasma_frequency": plasma_frequency,
         "max_initial_vth_electrons": vth_electrons,
-        "max_number_of_Picard_iterations_implicit_CN": max_number_of_Picard_iterations_implicit_CN,
-        "number_of_particle_substeps_implicit_CN": number_of_particle_substeps_implicit_CN,
+        "max_number_of_Picard_iterations_implicit_CN": solver_parameters["max_number_of_Picard_iterations_implicit_CN"],
+        "number_of_particle_substeps_implicit_CN": solver_parameters["number_of_particle_substeps_implicit_CN"],
     })
 
-    return parameters
+    return parameters, solver_parameters
 
 def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
     """
@@ -508,11 +561,34 @@ def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
 
     return out
 
-@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'number_pseudoparticles_species', 'total_steps', 'field_solver', "time_evolution_algorithm",
-                               "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
-def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000,
-               number_pseudoparticles_species=None, total_steps=1000,
-               field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
+
+def simulation(input_parameters={}, solver_parameters={}, positions=None, velocities=None):
+    #  This isn't very pythonic but it allows us to avoid recompiling the JIT function if we call simulation(...) multiple times with the same solver parameters.
+    #  This is a workaround for the fact that jit with static_argnames doesn't work when the static argument is a dictionary (since dictionaries are unhashable and can't be used as static arguments in JIT-compiled functions)
+    global __jaxincell_internal_solver_parameters_previous
+    global sim
+    try:
+        if __jaxincell_internal_solver_parameters_previous == solver_parameters:
+            return sim(input_parameters, positions, velocities)
+        else:
+            # sim = jit(lambda _input_parameters, _positions, _velocities: jit_simulation(input_parameters=_input_parameters, solver_parameters=solver_parameters, positions=_positions, velocities=_velocities))
+            def simulation_call(_input_parameters, _positions, _velocities):
+                return jit_simulation(input_parameters=_input_parameters, solver_parameters=solver_parameters, positions=_positions, velocities=_velocities)
+            sim = jit(simulation_call)
+            __jaxincell_internal_solver_parameters_previous = solver_parameters
+            return sim(input_parameters, positions, velocities)
+    except:
+        # sim = jit(lambda _input_parameters, _positions, _velocities: jit_simulation(input_parameters=_input_parameters, solver_parameters=solver_parameters, positions=_positions, velocities=_velocities))
+        def simulation_call(_input_parameters, _positions, _velocities):
+            return jit_simulation(input_parameters=_input_parameters, solver_parameters=solver_parameters, positions=_positions, velocities=_velocities)
+        sim = jit(simulation_call)
+        __jaxincell_internal_solver_parameters_previous = solver_parameters
+        return sim(input_parameters, positions, velocities)
+
+    
+
+#@partial(jit, static_argnames=['solver_parameters'])
+def jit_simulation(input_parameters={}, solver_parameters={}, positions=None, velocities=None):
     """
     Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
@@ -533,23 +609,9 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     -------
     output : dict
     """
-
-    # For simulation(...) parameters specified via Python, not parsed TOML file
-    if 'species' not in input_parameters:
-        input_parameters['species'] = []
-    if not number_pseudoparticles_species:
-        number_pseudoparticles_species = ()
-    else:
-        number_pseudoparticles_species = tuple(number_pseudoparticles_species)
-    assert len(number_pseudoparticles_species) == len(input_parameters['species'])
-
     # **Initialize simulation parameters**
-    parameters = initialize_particles_fields(input_parameters, number_grid_points=number_grid_points,
-                                             number_pseudoelectrons=number_pseudoelectrons,
-                                             number_pseudoparticles_species=number_pseudoparticles_species,
-                                             total_steps=total_steps,
-                                             max_number_of_Picard_iterations_implicit_CN=max_number_of_Picard_iterations_implicit_CN,
-                                             number_of_particle_substeps_implicit_CN=number_of_particle_substeps_implicit_CN)
+    parameters, solver_parameters = initialize_particles_fields(input_parameters, solver_parameters)
+    total_steps = solver_parameters["total_steps"]
 
     # Extract parameters for convenience
     dx = parameters["dx"]
@@ -585,14 +647,14 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         parameters["charges"], dx, grid, *box_size,
         particle_BC_left, particle_BC_right)
 
-    if time_evolution_algorithm == 0:
+    if solver_parameters["time_evolution_algorithm"] == 0:
         initial_carry = (
             E_field, B_field, positions_minus1_2, positions,
             positions_plus1_2, velocities, qs, ms, q_ms,
         )
         step_func = lambda carry, step_index: Boris_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
-            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, field_solver
+            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
         )
     else:
         initial_carry = (
@@ -637,8 +699,8 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         "magnetic_field":  magnetic_field_over_time,
         "current_density": current_density_over_time,
         "charge_density":  charge_density_over_time,
-        "number_grid_points":     number_grid_points,
-        "number_pseudoelectrons": number_pseudoelectrons,
+        "number_grid_points":     solver_parameters["number_grid_points"],
+        "number_pseudoelectrons": solver_parameters["number_pseudoelectrons"],
         "total_steps": total_steps,
         "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
     }

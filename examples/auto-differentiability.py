@@ -23,7 +23,7 @@ solver_parameters["number_pseudoelectrons"] = 3000
 @jit
 def mean_electric_field(electron_drift_speed):
     input_parameters["electron_drift_speed_x"] = electron_drift_speed
-    output = block_until_ready(simulation(input_parameters, **solver_parameters))
+    output = block_until_ready(simulation(input_parameters, solver_parameters))
     electric_field = jnp.mean(output['electric_field'][:, :, 0], axis=1)
     mean_E = jnp.mean(lax.slice(electric_field, [solver_parameters["total_steps"]//2], [solver_parameters["total_steps"]]))
     return mean_E

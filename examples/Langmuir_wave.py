@@ -24,7 +24,7 @@ solver_parameters = {
     "total_steps"            : 1000, # Total number of time steps
 }
 
-output = block_until_ready(simulation(input_parameters, **solver_parameters))
+output = block_until_ready(simulation(input_parameters, solver_parameters))
 
 # Post-process: segregate ions/electrons, compute energies, compute FFT
 diagnostics(output)

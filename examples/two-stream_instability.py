@@ -17,7 +17,7 @@ n_simulations = 1 # >1 to check that first simulation takes longer due to JIT co
 for i in range(n_simulations):
     if i>0: input_parameters["print_info"] = False
     start = time.time()
-    output = block_until_ready(simulation(input_parameters, **solver_parameters))
+    output = block_until_ready(simulation(input_parameters, solver_parameters))
     print(f"Run #{i+1}: Wall clock time: {time.time()-start}s")
 
 # Post-process: segregate ions/electrons, compute energies, compute FFT

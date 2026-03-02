@@ -60,7 +60,7 @@ def measure_time_and_error(parameter_list, param_name):
             old_param = solver_parameters[param_name]
             solver_parameters[param_name] = param
             solver_parameters['number_pseudoelectrons'] = int(solver_parameters['number_pseudoelectrons']+j)
-            output = block_until_ready(simulation(input_parameters, **solver_parameters))
+            output = block_until_ready(simulation(input_parameters, solver_parameters))
             solver_parameters[param_name] = old_param
         if param_name in input_parameters:
             old_param = input_parameters[param_name]
@@ -71,7 +71,7 @@ def measure_time_and_error(parameter_list, param_name):
             #     solver_parameters['number_grid_points'] = int(solver_parameters['number_grid_points'] * param / input_parameters['timestep_over_spatialstep_times_c'])
             input_parameters[param_name] = param
             solver_parameters['number_pseudoelectrons'] = int(solver_parameters['number_pseudoelectrons']+j)
-            output = block_until_ready(simulation(input_parameters, **solver_parameters))
+            output = block_until_ready(simulation(input_parameters, solver_parameters))
             input_parameters[param_name] = old_param
             # if 'timestep_over_spatialstep_times_c' in param_name:
             #     solver_parameters['total_steps'] = old_time_steps
@@ -101,7 +101,7 @@ def plot_results(ax, x_data, y_data, xlabel, ylabel):
 
 ####################################################################################################
 print(f"Run 1 simulation for JIT compilation")
-base_simulation = block_until_ready(simulation(input_parameters, **solver_parameters))
+base_simulation = block_until_ready(simulation(input_parameters, solver_parameters))
 
 print(f"\n\nRun scaling tests with {number_of_steps} steps and increase factor {increase_factor}: time vs 1) number of grid points, 2) pseudoelectrons, 3) steps, and 4) timestep factor")
 
