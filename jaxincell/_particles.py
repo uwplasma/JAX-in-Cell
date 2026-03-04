@@ -6,7 +6,7 @@ from ._sources import get_S2_weights_and_indices_periodic_CN
 __all__ = ['fields_to_particles_grid', 'fields_to_particles_periodic_CN','rotation', 'boris_step', 'boris_step_relativistic']
 
 @jit
-def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):
+def fields_to_particles_grid(x_n, internal_field, external_field, dxyz, gridxyz, grid_startxyz, field_BC_left, field_BC_right):
     """
     This function retrieves the electric or magnetic field values at particle positions 
     using a field interpolation scheme. The function first adds ghost cells to the field 
@@ -26,23 +26,34 @@ def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, fi
         array: The interpolated field values at the particle positions, shape (N,).
     """
     # Add ghost cells for the boundaries using provided boundary conditions
-    ghost_cell_L2, ghost_cell_L1, ghost_cell_R = field_2_ghost_cells(field_BC_left,field_BC_right,field)
-    field = jnp.insert(field,0,ghost_cell_L1,axis=0)
-    field = jnp.insert(field,0,ghost_cell_L2,axis=0)
-    field = jnp.append(field,jnp.array([ghost_cell_R]),axis=0)
-    x = x_n[0]
-    
+    ghost_cell_L2, ghost_cell_L1, ghost_cell_R = field_2_ghost_cells(field_BC_left,field_BC_right,internal_field)
+    internal_field = jnp.insert(internal_field,0,ghost_cell_L1,axis=0)
+    internal_field = jnp.insert(internal_field,0,ghost_cell_L2,axis=0)
+    internal_field = jnp.append(internal_field,jnp.array([ghost_cell_R]),axis=0)
+    x, y, z = x_n
+    dx, dy, dz = dxyz
+    grid_start, grid_start_y, grid_start_z = grid_startxyz
+    grid, grid_y, grid_z = gridxyz
     # Adjust the grid to accommodate particles at the first half grid cell (staggered grid)
     #If using a staggered grid, particles at first half cell will be out of grid, so add extra cell
-    grid = jnp.insert(grid,0,grid[0]-dx,axis=0) 
+    grid = jnp.insert(grid,0,grid[0]-dx,axis=0)
+    grid_y = jnp.insert(grid_y,0,grid_y[0]-dy,axis=0)
+    grid_z = jnp.insert(grid_z,0,grid_z[0]-dz,axis=0)
     
     # Calculate the index of the field grid corresponding to the particle position
     i = ((x-grid_start+dx)//dx).astype(int) #new grid_start = grid_start-dx due to extra cell
+    j = ((y-grid_start_y+dy)//dy).astype(int) #new grid_start_y = grid_start_y-dy due to extra cell
+    k = ((z-grid_start_z+dz)//dz).astype(int) #new grid_start_z = grid_start_z-dz due to extra cell
     
     # Interpolate the field at the particle position using a quadratic interpolation
-    fields_n = 0.5*field[i]*(0.5+(grid[i]-x)/dx)**2 + field[i+1]*(0.75-(grid[i]-x)**2/dx**2) + 0.5*field[i+2]*(0.5-(grid[i]-x)/dx)**2
+    fields_n = 0.5*internal_field[i]*(0.5+(grid[i]-x)/dx)**2 + internal_field[i+1]*(0.75-(grid[i]-x)**2/dx**2) + 0.5*internal_field[i+2]*(0.5-(grid[i]-x)/dx)**2
     
-    return fields_n
+    # external field contribution
+    external_field = 0.5*external_field[i]*(0.5+(grid[i]  -x)/dx)**2 + external_field[i+1]*(0.75-(grid[i]  -x)**2/dx**2) + 0.5*external_field[i+2]*(0.5-(grid[i]  -x)/dx)**2
+    external_field = 0.5*external_field[j]*(0.5+(grid_y[j]-y)/dy)**2 + external_field[j+1]*(0.75-(grid_y[j]-y)**2/dy**2) + 0.5*external_field[j+2]*(0.5-(grid_y[j]-y)/dy)**2
+    external_field = 0.5*external_field[k]*(0.5+(grid_z[k]-z)/dz)**2 + external_field[k+1]*(0.75-(grid_z[k]-z)**2/dz**2) + 0.5*external_field[k+2]*(0.5-(grid_z[k]-z)/dz)**2
+
+    return fields_n + external_field
 
 @jit
 def fields_to_particles_periodic_CN(x_n, field, dx, grid_start):

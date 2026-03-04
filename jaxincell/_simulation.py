@@ -7,7 +7,7 @@ from jax import lax, jit, config
 from jax.random import PRNGKey, uniform, normal
 
 from ._sources import calculate_charge_density
-from ._boundary_conditions import set_BC_positions, set_BC_particles
+from ._boundary_conditions import field_2_ghost_cells, set_BC_positions, set_BC_particles
 from ._constants import speed_of_light, epsilon_0, elementary_charge, mass_electron, mass_proton
 from ._fields import E_from_Gauss_1D_Cartesian
 from ._algorithms import Boris_step, CN_step
@@ -79,6 +79,8 @@ def initialize_simulation_parameters(user_parameters={}):
     default_parameters = {
         # Basic simulation settings
         "length": 1e-2,                           # Dimensions of the simulation box
+        "length_y": None,                         # Optional separate length in y direction (defaults to "length" if None)
+        "length_z": None,                         # Optional separate length in z direction (defaults to "length" if None)
         "random_positions_x": False,  # Use random positions in x for particles
         "random_positions_y": True,  # Use random positions in y for particles
         "random_positions_z": True,  # Use random positions in z for particles
@@ -149,7 +151,7 @@ def initialize_simulation_parameters(user_parameters={}):
 
     return parameters
 
-def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_pseudoelectrons=500,
+def initialize_particles_fields(input_parameters={}, number_grid_points=50, number_grid_points_y=None, number_grid_points_z=None, number_pseudoelectrons=500,
                                 number_pseudoparticles_species=None, total_steps=350
                                 ,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
     """
@@ -180,7 +182,9 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Simulation box dimensions
     length = parameters["length"]
-    box_size = (length, length, length)
+    length_y = lax.cond(parameters["length_y"] is not None, lambda: parameters["length_y"], lambda: length)
+    length_z = lax.cond(parameters["length_z"] is not None, lambda: parameters["length_z"], lambda: length)
+    box_size = (length, length_y, length_z)
 
     # Random key generator for reproducibility
     seed = parameters["seed"]
@@ -318,6 +322,28 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     # Grid setup
     dx = length / number_grid_points
     grid = jnp.linspace(-length / 2 + dx / 2, length / 2 - dx / 2, number_grid_points)
+    dimensions = ("x",)
+
+    if number_grid_points_y is None:
+        number_grid_points_y = 3
+    else:
+        dimensions = dimensions + ("y",)
+    if number_grid_points_y %2 == 0:
+        number_grid_points_y+=1
+        lax.cond(parameters["print_info"], lambda _: jprint("number_grid_points_y was even, incremented to make it odd"), lambda _: None, operand=None)
+    dy = length_y / number_grid_points_y
+    grid_y = jnp.linspace(-length_y / 2 + dy / 2, length_y / 2 - dy / 2, number_grid_points_y)
+
+    if number_grid_points_z is None:
+        number_grid_points_z = 3
+    else:
+        dimensions = dimensions + ("z",)
+    if number_grid_points_z %2 == 0:
+        number_grid_points_z+=1
+        lax.cond(parameters["print_info"], lambda _: jprint("number_grid_points_z was even, incremented to make it odd"), lambda _: None, operand=None)
+    dz = length_z / number_grid_points_z
+    grid_z = jnp.linspace(-length_z / 2 + dz / 2, length_z / 2 - dz / 2, number_grid_points_z)
+
     dt = parameters["timestep_over_spatialstep_times_c"] * dx / speed_of_light
 
     # Print information about the simulation
@@ -377,14 +403,17 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     secE = input_parameters.get("external_electric_field")
     # print(secB["B"])
     if isinstance(secB, dict) and "B" in secB:
-        parameters["external_magnetic_field"] = jnp.asarray(secB["B"], dtype=jnp.float32)
+        external_magnetic_field = jnp.asarray(secB["B"], dtype=jnp.float32)
     else:
-        parameters["external_magnetic_field"] = jnp.zeros((G, 3), dtype=jnp.float32)
+        external_magnetic_field = jnp.zeros((G, 3), dtype=jnp.float32)
 
     if isinstance(secE, dict) and "E" in secE:
-        parameters["external_electric_field"] = jnp.asarray(secE["E"], dtype=jnp.float32)
+        external_electric_field = jnp.asarray(secE["E"], dtype=jnp.float32)
     else:
-        parameters["external_electric_field"] = jnp.zeros((G, 3), dtype=jnp.float32)
+        external_electric_field = jnp.zeros((G, 3), dtype=jnp.float32)
+
+    # reshape external fields to 3d and add ghost cells
+    external_electric_field, external_magnetic_field = set_external_fields(external_electric_field, external_magnetic_field, dimensions, (number_grid_points, number_grid_points_y, number_grid_points_z))
 
     # external_E_field_x = parameters["external_electric_field_amplitude"] * jnp.cos(parameters["external_electric_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
     # external_B_field_x = parameters["external_magnetic_field_amplitude"] * jnp.cos(parameters["external_magnetic_field_wavenumber"] * jnp.linspace(-jnp.pi, jnp.pi, number_grid_points))
@@ -398,13 +427,13 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "masses": masses,
         "charge_to_mass_ratios": charge_to_mass_ratios,
         "fields": fields,
-        "grid": grid,
-        "dx": dx,
+        "gridxyz": (grid, grid_y, grid_z),
+        "dxyz": (dx, dy, dz),
         "dt": dt,
         "box_size": box_size,
-        "external_electric_field": parameters["external_electric_field"],
+        "external_electric_field": external_electric_field,
         # "external_magnetic_field": jnp.array([external_B_field_x, jnp.zeros((number_grid_points,)), jnp.zeros((number_grid_points,))]).T,
-        "external_magnetic_field": parameters["external_magnetic_field"],
+        "external_magnetic_field": external_magnetic_field,
         "number_pseudoelectrons": number_pseudoelectrons,
         "number_grid_points": number_grid_points,
         "plasma_frequency": plasma_frequency,
@@ -508,9 +537,190 @@ def make_particles(species_parameters, Nprt, box_size, weight, seed, rng_index):
 
     return out
 
-@partial(jit, static_argnames=['number_grid_points', 'number_pseudoelectrons', 'number_pseudoparticles_species', 'total_steps', 'field_solver', "time_evolution_algorithm",
+def set_external_fields(external_electric_field, external_magnetic_field, dimensions, number_grid_pointsxyz):
+    """
+    Set external fields based on user input and simulation dimensions.
+
+    Parameters:
+    ----------
+    external_electric_field : jnp.ndarray
+        User-provided external electric field array of shape (G, 3) or (G,).
+    external_magnetic_field : jnp.ndarray
+        User-provided external magnetic field array of shape (G, 3) or (G,).
+    dimensions : tuple
+        Tuple of dimension names ("x", "y", "z") present in the simulation.
+    number_grid_pointsxyz : tuple
+        Tuple of grid point counts in x, y, z directions.
+
+    Returns:
+    -------
+    external_electric_field : jnp.ndarray
+        External electric field array reshaped to match simulation grid.
+    external_magnetic_field : jnp.ndarray
+        External magnetic field array reshaped to match simulation grid.
+    """
+    #probably there is a way to accomplish this with a vmap or something more elegant, but this works for now and only needs to be done once at the beginning of the simulation, so not a bottleneck
+
+    number_grid_points, number_grid_points_y, number_grid_points_z = number_grid_pointsxyz
+
+    external_electric_field = jnp.where("y" in dimensions, external_electric_field, jnp.stack([external_electric_field]*number_grid_points_y, axis=1))
+    external_electric_field = jnp.where("z" in dimensions, external_electric_field, jnp.stack([external_electric_field]*number_grid_points_z, axis=2))
+
+    external_magnetic_field = jnp.where("y" in dimensions, external_magnetic_field, jnp.stack([external_magnetic_field]*number_grid_points_y, axis=1))
+    external_magnetic_field = jnp.where("z" in dimensions, external_magnetic_field, jnp.stack([external_magnetic_field]*number_grid_points_z, axis=2))
+
+    # we only need to find the ghost cells for the external fields once at the beginning, since they are static in time
+    # start with x
+    ghost_cells_L2_x = jnp.zeros(number_grid_points_z)
+    ghost_cells_L1_x = jnp.zeros(number_grid_points_z)
+    ghost_cells_R_x = jnp.zeros(number_grid_points_z)
+    for ii in range(number_grid_points_y):
+        temp_L2_x = jnp.array([])
+        temp_L1_x = jnp.array([])
+        temp_R_x = jnp.array([])
+        for jj in range(number_grid_points_z):
+            L2_x, L1_x, R_x = field_2_ghost_cells(0,0, external_electric_field[:, ii, jj])
+            temp_L2_x = jnp.append(temp_L2_x, L2_x)
+            temp_L1_x = jnp.append(temp_L1_x, L1_x)
+            temp_R_x = jnp.append(temp_R_x, R_x)
+        ghost_cells_L2_x = jnp.stack((ghost_cells_L2_x, temp_L2_x))
+        ghost_cells_L1_x = jnp.stack((ghost_cells_L1_x, temp_L1_x))
+        ghost_cells_R_x = jnp.stack((ghost_cells_R_x, temp_R_x))
+    ghost_cells_L2_x = ghost_cells_L2_x[jnp.newaxis, 1:, :, :]
+    ghost_cells_L1_x = ghost_cells_L1_x[jnp.newaxis, 1:, :, :]
+    ghost_cells_R_x = ghost_cells_R_x[jnp.newaxis, 1:, :, :]
+    
+    external_electric_field = jnp.append(ghost_cells_L1_x, external_electric_field, axis=0)
+    external_electric_field = jnp.append(ghost_cells_L2_x, external_electric_field, axis=0)
+    external_electric_field = jnp.append(external_electric_field, ghost_cells_R_x, axis=0)
+
+    # now y
+    ghost_cells_L2_y = jnp.zeros(number_grid_points_z)
+    ghost_cells_L1_y = jnp.zeros(number_grid_points_z)
+    ghost_cells_R_y = jnp.zeros(number_grid_points_z)
+    for ii in range(number_grid_points+3):
+        temp_L2_y = jnp.array([])
+        temp_L1_y = jnp.array([])
+        temp_R_y = jnp.array([])
+        for jj in range(number_grid_points_z):
+            L2_y, L1_y, R_y = field_2_ghost_cells(0,0, external_electric_field[ii, :, jj])
+            temp_L2_y = jnp.append(temp_L2_y, L2_y)
+            temp_L1_y = jnp.append(temp_L1_y, L1_y)
+            temp_R_y = jnp.append(temp_R_y, R_y)
+        ghost_cells_L2_y = jnp.stack((ghost_cells_L2_y, temp_L2_y))
+        ghost_cells_L1_y = jnp.stack((ghost_cells_L1_y, temp_L1_y))
+        ghost_cells_R_y = jnp.stack((ghost_cells_R_y, temp_R_y))
+    ghost_cells_L2_y = ghost_cells_L2_y[1:, jnp.newaxis, :, :]
+    ghost_cells_L1_y = ghost_cells_L1_y[1:, jnp.newaxis, :, :]
+    ghost_cells_R_y = ghost_cells_R_y[1:, jnp.newaxis, :, :]
+
+    external_electric_field = jnp.append(ghost_cells_L1_y, external_electric_field, axis=1)
+    external_electric_field = jnp.append(ghost_cells_L2_y, external_electric_field, axis=1)
+    external_electric_field = jnp.append(external_electric_field, ghost_cells_R_y, axis=1)
+
+    # now z
+    ghost_cells_L2_z = jnp.zeros(number_grid_points_y)
+    ghost_cells_L1_z = jnp.zeros(number_grid_points_y)
+    ghost_cells_R_z = jnp.zeros(number_grid_points_y)
+    for ii in range(number_grid_points+3):
+        temp_L2_z = jnp.array([])
+        temp_L1_z = jnp.array([])
+        temp_R_z = jnp.array([])
+        for jj in range(number_grid_points_y+3):
+            L2_z, L1_z, R_z = field_2_ghost_cells(0,0, external_electric_field[ii, jj, :])
+            temp_L2_z = jnp.append(temp_L2_z, L2_z)
+            temp_L1_z = jnp.append(temp_L1_z, L1_z)
+            temp_R_z = jnp.append(temp_R_z, R_z)
+        ghost_cells_L2_z = jnp.stack((ghost_cells_L2_z, temp_L2_z))
+        ghost_cells_L1_z = jnp.stack((ghost_cells_L1_z, temp_L1_z))
+        ghost_cells_R_z = jnp.stack((ghost_cells_R_z, temp_R_z))
+    ghost_cells_L2_z = ghost_cells_L2_z[1:, :, jnp.newaxis, :]
+    ghost_cells_L1_z = ghost_cells_L1_z[1:, :, jnp.newaxis, :]
+    ghost_cells_R_z = ghost_cells_R_z[1:, :, jnp.newaxis, :]
+
+    external_electric_field = jnp.append(ghost_cells_L1_z, external_electric_field, axis=2)
+    external_electric_field = jnp.append(ghost_cells_L2_z, external_electric_field, axis=2)
+    external_electric_field = jnp.append(external_electric_field, ghost_cells_R_z, axis=2)
+
+    # next do the same for the external magnetic field
+
+    ghost_cells_L2_x = jnp.zeros(number_grid_points_z)
+    ghost_cells_L1_x = jnp.zeros(number_grid_points_z)
+    ghost_cells_R_x = jnp.zeros(number_grid_points_z)
+    for ii in range(number_grid_points_y):
+        temp_L2_x = jnp.array([])
+        temp_L1_x = jnp.array([])
+        temp_R_x = jnp.array([])
+        for jj in range(number_grid_points_z):
+            L2_x, L1_x, R_x = field_2_ghost_cells(0,0, external_magnetic_field[:, ii, jj])
+            temp_L2_x = jnp.append(temp_L2_x, L2_x)
+            temp_L1_x = jnp.append(temp_L1_x, L1_x)
+            temp_R_x = jnp.append(temp_R_x, R_x)
+        ghost_cells_L2_x = jnp.stack((ghost_cells_L2_x, temp_L2_x))
+        ghost_cells_L1_x = jnp.stack((ghost_cells_L1_x, temp_L1_x))
+        ghost_cells_R_x = jnp.stack((ghost_cells_R_x, temp_R_x))
+    ghost_cells_L2_x = ghost_cells_L2_x[jnp.newaxis, 1:, :, :]
+    ghost_cells_L1_x = ghost_cells_L1_x[jnp.newaxis, 1:, :, :]
+    ghost_cells_R_x = ghost_cells_R_x[jnp.newaxis, 1:, :, :]
+    
+    external_magnetic_field = jnp.append(ghost_cells_L1_x, external_magnetic_field, axis=0)
+    external_magnetic_field = jnp.append(ghost_cells_L2_x, external_magnetic_field, axis=0)
+    external_magnetic_field = jnp.append(external_magnetic_field, ghost_cells_R_x, axis=0)
+
+    # now y
+    ghost_cells_L2_y = jnp.zeros(number_grid_points_z)
+    ghost_cells_L1_y = jnp.zeros(number_grid_points_z)
+    ghost_cells_R_y = jnp.zeros(number_grid_points_z)
+    for ii in range(number_grid_points+3):
+        temp_L2_y = jnp.array([])
+        temp_L1_y = jnp.array([])
+        temp_R_y = jnp.array([])
+        for jj in range(number_grid_points_z):
+            L2_y, L1_y, R_y = field_2_ghost_cells(0,0, external_magnetic_field[ii, :, jj])
+            temp_L2_y = jnp.append(temp_L2_y, L2_y)
+            temp_L1_y = jnp.append(temp_L1_y, L1_y)
+            temp_R_y = jnp.append(temp_R_y, R_y)
+        ghost_cells_L2_y = jnp.stack((ghost_cells_L2_y, temp_L2_y))
+        ghost_cells_L1_y = jnp.stack((ghost_cells_L1_y, temp_L1_y))
+        ghost_cells_R_y = jnp.stack((ghost_cells_R_y, temp_R_y))
+    ghost_cells_L2_y = ghost_cells_L2_y[1:, jnp.newaxis, :, :]
+    ghost_cells_L1_y = ghost_cells_L1_y[1:, jnp.newaxis, :, :]
+    ghost_cells_R_y = ghost_cells_R_y[1:, jnp.newaxis, :, :]
+
+    external_magnetic_field = jnp.append(ghost_cells_L1_y, external_magnetic_field, axis=1)
+    external_magnetic_field = jnp.append(ghost_cells_L2_y, external_magnetic_field, axis=1)
+    external_magnetic_field = jnp.append(external_magnetic_field, ghost_cells_R_y, axis=1)
+
+    # now z
+    ghost_cells_L2_z = jnp.zeros(number_grid_points_y)
+    ghost_cells_L1_z = jnp.zeros(number_grid_points_y)
+    ghost_cells_R_z = jnp.zeros(number_grid_points_y)
+    for ii in range(number_grid_points+3):
+        temp_L2_z = jnp.array([])
+        temp_L1_z = jnp.array([])
+        temp_R_z = jnp.array([])
+        for jj in range(number_grid_points_y+3):
+            L2_z, L1_z, R_z = field_2_ghost_cells(0,0, external_magnetic_field[ii, jj, :])
+            temp_L2_z = jnp.append(temp_L2_z, L2_z)
+            temp_L1_z = jnp.append(temp_L1_z, L1_z)
+            temp_R_z = jnp.append(temp_R_z, R_z)
+        ghost_cells_L2_z = jnp.stack((ghost_cells_L2_z, temp_L2_z))
+        ghost_cells_L1_z = jnp.stack((ghost_cells_L1_z, temp_L1_z))
+        ghost_cells_R_z = jnp.stack((ghost_cells_R_z, temp_R_z))
+    ghost_cells_L2_z = ghost_cells_L2_z[1:, :, jnp.newaxis, :]
+    ghost_cells_L1_z = ghost_cells_L1_z[1:, :, jnp.newaxis, :]
+    ghost_cells_R_z = ghost_cells_R_z[1:, :, jnp.newaxis, :]
+
+    external_magnetic_field = jnp.append(ghost_cells_L1_z, external_magnetic_field, axis=2)
+    external_magnetic_field = jnp.append(ghost_cells_L2_z, external_magnetic_field, axis=2)
+    external_magnetic_field = jnp.append(external_magnetic_field, ghost_cells_R_z, axis=2)
+
+
+    return external_electric_field, external_magnetic_field
+
+@partial(jit, static_argnames=['number_grid_points', 'number_grid_points_y', 'number_grid_points_z', 'number_pseudoelectrons', 'number_pseudoparticles_species', 'total_steps', 'field_solver', "time_evolution_algorithm",
                                "max_number_of_Picard_iterations_implicit_CN","number_of_particle_substeps_implicit_CN"])
-def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectrons=3000,
+def simulation(input_parameters={}, number_grid_points=100, number_grid_points_y=None, number_grid_points_z=None, number_pseudoelectrons=3000,
                number_pseudoparticles_species=None, total_steps=1000,
                field_solver=0,positions=None, velocities=None,time_evolution_algorithm=0,max_number_of_Picard_iterations_implicit_CN=20, number_of_particle_substeps_implicit_CN=2):
     """
@@ -552,9 +762,9 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
                                              number_of_particle_substeps_implicit_CN=number_of_particle_substeps_implicit_CN)
 
     # Extract parameters for convenience
-    dx = parameters["dx"]
+    dx = parameters["dxyz"][0]
     dt = parameters["dt"]
-    grid = parameters["grid"]
+    grid = parameters["gridxyz"][0]
     box_size = parameters["box_size"]
     E_field, B_field = parameters["fields"]
     field_BC_left = parameters["field_BC_left"]
@@ -591,7 +801,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
             positions_plus1_2, velocities, qs, ms, q_ms,
         )
         step_func = lambda carry, step_index: Boris_step(
-            carry, step_index, parameters, dx, dt, grid, box_size,
+            carry, step_index, parameters, parameters['dxyz'], dt, parameters['gridxyz'], box_size,
             particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, field_solver
         )
     else:
