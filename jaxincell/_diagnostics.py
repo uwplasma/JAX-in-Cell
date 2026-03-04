@@ -66,7 +66,7 @@ def diagnostics(output):
 
     # --- All your existing energy/FFT/diagnostics code continues below unchanged ---
     E_field_over_time = output['electric_field']
-    grid              = output['grid']
+    grid              = output['gridxyz'][0]
 
     # Make sure these are plain Python scalars for indexing / fftfreq
     total_steps_val = output['total_steps']
@@ -99,14 +99,14 @@ def diagnostics(output):
         return jnp.sum(y, axis=-1) * dx
 
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
-    abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
-    integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
-    integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dx'])
+    #abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
+    integral_E_squared         = integrate(abs_E_squared, dx=output['dxyz'][0])
+    #integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dxyz'][0])
 
     abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
-    abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
-    integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
-    integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
+    #abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
+    integral_B_squared         = integrate(abs_B_squared, dx=output['dxyz'][0])
+    #integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dxyz'][0])
 
     # CHANGED: Calculate v^2 per particle (sum over spatial dims x,y,z only)
     # Shape becomes (Time, N_particles)
@@ -135,14 +135,18 @@ def diagnostics(output):
         'kinetic_energy_electrons': total_ke_electrons,
         'kinetic_energy_ions':      total_ke_ions,
         
-        'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
-        'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
-        'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
-        'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared
+        #'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
+        #'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
+        #'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
+        #'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared
     })
-
+    '''
     total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
                     output["magnetic_field_energy"] + output["external_magnetic_field_energy"] +
+                    output["kinetic_energy"])
+    '''
+    total_energy = (output["electric_field_energy"] +
+                    output["magnetic_field_energy"] +
                     output["kinetic_energy"])
 
     output.update({'total_energy': total_energy})
