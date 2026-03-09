@@ -182,8 +182,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
 
     # Simulation box dimensions
     length = parameters["length"]
-    length_y = lax.cond(parameters["length_y"] != -1, lambda: parameters["length_y"], lambda: length)
-    length_z = lax.cond(parameters["length_z"] != -1, lambda: parameters["length_z"], lambda: length)
+    length_y = lax.cond(parameters["length_y"] != -1, lambda: parameters["length_y"] * 1., lambda: length)
+    length_z = lax.cond(parameters["length_z"] != -1, lambda: parameters["length_z"] * 1., lambda: length)
     box_size = (length, length_y, length_z)
 
     # Random key generator for reproducibility
@@ -756,6 +756,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_grid_points_y
 
     # **Initialize simulation parameters**
     parameters = initialize_particles_fields(input_parameters, number_grid_points=number_grid_points,
+                                             number_grid_points_y=number_grid_points_y, number_grid_points_z=number_grid_points_z,
                                              number_pseudoelectrons=number_pseudoelectrons,
                                              number_pseudoparticles_species=number_pseudoparticles_species,
                                              total_steps=total_steps,
