@@ -17,7 +17,7 @@ __all__ = ['Boris_step', 'CN_step']
 def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
                       particle_BC_left, particle_BC_right,
                       field_BC_left, field_BC_right, mixed_BC_weight,
-                      field_solver):
+                      field_solver, COR_left, COR_right):
 
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
@@ -55,7 +55,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # Apply boundary conditions
     positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
         positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
-        *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight)
+        *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight, COR_left, COR_right)
     
     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
@@ -100,7 +100,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 @partial(jit, static_argnames=('num_substeps', 'particle_BC_left', 'particle_BC_right', 'field_BC_left', 'field_BC_right'))
 def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
                                   particle_BC_left, particle_BC_right,
-                                  field_BC_left, field_BC_right, mixed_BC_weight, num_substeps):
+                                  field_BC_left, field_BC_right, mixed_BC_weight, num_substeps, COR_left, COR_right):
     (E_field, B_field, positions,
     velocities, qs, ms, q_ms) = carry
     
@@ -162,7 +162,7 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
             # BCs
             pos_new, vel_mid, qs_new, ms_new, q_ms_new = set_BC_particles(
                 pos_new, vel_mid, qs_sub, ms_sub, q_ms_sub,
-                dx, grid, *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight
+                dx, grid, *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight, COR_left, COR_right
             )
             pos_stag_new = set_BC_positions(
                 pos_new - 0.5*dtau*vel_mid,
