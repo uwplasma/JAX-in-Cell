@@ -119,12 +119,12 @@ def initialize_simulation_parameters(user_parameters={}):
         "relativistic": False,                    # Use relativistic Boris pusher
         "tolerance_Picard_iterations_implicit_CN": 1e-6, # Tolerance for Picard iterations in implicit Crank-Nicholson method
         "mixed_BC_weight": 1.0,                      # Fraction of macroparticle reflected at mixed BC wall (BC=3); must be between 0 and 1
-        "COR_left":  0.5,                            # Coefficient of restitution at left wall (1=elastic, 0=fully inelastic); applies to BC=1,3,4
-        "COR_right": 0.5,                            # Coefficient of restitution at right wall
+        "COR_left":  1.0,                            # Coefficient of restitution at left wall (1=elastic, 0=fully inelastic); applies to BC=1,3,4
+        "COR_right": 1.0,                            # Coefficient of restitution at right wall
 
         # Boundary conditions
-        "particle_BC_left":  4,                   # Left boundary condition for particles
-        "particle_BC_right": 4,                   # Right boundary condition for particles
+        "particle_BC_left":  0,                   # Left boundary condition for particles
+        "particle_BC_right": 0,                   # Right boundary condition for particles
         "field_BC_left":     0,                   # Left boundary condition for fields
         "field_BC_right":    0,                   # Right boundary condition for fields
 
