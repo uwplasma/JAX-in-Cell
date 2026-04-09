@@ -1,0 +1,53 @@
+[input_parameters]
+# -----------------------------
+# Global / Default Parameters
+# -----------------------------
+length = 0.01
+grid_points_per_Debye_length = 0.50265482457
+density = 2.1851143e+18
+number_species = 1 
+print_info = true
+relativistic = false
+tolerance_Picard_iterations_implicit_CN = 1e-10
+
+# --- Electron Settings (Species 0) ---
+# We'll set the electrons to be "Hot"
+electron_charge_over_elementary_charge = -1
+electron_drift_speed_x = 0        # No drift for relaxation benchmark
+velocity_plus_minus_electrons_x = false 
+
+# Electron Thermal Velocity (vth_e = 0.05c)
+vth_electrons_over_c_x = 0.001
+vth_electrons_over_c_y = 0.001
+vth_electrons_over_c_z = 0.001
+
+# --- Perturbation (Disabled for pure thermal benchmark) ---
+amplitude_perturbation_x = 0
+wavenumber_electrons_x = 0
+
+# --- "Ion" Group 1 Settings (Acting as Positrons) ---
+# To make this a positron, mass must equal electron mass
+ion_charge_over_elementary_charge = 1.0 
+ion_mass_over_proton_mass = 0.000544617019938 # Electron Mass
+
+# Set Positrons to be "Cold" (e.g., 10% of electron thermal velocity)
+# Temperature scales with vth^2, so this is T_p = 0.01 * T_e
+ion_temperature_over_electron_temperature_x = 0.01
+ion_temperature_over_electron_temperature_y = 0.01
+ion_temperature_over_electron_temperature_z = 0.01
+ion_drift_speed_x = 0
+
+# -----------------------------
+# Solver & Particle Counts
+# -----------------------------
+[solver_parameters]
+field_solver = 0
+time_evolution_algorithm = 0
+number_grid_points = 70
+
+# Ensure high particle count to reduce noise for temperature measurements
+number_pseudoelectrons = 5000
+
+total_steps = 500 # Increased steps to observe the relaxation curve
+max_number_of_Picard_iterations_implicit_CN = 20
+number_of_particle_substeps_implicit_CN = 2

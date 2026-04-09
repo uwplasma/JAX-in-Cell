@@ -3,7 +3,7 @@ from jax.lax import cond
 from functools import partial
 from jax_tqdm import scan_tqdm
 from jax.debug import print as jprint
-from jax import lax, jit, config
+from jax import lax, jit, config, random
 from jax.random import PRNGKey, uniform, normal
 
 from ._sources import calculate_charge_density
@@ -99,7 +99,7 @@ def initialize_simulation_parameters(user_parameters={}):
         "ion_temperature_over_electron_temperature_y": 1, # Temperature ratio of ions to electrons in the y direction
         "ion_temperature_over_electron_temperature_z": 1, # Temperature ratio of ions to electrons in the z direction
         "timestep_over_spatialstep_times_c": 1.0,   # dt * speed_of_light / dx
-        "seed": 1701,                               # Random seed for reproducibility
+        "seed": 17011,                               # Random seed for reproducibility
         "electron_drift_speed_x": 1e8,              # Drift speed of electrons in the x direction
         "electron_drift_speed_y": 0,              # Drift speed of electrons in the y direction
         "electron_drift_speed_z": 0,              # Drift speed of electrons in the z direction
@@ -133,9 +133,12 @@ def initialize_simulation_parameters(user_parameters={}):
 
         # Filtering parameters for current and charge density (digital smoothing)
         "filter_passes": 5,       # number of passes of the digital filter applied to ρ and J
-        "filter_alpha": 0.5,      # filter strength (0 < alpha < 1)
+        "filter_alpha": 0,      # filter strength (0 < alpha < 1)
         "filter_strides": (1, 2, 4),  # multi-scale strides for filtering
 
+        "coulomb_logarithm": 0,          # Coulomb logarithm for collision frequency calculation
+        "number_species": 1, # List of additional neutral species ( defult is 1, meaning only the main electron and ion species)
+        "density": 0,
         "weight": 0,
     }
 
@@ -250,13 +253,19 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         * vth_electrons_over_c**2
         / Debye_length_per_dx**2
     )
+    # Inverse formula: Density = Weight * N / Length
+    density = weight * number_pseudoelectrons / length
+    # If parameters["density"] is 0 (default), use the calculated density.
+    # Otherwise, use the user-provided density.
+    density = jnp.where(parameters["density"]==0, density, parameters["density"])
+    weight = density * length / number_pseudoelectrons
     weight = jnp.where(parameters["weight"]==0, weight, parameters["weight"])
     Debye_length_per_dx = jnp.where(vth_electrons_over_c==0, 0, 1 / (jnp.sqrt(
                             weight
                             / epsilon_0
                             / mass_electrons
                             * length
-                            * (2 * number_pseudoelectrons))
+                            * (parameters["number_species"] * 2 * number_pseudoelectrons))#total number of particle
                             / speed_of_light
                             * (-charge_electrons)
                             / number_grid_points
@@ -321,8 +330,33 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
     dt = parameters["timestep_over_spatialstep_times_c"] * dx / speed_of_light
 
     # Print information about the simulation
-    plasma_frequency = jnp.sqrt(number_pseudoelectrons * weight * charge_electrons**2)/jnp.sqrt(mass_electrons)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
+    plasma_frequency = jnp.sqrt(parameters["number_species"] * number_pseudoelectrons * weight * charge_electrons**2)/jnp.sqrt(mass_electrons)/jnp.sqrt(epsilon_0)/jnp.sqrt(length)
     relativistic_gamma_factor = 1 / jnp.sqrt(1 - jnp.sum(velocities**2, axis=1) / speed_of_light**2)
+    reduced_mass = mass_electrons * parameters["ion_mass_over_proton_mass"] * mass_proton / (mass_electrons + parameters["ion_mass_over_proton_mass"] * mass_proton)
+    mass_ratio = mass_electrons / mass_ions
+
+    v_th_e = parameters["vth_electrons_over_c_x"] * speed_of_light
+    # Using: v_th^2 = 2 * k_B * T / m_e -> T (Joules) = 0.5 * m_e * v_th^2
+    T_e_joules = 0.5 * mass_electrons * v_th_e**2
+    T_e_eV = T_e_joules / elementary_charge
+    # Lambda = 30.3 - 1.15*log10(n) + 3.44*log10(Te)  [for Te <= 50 eV]
+    lambda_low = 30.3 - 1.15 * jnp.log10(density) + 3.44 * jnp.log10(T_e_eV)
+
+    # Lambda = 32.2 - 1.15*log10(n) + 2.32*log10(Te)  [for Te > 50 eV]
+    lambda_high = 32.2 - 1.15 * jnp.log10(density) + 2.32 * jnp.log10(T_e_eV)
+
+    # 5. Select the correct Coulomb logarithm based on the 50 eV threshold
+    calculated_coulomb_log = jnp.where(T_e_eV <= 50.0, lambda_low, lambda_high)
+
+    # 6. Apply the user override fallback
+    coulomb_logarithm = jnp.where(
+        parameters["coulomb_logarithm"] == 0,
+        calculated_coulomb_log,
+        parameters["coulomb_logarithm"]
+    )
+
+    intra_collsion_frequency =   16 * jnp.sqrt(jnp.pi) * charge_electrons**4 * density * coulomb_logarithm / (3 * (4 * jnp.pi* epsilon_0)**2 * reduced_mass**2 * (parameters["vth_electrons_over_c_x"] * speed_of_light * jnp.sqrt(1+parameters["ion_temperature_over_electron_temperature_x"]*mass_ratio))**3)
+    inter_collsion_frequency =   16 * jnp.sqrt(jnp.pi) * charge_electrons**4 * density * coulomb_logarithm / ((4 * jnp.pi* epsilon_0)**2 *mass_electrons * parameters["ion_mass_over_proton_mass"] * mass_proton  * (parameters["vth_electrons_over_c_x"] * speed_of_light * jnp.sqrt(1+parameters["ion_temperature_over_electron_temperature_x"]*mass_ratio))**3)
 
     cond(parameters["print_info"],
         lambda _: jprint((
@@ -342,6 +376,8 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
             "Number of particles on a Debye cube: {}\n"
             "Relativistic gamma factor: Maximum {}, Average {}\n"
             "Charge x External electric field x Debye Length / Temperature: {}\n"
+            "Intra-collision frequency / Plasma frequency: {}\n"
+            "Inter-collision frequency / Plasma frequency: {}\n"
         ),length/(Debye_length_per_dx*dx),
           length/(speed_of_light/plasma_frequency),
           number_pseudoelectrons * weight / length,
@@ -357,7 +393,9 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
           number_pseudoelectrons * weight / length * (Debye_length_per_dx*dx)**3,
           jnp.max(relativistic_gamma_factor), jnp.mean(relativistic_gamma_factor),
           -charge_electrons * parameters["external_electric_field_amplitude"] * Debye_length_per_dx*dx / (mass_electrons * vth_electrons**2 / 2),
-        ), lambda _: None, operand=None)
+          intra_collsion_frequency / plasma_frequency,
+          inter_collsion_frequency / plasma_frequency
+        ),lambda _: None, operand=None)
 
     # **Fields Initialization**
     B_field = jnp.zeros((grid.size, 3))
@@ -411,6 +449,7 @@ def initialize_particles_fields(input_parameters={}, number_grid_points=50, numb
         "max_initial_vth_electrons": vth_electrons,
         "max_number_of_Picard_iterations_implicit_CN": max_number_of_Picard_iterations_implicit_CN,
         "number_of_particle_substeps_implicit_CN": number_of_particle_substeps_implicit_CN,
+        "coulomb_logarithm":coulomb_logarithm,
     })
 
     return parameters
@@ -584,11 +623,12 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         positions - (dt / 2) * velocities,
         parameters["charges"], dx, grid, *box_size,
         particle_BC_left, particle_BC_right)
-
+    seed=parameters["seed"]
+    key = random.PRNGKey(seed)
     if time_evolution_algorithm == 0:
         initial_carry = (
             E_field, B_field, positions_minus1_2, positions,
-            positions_plus1_2, velocities, qs, ms, q_ms,
+            positions_plus1_2, velocities, qs, ms, q_ms, key ,
         )
         step_func = lambda carry, step_index: Boris_step(
             carry, step_index, parameters, dx, dt, grid, box_size,

@@ -1,7 +1,7 @@
 from jax import lax
 import jax.numpy as jnp
 from jax.numpy.fft import fft, fftfreq
-from ._constants import epsilon_0, mu_0
+from ._constants import epsilon_0, mu_0, boltzmann_constant
 
 __all__ = ['diagnostics']
 
@@ -42,6 +42,8 @@ def diagnostics(output):
             name = "ions"
         else:
             name = f"species_{si}"
+        # Calculate temperature per dimension [Tx, Ty, Tz] 
+        temperature_s = mv * jnp.var(vel_s, axis=1)/ boltzmann_constant
 
         species_list.append({
             "name": name,
@@ -49,6 +51,7 @@ def diagnostics(output):
             "mass": float(mv),
             "positions": pos_s,
             "velocities": vel_s,
+            "temperature": temperature_s,
         })
 
     output["species"] = species_list
@@ -118,7 +121,9 @@ def diagnostics(output):
     # Sum over axis=-1 (particles) -> Result (Time,)
     total_ke_electrons = 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle, axis=-1)
     total_ke_ions      = 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle,      axis=-1)
-    
+    # Calculate legacy temperature per dimension [Tx, Ty, Tz]
+    temp_electrons = jnp.mean(mass_electrons_array) * jnp.var(output['velocity_electrons'], axis=1)/ boltzmann_constant
+    temp_ions      = jnp.mean(mass_ions_array)      * jnp.var(output['velocity_ions'], axis=1)/ boltzmann_constant
     # Debug print (optional, can be removed)
     # print(mass_electrons_array) 
 
@@ -134,6 +139,9 @@ def diagnostics(output):
         'kinetic_energy':           total_ke_electrons + total_ke_ions,
         'kinetic_energy_electrons': total_ke_electrons,
         'kinetic_energy_ions':      total_ke_ions,
+
+        'temperature_electrons': temp_electrons, 
+        'temperature_ions':      temp_ions,     
         
         'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
         'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
