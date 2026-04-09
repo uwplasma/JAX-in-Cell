@@ -37,7 +37,6 @@ input_params, solver_params = load_parameters(input_path)
 start_time = time.time()
 output = block_until_ready(simulation(input_params, **solver_params))
 diagnostics(output)
-# diagnostics(output) # Optional: comment out if you don't need the default plots
 print(f"Simulation complete. ({time.time() - start_time:.2f}s)")
 
 # -----------------------------------------------------------------------------
@@ -47,7 +46,7 @@ time_ts = np.arange(len(output["electric_field_energy"]))
 time_norm = time_ts / norm_factor
 
 # Weighting factor to get actual Temperature (K or eV)
-weight = 437022860000 
+weight = 4370228600000
 temp_e = np.array(output["temperature_electrons"][:, 0]) / weight
 temp_p = np.array(output["temperature_ions"][:, 0]) / weight
 
