@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from jax import lax,  vmap, jit
+from jax import lax,  vmap, jit, random
 from functools import partial
 from ._sources import current_density_periodic_CN, calculate_charge_density, current_density
 from ._boundary_conditions import set_BC_positions, set_BC_particles
@@ -13,6 +13,198 @@ except ModuleNotFoundError: import pip._vendor.tomli as tomllib
 
 __all__ = ['Boris_step', 'CN_step']
 
+@jit
+def collision_kernel(v1, v2, q1, q2, m1, m2, n_local, dt, coulomb_log, key):
+    """
+    Takizuka-Abe Binary Collision Kernel.
+    """
+
+    # --- 2. Calculate Scattering Physics ---
+    # Relative velocity
+    u_vec = v1 - v2
+    u_mag = jnp.linalg.norm(u_vec) + 1e-10  # Prevent div/0
+    
+    # Reduced mass: m_red = (m1*m2)/(m1+m2)
+    m_red = (m1 * m2) / (m1 + m2)
+    
+    variance_numerator =  ((q1 * q2)**2) * n_local * coulomb_log * dt
+    variance_denominator = 8.0 * jnp.pi * (epsilon_0**2) * (m_red**2) * (u_mag**3)
+    
+    variance_delta = variance_numerator / variance_denominator
+    
+    # Cap variance to prevent numerical explosions at extremely low relative velocities
+    variance_delta = jnp.minimum(variance_delta, 10.0)
+    
+    sigma_delta = jnp.sqrt(variance_delta)
+    # Generate Random Angles
+    key, k1, k2 = random.split(key, 3)
+    delta = random.normal(k1) * sigma_delta
+    phi   = random.uniform(k2, minval=0, maxval=2 * jnp.pi)
+
+    # --- 3. Vector Rotation (Geometry) ---
+    # Determine perpendicular vector n1
+    arbitrary = jnp.where(jnp.abs(u_vec[2]) < 0.8 * u_mag, 
+                          jnp.array([0., 0., 1.]), 
+                          jnp.array([1., 0., 0.]))
+    
+    n1 = jnp.cross(u_vec, arbitrary)
+    n1 = n1 / (jnp.linalg.norm(n1) + 1e-10)
+    n2 = jnp.cross(u_vec, n1) / u_mag
+
+    # Rotate u_vec
+    delta_sq = delta**2
+    sin_theta = (2.0 * delta) / (1.0 + delta_sq)
+    cos_theta = (1.0 - delta_sq) / (1.0 + delta_sq)
+    
+    u_new = (u_vec * cos_theta + 
+             u_mag * sin_theta * (n1 * jnp.cos(phi) + n2 * jnp.sin(phi)))
+    
+    # Change in velocity
+    delta_u = u_new - u_vec
+
+    # --- 4. Update Velocities (Conservation of Momentum) ---
+    # v1 changes by (m2/M_total) * delta_u
+    # v2 changes by (m1/M_total) * delta_u
+    
+    v1_new = v1 + (m2 / (m1 + m2)) * delta_u
+    v2_new = v2 - (m1 / (m1 + m2)) * delta_u
+    
+    return v1_new, v2_new
+
+
+
+@partial(jit, static_argnames=['num_cells'])
+def apply_binary_collisions(positions, velocities, qs, ms, dt, dx, grid_start, num_cells, parameters, rng_key):
+    """
+    Classical Takizuka-Abe Pairing:
+    1. Intra-species (Like-Like)
+    2. Inter-species (Binary matching index J, truncating excess)
+    """
+    N = len(positions)
+    coulomb_log = parameters["coulomb_logarithm"]
+    weight = parameters["weight"]
+    qs = jnp.squeeze(qs)
+    ms = jnp.squeeze(ms)
+
+    # 1. Assign particles to cells
+    cell_indices = jnp.floor((positions[:, 0] - grid_start) / dx).astype(int)
+    cell_indices = jnp.clip(cell_indices, 0, num_cells - 1)
+
+    # Species flag: 1 for Ion, 0 for Electron
+    is_ion = jnp.where(qs > 0, 1, 0)
+
+    # --- DENSITY CALCULATION ---
+    # We must explicitly define `length` for bincount to be JIT-compatible.
+    # We route opposite species to an out-of-bounds index (num_cells) and slice it off.
+    e_counts = jnp.bincount(jnp.where(is_ion == 0, cell_indices, num_cells), length=num_cells + 1)[:-1]
+    i_counts = jnp.bincount(jnp.where(is_ion == 1, cell_indices, num_cells), length=num_cells + 1)[:-1]
+
+    n_e_local = (e_counts[cell_indices] * weight) / dx
+    n_i_local = (i_counts[cell_indices] * weight) / dx
+    n_min_local = jnp.minimum(n_e_local, n_i_local) # Use lower one for inter-species
+
+    # Split PRNG keys
+    k1, k2, k3 = random.split(rng_key, 3)
+
+    # ==========================================
+    # PASS 1: INTRA-SPECIES (Like-Like)
+    # ==========================================
+    # Shuffle first to randomize which pairs meet within the same species
+    rand_perm = random.permutation(k1, N)
+    c_shuf = cell_indices[rand_perm]
+    ion_shuf = is_ion[rand_perm]
+
+    # Sort by Cell, then Species. 
+    # This groups all e's and i's together inside each cell.
+    sort_keys_intra = c_shuf * 10 + ion_shuf
+    intra_perm = jnp.argsort(sort_keys_intra)
+    final_intra_perm = rand_perm[intra_perm]
+
+    # Gather data for Intra-pass
+    v_intra = velocities[final_intra_perm]
+    q_intra = qs[final_intra_perm] / weight
+    m_intra = ms[final_intra_perm] / weight
+    c_intra = cell_indices[final_intra_perm]
+    ion_flag_intra = is_ion[final_intra_perm]
+    
+    # Use respective density (e or i) for like-like collisions
+    n_intra = jnp.where(ion_flag_intra == 1, n_i_local[final_intra_perm], n_e_local[final_intra_perm])
+
+    idx_1 = jnp.arange(0, N - 1, 2)
+    idx_2 = jnp.arange(1, N, 2)
+
+    # Mask: Must be same cell AND same species
+    mask_intra = (c_intra[idx_1] == c_intra[idx_2]) & (ion_flag_intra[idx_1] == ion_flag_intra[idx_2])
+
+    keys_intra = random.split(k2, len(idx_1))
+    v1_out_intra, v2_out_intra = vmap(collision_kernel, in_axes=(0,0,0,0,0,0,0,None,None,0))(
+        v_intra[idx_1], v_intra[idx_2], q_intra[idx_1], q_intra[idx_2], 
+        m_intra[idx_1], m_intra[idx_2], n_intra[idx_1], dt, coulomb_log, keys_intra
+    )
+
+    v1_final_intra = jnp.where(mask_intra[:, None], v1_out_intra, v_intra[idx_1])
+    v2_final_intra = jnp.where(mask_intra[:, None], v2_out_intra, v_intra[idx_2])
+
+    v_after_intra = jnp.zeros_like(velocities)
+    v_after_intra = v_after_intra.at[idx_1].set(v1_final_intra)
+    v_after_intra = v_after_intra.at[idx_2].set(v2_final_intra)
+    if N % 2 != 0: v_after_intra = v_after_intra.at[-1].set(v_intra[-1])
+
+    # ==========================================
+    # PASS 2: INTER-SPECIES (Binary J-matching)
+    # ==========================================
+    # We need to find the local index "J" for each particle. 
+    # Since the array is currently sorted by (Cell, Species), we look for boundaries.
+    changes = jnp.concatenate([
+        jnp.array([True]), 
+        (c_intra[1:] != c_intra[:-1]) | (ion_flag_intra[1:] != ion_flag_intra[:-1])
+    ])
+    # JAX trick to create local arange counters: [0, 1, 2, 0, 1, 0, ...]
+    group_start_indices = lax.cummax(jnp.where(changes, jnp.arange(N), 0))
+    J_ranks_intra = jnp.arange(N) - group_start_indices
+
+    # Map arrays back to original particle indices temporarily to re-sort
+    inv_intra_perm = jnp.argsort(final_intra_perm)
+    v_base_inter = v_after_intra[inv_intra_perm]
+    J_ranks = J_ranks_intra[inv_intra_perm]
+
+    # SORT 2: Sort by (Cell, J_rank, Species)
+    # This guarantees the J-th electron and J-th ion in a cell are adjacent!
+    sort_keys_inter = cell_indices * (N * 10) + J_ranks * 10 + is_ion
+    inter_perm = jnp.argsort(sort_keys_inter)
+
+    v_inter = v_base_inter[inter_perm]
+    q_inter = qs[inter_perm] / weight
+    m_inter = ms[inter_perm] / weight
+    c_inter = cell_indices[inter_perm]
+    ion_flag_inter = is_ion[inter_perm]
+    J_inter = J_ranks[inter_perm]
+    n_min_inter = n_min_local[inter_perm]
+
+    # Mask: Must be same cell, SAME J, but DIFFERENT species!
+    # If a particle is truncated, it won't have a J match, and this mask becomes False.
+    mask_inter = (c_inter[idx_1] == c_inter[idx_2]) & \
+                 (J_inter[idx_1] == J_inter[idx_2]) & \
+                 (ion_flag_inter[idx_1] != ion_flag_inter[idx_2])
+
+    keys_inter = random.split(k3, len(idx_1))
+    v1_out_inter, v2_out_inter = vmap(collision_kernel, in_axes=(0,0,0,0,0,0,0,None,None,0))(
+        v_inter[idx_1], v_inter[idx_2], q_inter[idx_1], q_inter[idx_2], 
+        m_inter[idx_1], m_inter[idx_2], n_min_inter[idx_1], dt, coulomb_log, keys_inter
+    )
+
+    v1_final_inter = jnp.where(mask_inter[:, None], v1_out_inter, v_inter[idx_1])
+    v2_final_inter = jnp.where(mask_inter[:, None], v2_out_inter, v_inter[idx_2])
+
+    v_final_sorted = jnp.zeros_like(velocities)
+    v_final_sorted = v_final_sorted.at[idx_1].set(v1_final_inter)
+    v_final_sorted = v_final_sorted.at[idx_2].set(v2_final_inter)
+    if N % 2 != 0: v_final_sorted = v_final_sorted.at[-1].set(v_inter[-1])
+
+    # Final unsort
+    inv_inter_perm = jnp.argsort(inter_perm)
+    return v_final_sorted[inv_inter_perm]
+
 #Boris step
 def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
                       particle_BC_left, particle_BC_right,
@@ -20,12 +212,23 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
                       field_solver):
 
     (E_field, B_field, positions_minus1_2, positions,
-    positions_plus1_2, velocities, qs, ms, q_ms) = carry
+        positions_plus1_2, velocities, qs, ms, q_ms, rng_key) = carry
 
     fpasses  = parameters["filter_passes"]
     falpha   = parameters["filter_alpha"]
     fstrides = parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
-    
+
+    # --- 1. Nanbu/Takizuka-Abe Collision Step ---
+    # We apply collisions to the current velocities 'velocities' (v_n)
+    # before they are used to push the position or updated to v_{n+1}
+
+    rng_key, col_key = random.split(rng_key)
+    num_cells = len(grid)
+    velocities = apply_binary_collisions(
+        positions, velocities, qs, ms, dt, dx, grid[0], num_cells,
+        parameters, col_key
+    )
+
     J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
                 filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
@@ -83,8 +286,8 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     positions = positions_plus1
 
     # Prepare state for the next step
-    carry = (E_field, B_field, positions_minus1_2, positions,
-            positions_plus1_2, velocities, qs, ms, q_ms)
+    new_carry = (E_field, B_field, positions_minus1_2, positions,
+                positions_plus1_2, velocities, qs, ms, q_ms, rng_key)
 
     # Collect data for storage
     charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right,
@@ -92,7 +295,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
                                               field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     step_data = (positions, velocities, E_field, B_field, J, charge_density)
     
-    return carry, step_data
+    return new_carry, step_data
 
 
 
