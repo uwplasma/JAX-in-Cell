@@ -123,7 +123,6 @@ def diagnostics(output):
         total_ke_electrons = 0.5 * jnp.sum(mass_electrons_t * v_sq_electrons_per_particle, axis=-1)
         total_ke_ions      = 0.5 * jnp.sum(mass_ions_t      * v_sq_ions_per_particle,      axis=-1)
     else:
-        # Fallback: fixed initial masses — correct for BC=0/1/2, wrong for BC=3
         total_ke_electrons = 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle, axis=-1)
         total_ke_ions      = 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle,      axis=-1)
 

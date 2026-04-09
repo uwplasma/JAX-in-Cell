@@ -4,7 +4,7 @@ from ._constants import speed_of_light
 
 __all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
 
-def set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight, COR_left, COR_right, max_vx=1.0):
+def set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight=1.0, COR_left=1.0, COR_right=1.0, max_vx=1.0):
     """
     Applies boundary conditions (BCs) to a single particle's position and velocity.
 
@@ -55,8 +55,8 @@ def set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y
         default=x_n[0]
     )
 
-    # Compute vel_dep_weight from incoming velocity before the flip
-    vel_dep_weight = jnp.clip(1.0 - jnp.abs(v_n[0]) / max_vx, 0.0, 1.0)
+    # Compute vel_dep_weight from incoming velocity before the flip, set 
+    vel_dep_weight = jnp.clip(1.0 - jnp.abs(v_n[0]) / (max_vx + 1e-6), 0.0, 1.0)
 
     # Update velocities for reflective or absorbing boundaries
     v_n = jnp.select(
@@ -85,7 +85,7 @@ def set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y
     return jnp.array([x_n0, x_n1, x_n2]), v_n, q, q_m, m
 
 @jit
-def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight, COR_left, COR_right):
+def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight=1.0, COR_left=1.0, COR_right=1.0):
     """
     Applies boundary conditions to all particles in parallel.
 
@@ -100,7 +100,10 @@ def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y,
     Returns:
         tuple: Updated positions, velocities, charges, masses, and charge-to-mass ratios for all particles.
     """
-    max_vx = jnp.max(jnp.abs(vs_n[:, 0]))
+    # Compute max_vx using only active particles (non-zero mass and charge)
+    active_mask = (ms > 0) & (qs != 0)
+    active_vx = jnp.where(active_mask, vs_n[:, 0], 0.0)
+    max_vx = jnp.max(jnp.abs(active_vx))
     xs_n, vs_n, qs, q_ms, ms = vmap(
         lambda x_n, v_n, q, q_m, m: set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight, COR_left, COR_right, max_vx)
     )(xs_n, vs_n, qs, q_ms, ms)

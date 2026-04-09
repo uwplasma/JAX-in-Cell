@@ -111,6 +111,9 @@ def test_boris_step_relativistic_and_field_solver_branch():
         particle_BC_right=particle_BC_right,
         field_BC_left=field_BC_left,
         field_BC_right=field_BC_right,
+        mixed_BC_weight=1.0,
+        COR_left=1.0,
+        COR_right=1.0,
         field_solver=1,  # triggers E_from_* branch
     )
 
@@ -140,10 +143,11 @@ def test_boris_step_relativistic_and_field_solver_branch():
     assert ms_new.shape == (n_particles, 1)
     assert q_ms_new.shape == (n_particles, 1)
 
-    # step_data = (positions, velocities, E_field, B_field, J, charge_density)
-    pos_step, vel_step, E_step, B_step, J_step, rho_step = step_data
+    # step_data = (positions, velocities, masses, E_field, B_field, J, charge_density)
+    pos_step, vel_step, ms_step, E_step, B_step, J_step, rho_step = step_data
     assert pos_step.shape == (n_particles, 3)
     assert vel_step.shape == (n_particles, 3)
+    assert ms_step.shape == (n_particles, 1)
     assert E_step.shape == (G, 3)
     assert B_step.shape == (G, 3)
     assert J_step.shape == (G, 3)
@@ -194,6 +198,9 @@ def test_cn_step_shapes_and_substepping():
         particle_BC_right=particle_BC_right,
         field_BC_left=field_BC_left,
         field_BC_right=field_BC_right,
+        mixed_BC_weight=1.0,
+        COR_left=1.0,
+        COR_right=1.0,
         num_substeps=num_substeps,
     )
 
@@ -209,10 +216,11 @@ def test_cn_step_shapes_and_substepping():
     assert ms_new.shape == (n_particles, 1)
     assert q_ms_new.shape == (n_particles, 1)
 
-    # step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
-    pos_step, vel_step, E_step, B_step, J_step, rho_step = step_data
+    # step_data = (positions_plus1, velocities_plus1, masses_new, E_field, B_field, J, charge_density)
+    pos_step, vel_step, ms_step, E_step, B_step, J_step, rho_step = step_data
     assert pos_step.shape == (n_particles, 3)
     assert vel_step.shape == (n_particles, 3)
+    assert ms_step.shape == (n_particles, 1)
     assert E_step.shape == (G, 3)
     assert B_step.shape == (G, 3)
     assert J_step.shape == (G, 3)

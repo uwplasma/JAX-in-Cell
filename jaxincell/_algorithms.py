@@ -224,7 +224,7 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     final_carry, J, _, _ = lax.while_loop(cond_fn, body_fn, state0)
     
-    (E_prev, E_final, B_final, _, positions_new, _, velocities_new, _, _, _, _) = final_carry
+    (E_prev, E_final, B_final, _, positions_new, _, velocities_new, charges_new, masses_new, charge_ratios_new, _) = final_carry
 
     # Store Data
     E_field = E_final
@@ -232,10 +232,10 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     positions_plus1 = positions_new
     velocities_plus1 = velocities_new
     
-    charge_density = calculate_charge_density(positions_new, qs, dx, grid, particle_BC_left, particle_BC_right,
+    charge_density = calculate_charge_density(positions_new, charges_new, dx, grid, particle_BC_left, particle_BC_right,
                                               filter_passes=0, filter_alpha=0.5, filter_strides=(1, 2, 4),
                                               field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-    carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
-    step_data = (positions_plus1, velocities_plus1, ms, E_field, B_field, J, charge_density)
+    carry = (E_field, B_field, positions_plus1, velocities_plus1, charges_new, masses_new, charge_ratios_new)
+    step_data = (positions_plus1, velocities_plus1, masses_new, E_field, B_field, J, charge_density)
 
     return carry, step_data

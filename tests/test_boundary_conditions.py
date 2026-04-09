@@ -548,8 +548,8 @@ def test_set_BC_particles_bc4():
     # Particle 2 (inside): no change
     assert jnp.allclose(xs_n_updated, jnp.array([[4.0, 0.0, 0.0], [-4.0, 0.0, 0.0], [0.0, 0.0, 0.0]])), "bc4 batch: positions wrong"
     assert jnp.allclose(vs_n_updated, jnp.array([[-2.0, 0.5, 0.3], [1.0, 0.5, 0.3], [0.5, 0.5, 0.5]])),  "bc4 batch: velocities wrong"
-    assert jnp.allclose(qs_updated,   jnp.array([2.0 * 0.0, 2.0 * 0.5, 2.0])),  "bc4 batch: charges wrong"
-    assert jnp.allclose(ms_updated,   jnp.array([4.0 * 0.0, 4.0 * 0.5, 4.0])),  "bc4 batch: masses wrong"
+    assert jnp.allclose(qs_updated,   jnp.array([2.0 * 0.0, 2.0 * 0.5, 2.0]), atol=1e-5),  "bc4 batch: charges wrong"
+    assert jnp.allclose(ms_updated,   jnp.array([4.0 * 0.0, 4.0 * 0.5, 4.0]), atol=1e-5),  "bc4 batch: masses wrong"
     assert jnp.allclose(q_ms_updated, q_ms),                                      "bc4 batch: q_m must not change"
 
 

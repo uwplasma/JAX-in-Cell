@@ -233,7 +233,10 @@ These parameters control the numerical discretization, algorithm selection, and 
 | `external_magnetic_field_amplitude`  | Amplitude of external B-field (cosine). |
 | `external_magnetic_field_wavenumber` | Wavenumber of external B-field. |
 | **Boundary Conditions** | | |
-| `particle_BC_left,right` | Left,right particle boundary conditon (0: periodic, 1: reflective, 2: absorbing). |
+| `particle_BC_left,right` | Left/right particle boundary condition: **0** periodic, **1** reflective, **2** absorbing, **3** mixed (static weight), **4** mixed (velocity-dependent weight). |
+| `field_BC_left,right` | Left/right field boundary condition: **0** periodic, **1** Dirichlet (E=0 at wall). |
+| `mixed_BC_weight` | Fraction of each macroparticle reflected at a BC=3 wall (0 = fully absorbing, 1 = fully reflective). |
+| `COR_left,right` | Coefficient of restitution at the left/right wall for reflective BCs. (1.0 = elastic, 0.0 = fully inelastic.) |
 | **Numerics** | | |
 | `filter_passes` | Number of passes of the digital filter for charge/current density. |
 | `filter_alpha`  | Smoothing strength (0.0 to 1.0). |

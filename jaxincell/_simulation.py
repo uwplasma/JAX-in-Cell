@@ -118,15 +118,15 @@ def initialize_simulation_parameters(user_parameters={}):
         "ion_mass_over_proton_mass": 1,           # Ion mass in units of the proton mass
         "relativistic": False,                    # Use relativistic Boris pusher
         "tolerance_Picard_iterations_implicit_CN": 1e-6, # Tolerance for Picard iterations in implicit Crank-Nicholson method
-        "mixed_BC_weight": 1.0,                      # Fraction of macroparticle reflected at mixed BC wall (BC=3); must be between 0 and 1
-        "COR_left":  1.0,                            # Coefficient of restitution at left wall (1=elastic, 0=fully inelastic); applies to BC=1,3,4
-        "COR_right": 1.0,                            # Coefficient of restitution at right wall
 
         # Boundary conditions
         "particle_BC_left":  0,                   # Left boundary condition for particles
         "particle_BC_right": 0,                   # Right boundary condition for particles
         "field_BC_left":     0,                   # Left boundary condition for fields
         "field_BC_right":    0,                   # Right boundary condition for fields
+        "mixed_BC_weight":   1.0,                 # Fraction of macroparticle reflected at mixed BC wall (BC=3); must be between 0 and 1
+        "COR_left":          1.0,                 # Coefficient of restitution at left wall (1=elastic, 0=fully inelastic)
+        "COR_right":         1.0,                 # Coefficient of restitution at right wall
 
         # External fields (initialized to zero)
         "external_electric_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
@@ -568,18 +568,6 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     COR_left  = parameters["COR_left"]
     COR_right = parameters["COR_right"]
 
-    assert 0.0 <= COR_left  <= 1.0, f"COR_left must be between 0 and 1, got {COR_left}"
-    assert 0.0 <= COR_right <= 1.0, f"COR_right must be between 0 and 1, got {COR_right}"
-
-    # Coerce degenerate mixed_BC_weight values: weight=0 → fully absorbing (BC=2), weight=1 → fully reflective (BC=1)
-    assert 0.0 <= mixed_BC_weight <= 1.0, f"mixed_BC_weight must be between 0 and 1, got {mixed_BC_weight}"
-    if mixed_BC_weight == 0.0:
-        particle_BC_left  = 2 if particle_BC_left  == 3 else particle_BC_left
-        particle_BC_right = 2 if particle_BC_right == 3 else particle_BC_right
-    elif mixed_BC_weight == 1.0:
-        particle_BC_left  = 1 if particle_BC_left  == 3 else particle_BC_left
-        particle_BC_right = 1 if particle_BC_right == 3 else particle_BC_right
-
     # **Use provided positions/velocities if given, otherwise use defaults**
     if positions is None:
         positions = parameters["initial_positions"]
@@ -596,7 +584,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
         positions + (dt / 2) * velocities, velocities,
         parameters["charges"], parameters["masses"], parameters["charge_to_mass_ratios"],
-        dx, grid, *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight, COR_left, COR_right)
+        dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
     positions_minus1_2 = set_BC_positions(
         positions - (dt / 2) * velocities,
@@ -619,8 +607,9 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         )
         step_func = lambda carry, step_index: CN_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
-            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, mixed_BC_weight,
-            parameters["number_of_particle_substeps_implicit_CN"], COR_left, COR_right
+            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right,
+            mixed_BC_weight, parameters["number_of_particle_substeps_implicit_CN"],
+            COR_left, COR_right
         )
 
     @scan_tqdm(total_steps)
