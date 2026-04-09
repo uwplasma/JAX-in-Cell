@@ -73,6 +73,7 @@ try:
     
     print(f"Unified Fit Result:")
     print(f"  Gamma (Collision Rate): {fit_gamma:.6f} +/- {perr[1]:.6f}")
+    print(f"  Collision Rate: {fit_gamma*3/2:.6f} ")
     print(f"  Initial Delta T:       {fit_delta_0:.4e}")
 
     # Generate the symmetric fits for plotting
