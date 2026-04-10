@@ -1,13 +1,11 @@
 ## bc_parameter_comparison.py
 # Compares BC=3 (mixed, static weight) at three different weight values and BC=4
-# (velocity-dependent weight). Runs all simulations and show kinetic energy
+# (velocity-dependent weight). Runs all simulations and shows kinetic energy
 # comparison.
-from jaxincell import plot, simulation, diagnostics
+from jaxincell import simulation, diagnostics
 from jax import block_until_ready
 import matplotlib.pyplot as plt
 import numpy as np
-
-####################################################################################################
 
 input_parameters = {
     "length"                                        : 1,     # dimensions of the simulation box in (x, y, z)
@@ -34,7 +32,6 @@ configs = [
     {"label": "BC=4 (vel-dep.)",   "particle_BC_left": 4, "particle_BC_right": 4},
 ]
 
-####################################################################################################
 
 outputs = []
 for cfg in configs:
@@ -46,7 +43,6 @@ for cfg in configs:
     output["_label"] = label
     outputs.append(output)
 
-####################################################################################################
 
 # Kinetic energy comparison across all configurations
 plt.figure(figsize=(8, 5))
@@ -61,9 +57,3 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-####################################################################################################
-
-# Full animated plot for each configuration (close each window to advance)
-for output in outputs:
-    print(f"\nPlotting {output['_label']} (close window to continue)...")
-    plot(output, animation_interval=20)
