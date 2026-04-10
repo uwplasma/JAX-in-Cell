@@ -50,7 +50,6 @@ def load_parameters(input_file):
         solver_parameters['number_pseudoparticles_species'] = ()
     if 'source_parameters' in parameters:
         pass # currently no source parameters, but are added in a separate branch, so this is a placeholder for future loading of source parameters
-    G = solver_parameters["number_grid_points"]
     return input_parameters, solver_parameters
 
 def initialize_simulation_parameters(user_parameters={}):
