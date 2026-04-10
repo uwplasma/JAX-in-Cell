@@ -108,19 +108,23 @@ def diagnostics(output):
     integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
     integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
 
-    # CHANGED: Calculate v^2 per particle (sum over spatial dims x,y,z only)
+    # Calculate v^2 per particle (sum over spatial dims x,y,z only)
     # Shape becomes (Time, N_particles)
     v_sq_electrons_per_particle = jnp.sum(output['velocity_electrons']**2, axis=-1)
     v_sq_ions_per_particle      = jnp.sum(output['velocity_ions']**2,      axis=-1)
 
-    # CHANGED: Calculate KE = sum(0.5 * m_i * v_i^2)
-    # Mass (N,) broadcasts against V_sq (Time, N) -> Result (Time, N)
-    # Sum over axis=-1 (particles) -> Result (Time,)
-    total_ke_electrons = 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle, axis=-1)
-    total_ke_ions      = 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle,      axis=-1)
-    
-    # Debug print (optional, can be removed)
-    # print(mass_electrons_array) 
+    # Calculate KE = sum(0.5 * m_i(t) * v_i^2)
+    # Use time-varying masses if available (needed for mixed BC where mass changes per bounce).
+    # masses_over_time has shape (Time, N, 1); squeeze to (Time, N) then select by species.
+    if "masses_over_time" in output:
+        masses_t = jnp.squeeze(output["masses_over_time"], axis=-1)  # (Time, N)
+        mass_electrons_t = masses_t[:, esel]  # (Time, N_e)
+        mass_ions_t      = masses_t[:, isel]  # (Time, N_i)
+        total_ke_electrons = 0.5 * jnp.sum(mass_electrons_t * v_sq_electrons_per_particle, axis=-1)
+        total_ke_ions      = 0.5 * jnp.sum(mass_ions_t      * v_sq_ions_per_particle,      axis=-1)
+    else:
+        total_ke_electrons = 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle, axis=-1)
+        total_ke_ions      = 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle,      axis=-1)
 
     output.update({ 
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,

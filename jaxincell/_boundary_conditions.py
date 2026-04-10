@@ -4,7 +4,7 @@ from ._constants import speed_of_light
 
 __all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
 
-def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
+def set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight=1.0, COR_left=1.0, COR_right=1.0, max_vx=1.0):
     """
     Applies boundary conditions (BCs) to a single particle's position and velocity.
 
@@ -13,6 +13,7 @@ def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, b
         v_n (jnp.ndarray): Particle velocity as a 1D array [vx, vy, vz].
         q (float): Particle charge.
         q_m (float): Charge-to-mass ratio of the particle.
+        m (float): Particle mass.
         dx (float): Grid spacing.
         grid (jnp.ndarray): Discretized grid positions.
         box_size_x, box_size_y, box_size_z (float): Box dimensions in x, y, and z directions.
@@ -20,68 +21,71 @@ def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, b
             0: Periodic
             1: Reflective
             2: Absorbing
+            3: Mixed (mixed_BC_weight fraction reflected — scales q and m, reflects position and velocity)
+            4: Velocity-dependent mixed (weight = clamp(1 - |vx| / max_vx, 0, 1); slow particles reflect
+               more, fast particles absorbed more; q_m unchanged)
+        mixed_BC_weight (float): Fraction of macroparticle reflected for BC=3; between 0 and 1.
+        max_vx (float): Maximum |vx| across all particles, used to normalize BC=4 weights.
+        COR_left (float): Coefficient of restitution at the left wall; between 0 and 1.
+            1 = perfectly elastic (no energy loss), 0 = fully inelastic (particle stops).
+        COR_right (float): Coefficient of restitution at the right wall; between 0 and 1.
 
     Returns:
-        tuple: Updated position (x_n), velocity (v_n), charge (q), and charge-to-mass ratio (q_m).
+        tuple: Updated position (x_n), velocity (v_n), charge (q), charge-to-mass ratio (q_m), and mass (m).
     """
     # Apply periodic BCs in y and z directions
     x_n1 = (x_n[1] + box_size_y / 2) % box_size_y - box_size_y / 2
     x_n2 = (x_n[2] + box_size_z / 2) % box_size_z - box_size_z / 2
 
+    hit_left_boundary = x_n[0] < -box_size_x / 2
+    hit_right_boundary = x_n[0] > box_size_x / 2
+
     # Apply boundary conditions in x-direction
-    x_n0 = jnp.where(
-        x_n[0] < -box_size_x / 2,
-        jnp.where(
-            BC_left == 0,  # Periodic
-            (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2,
-            jnp.where(
-                BC_left == 1,  # Reflective
-                -box_size_x - x_n[0],
-                jnp.where(BC_left == 2, grid[0] - 1.5 * dx, x_n[0]),  # Absorbing
-            ),
-        ),
-        jnp.where(
-            x_n[0] > box_size_x / 2,
-            jnp.where(
-                BC_right == 0,  # Periodic
-                (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2,
-                jnp.where(
-                    BC_right == 1,  # Reflective
-                    box_size_x - x_n[0],
-                    jnp.where(BC_right == 2, grid[-1] + 3 * dx, x_n[0]),  # Absorbing
-                ),
-            ),
-            x_n[0],
-        ),
+    x_n0 = jnp.select(
+        [hit_left_boundary, hit_right_boundary],
+        [jnp.select(
+            # Periodic, Reflective, Absorbing, Mixed, Vel-dep Mixed
+            [BC_left == 0, BC_left == 1, BC_left == 2, BC_left == 3, BC_left == 4],
+            [(x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2, -box_size_x - x_n[0], grid[0] - 1.5 * dx, -box_size_x - x_n[0], -box_size_x - x_n[0]]
+        ), jnp.select(
+            # Periodic, Reflective, Absorbing, Mixed, Vel-dep Mixed
+            [BC_right == 0, BC_right == 1, BC_right == 2, BC_right == 3, BC_right == 4],
+            [(x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2, box_size_x - x_n[0], grid[-1] + 3 * dx, box_size_x - x_n[0], box_size_x - x_n[0]]
+        )],
+        default=x_n[0]
     )
+
+    # Compute vel_dep_weight from incoming velocity before the flip, set 
+    vel_dep_weight = jnp.clip(1.0 - jnp.abs(v_n[0]) / (max_vx + 1e-6), 0.0, 1.0)
 
     # Update velocities for reflective or absorbing boundaries
-    v_n = jnp.where(
-        x_n[0] < -box_size_x / 2,
-        jnp.where(
-            BC_left == 0,  # Periodic
-            v_n,
-            jnp.where(BC_left == 1, v_n * jnp.array([-1, 1, 1]), jnp.array([0, 0, 0])),  # Reflective or Absorbing
-        ),
-        jnp.where(
-            x_n[0] > box_size_x / 2,
-            jnp.where(
-                BC_right == 0,  # Periodic
-                v_n,
-                jnp.where(BC_right == 1, v_n * jnp.array([-1, 1, 1]), jnp.array([0, 0, 0])),  # Reflective or Absorbing
-            ),
-            v_n,
-        ),
+    v_n = jnp.select(
+        [hit_left_boundary, hit_right_boundary],
+        [jnp.select(
+            # Periodic, Reflective, Absorbing, Mixed, Vel-dep Mixed
+            [BC_left == 0, BC_left == 1, BC_left == 2, BC_left == 3, BC_left == 4],
+            [v_n, v_n * jnp.array([-COR_left, 1, 1]), jnp.array([0, 0, 0]), v_n * jnp.array([-COR_left, 1, 1]), v_n * jnp.array([-COR_left, 1, 1])]
+        ), jnp.select(
+            # Periodic, Reflective, Absorbing, Mixed, Vel-dep Mixed
+            [BC_right == 0, BC_right == 1, BC_right == 2, BC_right == 3, BC_right == 4],
+            [v_n, v_n * jnp.array([-COR_right, 1, 1]), jnp.array([0, 0, 0]), v_n * jnp.array([-COR_right, 1, 1]), v_n * jnp.array([-COR_right, 1, 1])]
+        )],
+        default=v_n
     )
 
-    # Nullify charges and charge-to-mass ratio for absorbing BCs
-    q   = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q)
-    q_m = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q_m)
+    # Nullify charges and charge-to-mass ratio for absorbing BCs and adjust mass and charge for mixed BCs
+    absorbed     = (hit_left_boundary & (BC_left == 2)) | (hit_right_boundary & (BC_right == 2))
+    mixed        = (hit_left_boundary & (BC_left == 3)) | (hit_right_boundary & (BC_right == 3))
+    vel_dep_mixed = (hit_left_boundary & (BC_left == 4)) | (hit_right_boundary & (BC_right == 4))
 
-    return jnp.array([x_n0, x_n1, x_n2]), v_n, q, q_m
+    q   = jnp.where(absorbed, 0, jnp.where(mixed, q * mixed_BC_weight, jnp.where(vel_dep_mixed, q * vel_dep_weight, q)))
+    q_m = jnp.where(absorbed, 0, q_m)
+    m   = jnp.where(mixed, m * mixed_BC_weight, jnp.where(vel_dep_mixed, m * vel_dep_weight, m))
+
+    return jnp.array([x_n0, x_n1, x_n2]), v_n, q, q_m, m
 
 @jit
-def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
+def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight=1.0, COR_left=1.0, COR_right=1.0):
     """
     Applies boundary conditions to all particles in parallel.
 
@@ -96,9 +100,13 @@ def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y,
     Returns:
         tuple: Updated positions, velocities, charges, masses, and charge-to-mass ratios for all particles.
     """
-    xs_n, vs_n, qs, q_ms = vmap(
-        lambda x_n, v_n, q, q_m: set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right)
-    )(xs_n, vs_n, qs, q_ms)
+    # Compute max_vx using only active particles (non-zero mass and charge)
+    active_mask = (ms > 0) & (qs != 0)
+    active_vx = jnp.where(active_mask, vs_n[:, 0], 0.0)
+    max_vx = jnp.max(jnp.abs(active_vx))
+    xs_n, vs_n, qs, q_ms, ms = vmap(
+        lambda x_n, v_n, q, q_m, m: set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight, COR_left, COR_right, max_vx)
+    )(xs_n, vs_n, qs, q_ms, ms)
     return xs_n, vs_n, qs, ms, q_ms
 
 def set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
@@ -115,17 +123,21 @@ def set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_
     x_n1 = (x_n[1] + box_size_y / 2) % box_size_y - box_size_y / 2
     x_n2 = (x_n[2] + box_size_z / 2) % box_size_z - box_size_z / 2
 
-    x_n0 = jnp.where(
-        x_n[0] < -box_size_x / 2,
-        jnp.where(BC_left == 0, (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2, 
-                  jnp.where(BC_left == 1, -box_size_x - x_n[0], grid[0] - 1.5 * dx)),  # Absorbing
-        jnp.where(
-            x_n[0] > box_size_x / 2,
-            jnp.where(BC_right == 0, (x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2,
-                      jnp.where(BC_right == 1, box_size_x - x_n[0], grid[-1] + 3 * dx)),  # Absorbing
-            x_n[0],
-        ),
+    hit_left_boundary = x_n[0] < -box_size_x / 2
+    hit_right_boundary = x_n[0] > box_size_x / 2
+
+    x_n0 = jnp.select(
+        [hit_left_boundary, hit_right_boundary],
+        [jnp.select(
+            [BC_left == 0, BC_left == 1, BC_left == 2, BC_left == 3, BC_left == 4],
+            [(x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2, -box_size_x - x_n[0], grid[0] - 1.5 * dx, -box_size_x - x_n[0], -box_size_x - x_n[0]]
+        ), jnp.select(
+            [BC_right == 0, BC_right == 1, BC_right == 2, BC_right == 3, BC_right == 4],
+            [(x_n[0] + box_size_x / 2) % box_size_x - box_size_x / 2, box_size_x - x_n[0], grid[-1] + 3 * dx, box_size_x - x_n[0], box_size_x - x_n[0]]
+        )],
+        x_n[0]
     )
+
     return jnp.array([x_n0, x_n1, x_n2])
 
 @jit

@@ -124,6 +124,9 @@ def initialize_simulation_parameters(user_parameters={}):
         "particle_BC_right": 0,                   # Right boundary condition for particles
         "field_BC_left":     0,                   # Left boundary condition for fields
         "field_BC_right":    0,                   # Right boundary condition for fields
+        "mixed_BC_weight":   1.0,                 # Fraction of macroparticle reflected at mixed BC wall (BC=3); must be between 0 and 1
+        "COR_left":          1.0,                 # Coefficient of restitution at left wall (1=elastic, 0=fully inelastic)
+        "COR_right":         1.0,                 # Coefficient of restitution at right wall
 
         # External fields (initialized to zero)
         "external_electric_field_amplitude":  0,   # Amplitude of sinusoidal (cos) perturbation in x
@@ -561,6 +564,9 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     field_BC_right = parameters["field_BC_right"]
     particle_BC_left = parameters["particle_BC_left"]
     particle_BC_right = parameters["particle_BC_right"]
+    mixed_BC_weight = parameters["mixed_BC_weight"]
+    COR_left  = parameters["COR_left"]
+    COR_right = parameters["COR_right"]
 
     # **Use provided positions/velocities if given, otherwise use defaults**
     if positions is None:
@@ -592,7 +598,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         )
         step_func = lambda carry, step_index: Boris_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
-            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, field_solver
+            particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, mixed_BC_weight, field_solver, COR_left, COR_right
         )
     else:
         initial_carry = (
@@ -602,7 +608,8 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         step_func = lambda carry, step_index: CN_step(
             carry, step_index, parameters, dx, dt, grid, box_size,
             particle_BC_left, particle_BC_right, field_BC_left, field_BC_right,
-            parameters["number_of_particle_substeps_implicit_CN"]
+            mixed_BC_weight, parameters["number_of_particle_substeps_implicit_CN"],
+            COR_left, COR_right
         )
 
     @scan_tqdm(total_steps)
@@ -614,7 +621,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
     _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
 
     # Unpack results
-    positions_over_time, velocities_over_time, electric_field_over_time, \
+    positions_over_time, velocities_over_time, masses_over_time, electric_field_over_time, \
     magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
 
     # **Output results**
@@ -632,6 +639,7 @@ def simulation(input_parameters={}, number_grid_points=100, number_pseudoelectro
         "positions": positions_over_time,
         "velocities": velocities_over_time,
         "masses": parameters["masses"],
+        "masses_over_time": masses_over_time,
         "charges": parameters["charges"],
         "electric_field":  electric_field_over_time,
         "magnetic_field":  magnetic_field_over_time,
