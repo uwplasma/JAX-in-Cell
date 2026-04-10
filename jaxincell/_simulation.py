@@ -170,10 +170,10 @@ def initialize_solver_parameters(solver_parameters={}):
         Dictionary containing all solver parameters, with user-provided values overriding defaults.
     """
     default_solver_parameters = {
-        "number_grid_points": 100,
-        "number_pseudoelectrons": 3000,
+        "number_grid_points": 50,
+        "number_pseudoelectrons": 500,
         "number_pseudoparticles_species": None,
-        "total_steps": 1000,
+        "total_steps": 350,
         "field_solver": 0,
         "time_evolution_algorithm": 0,
         "max_number_of_Picard_iterations_implicit_CN": 20,
