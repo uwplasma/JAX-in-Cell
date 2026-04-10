@@ -17,14 +17,14 @@ def _run_small_simulation(total_steps=10, number_grid_points=8, number_pseudoele
         "grid_points_per_Debye_length": 1.0,
         "print_info": False,  # avoid jprint noise in tests
     }
+    solver_parameters = {
+        "number_grid_points": number_grid_points,
+        "number_pseudoelectrons": number_pseudoelectrons,
+        "total_steps": total_steps,
+        "field_solver": 0,  # Curl_EB
+    }
 
-    output = simulation(
-        input_parameters,
-        number_grid_points=number_grid_points,
-        number_pseudoelectrons=number_pseudoelectrons,
-        total_steps=total_steps,
-        field_solver=0,  # Curl_EB
-    )
+    output = simulation(input_parameters, solver_parameters)
     return output
 
 
@@ -141,21 +141,16 @@ def test_simulation_deterministic_with_same_parameters():
         "seed": 1234,
     }
 
-    out1 = simulation(
-        input_parameters,
-        number_grid_points=number_grid_points,
-        number_pseudoelectrons=number_pseudoelectrons,
-        total_steps=total_steps,
-        field_solver=0,
-    )
+    solver_parameters = {
+        "number_grid_points": number_grid_points,
+        "number_pseudoelectrons": number_pseudoelectrons,
+        "total_steps": total_steps,
+        "field_solver": 0,
+    }
 
-    out2 = simulation(
-        input_parameters,
-        number_grid_points=number_grid_points,
-        number_pseudoelectrons=number_pseudoelectrons,
-        total_steps=total_steps,
-        field_solver=0,
-    )
+    out1 = simulation(input_parameters, solver_parameters)
+
+    out2 = simulation(input_parameters, solver_parameters)
 
     # Compare a few representative arrays
     assert jnp.allclose(out1["positions"], out2["positions"])
@@ -218,11 +213,13 @@ def test_simulation_with_extra_species_and_external_fields():
     N_extra = 4
     output = simulation(
         input_parameters,
-        number_grid_points=G,
-        number_pseudoelectrons=N_e,
-        number_pseudoparticles_species=(N_extra,),  # <-- tuple, not list
-        total_steps=total_steps,
-        field_solver=0,
+        {
+            "number_grid_points": G,
+            "number_pseudoelectrons": N_e,
+            "number_pseudoparticles_species": (N_extra,),  # <-- tuple, not list
+            "total_steps": total_steps,
+            "field_solver": 0,
+        },
     )
     
     # We should have 2*N_e + N_extra total particles
@@ -263,11 +260,13 @@ def test_simulation_crank_nicolson_time_evolution_algorithm():
 
     output = simulation(
         input_parameters,
-        number_grid_points=G,
-        number_pseudoelectrons=N_e,
-        total_steps=total_steps,
-        field_solver=0,
-        time_evolution_algorithm=1,  # CN_step path
+        {
+            "number_grid_points": G,
+            "number_pseudoelectrons": N_e,
+            "total_steps": total_steps,
+            "field_solver": 0,
+            "time_evolution_algorithm": 1,  # CN_step path
+        },
     )
 
     n_particles = output["masses"].shape[0]
@@ -294,14 +293,15 @@ def test_simulation_rejects_mismatched_positions_shape():
         "print_info": False,
     }
 
+    solver_params = {
+        "number_grid_points": G,
+        "number_pseudoelectrons": N_e,
+        "total_steps": total_steps,
+        "field_solver": 0,
+    }
+
     # First run: just to discover the correct initial_positions shape
-    base_output = simulation(
-        base_params,
-        number_grid_points=G,
-        number_pseudoelectrons=N_e,
-        total_steps=total_steps,
-        field_solver=0,
-    )
+    base_output = simulation(base_params, solver_params)
 
     good_shape = base_output["initial_positions"].shape
     # Create positions with one fewer particle
@@ -311,10 +311,7 @@ def test_simulation_rejects_mismatched_positions_shape():
     with pytest.raises(ValueError):
         simulation(
             base_params,
-            number_grid_points=G,
-            number_pseudoelectrons=N_e,
-            total_steps=total_steps,
-            field_solver=0,
+            solver_params,
             positions=bad_positions,
             velocities=bad_velocities,
         )
@@ -445,14 +442,15 @@ def test_simulation_rejects_mismatched_velocities_shape():
         "print_info": False,
     }
 
+    solver_params = {
+        "number_grid_points": G,
+        "number_pseudoelectrons": N_e,
+        "total_steps": total_steps,
+        "field_solver": 0,
+    }
+
     # Run once to obtain correct shapes from returned params
-    base_output = simulation(
-        base_params,
-        number_grid_points=G,
-        number_pseudoelectrons=N_e,
-        total_steps=total_steps,
-        field_solver=0,
-    )
+    base_output = simulation(base_params, solver_params)
 
     good_pos = base_output["initial_positions"]
     good_vel = base_output["initial_velocities"]
@@ -464,10 +462,7 @@ def test_simulation_rejects_mismatched_velocities_shape():
     with pytest.raises(ValueError, match=r"Expected velocities shape"):
         simulation(
             base_params,
-            number_grid_points=G,
-            number_pseudoelectrons=N_e,
-            total_steps=total_steps,
-            field_solver=0,
+            solver_params,
             positions=good_pos,
             velocities=bad_vel,
         )

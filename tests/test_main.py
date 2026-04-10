@@ -65,7 +65,7 @@ def test_main_with_toml_argument(
     """
     When a TOML file path is provided, main() should:
       - call load_parameters(toml_path)
-      - call simulation(input_parameters, **solver_parameters)
+      - call simulation(input_parameters, solver_parameters)
       - call diagnostics(output) and plot(output)
     """
     toml_path = "path/to/input.toml"
@@ -79,8 +79,8 @@ def test_main_with_toml_argument(
     # Unpack what our fixture made load_parameters return
     input_params, solver_params = mock_load_parameters.return_value
 
-    # simulation should be called with those unpacked solver parameters
-    mock_simulation.assert_called_once_with(input_params, **solver_params)
+    # simulation should be called with the solver_parameters dict
+    mock_simulation.assert_called_once_with(input_params, solver_params)
 
     # diagnostics and plot must be called on the output of simulation()
     mock_diagnostics.assert_called_once_with(mock_simulation.return_value)

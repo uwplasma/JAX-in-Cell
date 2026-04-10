@@ -22,14 +22,16 @@ def _small_parameters_for_algorithms():
     number_grid_points = 4
     number_pseudoelectrons = 4
 
-    params = initialize_particles_fields(
+    params, _ = initialize_particles_fields(
         input_parameters=input_parameters,
-        number_grid_points=number_grid_points,
-        number_pseudoelectrons=number_pseudoelectrons,
-        number_pseudoparticles_species=(),         # empty tuple, consistent with species=[]
-        total_steps=2,
-        max_number_of_Picard_iterations_implicit_CN=3,
-        number_of_particle_substeps_implicit_CN=2,
+        solver_parameters={
+            "number_grid_points": number_grid_points,
+            "number_pseudoelectrons": number_pseudoelectrons,
+            "number_pseudoparticles_species": (),  # empty tuple, consistent with species=[]
+            "total_steps": 2,
+            "max_number_of_Picard_iterations_implicit_CN": 3,
+            "number_of_particle_substeps_implicit_CN": 2,
+        },
     )
     return params, number_grid_points, number_pseudoelectrons
 
