@@ -59,7 +59,6 @@ plt.ylabel(r"$KE_e\,/\,KE_e(0)$", fontsize=13)
 plt.title("Electron kinetic energy over time", fontsize=13)
 plt.legend()
 plt.tight_layout()
-plt.savefig("bc_comparison_KE.pdf", dpi=300)
 plt.show()
 
 ####################################################################################################
