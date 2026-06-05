@@ -1,48 +1,61 @@
 ## differentiability.py
 # Calculate derivatives of outputs with respect to inputs
+from copy import deepcopy
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import time
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from jax import jit, grad, lax, block_until_ready, debug
-from jaxincell import simulation, load_parameters
+from jax import grad, block_until_ready
+from jaxincell import Simulation, load_parameters
 
 # Read from input.toml (assuming it's in the same directory as this script)
 input_file = 'input.toml'
 current_directory = os.path.dirname(os.path.abspath(__file__))
 input_toml_path = os.path.join(current_directory, input_file)
 
-input_parameters, solver_parameters = load_parameters(input_toml_path)
+parameters = load_parameters(input_toml_path)
 
-input_parameters["print_info"] = False
-solver_parameters["total_steps"] = 400
-solver_parameters["number_grid_points"] = 60
-solver_parameters["number_pseudoelectrons"] = 3000
+parameters.setdefault("input_parameters", {})
+parameters.setdefault("domain_parameters", {})
+parameters.setdefault("species_parameters", {})
+parameters.setdefault("solver_parameters", {})
 
-@jit
+parameters["input_parameters"]["print_info"] = False
+parameters["domain_parameters"]["total_steps"] = 400
+parameters["domain_parameters"]["number_grid_points"] = 60
+parameters["species_parameters"]["number_pseudoelectrons"] = 3000
+parameters["solver_parameters"].pop("total_steps", None)
+parameters["solver_parameters"].pop("number_grid_points", None)
+parameters["solver_parameters"].pop("number_pseudoelectrons", None)
+
+sim = Simulation(parameters)
+input_parameters = deepcopy(sim.input_parameters)
+total_steps = sim.domain_parameters["total_steps"]
+
 def mean_electric_field(electron_drift_speed):
-    input_parameters["electron_drift_speed_x"] = electron_drift_speed
-    output = block_until_ready(simulation(input_parameters, solver_parameters))
+    runtime_input_parameters = deepcopy(input_parameters)
+    runtime_input_parameters["electron_drift_speed_x"] = electron_drift_speed
+    output = sim.run(runtime_input_parameters)
     electric_field = jnp.mean(output['electric_field'][:, :, 0], axis=1)
-    mean_E = jnp.mean(lax.slice(electric_field, [solver_parameters["total_steps"]//2], [solver_parameters["total_steps"]]))
+    mean_E = jnp.mean(electric_field[total_steps//2:])
     return mean_E
 
 # Calculate the derivative of the plasma frequency with respect to the wavenumber
 electron_drift_speed = 1e8
 epsilon_array = [1e-11, 1e-9, 1e-7, 1e-5, 1e-3, 1e-1]
-E_field = mean_electric_field(electron_drift_speed)
+E_field = block_until_ready(mean_electric_field(electron_drift_speed))
 print(f"Mean electric field at drift speed {electron_drift_speed} m/s: {E_field}")
 start = time.time()
-derivative_JAX = grad(mean_electric_field)(electron_drift_speed)
+derivative_JAX = block_until_ready(grad(mean_electric_field)(electron_drift_speed))
 time_JAX_derivative = time.time()-start
 
 derivative_analytical_array = []
 time_analytical_derivative = []
 for epsilon in epsilon_array:
-    debug.print("Calculating derivative for epsilon = {}",epsilon)
+    print(f"Calculating derivative for epsilon = {epsilon}")
     start = time.time()
-    E_field_plus_epsilon = mean_electric_field(electron_drift_speed+epsilon)
+    E_field_plus_epsilon = block_until_ready(mean_electric_field(electron_drift_speed+epsilon))
     time_analytical_derivative.append(time.time()-start)
     derivative_analytical = (E_field_plus_epsilon - E_field) / epsilon
     derivative_analytical_array.append(derivative_analytical)
