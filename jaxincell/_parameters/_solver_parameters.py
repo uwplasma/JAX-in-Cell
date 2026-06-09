@@ -1,3 +1,5 @@
+from ._utils import build_parameter_hash, overlay_parameter_defaults
+
 __all__ = [
     "ALL_SOLVER_PARAMETERS",
     "DIFFERENTIABLE_SOLVER_PARAMETERS",
@@ -37,10 +39,11 @@ def clean_and_initialize_solver_parameters(solver_parameters, input_parameters={
         "filter_strides": (1, 2, 4),  # multi-scale strides for filtering
         "seed": 1701,                        # Random seed for reproducibility (if None, will be random every time)
     }
-    solver_parameters = {**default_solver_parameters, **solver_parameters}
-    for key in solver_parameters.keys():
-        if key in input_parameters.keys():
-            solver_parameters[key] = input_parameters[key]
+    solver_parameters = overlay_parameter_defaults(
+        default_solver_parameters,
+        solver_parameters,
+        input_parameters,
+    )
 
     solver_parameters["tolerance_Picard_iterations_implicit_CN"] = float(solver_parameters["tolerance_Picard_iterations_implicit_CN"])
     if type(solver_parameters["filter_strides"]) != tuple:
@@ -58,9 +61,4 @@ def clean_and_initialize_solver_parameters(solver_parameters, input_parameters={
     return solver_parameters
 
 def build_solver_hash(solver_parameters):
-    hash_list = []
-    for key, value in solver_parameters.items():
-        hash_list.append(str(key))
-        hash_list.append(str(value))
-    solver_hash = "".join(hash_list)
-    return solver_hash
+    return build_parameter_hash(solver_parameters)

@@ -98,7 +98,7 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
 
 # Implicit Crank-Nicolson step
 @partial(jit, static_argnames=('num_substeps', 'particle_BC_left', 'particle_BC_right', 'field_BC_left', 'field_BC_right'))
-def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
+def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
                                   particle_BC_left, particle_BC_right,
                                   field_BC_left, field_BC_right, num_substeps):
     (E_field, B_field, positions,
@@ -201,8 +201,8 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # --- Picard Loop ---
     picard_init = (E_new, E_new, B_new, positions, positions_new, velocities, velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
     
-    tol = parameters["tolerance_Picard_iterations_implicit_CN"]
-    max_iter = parameters["max_number_of_Picard_iterations_implicit_CN"]
+    tol = solver_parameters["tolerance_Picard_iterations_implicit_CN"]
+    max_iter = solver_parameters["max_number_of_Picard_iterations_implicit_CN"]
 
     # Initial state
     state0 = (picard_init, jnp.zeros_like(E_new), jnp.array(jnp.inf), jnp.array(0))

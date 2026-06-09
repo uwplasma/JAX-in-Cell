@@ -1,3 +1,5 @@
+from ._utils import build_parameter_hash, overlay_parameter_defaults
+
 __all__ = [
     "ALL_EXTERNAL_FIELD_PARAMETERS",
     "DIFFERENTIABLE_EXTERNAL_FIELD_PARAMETERS",
@@ -27,10 +29,11 @@ def clean_and_initialize_external_field_parameters(external_field_parameters, in
         "external_electric_field_function": None,   # Function of (x, y, z, t) that returns the external electric field vector at a given position and time.
         "external_magnetic_field_function": None,   # Function of (x, y, z, t) that returns the external magnetic field vector at a given position and time.
     }
-    external_field_parameters = {**default_external_field_parameters, **external_field_parameters}
-    for key in external_field_parameters.keys():
-        if key in input_parameters.keys():
-            external_field_parameters[key] = input_parameters[key]
+    external_field_parameters = overlay_parameter_defaults(
+        default_external_field_parameters,
+        external_field_parameters,
+        input_parameters,
+    )
 
     external_field_parameters["external_electric_field_amplitude"] = float(external_field_parameters["external_electric_field_amplitude"])
     external_field_parameters["external_electric_field_wavenumber"] = float(external_field_parameters["external_electric_field_wavenumber"])
@@ -40,9 +43,4 @@ def clean_and_initialize_external_field_parameters(external_field_parameters, in
     return external_field_parameters
 
 def build_external_field_hash(external_field_parameters):
-    hash_list = []
-    for key, value in external_field_parameters.items():
-        hash_list.append(str(key))
-        hash_list.append(str(value))
-    external_field_hash = "".join(hash_list)
-    return external_field_hash
+    return build_parameter_hash(external_field_parameters)

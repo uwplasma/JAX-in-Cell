@@ -1,4 +1,5 @@
 from .._utils import make_tuple, make_tuple_values_floats
+from ._utils import build_parameter_hash, overlay_parameter_defaults
 
 __all__ = [
     "ALL_SOURCE_PARAMETERS",
@@ -35,10 +36,11 @@ def clean_and_initialize_source_parameters(source_parameters, input_parameters={
         "injection_speed_z": 0,                   # (tuple for multiple sources)
         # Should add temps for maxwellian injection profiles, but will be constant for now
     }
-    source_parameters = {**default_source_parameters, **source_parameters}
-    for key in source_parameters.keys():
-        if key in input_parameters.keys():
-            source_parameters[key] = input_parameters[key]
+    source_parameters = overlay_parameter_defaults(
+        default_source_parameters,
+        source_parameters,
+        input_parameters,
+    )
 
     assert source_parameters["source_term_active"] in [0, 1], f"Source term active must be 0 (inactive) or 1 (active). Got {source_parameters['source_term_active']}."
 
@@ -80,9 +82,4 @@ def clean_and_initialize_source_parameters(source_parameters, input_parameters={
     return source_parameters
 
 def build_source_hash(source_parameters):
-    hash_list = []
-    for key, value in source_parameters.items():
-        hash_list.append(str(key))
-        hash_list.append(str(value))
-    source_hash = "".join(hash_list)
-    return source_hash
+    return build_parameter_hash(source_parameters)
