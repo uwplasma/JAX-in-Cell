@@ -25,8 +25,11 @@ __all__ = [
     name for name in _species_definition_exports if not name.startswith("DEFAULT_")
 ] + [
     "clean_and_initialize_species_parameters",
+    "resolve_species_references",
     "build_species_hash",
 ]
+
+REFERENCE_PREFIX = "_reference_"
 
 def merge_species_parameter_dicts(species_parameters, input_parameters):
     species_parameters = {**species_parameters}
@@ -164,6 +167,75 @@ def canonicalize_species_keys(species_parameters, species_prefix, legacy_species
         ind += 1
     return species_parameters_out
 
+def reference_metadata_key(key):
+    return f"{REFERENCE_PREFIX}{key}"
+
+def resolve_reference_value(species_parameters, species_type, species, key, reference_type, reference_species):
+    sp = species_parameters[species_type][species]
+    referenced_sp = species_parameters[reference_type][reference_species]
+    assert type(referenced_sp[key]) != str, (
+        "Cross referenced species values cannot reference another reference. "
+        f"For {species_type} {species} referencing {reference_species}, got {referenced_sp[key]}."
+    )
+
+    if species_type == "ions" and reference_type == "electrons":
+        if key == "vth_over_c_x":
+            return jnp.sqrt(sp["ion_temperature_over_electron_temperature_x"]) * referenced_sp[key] * jnp.sqrt(mass_electron / (sp["mass_over_proton_mass"] * mass_proton))
+        if key == "vth_over_c_y":
+            return jnp.sqrt(sp["ion_temperature_over_electron_temperature_y"]) * referenced_sp[key] * jnp.sqrt(mass_electron / (sp["mass_over_proton_mass"] * mass_proton))
+        if key == "vth_over_c_z":
+            return jnp.sqrt(sp["ion_temperature_over_electron_temperature_z"]) * referenced_sp[key] * jnp.sqrt(mass_electron / (sp["mass_over_proton_mass"] * mass_proton))
+
+    if species_type == "ions" and reference_type == "ions":
+        if key == "vth_over_c_x":
+            return jnp.sqrt(1 / sp["ion_temperature_over_electron_temperature_x"]) * referenced_sp[key] * jnp.sqrt(referenced_sp["mass_over_proton_mass"] * mass_proton / mass_electron)
+        if key == "vth_over_c_y":
+            return jnp.sqrt(1 / sp["ion_temperature_over_electron_temperature_y"]) * referenced_sp[key] * jnp.sqrt(referenced_sp["mass_over_proton_mass"] * mass_proton / mass_electron)
+        if key == "vth_over_c_z":
+            return jnp.sqrt(1 / sp["ion_temperature_over_electron_temperature_z"]) * referenced_sp[key] * jnp.sqrt(referenced_sp["mass_over_proton_mass"] * mass_proton / mass_electron)
+
+    return referenced_sp[key]
+
+def resolve_species_references(species_parameters):
+    all_ion_species = list(species_parameters["ions"].keys())
+    all_electron_species = list(species_parameters["electrons"].keys())
+
+    for species_type in SPECIES_TYPES:
+        for species in species_parameters[species_type].keys():
+            sp = species_parameters[species_type][species]
+            for key, value in list(sp.items()):
+                if key == "user_label" or key.startswith(REFERENCE_PREFIX):
+                    continue
+                if value in all_ion_species:
+                    sp[reference_metadata_key(key)] = ("ions", value)
+                elif value in all_electron_species:
+                    sp[reference_metadata_key(key)] = ("electrons", value)
+                elif type(value) == str:
+                    raise ValueError(
+                        f"Cross referenced species value did not reference another species. "
+                        f"{species_type} {species} referenced {value} for {key}. "
+                        f"Valid references are {all_ion_species} referencing ions or "
+                        f"{all_electron_species} referencing electrons."
+                    )
+
+    for species_type in SPECIES_TYPES:
+        for species in species_parameters[species_type].keys():
+            sp = species_parameters[species_type][species]
+            for metadata_key, metadata_value in list(sp.items()):
+                if not metadata_key.startswith(REFERENCE_PREFIX):
+                    continue
+                key = metadata_key.removeprefix(REFERENCE_PREFIX)
+                reference_type, reference_species = metadata_value
+                sp[key] = resolve_reference_value(
+                    species_parameters,
+                    species_type,
+                    species,
+                    key,
+                    reference_type,
+                    reference_species,
+                )
+    return species_parameters
+
 def clean_and_initialize_species_parameters(species_parameters, input_parameters={}):
     (
         legacy_parameters,
@@ -206,39 +278,7 @@ def clean_and_initialize_species_parameters(species_parameters, input_parameters
         "_legacy_electrons",
     )
 
-    # Now fill in all the cross referenced information
-    all_ion_species = []
-    all_electron_species = []
-    for species in species_parameters['ions'].keys():
-        all_ion_species.append(species)
-    for species in species_parameters['electrons'].keys():
-        all_electron_species.append(species)
-    for type_species in ['ions', 'electrons']:
-        for species in species_parameters[type_species].keys():
-            sp = species_parameters[type_species][species]
-            for key, value in sp.items():
-                if value in all_ion_species and not key == 'user_label':
-                    assert type(species_parameters['ions'][value][key]) != str, f"Cross referenced species values cannot reference another reference. For {type_species} {species} referencing {value}, got {species_parameters['ions'][key]}."
-                    if key == "vth_over_c_x":
-                        sp[key] = jnp.sqrt(1 / sp['ion_temperature_over_electron_temperature_x']) * species_parameters['ions'][value][key] * jnp.sqrt(species_parameters['ions'][value]['mass_over_proton_mass'] * mass_proton / mass_electron)
-                    elif key == "vth_over_c_y":
-                        sp[key] = jnp.sqrt(1 / sp['ion_temperature_over_electron_temperature_y']) * species_parameters['ions'][value][key] * jnp.sqrt(species_parameters['ions'][value]['mass_over_proton_mass'] * mass_proton / mass_electron)
-                    elif key == "vth_over_c_z":
-                        sp[key] = jnp.sqrt(1 / sp['ion_temperature_over_electron_temperature_z']) * species_parameters['ions'][value][key] * jnp.sqrt(species_parameters['ions'][value]['mass_over_proton_mass'] * mass_proton / mass_electron)
-                    else:
-                        sp[key] = species_parameters['ions'][value][key]
-                elif value in all_electron_species and not key == 'user_label':
-                    assert type(species_parameters['electrons'][value][key]) != str, f"Cross referenced species values cannot reference another reference. For {type_species} {species} referencing {value}, got {species_parameters['electrons'][key]}."
-                    if key == "vth_over_c_x":
-                        sp[key] = jnp.sqrt(sp['ion_temperature_over_electron_temperature_x']) * species_parameters['electrons'][value][key] * jnp.sqrt(mass_electron / (sp['mass_over_proton_mass'] * mass_proton))
-                    elif key == "vth_over_c_y":
-                        sp[key] = jnp.sqrt(sp['ion_temperature_over_electron_temperature_y']) * species_parameters['electrons'][value][key] * jnp.sqrt(mass_electron / (sp['mass_over_proton_mass'] * mass_proton))
-                    elif key == "vth_over_c_z":
-                        sp[key] = jnp.sqrt(sp['ion_temperature_over_electron_temperature_z']) * species_parameters['electrons'][value][key] * jnp.sqrt(mass_electron / (sp['mass_over_proton_mass'] * mass_proton))
-                    else:
-                        sp[key] = species_parameters['ions'][value][key]
-                elif type(value) == str and not key == 'user_label':
-                    raise ValueError(f'Cross referenced species value did not reference another species. {type_species} {species} referenced {value} for {key}. Valid references are {all_ion_species} referencing ions or {all_electron_species} referencing electrons.')
+    resolve_species_references(species_parameters)
 
     # Now do all the assert statements to check that the parameters are valid
     for type_species in ['ions', 'electrons']:

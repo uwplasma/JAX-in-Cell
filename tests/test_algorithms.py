@@ -2,9 +2,13 @@
 
 import jax.numpy as jnp
 
-from jaxincell._simulation import initialize_particles_fields
 from jaxincell._algorithms import Boris_step, CN_step
 from jaxincell._boundary_conditions import set_BC_particles, set_BC_positions
+from jaxincell._parameters._domain_parameters import clean_and_initialize_domain_parameters
+from jaxincell._parameters._external_field_parameters import clean_and_initialize_external_field_parameters
+from jaxincell._parameters._solver_parameters import clean_and_initialize_solver_parameters
+from jaxincell._parameters._species_parameters import clean_and_initialize_species_parameters
+from jaxincell._state_initialization import build_domain_state, initialize_field_state, initialize_particle_state
 
 
 def _small_parameters_for_algorithms():
@@ -13,27 +17,111 @@ def _small_parameters_for_algorithms():
     as the main simulation, so we don't need to manually reimplement
     PIC plumbing here.
     """
-    input_parameters = {
-        "length": 0.01,
-        "grid_points_per_Debye_length": 1.0,
-        "print_info": False,
-        "species": [],          # <-- important to avoid KeyError in initialize_particles_fields
-    }
     number_grid_points = 4
-    number_pseudoelectrons = 4
+    number_pseudoparticles = 4
 
-    params, _ = initialize_particles_fields(
-        input_parameters=input_parameters,
-        solver_parameters={
+    base_species = {
+        "number_pseudoparticles": number_pseudoparticles,
+        "grid_points_per_Debye_length": 1.0,
+        "weight": 1.0,
+        "perturbation_amplitude_x": 0.0,
+        "perturbation_amplitude_y": 0.0,
+        "perturbation_amplitude_z": 0.0,
+        "perturbation_wavenumber_x": 1.0,
+        "perturbation_wavenumber_y": 1.0,
+        "perturbation_wavenumber_z": 1.0,
+        "random_positions_x": False,
+        "random_positions_y": False,
+        "random_positions_z": False,
+        "vth_over_c_x": 0.01,
+        "vth_over_c_y": 0.01,
+        "vth_over_c_z": 0.01,
+        "drift_speed_x": 1.0,
+        "drift_speed_y": 0.0,
+        "drift_speed_z": 0.0,
+        "velocity_plus_minus_x": False,
+        "velocity_plus_minus_y": False,
+        "velocity_plus_minus_z": False,
+    }
+
+    domain_parameters = clean_and_initialize_domain_parameters(
+        {
+            "length": 0.01,
+            "length_y": 0.01,
+            "length_z": 0.01,
             "number_grid_points": number_grid_points,
-            "number_pseudoelectrons": number_pseudoelectrons,
-            "number_pseudoparticles_species": (),  # empty tuple, consistent with species=[]
+            "number_grid_points_y": 3,
+            "number_grid_points_z": 3,
             "total_steps": 2,
+        }
+    )
+    solver_parameters = clean_and_initialize_solver_parameters(
+        {
+            "field_solver": 0,
             "max_number_of_Picard_iterations_implicit_CN": 3,
             "number_of_particle_substeps_implicit_CN": 2,
-        },
+            "filter_passes": 0,
+            "filter_alpha": 0.5,
+            "filter_strides": (1, 2, 4),
+            "seed": 1701,
+            "relativistic": False,
+            "time_evolution_algorithm": 0,
+            "print_info": False,
+        }
     )
-    return params, number_grid_points, number_pseudoelectrons
+    species_parameters = clean_and_initialize_species_parameters(
+        {
+            "electrons": {
+                "electrons0": {
+                    **base_species,
+                    "charge_over_elementary_charge": -1.0,
+                },
+            },
+            "ions": {
+                "ions0": {
+                    **base_species,
+                    "charge_over_elementary_charge": 1.0,
+                    "mass_over_proton_mass": 1.0,
+                    "ion_temperature_over_electron_temperature_x": 1.0,
+                    "ion_temperature_over_electron_temperature_y": 1.0,
+                    "ion_temperature_over_electron_temperature_z": 1.0,
+                },
+            },
+        }
+    )
+    external_field_parameters = clean_and_initialize_external_field_parameters({})
+
+    domain_state = build_domain_state(domain_parameters)
+    particle_state = initialize_particle_state(
+        species_parameters,
+        domain_parameters,
+        solver_parameters,
+        domain_state,
+    )
+    field_state = initialize_field_state(
+        domain_parameters,
+        solver_parameters,
+        external_field_parameters,
+        domain_state,
+        particle_state,
+    )
+
+    params = {
+        **domain_parameters,
+        **solver_parameters,
+        "box_size": domain_state["box_size"],
+        "dx": domain_state["dx"],
+        "dt": domain_state["dt"],
+        "grid": domain_state["grid"],
+        "fields": field_state["fields"],
+        "initial_positions": particle_state["positions"],
+        "initial_velocities": particle_state["velocities"],
+        "charges": particle_state["charges"],
+        "masses": particle_state["masses"],
+        "charge_to_mass_ratios": particle_state["charge_to_mass_ratios"],
+    }
+
+    return params, external_field_parameters, number_grid_points, number_pseudoparticles
 
 
 def test_boris_step_relativistic_and_field_solver_branch():
@@ -43,7 +131,7 @@ def test_boris_step_relativistic_and_field_solver_branch():
     - field_solver != 0 branch (E_from_* correction),
     and verify that output shapes are consistent.
     """
-    params, G, _ = _small_parameters_for_algorithms()
+    params, external_field_parameters, G, _ = _small_parameters_for_algorithms()
 
     dx = params["dx"]
     dt = params["dt"]
@@ -104,7 +192,8 @@ def test_boris_step_relativistic_and_field_solver_branch():
     carry1, step_data = Boris_step(
         carry0,
         step_index=0,
-        parameters=params_rel,
+        solver_parameters=params_rel,
+        external_field_parameters=external_field_parameters,
         dx=dx,
         dt=dt,
         grid=grid,
@@ -158,7 +247,7 @@ def test_cn_step_shapes_and_substepping():
     - verifies that it runs to completion with small tolerances,
     - checks shapes of the returned fields and sources.
     """
-    params, G, _ = _small_parameters_for_algorithms()
+    params, _, G, _ = _small_parameters_for_algorithms()
 
     dx = params["dx"]
     dt = params["dt"]
@@ -187,7 +276,7 @@ def test_cn_step_shapes_and_substepping():
     carry1, step_data = CN_step(
         carry0,
         step_index=0,
-        parameters=params_cn,
+        solver_parameters=params_cn,
         dx=dx,
         dt=dt,
         grid=grid,

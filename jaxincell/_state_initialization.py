@@ -100,10 +100,11 @@ def make_particles_from_state(
 
     charge = species["charge_over_elementary_charge"] * elementary_charge
     charge_mass = charge / mass
-    thermal_speeds = jnp.array([
-        species[f"vth_over_c_{axis}"] * speed_of_light
+    thermal_speeds_over_c = jnp.array([
+        species[f"vth_over_c_{axis}"]
         for axis in SPECIES_AXES
     ])
+    thermal_speeds = thermal_speeds_over_c * speed_of_light
 
     seed = solver_parameters["seed"]
     number_particles = species["number_pseudoparticles"]
@@ -136,12 +137,13 @@ def make_particles_from_state(
     if species_type == "electrons" and rng_index == 0:
         electron_reference = {
             "vth_electrons": jnp.max(thermal_speeds),
+            "vth_electrons_over_c": jnp.max(thermal_speeds_over_c),
             "charge_electrons": charge,
         }
     if electron_reference is None:
         raise ValueError("Electron reference species must be initialized before ions.")
 
-    vth_electrons_over_c = electron_reference["vth_electrons"]
+    vth_electrons_over_c = electron_reference["vth_electrons_over_c"]
     charge_electrons = electron_reference["charge_electrons"]
 
     Debye_length_per_dx = 1 / species["grid_points_per_Debye_length"]
@@ -244,6 +246,7 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
         "masses": masses,
         "charge_to_mass_ratios": charge_to_mass_ratios,
         "vth_electrons": electron_reference["vth_electrons"],
+        "vth_electrons_over_c": electron_reference["vth_electrons_over_c"],
         "charge_electrons": electron_reference["charge_electrons"],
     }
 

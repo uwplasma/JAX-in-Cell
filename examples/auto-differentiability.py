@@ -1,6 +1,5 @@
 ## differentiability.py
 # Calculate derivatives of outputs with respect to inputs
-from copy import deepcopy
 import os, sys;
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import time
@@ -16,26 +15,27 @@ input_toml_path = os.path.join(current_directory, input_file)
 
 parameters = load_parameters(input_toml_path)
 
-parameters.setdefault("input_parameters", {})
 parameters.setdefault("domain_parameters", {})
 parameters.setdefault("species_parameters", {})
 parameters.setdefault("solver_parameters", {})
 
-parameters["input_parameters"]["print_info"] = False
+parameters["solver_parameters"]["print_info"] = False
 parameters["domain_parameters"]["total_steps"] = 400
 parameters["domain_parameters"]["number_grid_points"] = 60
-parameters["species_parameters"]["number_pseudoelectrons"] = 3000
-parameters["solver_parameters"].pop("total_steps", None)
-parameters["solver_parameters"].pop("number_grid_points", None)
-parameters["solver_parameters"].pop("number_pseudoelectrons", None)
+parameters["species_parameters"]["electrons"]["electrons0"]["number_pseudoparticles"] = 3000
+parameters["species_parameters"]["ions"]["ions0"]["number_pseudoparticles"] = 3000
 
 sim = Simulation(parameters)
-input_parameters = deepcopy(sim.input_parameters)
 total_steps = sim.domain_parameters["total_steps"]
 
 def mean_electric_field(electron_drift_speed):
-    runtime_input_parameters = deepcopy(input_parameters)
-    runtime_input_parameters["electron_drift_speed_x"] = electron_drift_speed
+    runtime_input_parameters = {
+        "electrons": {
+            "electrons0": {
+                "drift_speed_x": electron_drift_speed,
+            },
+        },
+    }
     output = sim.run(runtime_input_parameters)
     electric_field = jnp.mean(output['electric_field'][:, :, 0], axis=1)
     mean_E = jnp.mean(electric_field[total_steps//2:])

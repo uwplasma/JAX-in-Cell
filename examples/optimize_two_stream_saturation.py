@@ -5,16 +5,17 @@ import jax.numpy as jnp
 from jax import jit, grad
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
-from jaxincell import simulation, epsilon_0, load_parameters, diagnostics
+from jaxincell import Simulation, epsilon_0, load_parameters, diagnostics
 
 # Read from input.toml (assuming it's in the same directory as this script)
 input_file = 'input.toml'
 current_directory = os.path.dirname(os.path.abspath(__file__))
 input_toml_path = os.path.join(current_directory, input_file)
 
-input_parameters, solver_parameters = load_parameters(input_toml_path)
+parameters = load_parameters(input_toml_path)
 
-input_parameters["print_info"] = False
+parameters.setdefault("solver_parameters", {})["print_info"] = False
+sim = Simulation(parameters)
 
 steps_to_average = 800 # only take the mean of these last steps
 minimum_Ti = -2
@@ -27,10 +28,15 @@ learning_rate = 0.05
 ## Objective function to minimize - nonlinear saturation value (mean of long time electric field energy)
 @jit
 def objective_function(Ti):
-    params = input_parameters.copy()
     Ti = jnp.atleast_1d(Ti)[0]
-    params["ion_temperature_over_electron_temperature_x"] = Ti
-    output = simulation(params, solver_parameters)
+    runtime_input_parameters = {
+        "ions": {
+            "ions0": {
+                "ion_temperature_over_electron_temperature_x": Ti,
+            },
+        },
+    }
+    output = sim.run(runtime_input_parameters)
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     integral_E_squared         = jnp.trapezoid(abs_E_squared, dx=output['dx'], axis=-1)
     energy = (epsilon_0/2) * integral_E_squared
@@ -38,8 +44,15 @@ def objective_function(Ti):
 jac = jit(grad(objective_function))
 ############### -------- #################
 print(f'Perform a first run to see one objective function')
-input_parameters["ion_temperature_over_electron_temperature_x"] = x0_optimization
-output = simulation(input_parameters, solver_parameters)
+output = sim.run(
+    {
+        "ions": {
+            "ions0": {
+                "ion_temperature_over_electron_temperature_x": x0_optimization,
+            },
+        },
+    }
+)
 diagnostics(output)
 objective = objective_function(x0_optimization)
 plt.figure(figsize=(8,6))
@@ -57,7 +70,6 @@ plt.savefig('objective_function_onerun_twostream.pdf', dpi=300)
 plt.show()
 ############### -------- #################
 ion_temperature_over_electron_temperature = jnp.logspace(start=minimum_Ti,stop=maximum_Ti,num=nTi)
-input_parameters['print_info'] = False
 energy_array =[]
 print(f'Perform a parameter scan with {len(ion_temperature_over_electron_temperature)} values to see the variation of the objective function')
 for i, Ti in enumerate(ion_temperature_over_electron_temperature):

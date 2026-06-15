@@ -1,6 +1,8 @@
 ## scaling_time.py
 import time
-from jaxincell import simulation
+from copy import deepcopy
+
+from jaxincell import Simulation
 from jaxincell import diagnostics
 from jax import block_until_ready
 import matplotlib.pyplot as plt
@@ -10,39 +12,74 @@ import matplotlib
 
 ####################################################################################################
 
-input_parameters = {
-"length"                         : 1e-2,  # dimensions of the simulation box in (x, y, z)
-"amplitude_perturbation_x"       : 5e-4,  # amplitude of sinusoidal perturbation in x
-"wavenumber_electrons_x"         : 8, # Wavenumber of sinusoidal electron density perturbation in x (factor of 2pi/length)
-"grid_points_per_Debye_length"   : 2,     # dx over Debye length
-"vth_electrons_over_c_x"         : 0.05,  # thermal velocity of electrons over speed of light
-"ion_temperature_over_electron_temperature_x": 1e-2, # Temperature of ions over temperature of electrons
-"timestep_over_spatialstep_times_c": 0.3, # dt * speed_of_light / dx
-"velocity_plus_minus_electrons_x": False, # create two groups of electrons moving in opposite directions
-"print_info"                     : False,  # print information about the simulation
-"external_electric_field_amplitude": 0, # External electric field value (V/m)
-"external_electric_field_wavenumber": 0,  # External electric Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
-"amplitude_perturbation_x"       : 1e-7,  # Two-Stream (amplitude of sinusoidal perturbation in x)
-"electron_drift_speed_x"         : 1e8,   # Two-Stream (drift speed of electrons)
-"velocity_plus_minus_electrons_x": True,  # Two-Stream (create two groups of electrons moving in opposite directions)
-}
-
-solver_parameters = {
-    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT, 
-    "number_grid_points"     : 60,   # Number of grid points
-    "number_pseudoelectrons" : 3500, # Number of pseudoelectrons
-    "total_steps"            : 1500, # Total number of time steps
+parameters = {
+    "domain_parameters": {
+        "length": 1e-2,
+        "timestep_over_spatialstep_times_c": 0.3,
+        "number_grid_points": 60,
+        "total_steps": 1500,
+    },
+    "species_parameters": {
+        "electrons": {
+            "electrons0": {
+                "number_pseudoparticles": 3500,
+                "grid_points_per_Debye_length": 2,
+                "perturbation_amplitude_x": 1e-7,
+                "perturbation_wavenumber_x": 8,
+                "vth_over_c_x": 0.05,
+                "drift_speed_x": 1e8,
+                "velocity_plus_minus_x": True,
+            },
+        },
+        "ions": {
+            "ions0": {
+                "number_pseudoparticles": 3500,
+                "grid_points_per_Debye_length": 2,
+                "vth_over_c_x": "_electrons0",
+                "vth_over_c_y": "_electrons0",
+                "vth_over_c_z": "_electrons0",
+                "ion_temperature_over_electron_temperature_x": 1e-2,
+            },
+        },
+    },
+    "external_field_parameters": {
+        "external_electric_field_amplitude": 0,
+        "external_electric_field_wavenumber": 0,
+    },
+    "solver_parameters": {
+        "field_solver": 0,
+        "print_info": False,
+    },
 }
 
 increase_factor = 1.5 # Factor by which to increase the parameters
 number_of_steps = 4  # Number of steps for scaling
 
-grid_points_list     = [int(solver_parameters["number_grid_points"] * (increase_factor ** i)) for i in range(number_of_steps)]
-pseudoelectrons_list = [int(solver_parameters["number_pseudoelectrons"] * (increase_factor ** i)) for i in range(number_of_steps)]
-steps_list           = [int(solver_parameters["total_steps"] * (increase_factor ** i)) for i in range(number_of_steps)]
-timestep_list        = [input_parameters["timestep_over_spatialstep_times_c"] * (increase_factor ** i) for i in range(number_of_steps)]
+domain_parameters = parameters["domain_parameters"]
+electron_parameters = parameters["species_parameters"]["electrons"]["electrons0"]
+
+grid_points_list = [
+    int(domain_parameters["number_grid_points"] * (increase_factor ** i))
+    for i in range(number_of_steps)
+]
+pseudoelectrons_list = [
+    int(electron_parameters["number_pseudoparticles"] * (increase_factor ** i))
+    for i in range(number_of_steps)
+]
+steps_list = [
+    int(domain_parameters["total_steps"] * (increase_factor ** i))
+    for i in range(number_of_steps)
+]
+timestep_list = [
+    domain_parameters["timestep_over_spatialstep_times_c"] * (increase_factor ** i)
+    for i in range(number_of_steps)
+]
 
 ####################################################################################################
+
+def run_simulation(parameter_tree):
+    return block_until_ready(Simulation(parameter_tree).run())
+
 
 # Function to compute the maximum relative energy error
 def max_relative_energy_error(output):
@@ -50,37 +87,40 @@ def max_relative_energy_error(output):
     relative_energy_error = jnp.abs((output["total_energy"] - output["total_energy"][0]) / output["total_energy"][0])
     return jnp.max(relative_energy_error)
 
+
+def set_parameter(parameter_tree, param_name, param):
+    if param_name == "number_pseudoparticles":
+        parameter_tree["species_parameters"]["electrons"]["electrons0"][param_name] = param
+        parameter_tree["species_parameters"]["ions"]["ions0"][param_name] = param
+        return
+
+    for section_name in ("domain_parameters", "solver_parameters"):
+        if param_name in parameter_tree[section_name]:
+            parameter_tree[section_name][param_name] = param
+            return
+
+    raise KeyError(f"Unknown scaling parameter {param_name!r}.")
+
+
 # Fuction to measure time and error
 def measure_time_and_error(parameter_list, param_name):
     times = []
     max_relative_errors = []
     for j, param in enumerate(parameter_list):
+        parameter_tree = deepcopy(parameters)
+        set_parameter(parameter_tree, param_name, param)
+        parameter_tree["species_parameters"]["electrons"]["electrons0"]["number_pseudoparticles"] += j
+        parameter_tree["species_parameters"]["ions"]["ions0"]["number_pseudoparticles"] += j
+
         start = time.time()
-        if param_name in solver_parameters:
-            old_param = solver_parameters[param_name]
-            solver_parameters[param_name] = param
-            solver_parameters['number_pseudoelectrons'] = int(solver_parameters['number_pseudoelectrons']+j)
-            output = block_until_ready(simulation(input_parameters, solver_parameters))
-            solver_parameters[param_name] = old_param
-        if param_name in input_parameters:
-            old_param = input_parameters[param_name]
-            # if 'timestep_over_spatialstep_times_c' in param_name:
-            #     old_time_steps = solver_parameters['total_steps']
-            #     old_grid_points = solver_parameters['number_grid_points']
-            #     solver_parameters['total_steps'] = int(solver_parameters['total_steps'] * param / timestep_list[0])
-            #     solver_parameters['number_grid_points'] = int(solver_parameters['number_grid_points'] * param / input_parameters['timestep_over_spatialstep_times_c'])
-            input_parameters[param_name] = param
-            solver_parameters['number_pseudoelectrons'] = int(solver_parameters['number_pseudoelectrons']+j)
-            output = block_until_ready(simulation(input_parameters, solver_parameters))
-            input_parameters[param_name] = old_param
-            # if 'timestep_over_spatialstep_times_c' in param_name:
-            #     solver_parameters['total_steps'] = old_time_steps
-            #     solver_parameters['number_grid_points'] = old_grid_points
+        output = run_simulation(parameter_tree)
         elapsed_time = time.time() - start
+
         times.append(elapsed_time)
         max_relative_errors.append(max_relative_energy_error(output))
         print(f"{param_name.capitalize()}: {param}, Time: {elapsed_time}s")
     return times, max_relative_errors
+
 
 # Function to plot results
 def plot_results(ax, x_data, y_data, xlabel, ylabel):
@@ -101,7 +141,7 @@ def plot_results(ax, x_data, y_data, xlabel, ylabel):
 
 ####################################################################################################
 print(f"Run 1 simulation for JIT compilation")
-base_simulation = block_until_ready(simulation(input_parameters, solver_parameters))
+base_simulation = run_simulation(parameters)
 
 print(f"\n\nRun scaling tests with {number_of_steps} steps and increase factor {increase_factor}: time vs 1) number of grid points, 2) pseudoelectrons, 3) steps, and 4) timestep factor")
 
@@ -109,7 +149,7 @@ print('\n\nMeasure time vs number of grid points')
 times_grid_points, max_grid_points_relative_energy_error_array = measure_time_and_error(grid_points_list, 'number_grid_points')
 
 print('\n\nMeasure time vs number of pseudoelectrons')
-times_pseudoelectrons, max_pseudoelectrons_relative_energy_error_array = measure_time_and_error(pseudoelectrons_list, 'number_pseudoelectrons')
+times_pseudoelectrons, max_pseudoelectrons_relative_energy_error_array = measure_time_and_error(pseudoelectrons_list, 'number_pseudoparticles')
 
 print('\n\nMeasure time vs number of steps')
 times_steps, max_steps_relative_energy_error_array = measure_time_and_error(steps_list, 'total_steps')
@@ -132,6 +172,7 @@ def plot_and_save_results(x_data_list, y_data_list, x_labels, y_labels, file_nam
         ax.set_ylim([0.9 * min(all_y_data), 1.1 * max(all_y_data)])
     plt.tight_layout()
     plt.savefig(file_name, dpi=300)
+
 
 # Data for plotting
 x_data_list = [grid_points_list, pseudoelectrons_list, steps_list, timestep_list]

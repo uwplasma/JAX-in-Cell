@@ -16,6 +16,7 @@ from ._parameters._sections import (
 from ._parameters._species_definitions import (
     SPECIES_TYPES,
 )
+from ._parameters._species_parameters import resolve_species_references
 from ._routing import (
     build_runtime_flat_parameter_routes,
     build_runtime_parameter_sections,
@@ -211,6 +212,7 @@ class Simulation:
         )
         domain_parameters = runtime_parameter_sections["domain_parameters"]
         species_parameters = runtime_parameter_sections["species_parameters"]
+        resolve_species_references(species_parameters)
         external_field_parameters = runtime_parameter_sections["external_field_parameters"]
         source_parameters = runtime_parameter_sections["source_parameters"]
         solver_parameters = runtime_parameter_sections["solver_parameters"]
@@ -306,6 +308,15 @@ class Simulation:
         magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
 
         # **Output results**
+        from ._constants import epsilon_0, mass_electron
+        electron_species = next(iter(species_parameters["electrons"].values()))
+        electron_weight = particle_state["weights"][0, 0]
+        plasma_frequency = (
+            jnp.sqrt(electron_species["number_pseudoparticles"] * electron_weight * particle_state["charge_electrons"]**2)
+            / jnp.sqrt(mass_electron)
+            / jnp.sqrt(epsilon_0)
+            / jnp.sqrt(domain_parameters["length"])
+        )
         temporary_output = {
             ## segregate ions/electrons in non-jitted method outside simulation(...)
             ## so we can make use of dynamically constructed arrays
@@ -331,9 +342,11 @@ class Simulation:
             "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
             "grid": grid,
             "dt": dt,
-            'plasma_frequency': 1e10,
+            "plasma_frequency": plasma_frequency,
             'dx': dx,
-            'length': box_size[0]
+            'length': box_size[0],
+            "external_electric_field": self.external_electric_field,
+            "external_magnetic_field": self.external_magnetic_field,
         }
 
         # Might want to do more here
