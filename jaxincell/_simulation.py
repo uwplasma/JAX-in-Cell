@@ -6,7 +6,7 @@ from jax import lax, jit, config
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
-from ._utils import make_differentiable_type
+from ._utils import as_float_parameter
 from ._parameters._sections import (
     DIFFERENTIABLE_INPUT_PARAMETERS,
     FLAT_DIFFERENTIABLE_INPUT_PARAMETERS,
@@ -89,7 +89,7 @@ class Simulation:
             if key in SPECIES_TYPES:
                 continue
             if key in FLAT_DIFFERENTIABLE_INPUT_PARAMETERS:
-                differentiable_parameters[key] = make_differentiable_type(value)
+                differentiable_parameters[key] = as_float_parameter(value)
                 cleaner_input_parameters[key] = value
                 continue
 
@@ -105,8 +105,14 @@ class Simulation:
                 unrouted_input_parameters[key] = value
 
         self._input_parameters = differentiable_parameters
-        self._unrouted_input_parameters = unrouted_input_parameters
         self.differentiable_input_parameters = DIFFERENTIABLE_INPUT_PARAMETERS
+
+        if unrouted_input_parameters:
+            unrouted_keys = ", ".join(unrouted_input_parameters.keys())
+            raise ValueError(
+                "Initial input_parameters included parameter(s) that could not be routed. "
+                f"Unrouted parameter(s): {unrouted_keys}"
+            )
 
         return cleaner_input_parameters, parameters
     
@@ -119,7 +125,7 @@ class Simulation:
             )
 
     def reinitialize_simulation_state(self):
-        self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes(self._species_parameters)
+        self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
         self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
         self.build_domain()
         self.initialize_particles()

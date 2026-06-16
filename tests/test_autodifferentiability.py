@@ -10,7 +10,6 @@ from jaxincell._parameters import (
     DIFFERENTIABLE_DOMAIN_PARAMETERS,
     DIFFERENTIABLE_ELECTRON_PARAMETERS,
     DIFFERENTIABLE_ION_PARAMETERS,
-    DIFFERENTIABLE_LEGACY_SPECIES_PARAMETERS,
     DIFFERENTIABLE_SOLVER_PARAMETERS,
 )
 
@@ -27,24 +26,12 @@ class DifferentiableParameterCase:
 
 
 PARAMETER_VALUES = {
-    "amplitude_perturbation_x": 1e-7,
-    "amplitude_perturbation_y": 1e-7,
-    "amplitude_perturbation_z": 1e-7,
     "charge_over_elementary_charge": 1.0,
     "drift_speed_x": 1.0,
     "drift_speed_y": 1.0,
     "drift_speed_z": 1.0,
-    "electron_charge_over_elementary_charge": -1.0,
-    "electron_drift_speed_x": 1.0,
-    "electron_drift_speed_y": 1.0,
-    "electron_drift_speed_z": 1.0,
     "filter_alpha": 0.5,
     "grid_points_per_Debye_length": 1.0,
-    "ion_charge_over_elementary_charge": 1.0,
-    "ion_drift_speed_x": 1.0,
-    "ion_drift_speed_y": 1.0,
-    "ion_drift_speed_z": 1.0,
-    "ion_mass_over_proton_mass": 1.0,
     "ion_temperature_over_electron_temperature_x": 1.0,
     "ion_temperature_over_electron_temperature_y": 1.0,
     "ion_temperature_over_electron_temperature_z": 1.0,
@@ -59,18 +46,9 @@ PARAMETER_VALUES = {
     "perturbation_wavenumber_y": 1.0,
     "perturbation_wavenumber_z": 1.0,
     "timestep_over_spatialstep_times_c": 0.5,
-    "vth_electrons_over_c_x": 0.01,
-    "vth_electrons_over_c_y": 0.01,
-    "vth_electrons_over_c_z": 0.01,
     "vth_over_c_x": 0.01,
     "vth_over_c_y": 0.01,
     "vth_over_c_z": 0.01,
-    "wavenumber_electrons_x": 1.0,
-    "wavenumber_electrons_y": 1.0,
-    "wavenumber_electrons_z": 1.0,
-    "wavenumber_ions_x": 1.0,
-    "wavenumber_ions_y": 1.0,
-    "wavenumber_ions_z": 1.0,
     "weight": 1.0,
 }
 
@@ -88,8 +66,6 @@ def differentiable_parameter_cases():
         cases.append(DifferentiableParameterCase("domain", key, parameter_value(key)))
     for key in DIFFERENTIABLE_SOLVER_PARAMETERS:
         cases.append(DifferentiableParameterCase("solver", key, parameter_value(key)))
-    for key in DIFFERENTIABLE_LEGACY_SPECIES_PARAMETERS:
-        cases.append(DifferentiableParameterCase("legacy_species", key, parameter_value(key)))
     for key in DIFFERENTIABLE_ION_PARAMETERS:
         cases.append(DifferentiableParameterCase("ions", key, parameter_value(key)))
     for key in DIFFERENTIABLE_ELECTRON_PARAMETERS:
@@ -158,7 +134,7 @@ def base_simulation_parameters():
 
 
 def set_runtime_parameter(runtime_input_parameters, parameter_case, value):
-    if parameter_case.section in ("domain", "solver", "legacy_species"):
+    if parameter_case.section in ("domain", "solver"):
         runtime_input_parameters[parameter_case.key] = value
     elif parameter_case.section == "ions":
         runtime_input_parameters.setdefault("ions", {}).setdefault("ions0", {})[parameter_case.key] = value

@@ -13,12 +13,11 @@ def main(cl_args=sys.argv[1:]):
     """
     if len(cl_args) == 0:
         print("Using standard input parameters instead of an input TOML file.")
-        simulation = Simulation()
-        output = simulation.run()
+        sim = Simulation()
     else:
         parameters = load_parameters(cl_args[0])
-        simulation = Simulation(parameters)
-        output = simulation.run()
+        sim = Simulation(parameters)
+    output = sim.run()
     diagnostics(output)
     plot(output)
 

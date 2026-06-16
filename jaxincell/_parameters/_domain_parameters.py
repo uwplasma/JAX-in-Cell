@@ -8,30 +8,7 @@ __all__ = [
     "build_domain_hash",
 ]
 
-ALL_DOMAIN_PARAMETERS = [
-    "total_steps",
-    "timestep_over_spatialstep_times_c",
-    "number_grid_points",
-    "number_grid_points_y",
-    "number_grid_points_z",
-    "length",
-    "length_y",
-    "length_z",
-    "particle_BC_left",
-    "particle_BC_right",
-    "field_BC_left",
-    "field_BC_right",
-]
-
-DIFFERENTIABLE_DOMAIN_PARAMETERS = [
-    "timestep_over_spatialstep_times_c",
-    "length",
-    "length_y",
-    "length_z",
-]
-
-def clean_and_initialize_domain_parameters(domain_parameters, input_parameters={}):
-    default_domain_parameters = {
+DEFAULT_DOMAIN_PARAMETERS = {
         "total_steps": 350,                       # Total number of time steps to evolve the simulation
         "timestep_over_spatialstep_times_c": 1.0,   # dt * speed_of_light / dx
         "number_grid_points": 50,                       # Number of grid points in the simulation box
@@ -45,8 +22,19 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters={
         "field_BC_left": 0,                     # Left boundary condition for fields
         "field_BC_right": 0,                    # Right boundary condition for fields
     }
+
+DIFFERENTIABLE_DOMAIN_PARAMETERS = [
+    "timestep_over_spatialstep_times_c",
+    "length",
+    "length_y",
+    "length_z",
+]
+
+ALL_DOMAIN_PARAMETERS = list(DEFAULT_DOMAIN_PARAMETERS.keys())
+
+def clean_and_initialize_domain_parameters(domain_parameters, input_parameters={}):
     domain_parameters = overlay_parameter_defaults(
-        default_domain_parameters,
+        DEFAULT_DOMAIN_PARAMETERS,
         domain_parameters,
         input_parameters,
     )

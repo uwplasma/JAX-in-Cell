@@ -2,280 +2,38 @@ __all__ = [
     "ALL_ION_PARAMETERS",
     "ALL_ELECTRON_PARAMETERS",
     "ALL_SPECIES_PARAMETERS",
-    "ALL_LEGACY_SPECIES_PARAMETERS",
     "SPECIES_TYPES",
     "SPECIES_AXES",
+    "SPECIES_DEFAULT_LABELS",
+    "SPECIES_CANONICAL_PREFIXES",
     "SPECIES_PARAMETER_KEYS",
     "SPECIES_DIFFERENTIABLE_KEYS",
     "DIFFERENTIABLE_ION_PARAMETERS",
     "DIFFERENTIABLE_ELECTRON_PARAMETERS",
     "DIFFERENTIABLE_SPECIES_PARAMETERS",
-    "DIFFERENTIABLE_LEGACY_SPECIES_PARAMETERS",
-    "LEGACY_SPECIES_PARAMETER_ROUTES",
-    "DEFAULT_LEGACY_SPECIES_INPUT_PARAMETERS",
+    "SPECIES_DEFAULT_PARAMETERS",
+    "SPECIES_INITIAL_DEFAULT_PARAMETERS",
+    "DEFAULT_INITIAL_ION_PARAMETERS",
+    "DEFAULT_INITIAL_ELECTRON_PARAMETERS",
     "DEFAULT_ION_PARAMETERS",
     "DEFAULT_ELECTRON_PARAMETERS",
 ]
 
 SPECIES_TYPES = ("electrons", "ions")
 SPECIES_AXES = ("x", "y", "z")
-
-ALL_ION_PARAMETERS = [
-    "number_pseudoparticles",
-    "grid_points_per_Debye_length",
-    "weight",
-    "charge_over_elementary_charge",
-    "mass_over_proton_mass",
-    "perturbation_amplitude_x",
-    "perturbation_amplitude_y",
-    "perturbation_amplitude_z",
-    "perturbation_wavenumber_x",
-    "perturbation_wavenumber_y",
-    "perturbation_wavenumber_z",
-    "random_positions_x",
-    "random_positions_y",
-    "random_positions_z",
-    "vth_over_c_x",
-    "vth_over_c_y",
-    "vth_over_c_z",
-    "ion_temperature_over_electron_temperature_x",
-    "ion_temperature_over_electron_temperature_y",
-    "ion_temperature_over_electron_temperature_z",
-    "drift_speed_x",
-    "drift_speed_y",
-    "drift_speed_z",
-    "velocity_plus_minus_x",
-    "velocity_plus_minus_y",
-    "velocity_plus_minus_z",
-    "seed_position_override",
-    "seed_position",
-]
-
-ALL_ELECTRON_PARAMETERS = [
-    "number_pseudoparticles",
-    "grid_points_per_Debye_length",
-    "weight",
-    "charge_over_elementary_charge",
-    "perturbation_amplitude_x",
-    "perturbation_amplitude_y",
-    "perturbation_amplitude_z",
-    "perturbation_wavenumber_x",
-    "perturbation_wavenumber_y",
-    "perturbation_wavenumber_z",
-    "random_positions_x",
-    "random_positions_y",
-    "random_positions_z",
-    "vth_over_c_x",
-    "vth_over_c_y",
-    "vth_over_c_z",
-    "drift_speed_x",
-    "drift_speed_y",
-    "drift_speed_z",
-    "velocity_plus_minus_x",
-    "velocity_plus_minus_y",
-    "velocity_plus_minus_z",
-    "seed_position_override",
-    "seed_position",
-]
-
-ALL_SPECIES_PARAMETERS = list(dict.fromkeys(ALL_ION_PARAMETERS + ALL_ELECTRON_PARAMETERS))
-
-SPECIES_PARAMETER_KEYS = {
-    "ions": ALL_ION_PARAMETERS,
-    "electrons": ALL_ELECTRON_PARAMETERS,
+SPECIES_DEFAULT_LABELS = {
+    "electrons": "electrons0",
+    "ions": "ions0",
+}
+SPECIES_CANONICAL_PREFIXES = {
+    "electrons": "electrons",
+    "ions": "ions",
 }
 
-ALL_LEGACY_SPECIES_PARAMETERS = [
-    "number_pseudoelectrons",
-    "grid_points_per_Debye_length",
-    "weight",
-    "electron_charge_over_elementary_charge",
-    "ion_charge_over_elementary_charge",
-    "ion_mass_over_proton_mass",
-    "random_positions_x",
-    "random_positions_y",
-    "random_positions_z",
-    "amplitude_perturbation_x",
-    "amplitude_perturbation_y",
-    "amplitude_perturbation_z",
-    "wavenumber_electrons_x",
-    "wavenumber_electrons_y",
-    "wavenumber_electrons_z",
-    "wavenumber_ions_x",
-    "wavenumber_ions_y",
-    "wavenumber_ions_z",
-    "vth_electrons_over_c_x",
-    "vth_electrons_over_c_y",
-    "vth_electrons_over_c_z",
-    "ion_temperature_over_electron_temperature_x",
-    "ion_temperature_over_electron_temperature_y",
-    "ion_temperature_over_electron_temperature_z",
-    "electron_drift_speed_x",
-    "electron_drift_speed_y",
-    "electron_drift_speed_z",
-    "ion_drift_speed_x",
-    "ion_drift_speed_y",
-    "ion_drift_speed_z",
-    "velocity_plus_minus_electrons_x",
-    "velocity_plus_minus_electrons_y",
-    "velocity_plus_minus_electrons_z",
-    "velocity_plus_minus_ions_x",
-    "velocity_plus_minus_ions_y",
-    "velocity_plus_minus_ions_z",
-]
-
-DIFFERENTIABLE_ION_PARAMETERS = [
-    "grid_points_per_Debye_length",
-    "weight",
-    "charge_over_elementary_charge",
-    "mass_over_proton_mass",
-    "perturbation_amplitude_x",
-    "perturbation_amplitude_y",
-    "perturbation_amplitude_z",
-    "perturbation_wavenumber_x",
-    "perturbation_wavenumber_y",
-    "perturbation_wavenumber_z",
-    "vth_over_c_x",
-    "vth_over_c_y",
-    "vth_over_c_z",
-    "ion_temperature_over_electron_temperature_x",
-    "ion_temperature_over_electron_temperature_y",
-    "ion_temperature_over_electron_temperature_z",
-    "drift_speed_x",
-    "drift_speed_y",
-    "drift_speed_z",
-]
-
-DIFFERENTIABLE_ELECTRON_PARAMETERS = [
-    "grid_points_per_Debye_length",
-    "weight",
-    "charge_over_elementary_charge",
-    "perturbation_amplitude_x",
-    "perturbation_amplitude_y",
-    "perturbation_amplitude_z",
-    "perturbation_wavenumber_x",
-    "perturbation_wavenumber_y",
-    "perturbation_wavenumber_z",
-    "vth_over_c_x",
-    "vth_over_c_y",
-    "vth_over_c_z",
-    "drift_speed_x",
-    "drift_speed_y",
-    "drift_speed_z",
-]
-
-DIFFERENTIABLE_SPECIES_PARAMETERS = list(dict.fromkeys(
-    DIFFERENTIABLE_ION_PARAMETERS + DIFFERENTIABLE_ELECTRON_PARAMETERS
-))
-
-SPECIES_DIFFERENTIABLE_KEYS = {
-    "ions": DIFFERENTIABLE_ION_PARAMETERS,
-    "electrons": DIFFERENTIABLE_ELECTRON_PARAMETERS,
-}
-
-DIFFERENTIABLE_LEGACY_SPECIES_PARAMETERS = [
-    "grid_points_per_Debye_length",
-    "weight",
-    "electron_charge_over_elementary_charge",
-    "ion_charge_over_elementary_charge",
-    "ion_mass_over_proton_mass",
-    "amplitude_perturbation_x",
-    "amplitude_perturbation_y",
-    "amplitude_perturbation_z",
-    "wavenumber_electrons_x",
-    "wavenumber_electrons_y",
-    "wavenumber_electrons_z",
-    "wavenumber_ions_x",
-    "wavenumber_ions_y",
-    "wavenumber_ions_z",
-    "vth_electrons_over_c_x",
-    "vth_electrons_over_c_y",
-    "vth_electrons_over_c_z",
-    "ion_temperature_over_electron_temperature_x",
-    "ion_temperature_over_electron_temperature_y",
-    "ion_temperature_over_electron_temperature_z",
-    "electron_drift_speed_x",
-    "electron_drift_speed_y",
-    "electron_drift_speed_z",
-    "ion_drift_speed_x",
-    "ion_drift_speed_y",
-    "ion_drift_speed_z",
-]
-
-LEGACY_SPECIES_PARAMETER_ROUTES = {
-    "grid_points_per_Debye_length": (("ions", "grid_points_per_Debye_length"), ("electrons", "grid_points_per_Debye_length")),
-    "weight": (("ions", "weight"), ("electrons", "weight")),
-    "electron_charge_over_elementary_charge": (("electrons", "charge_over_elementary_charge"),),
-    "ion_charge_over_elementary_charge": (("ions", "charge_over_elementary_charge"),),
-    "ion_mass_over_proton_mass": (("ions", "mass_over_proton_mass"),),
-    "amplitude_perturbation_x": (("ions", "perturbation_amplitude_x"), ("electrons", "perturbation_amplitude_x")),
-    "amplitude_perturbation_y": (("ions", "perturbation_amplitude_y"), ("electrons", "perturbation_amplitude_y")),
-    "amplitude_perturbation_z": (("ions", "perturbation_amplitude_z"), ("electrons", "perturbation_amplitude_z")),
-    "wavenumber_electrons_x": (("electrons", "perturbation_wavenumber_x"),),
-    "wavenumber_electrons_y": (("electrons", "perturbation_wavenumber_y"),),
-    "wavenumber_electrons_z": (("electrons", "perturbation_wavenumber_z"),),
-    "wavenumber_ions_x": (("ions", "perturbation_wavenumber_x"),),
-    "wavenumber_ions_y": (("ions", "perturbation_wavenumber_y"),),
-    "wavenumber_ions_z": (("ions", "perturbation_wavenumber_z"),),
-    "vth_electrons_over_c_x": (("electrons", "vth_over_c_x"),),
-    "vth_electrons_over_c_y": (("electrons", "vth_over_c_y"),),
-    "vth_electrons_over_c_z": (("electrons", "vth_over_c_z"),),
-    "ion_temperature_over_electron_temperature_x": (("ions", "ion_temperature_over_electron_temperature_x"),),
-    "ion_temperature_over_electron_temperature_y": (("ions", "ion_temperature_over_electron_temperature_y"),),
-    "ion_temperature_over_electron_temperature_z": (("ions", "ion_temperature_over_electron_temperature_z"),),
-    "electron_drift_speed_x": (("electrons", "drift_speed_x"),),
-    "electron_drift_speed_y": (("electrons", "drift_speed_y"),),
-    "electron_drift_speed_z": (("electrons", "drift_speed_z"),),
-    "ion_drift_speed_x": (("ions", "drift_speed_x"),),
-    "ion_drift_speed_y": (("ions", "drift_speed_y"),),
-    "ion_drift_speed_z": (("ions", "drift_speed_z"),),
-}
-
-DEFAULT_LEGACY_SPECIES_INPUT_PARAMETERS = {
-    "number_pseudoelectrons": 500,
-    "grid_points_per_Debye_length": 2,
-    "weight": 0,
-    "electron_charge_over_elementary_charge": -1,
-    "ion_charge_over_elementary_charge": 1,
-    "ion_mass_over_proton_mass": 1,
-    "random_positions_x": False,
-    "random_positions_y": True,
-    "random_positions_z": True,
-    "amplitude_perturbation_x": 1e-7,
-    "amplitude_perturbation_y": 0.0,
-    "amplitude_perturbation_z": 0.0,
-    "wavenumber_electrons_x": 8,
-    "wavenumber_electrons_y": 0,
-    "wavenumber_electrons_z": 0,
-    "wavenumber_ions_x": 0,
-    "wavenumber_ions_y": 0,
-    "wavenumber_ions_z": 0,
-    "vth_electrons_over_c_x": 0.05,
-    "vth_electrons_over_c_y": 0.0,
-    "vth_electrons_over_c_z": 0.0,
-    "ion_temperature_over_electron_temperature_x": 1,
-    "ion_temperature_over_electron_temperature_y": 1,
-    "ion_temperature_over_electron_temperature_z": 1,
-    "electron_drift_speed_x": 1e8,
-    "electron_drift_speed_y": 0,
-    "electron_drift_speed_z": 0,
-    "ion_drift_speed_x": 0,
-    "ion_drift_speed_y": 0,
-    "ion_drift_speed_z": 0,
-    "velocity_plus_minus_electrons_x": True,
-    "velocity_plus_minus_electrons_y": False,
-    "velocity_plus_minus_electrons_z": False,
-    "velocity_plus_minus_ions_x": False,
-    "velocity_plus_minus_ions_y": False,
-    "velocity_plus_minus_ions_z": False,
-}
-
-DEFAULT_ION_PARAMETERS = {
+DEFAULT_CHARGED_SPECIES_PARAMETERS = {
     "number_pseudoparticles": 500,
     "grid_points_per_Debye_length": 2,
     "weight": 0,
-    "charge_over_elementary_charge": 1,
-    "mass_over_proton_mass": 1,
     "perturbation_amplitude_x": 0.0,
     "perturbation_amplitude_y": 0.0,
     "perturbation_amplitude_z": 0.0,
@@ -288,9 +46,6 @@ DEFAULT_ION_PARAMETERS = {
     "vth_over_c_x": 0,
     "vth_over_c_y": 0,
     "vth_over_c_z": 0,
-    "ion_temperature_over_electron_temperature_x": 1,
-    "ion_temperature_over_electron_temperature_y": 1,
-    "ion_temperature_over_electron_temperature_z": 1,
     "drift_speed_x": 0,
     "drift_speed_y": 0,
     "drift_speed_z": 0,
@@ -302,28 +57,92 @@ DEFAULT_ION_PARAMETERS = {
 }
 
 DEFAULT_ELECTRON_PARAMETERS = {
-    "number_pseudoparticles": 500,
-    "grid_points_per_Debye_length": 2,
-    "weight": 0,
+    **DEFAULT_CHARGED_SPECIES_PARAMETERS,
     "charge_over_elementary_charge": -1,
-    "perturbation_amplitude_x": 0.0,
-    "perturbation_amplitude_y": 0.0,
-    "perturbation_amplitude_z": 0.0,
-    "perturbation_wavenumber_x": 0,
-    "perturbation_wavenumber_y": 0,
-    "perturbation_wavenumber_z": 0,
-    "random_positions_x": False,
-    "random_positions_y": True,
-    "random_positions_z": True,
-    "vth_over_c_x": 0,
-    "vth_over_c_y": 0,
-    "vth_over_c_z": 0,
-    "drift_speed_x": 0,
-    "drift_speed_y": 0,
-    "drift_speed_z": 0,
-    "velocity_plus_minus_x": False,
-    "velocity_plus_minus_y": False,
-    "velocity_plus_minus_z": False,
-    "seed_position_override": False,
-    "seed_position": None,
+}
+
+ALL_ELECTRON_PARAMETERS = list(DEFAULT_ELECTRON_PARAMETERS.keys())
+
+DEFAULT_ION_PARAMETERS = {
+    **DEFAULT_CHARGED_SPECIES_PARAMETERS,
+    "charge_over_elementary_charge": 1,
+    "mass_over_proton_mass": 1,
+    "ion_temperature_over_electron_temperature_x": 1,
+    "ion_temperature_over_electron_temperature_y": 1,
+    "ion_temperature_over_electron_temperature_z": 1,
+}
+
+ALL_ION_PARAMETERS = list(DEFAULT_ION_PARAMETERS.keys())
+
+ALL_SPECIES_PARAMETERS = list(dict.fromkeys(ALL_ION_PARAMETERS + ALL_ELECTRON_PARAMETERS))
+
+SPECIES_PARAMETER_KEYS = {
+    "ions": ALL_ION_PARAMETERS,
+    "electrons": ALL_ELECTRON_PARAMETERS,
+}
+
+DEFAULT_INITIAL_ELECTRON_PARAMETERS = {
+    **DEFAULT_ELECTRON_PARAMETERS,
+    "perturbation_amplitude_x": 1e-7,
+    "perturbation_wavenumber_x": 8,
+    "vth_over_c_x": 0.05,
+    "drift_speed_x": 1e8,
+    "velocity_plus_minus_x": True,
+}
+
+DEFAULT_INITIAL_ION_PARAMETERS = {
+    **DEFAULT_ION_PARAMETERS,
+    "perturbation_amplitude_x": 1e-7,
+    "vth_over_c_x": "_electrons0",
+    "vth_over_c_y": "_electrons0",
+    "vth_over_c_z": "_electrons0",
+}
+
+SPECIES_DEFAULT_PARAMETERS = {
+    "electrons": DEFAULT_ELECTRON_PARAMETERS,
+    "ions": DEFAULT_ION_PARAMETERS,
+}
+
+SPECIES_INITIAL_DEFAULT_PARAMETERS = {
+    "electrons": DEFAULT_INITIAL_ELECTRON_PARAMETERS,
+    "ions": DEFAULT_INITIAL_ION_PARAMETERS,
+}
+
+DIFFERENTIABLE_CHARGED_SPECIES_PARAMETERS = [
+    "grid_points_per_Debye_length",
+    "weight",
+    "charge_over_elementary_charge",
+    "perturbation_amplitude_x",
+    "perturbation_amplitude_y",
+    "perturbation_amplitude_z",
+    "perturbation_wavenumber_x",
+    "perturbation_wavenumber_y",
+    "perturbation_wavenumber_z",
+    "vth_over_c_x",
+    "vth_over_c_y",
+    "vth_over_c_z",
+    "drift_speed_x",
+    "drift_speed_y",
+    "drift_speed_z",
+]
+
+DIFFERENTIABLE_ELECTRON_PARAMETERS = [
+    *DIFFERENTIABLE_CHARGED_SPECIES_PARAMETERS,
+]
+
+DIFFERENTIABLE_ION_PARAMETERS = [
+    *DIFFERENTIABLE_CHARGED_SPECIES_PARAMETERS,
+    "mass_over_proton_mass",
+    "ion_temperature_over_electron_temperature_x",
+    "ion_temperature_over_electron_temperature_y",
+    "ion_temperature_over_electron_temperature_z",
+]
+
+DIFFERENTIABLE_SPECIES_PARAMETERS = list(dict.fromkeys(
+    DIFFERENTIABLE_ION_PARAMETERS + DIFFERENTIABLE_ELECTRON_PARAMETERS
+))
+
+SPECIES_DIFFERENTIABLE_KEYS = {
+    "ions": DIFFERENTIABLE_ION_PARAMETERS,
+    "electrons": DIFFERENTIABLE_ELECTRON_PARAMETERS,
 }

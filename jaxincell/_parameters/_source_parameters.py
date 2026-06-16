@@ -8,22 +8,7 @@ __all__ = [
     "build_source_hash",
 ]
 
-ALL_SOURCE_PARAMETERS = [
-    "source_term_active",
-    "source_species",
-    "how_often_source_should_produce_quasiparticles",
-    "source_particles_per_second",
-    "location_of_source",
-    "width_of_source",
-    "injection_speed_x",
-    "injection_speed_y",
-    "injection_speed_z",
-]
-
-DIFFERENTIABLE_SOURCE_PARAMETERS = []
-
-def clean_and_initialize_source_parameters(source_parameters, input_parameters={}):
-    default_source_parameters = {
+DEFAULT_SOURCE_PARAMETERS = {
         "source_term_active": 0,                  # Whether the source term is active or not
         # 0 for electrons, 1 for ions, 2+ for extra species (sequential)
         "source_species": 1,                 # Which species should have sources (all species must be defined and named in the input file previously)
@@ -36,48 +21,58 @@ def clean_and_initialize_source_parameters(source_parameters, input_parameters={
         "injection_speed_z": 0,                   # (tuple for multiple sources)
         # Should add temps for maxwellian injection profiles, but will be constant for now
     }
+
+DIFFERENTIABLE_SOURCE_PARAMETERS = []
+
+ALL_SOURCE_PARAMETERS = list(DEFAULT_SOURCE_PARAMETERS.keys())
+SOURCE_SCALAR_PARAMETERS = ("source_term_active", "source_species")
+SOURCE_FLOAT_TUPLE_PARAMETERS = (
+    "source_particles_per_second",
+    "injection_speed_x",
+    "injection_speed_y",
+    "injection_speed_z",
+)
+SOURCE_INJECTION_SPEED_PARAMETERS = (
+    "injection_speed_x",
+    "injection_speed_y",
+    "injection_speed_z",
+)
+
+def clean_and_initialize_source_parameters(source_parameters, input_parameters={}):
     source_parameters = overlay_parameter_defaults(
-        default_source_parameters,
+        DEFAULT_SOURCE_PARAMETERS,
         source_parameters,
         input_parameters,
     )
 
     assert source_parameters["source_term_active"] in [0, 1], f"Source term active must be 0 (inactive) or 1 (active). Got {source_parameters['source_term_active']}."
-
-    if source_parameters["source_term_active"]:
-        def match_size_to_source_species(parameter_to_match_sizes):
-            if not len(source_parameters[parameter_to_match_sizes]) == len(source_parameters['source_species']):
-                source_parameters[parameter_to_match_sizes] = source_parameters[parameter_to_match_sizes] * len(source_parameters['source_species'])
-            assert len(source_parameters[parameter_to_match_sizes]) == len(source_parameters['source_species']), f"Length of {parameter_to_match_sizes} must match length of 'source_species' or be a single value. Got {len(source_parameters[parameter_to_match_sizes])} and {len(source_parameters['source_species'])}."
-    else:
-        def match_size_to_source_species(parameter_to_match_sizes):
-            pass
     
     source_parameters["source_species"] = make_tuple(source_parameters["source_species"])
     assert all(isinstance(s, int) for s in source_parameters["source_species"]), f"All source species must be specified as integers corresponding to the order of species defined in the input file. Got {source_parameters['source_species']}."
 
     for key in source_parameters.keys():
-        if key not in ["source_term_active", "source_species"]:
-            source_parameters[key] = make_tuple(source_parameters[key])
-            match_size_to_source_species(key)
+        if key in SOURCE_SCALAR_PARAMETERS:
+            continue
+
+        source_parameters[key] = make_tuple(source_parameters[key])
+        if source_parameters["source_term_active"]:
+            if len(source_parameters[key]) != len(source_parameters["source_species"]):
+                source_parameters[key] = source_parameters[key] * len(source_parameters["source_species"])
+            assert len(source_parameters[key]) == len(source_parameters["source_species"]), f"Length of {key} must match length of 'source_species' or be a single value. Got {len(source_parameters[key])} and {len(source_parameters['source_species'])}."
     
     assert all(isinstance(hosspq, int) and hosspq > 0 for hosspq in source_parameters["how_often_source_should_produce_quasiparticles"]), f"All values in 'how_often_source_should_produce_quasiparticles' must be positive integers. Got {source_parameters['how_often_source_should_produce_quasiparticles']}."
 
-    source_parameters["source_particles_per_second"] = make_tuple_values_floats(source_parameters["source_particles_per_second"])
+    for key in SOURCE_FLOAT_TUPLE_PARAMETERS:
+        source_parameters[key] = make_tuple_values_floats(source_parameters[key])
+
     assert all(spps > 0 for spps in source_parameters["source_particles_per_second"]), f"All values in 'source_particles_per_second' must be positive. Got {source_parameters['source_particles_per_second']}."
 
     assert all(los in [0, 1, 2, 3] for los in source_parameters["location_of_source"]), f"All values in 'location_of_source' must be 0 (center), 1 (left), 2 (right), or 3 (whole domain). Got {source_parameters['location_of_source']}."
 
     assert all(isinstance(wos, int) and wos > 0 for wos in source_parameters["width_of_source"]), f"All values in 'width_of_source' must be positive integers. Got {source_parameters['width_of_source']}."
 
-    source_parameters["injection_speed_x"] = make_tuple_values_floats(source_parameters["injection_speed_x"])
-    assert all(isinstance(isx, float) for isx in source_parameters["injection_speed_x"]), f"All values in 'injection_speed_x' must be floats. Got {source_parameters['injection_speed_x']}."
-
-    source_parameters["injection_speed_y"] = make_tuple_values_floats(source_parameters["injection_speed_y"])
-    assert all(isinstance(isy, float) for isy in source_parameters["injection_speed_y"]), f"All values in 'injection_speed_y' must be floats. Got {source_parameters['injection_speed_y']}."
-
-    source_parameters["injection_speed_z"] = make_tuple_values_floats(source_parameters["injection_speed_z"])
-    assert all(isinstance(isz, float) for isz in source_parameters["injection_speed_z"]), f"All values in 'injection_speed_z' must be floats. Got {source_parameters['injection_speed_z']}."
+    for key in SOURCE_INJECTION_SPEED_PARAMETERS:
+        assert all(isinstance(value, float) for value in source_parameters[key]), f"All values in '{key}' must be floats. Got {source_parameters[key]}."
 
     return source_parameters
 

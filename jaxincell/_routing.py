@@ -5,12 +5,11 @@ from ._parameters._sections import (
     PARAMETER_SECTIONS,
 )
 from ._parameters._species_definitions import (
-    LEGACY_SPECIES_PARAMETER_ROUTES,
     SPECIES_DIFFERENTIABLE_KEYS,
     SPECIES_PARAMETER_KEYS,
     SPECIES_TYPES,
 )
-from ._utils import make_differentiable_type
+from ._utils import as_float_parameter
 
 __all__ = [
     "build_runtime_flat_parameter_routes",
@@ -20,7 +19,6 @@ __all__ = [
     "iter_species_parameter_groups",
     "merge_parameter_trees",
     "put_parameter_path",
-    "put_species_parameter",
     "route_nested_initial_species_parameters",
 ]
 
@@ -63,50 +61,34 @@ def iter_species_parameter_groups(species_type, species_values, strict=False):
         species_groups.append((species_label, grouped_species_values))
     return species_groups
 
-def put_species_parameter(container, species_type, species_label, key, value):
-    species_container = container.setdefault(species_type, {})
-    if species_label is None:
-        species_container[key] = value
-    else:
-        species_container.setdefault(species_label, {})[key] = value
-
 def route_nested_initial_species_parameters(input_parameters, parameters, differentiable_parameters, cleaner_input_parameters):
     for species_type in SPECIES_TYPES:
         for species_label, species_values in iter_species_parameter_groups(species_type, input_parameters.get(species_type, {})):
             for key, value in species_values.items():
+                path = (
+                    (species_type, key)
+                    if species_label is None
+                    else (species_type, species_label, key)
+                )
                 if key in SPECIES_DIFFERENTIABLE_KEYS.get(species_type, ()):
-                    put_species_parameter(differentiable_parameters, species_type, species_label, key, make_differentiable_type(value))
-                    put_species_parameter(cleaner_input_parameters, species_type, species_label, key, value)
+                    put_parameter_path(differentiable_parameters, path, as_float_parameter(value))
+                    put_parameter_path(cleaner_input_parameters, path, value)
                 elif key in SPECIES_PARAMETER_KEYS.get(species_type, ()):
                     species_parameters = parameters.setdefault("species_parameters", {})
-                    put_species_parameter(species_parameters, species_type, species_label, key, value)
-                    put_species_parameter(cleaner_input_parameters, species_type, species_label, key, value)
+                    put_parameter_path(species_parameters, path, value)
+                    put_parameter_path(cleaner_input_parameters, path, value)
                 else:
-                    put_species_parameter(cleaner_input_parameters, species_type, species_label, key, value)
+                    put_parameter_path(cleaner_input_parameters, path, value)
 
-def build_runtime_flat_parameter_routes(species_parameters):
+def build_runtime_flat_parameter_routes():
     flat_routes = {}
 
-    def add_route(key, *path):
-        routes = flat_routes.setdefault(key, [])
-        route = tuple(path)
-        if route not in routes:
-            routes.append(route)
-
     for section_name, section_metadata in PARAMETER_SECTIONS.items():
-        for key in section_metadata["section_differentiable"]:
-            add_route(key, section_name, key)
-
-    for key, species_routes in LEGACY_SPECIES_PARAMETER_ROUTES.items():
-        for species_type, species_key in species_routes:
-            for species_label in species_parameters[species_type]:
-                add_route(
-                    key,
-                    "species_parameters",
-                    species_type,
-                    species_label,
-                    species_key,
-                )
+        for key in section_metadata["differentiable"]:
+            route = (section_name, key)
+            routes = flat_routes.setdefault(key, [])
+            if route not in routes:
+                routes.append(route)
 
     return flat_routes
 
@@ -123,13 +105,6 @@ def build_runtime_species_label_routes(species_parameters):
                 if canonical_label not in routes:
                     routes.append(canonical_label)
     return species_label_routes
-
-def canonical_runtime_species_labels(species_parameters, species_label_routes, species_type, species_label=None):
-    if species_label is None:
-        return tuple(species_parameters[species_type].keys())
-    if species_label in species_label_routes[species_type]:
-        return tuple(species_label_routes[species_type][species_label])
-    raise ValueError(f"Could not find {species_type} species {species_label!r}.")
 
 def clean_runtime_input_parameters(
     input_parameters,
@@ -157,12 +132,14 @@ def clean_runtime_input_parameters(
                             invalid_parameter_paths.append(f"{key}.{species_label}.{species_key}")
                         continue
 
-                    for canonical_label in canonical_runtime_species_labels(
-                        species_parameters,
-                        runtime_species_label_routes,
-                        key,
-                        species_label,
-                    ):
+                    if species_label is None:
+                        canonical_labels = tuple(species_parameters[key].keys())
+                    elif species_label in runtime_species_label_routes[key]:
+                        canonical_labels = tuple(runtime_species_label_routes[key][species_label])
+                    else:
+                        raise ValueError(f"Could not find {key} species {species_label!r}.")
+
+                    for canonical_label in canonical_labels:
                         put_parameter_path(
                             cleaned_input_parameters,
                             ("species_parameters", key, canonical_label, species_key),

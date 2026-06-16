@@ -19,11 +19,16 @@ def test_runtime_input_parameters_are_cleaned_to_canonical_section_overrides():
     cleaned_input_parameters = sim.clean_runtime_input_parameters(
         {
             "length": 0.02,
-            "grid_points_per_Debye_length": 1.5,
-            "ion_drift_speed_x": 3.0,
             "ions": {
                 "ions0": {
+                    "grid_points_per_Debye_length": 1.5,
+                    "drift_speed_x": 3.0,
                     "mass_over_proton_mass": 2.0,
+                },
+            },
+            "electrons": {
+                "electrons0": {
+                    "grid_points_per_Debye_length": 1.5,
                 },
             },
         }
@@ -39,6 +44,13 @@ def test_runtime_input_parameters_are_cleaned_to_canonical_section_overrides():
         "grid_points_per_Debye_length": 1.5,
     }
     assert cleaned_input_parameters["solver_parameters"] == {}
+
+
+def test_runtime_input_parameters_reject_removed_flat_species_values():
+    sim = Simulation(base_simulation_parameters())
+
+    with pytest.raises(ValueError, match="ion_drift_speed_x"):
+        sim.clean_runtime_input_parameters({"ion_drift_speed_x": 3.0})
 
 
 def test_runtime_input_parameters_reject_non_differentiable_values():
@@ -91,6 +103,16 @@ def test_initial_input_parameters_route_all_values_but_only_expose_differentiabl
     assert "filter_passes" not in exposed_input_parameters
     assert scalar(exposed_input_parameters["ions"]["ions0"]["mass_over_proton_mass"]) == 2.0
     assert "number_pseudoparticles" not in exposed_input_parameters["ions"]["ions0"]
+
+
+def test_initial_input_parameters_reject_unrouted_values():
+    parameters = deepcopy(base_simulation_parameters())
+    parameters["input_parameters"] = {
+        "ion_drift_speed_x": 3.0,
+    }
+
+    with pytest.raises(ValueError, match="ion_drift_speed_x"):
+        Simulation(parameters)
 
 
 def test_runtime_species_references_recompute_after_runtime_merge():

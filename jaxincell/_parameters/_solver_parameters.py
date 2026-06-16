@@ -7,26 +7,7 @@ __all__ = [
     "build_solver_hash",
 ]
 
-ALL_SOLVER_PARAMETERS = [
-    "print_info",
-    "field_solver",
-    "relativistic",
-    "time_evolution_algorithm",
-    "max_number_of_Picard_iterations_implicit_CN",
-    "number_of_particle_substeps_implicit_CN",
-    "tolerance_Picard_iterations_implicit_CN",
-    "filter_passes",
-    "filter_alpha",
-    "filter_strides",
-    "seed",
-]
-
-DIFFERENTIABLE_SOLVER_PARAMETERS = [
-    "filter_alpha",
-]
-
-def clean_and_initialize_solver_parameters(solver_parameters, input_parameters={}):
-    default_solver_parameters = {
+DEFAULT_SOLVER_PARAMETERS = {
         "print_info": True,                       # Print information about the simulation
         "field_solver": 0,                       # Algorithm for solving fields - 0: Gauss's law, 1: FDTD
         "relativistic": False,                    # Whether to use the relativistic version of the Boris push (only relevant if time_evolution_algorithm is 0 (Boris))
@@ -39,8 +20,16 @@ def clean_and_initialize_solver_parameters(solver_parameters, input_parameters={
         "filter_strides": (1, 2, 4),  # multi-scale strides for filtering
         "seed": 1701,                        # Random seed for reproducibility (if None, will be random every time)
     }
+
+DIFFERENTIABLE_SOLVER_PARAMETERS = [
+    "filter_alpha",
+]
+
+ALL_SOLVER_PARAMETERS = list(DEFAULT_SOLVER_PARAMETERS.keys())
+
+def clean_and_initialize_solver_parameters(solver_parameters, input_parameters={}):
     solver_parameters = overlay_parameter_defaults(
-        default_solver_parameters,
+        DEFAULT_SOLVER_PARAMETERS,
         solver_parameters,
         input_parameters,
     )
