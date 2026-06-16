@@ -66,6 +66,26 @@ def test_main_no_args_uses_default_parameters(
     assert "Using standard input parameters instead of an input TOML file." in captured.out
 
 
+def test_main_ignores_extra_arguments_after_toml_path():
+    """Test jaxincell.__main__.main argument handling.
+
+    Cases to implement:
+    - when more than one CLI argument is supplied, only cl_args[0] is passed to load_parameters.
+    - Simulation, diagnostics, and plot still run exactly once.
+    - no default-parameters message is printed in this branch.
+    """
+
+
+def test_main_propagates_simulation_or_plot_errors():
+    """Test jaxincell.__main__.main side-effect orchestration.
+
+    Cases to implement:
+    - Simulation construction errors are not swallowed.
+    - run errors are not swallowed and diagnostics/plot are not called afterward.
+    - plot errors are not swallowed after diagnostics has been called.
+    """
+
+
 def test_main_with_toml_argument(
     mock_simulation_class, mock_load_parameters, mock_plot, mock_diagnostics
 ):

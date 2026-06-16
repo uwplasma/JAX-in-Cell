@@ -344,6 +344,80 @@ print_info = false
     assert len(sim.species_parameters["ions"]) == 1
 
 
+def test_simulation_constructor_accepts_path_and_dict_equivalently():
+    """Test jaxincell._simulation.Simulation.__init__ and load_parameters.
+
+    Cases to implement:
+    - constructing Simulation from a TOML path calls load_parameters through the path branch.
+    - constructing Simulation from an equivalent dict yields matching cleaned parameter sections.
+    - invalid non-dict, non-path-like inputs produce the expected loading error.
+    """
+
+
+def test_simulation_property_setters_reinitialize_state_and_hashes():
+    """Test Simulation.set_parameter_section and section property setters.
+
+    Cases to implement:
+    - setting domain_parameters rebuilds domain state and updates domain_hash.
+    - setting species_parameters rebuilds particle state and updates species_hash.
+    - setting external_field_parameters, source_parameters, and solver_parameters updates the matching hash.
+    - unrelated base parameter sections remain unchanged.
+    """
+
+
+def test_simulation_input_parameters_setter_reclassifies_and_reinitializes():
+    """Test Simulation.input_parameters setter.
+
+    Cases to implement:
+    - assigning differentiable flat values updates exposed input_parameters.
+    - assigning nested species input parameters routes differentiable and non-differentiable values correctly.
+    - assigning invalid input parameter keys raises the same ValueError as initialization.
+    - simulation state and hashes are rebuilt after assignment.
+    """
+
+
+def test_simulation_current_domain_state_matches_attributes():
+    """Test Simulation.current_domain_state.
+
+    Cases to implement:
+    - returned box_size, dx, dt, and grid match the Simulation attributes.
+    - returned state can be passed to initialize_particle_state and initialize_field_state.
+    - mutating the returned dictionary does not mutate the Simulation attributes.
+    """
+
+
+def test_simulation_simulation_method_cleans_runtime_input_and_delegates_to_jitted_core():
+    """Test Simulation.simulation.
+
+    Cases to implement:
+    - None runtime input is normalized to empty section overrides.
+    - runtime input is passed through clean_runtime_input_parameters before _simulation.
+    - domain/species/external/source/solver hashes are forwarded to _simulation.
+    - invalid runtime input fails before calling _simulation.
+    """
+
+
+def test_simulation_jitted_core_orchestrates_runtime_sections_and_output_contract():
+    """Test Simulation._simulation.
+
+    Cases to implement:
+    - runtime section overrides are merged before domain, particle, and field initialization.
+    - species references are resolved after runtime merge.
+    - Boris and Crank-Nicolson algorithm branches both return the public output keys.
+    - plasma_frequency, time_array, external fields, and shape metadata match the runtime parameters.
+    """
+
+
+def test_simulation_run_delegates_to_simulation():
+    """Test Simulation.run.
+
+    Cases to implement:
+    - run(None) calls simulation(None).
+    - run(runtime_input_parameters) forwards the exact runtime input mapping.
+    - returned output object is the output from simulation.
+    """
+
+
 # Explicit initial position/velocity overrides are deferred until Simulation.run()
 # grows a public initial-state override API again.
 #

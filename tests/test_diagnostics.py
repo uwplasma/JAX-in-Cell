@@ -163,3 +163,33 @@ def test_diagnostics_basic_energy_and_species():
         assert s["velocities"].shape[0] == T
         assert s["positions"].shape[2] == 3
         assert s["velocities"].shape[2] == 3
+
+
+def test_diagnostics_external_field_energy_nonzero_cases():
+    """Test jaxincell._diagnostics.diagnostics external field energy calculations.
+
+    Cases to implement:
+    - nonzero external_electric_field produces expected density and integrated energy.
+    - nonzero external_magnetic_field produces expected density and integrated energy.
+    - total_energy includes both internal and external field energies.
+    """
+
+
+def test_diagnostics_species_split_with_multiple_species_signs():
+    """Test jaxincell._diagnostics.diagnostics species splitting.
+
+    Cases to implement:
+    - multiple negative-charge particles are grouped into electron arrays.
+    - multiple positive-charge particles are grouped into ion arrays.
+    - species metadata preserves positions, velocities, masses, and charges with correct leading dimensions.
+    """
+
+
+def test_diagnostics_dominant_frequency_for_oscillatory_energy():
+    """Test jaxincell._diagnostics.diagnostics dominant_frequency.
+
+    Cases to implement:
+    - a known oscillatory total energy signal reports the expected nonzero dominant frequency.
+    - dt and total_steps are used consistently in the frequency axis.
+    - constant energy falls back to zero dominant frequency.
+    """

@@ -241,6 +241,37 @@ def test_boris_step_relativistic_and_field_solver_branch():
     assert rho_step.shape == (G,)
 
 
+def test_boris_step_nonrelativistic_branch_and_zero_field_solver_path():
+    """Test jaxincell._algorithms.Boris_step.
+
+    Cases to implement:
+    - relativistic=False selects boris_step rather than boris_step_relativistic.
+    - field_solver=0 skips the charge-density correction switcher branch.
+    - returned carry advances staggered positions consistently with step_data.
+    """
+
+
+def test_boris_step_field_solver_switcher_variants():
+    """Test jaxincell._algorithms.Boris_step field_solver dispatch.
+
+    Cases to implement:
+    - field_solver=1 uses E_from_Gauss_1D_FFT.
+    - field_solver=2 uses E_from_Gauss_1D_Cartesian.
+    - field_solver=3 uses E_from_Poisson_1D_FFT.
+    - unsupported nonzero field_solver values raise the expected KeyError or validation error.
+    """
+
+
+def test_cn_step_picard_stopping_conditions():
+    """Test jaxincell._algorithms.CN_step Picard while_loop orchestration.
+
+    Cases to implement:
+    - convergence before max_number_of_Picard_iterations_implicit_CN exits early.
+    - max iteration limit stops the loop when tolerance is not met.
+    - number_of_particle_substeps_implicit_CN changes the substep accumulation shape but not public output shape.
+    """
+
+
 def test_cn_step_shapes_and_substepping():
     """
     Exercise the CN_step Picard iteration and substep loop:

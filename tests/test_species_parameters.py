@@ -1,10 +1,9 @@
 from copy import deepcopy
 
-import numpy as np
-
 from jaxincell._parameters._species_parameters import (
     clean_and_initialize_species_parameters,
 )
+from tests.helpers import scalar
 
 
 def clean_species_parameters(species_parameters=None, input_parameters=None):
@@ -12,10 +11,6 @@ def clean_species_parameters(species_parameters=None, input_parameters=None):
         deepcopy(species_parameters or {}),
         deepcopy(input_parameters or {}),
     )
-
-
-def scalar(value):
-    return float(np.asarray(value))
 
 
 def test_empty_species_input_builds_initial_ion_and_electron_species():
@@ -192,3 +187,54 @@ def test_nested_input_parameters_override_matching_nested_species_values():
 
     assert scalar(ion["drift_speed_x"]) == 6.0
     assert scalar(electron["drift_speed_x"]) == -6.0
+
+
+def test_species_parameter_validation_rejects_invalid_particle_counts_and_weights():
+    """Test jaxincell._parameters._species_parameters.validate_species_parameters.
+
+    Cases to implement:
+    - number_pseudoparticles must be a positive integer for ions and electrons.
+    - grid_points_per_Debye_length must be positive.
+    - weight must be nonnegative.
+    - boolean flags must be actual bool values, not integers or strings.
+    """
+
+
+def test_species_parameter_validation_rejects_invalid_ion_specific_values():
+    """Test ion-specific validation in clean_and_initialize_species_parameters.
+
+    Cases to implement:
+    - mass_over_proton_mass must be positive.
+    - ion_temperature_over_electron_temperature_* values must be nonnegative.
+    - seed_position_override=True requires a positive integer seed_position.
+    """
+
+
+def test_species_reference_resolution_ion_to_electron_and_electron_to_ion():
+    """Test jaxincell._parameters._species_parameters.resolve_species_references.
+
+    Cases to implement:
+    - ion vth_over_c_* referencing an electron species applies temperature and mass scaling.
+    - electron vth_over_c_* referencing an ion species applies inverse temperature and mass scaling.
+    - non-vth referenced values are copied directly.
+    """
+
+
+def test_species_reference_resolution_rejects_invalid_and_chained_references():
+    """Test jaxincell._parameters._species_parameters.resolve_reference_value.
+
+    Cases to implement:
+    - references to missing species labels raise ValueError during resolution setup.
+    - references to another unresolved reference raise AssertionError.
+    - error messages identify the species and key involved.
+    """
+
+
+def test_build_species_hash_stability_and_non_species_metadata():
+    """Test jaxincell._parameters._species_parameters.build_species_hash.
+
+    Cases to implement:
+    - identical cleaned species dictionaries produce identical hashes.
+    - changing a species parameter changes the hash.
+    - non-species metadata keys are included in the pre-species hash component.
+    """

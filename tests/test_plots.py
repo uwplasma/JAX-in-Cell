@@ -371,3 +371,33 @@ def test_plot_show_true_calls_show(monkeypatch):
 
     plot_mod.plot(out, direction="x", show=True, save_mp4=None)
     assert called["n"] == 1
+
+
+def test_combine_by_charge_sign_handles_missing_and_multiple_species():
+    """Test jaxincell._plot._combine_by_charge_sign.
+
+    Cases to implement:
+    - multiple species with matching charge sign are concatenated in stable order.
+    - missing matching species returns empty arrays with predictable shapes.
+    - species entries without charge metadata are handled according to the intended contract.
+    """
+
+
+def test_robust_vmax_clipped_edge_cases():
+    """Test jaxincell._plot._robust_vmax_clipped.
+
+    Cases to implement:
+    - all-zero and all-NaN sample arrays fall back to eps.
+    - clipping limits outliers while preserving useful central spread.
+    - q, pad, and eps parameters affect the result as documented.
+    """
+
+
+def test_pdf_over_frames_numpy_normalization_and_empty_bins():
+    """Test jaxincell._plot._pdf_over_frames_numpy.
+
+    Cases to implement:
+    - per-frame histograms integrate to one when samples are present.
+    - empty frames return zero density rather than NaN.
+    - bin edge handling is consistent for samples on the first and last edges.
+    """

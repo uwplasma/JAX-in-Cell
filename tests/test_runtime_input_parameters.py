@@ -1,16 +1,11 @@
 from copy import deepcopy
 
-import numpy as np
 import pytest
 
 from jaxincell import Simulation
 from jaxincell._parameters._species_parameters import resolve_species_references
 from jaxincell._routing import build_runtime_parameter_sections
-from tests.test_autodifferentiability import base_simulation_parameters
-
-
-def scalar(value):
-    return float(np.asarray(value))
+from tests.helpers import base_simulation_parameters, scalar
 
 
 def test_runtime_input_parameters_are_cleaned_to_canonical_section_overrides():
@@ -146,3 +141,43 @@ def test_runtime_species_references_recompute_after_runtime_merge():
 
     runtime_vth = runtime_sections["species_parameters"]["ions"]["_ions0"]["vth_over_c_x"]
     assert scalar(runtime_vth) == pytest.approx(2.0 * scalar(base_vth))
+
+
+def test_runtime_input_parameters_reject_non_dictionary_input():
+    """Test Simulation.clean_runtime_input_parameters with non-dict input.
+
+    Cases to implement:
+    - list, tuple, scalar, and string runtime inputs raise TypeError.
+    - the error message names runtime input_parameters.
+    - None remains accepted and cleans to empty section overrides.
+    """
+
+
+def test_runtime_input_parameters_reject_unknown_species_label():
+    """Test Simulation.clean_runtime_input_parameters species label resolution.
+
+    Cases to implement:
+    - unknown ion user labels raise ValueError.
+    - unknown electron user labels raise ValueError.
+    - canonical labels and user labels for known species are both accepted.
+    """
+
+
+def test_runtime_input_parameters_loose_species_values_apply_to_all_species_of_type():
+    """Test Simulation.clean_runtime_input_parameters loose species routing.
+
+    Cases to implement:
+    - loose ions runtime values apply to every canonical ion species.
+    - loose electrons runtime values apply to every canonical electron species.
+    - non-differentiable loose species keys are rejected with paths that include the species type.
+    """
+
+
+def test_initial_input_parameters_unknown_nested_species_key_is_reported():
+    """Test Simulation.classify_and_sort_input_parameters with unknown nested species keys.
+
+    Cases to implement:
+    - unknown keys under input_parameters.ions are preserved for cleaner validation.
+    - unknown keys under input_parameters.electrons are preserved for cleaner validation.
+    - the final initialization error includes the offending nested key path.
+    """

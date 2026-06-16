@@ -409,3 +409,24 @@ def test_filter_vector_field_with_nonperiodic_bcs():
     assert Ff_absorbing.shape == F.shape
     assert jnp.all(jnp.isfinite(Ff_reflective))
     assert jnp.all(jnp.isfinite(Ff_absorbing))
+
+
+def test_shift_with_bc_1d_direct_boundary_cases():
+    """Test jaxincell._filters._shift_with_bc_1d.
+
+    Cases to implement:
+    - positive and negative shifts with periodic boundaries match jnp.roll.
+    - reflective boundaries clamp to endpoint values.
+    - absorbing boundaries fill outside values with zero.
+    - shifts larger than one cell still use the documented one-step boundary semantics.
+    """
+
+
+def test_filter_vector_field_componentwise_equivalence_to_scalar_filter():
+    """Test jaxincell._filters.filter_vector_field.
+
+    Cases to implement:
+    - each vector component equals filter_scalar_field applied to that component.
+    - custom strides, passes, alpha, and boundary conditions are forwarded to each component.
+    - shape and dtype are preserved.
+    """
