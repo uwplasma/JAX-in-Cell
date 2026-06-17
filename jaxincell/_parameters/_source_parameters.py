@@ -1,4 +1,3 @@
-from .._utils import make_tuple, make_tuple_values_floats
 from ._utils import build_parameter_hash, overlay_parameter_defaults
 
 __all__ = [
@@ -37,6 +36,19 @@ SOURCE_INJECTION_SPEED_PARAMETERS = (
     "injection_speed_y",
     "injection_speed_z",
 )
+
+def make_tuple(thing_to_make_a_tuple):
+    if not isinstance(thing_to_make_a_tuple, (list, tuple)):
+        thing_to_make_a_tuple = (thing_to_make_a_tuple,)
+    else:
+        thing_to_make_a_tuple = tuple(thing_to_make_a_tuple)
+    return thing_to_make_a_tuple
+
+def make_tuple_values_floats(thing_to_make_tuple_values_floats):
+    thing_to_make_tuple_values_floats = list(thing_to_make_tuple_values_floats)
+    for i in range(len(thing_to_make_tuple_values_floats)):
+        thing_to_make_tuple_values_floats[i] = float(thing_to_make_tuple_values_floats[i])
+    return tuple(thing_to_make_tuple_values_floats)
 
 def clean_and_initialize_source_parameters(source_parameters, input_parameters={}):
     source_parameters = overlay_parameter_defaults(

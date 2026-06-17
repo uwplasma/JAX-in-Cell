@@ -373,6 +373,7 @@ def test_plot_show_true_calls_show(monkeypatch):
     assert called["n"] == 1
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_combine_by_charge_sign_handles_missing_and_multiple_species():
     """Test jaxincell._plot._combine_by_charge_sign.
 
@@ -383,6 +384,7 @@ def test_combine_by_charge_sign_handles_missing_and_multiple_species():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_robust_vmax_clipped_edge_cases():
     """Test jaxincell._plot._robust_vmax_clipped.
 
@@ -393,6 +395,7 @@ def test_robust_vmax_clipped_edge_cases():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_pdf_over_frames_numpy_normalization_and_empty_bins():
     """Test jaxincell._plot._pdf_over_frames_numpy.
 

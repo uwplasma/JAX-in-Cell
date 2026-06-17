@@ -2,8 +2,10 @@
 
 from copy import deepcopy
 
+import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from jaxincell._diagnostics import diagnostics
 from jaxincell._simulation import Simulation, load_parameters
@@ -145,6 +147,24 @@ def test_simulation_shapes_and_basic_consistency():
         rtol=1e-10,
         atol=1e-12,
     )
+
+
+def test_simulation_print_info_emits_initialization_summary(capsys):
+    parameters = small_simulation_parameters(
+        total_steps=1,
+        number_grid_points=4,
+        number_pseudoparticles=4,
+    )
+    parameters["solver_parameters"]["print_info"] = True
+
+    output = Simulation(parameters).run()
+    output["positions"].block_until_ready()
+    jax.effects_barrier()
+
+    captured = capsys.readouterr()
+    printed_output = captured.out + captured.err
+    assert "Length of the simulation box" in printed_output
+    assert "Relativistic gamma factor" in printed_output
 
 
 def test_simulation_deterministic_with_same_parameters():
@@ -344,6 +364,7 @@ print_info = false
     assert len(sim.species_parameters["ions"]) == 1
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_simulation_constructor_accepts_path_and_dict_equivalently():
     """Test jaxincell._simulation.Simulation.__init__ and load_parameters.
 
@@ -354,6 +375,7 @@ def test_simulation_constructor_accepts_path_and_dict_equivalently():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_simulation_property_setters_reinitialize_state_and_hashes():
     """Test Simulation.set_parameter_section and section property setters.
 
@@ -365,6 +387,7 @@ def test_simulation_property_setters_reinitialize_state_and_hashes():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_simulation_input_parameters_setter_reclassifies_and_reinitializes():
     """Test Simulation.input_parameters setter.
 
@@ -376,6 +399,7 @@ def test_simulation_input_parameters_setter_reclassifies_and_reinitializes():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_simulation_current_domain_state_matches_attributes():
     """Test Simulation.current_domain_state.
 
@@ -386,6 +410,7 @@ def test_simulation_current_domain_state_matches_attributes():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_simulation_simulation_method_cleans_runtime_input_and_delegates_to_jitted_core():
     """Test Simulation.simulation.
 
@@ -397,6 +422,7 @@ def test_simulation_simulation_method_cleans_runtime_input_and_delegates_to_jitt
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_simulation_jitted_core_orchestrates_runtime_sections_and_output_contract():
     """Test Simulation._simulation.
 
@@ -408,6 +434,7 @@ def test_simulation_jitted_core_orchestrates_runtime_sections_and_output_contrac
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_simulation_run_delegates_to_simulation():
     """Test Simulation.run.
 

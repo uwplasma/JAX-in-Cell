@@ -1,4 +1,5 @@
-from .._utils import as_float_parameter
+import jax.numpy as jnp
+
 from ._utils import build_parameter_hash, overlay_parameter_defaults
 
 __all__ = [
@@ -39,9 +40,9 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters={
         input_parameters,
     )
 
-    domain_parameters["length"] = as_float_parameter(domain_parameters["length"])
-    domain_parameters["length_y"] = as_float_parameter(domain_parameters["length_y"])
-    domain_parameters["length_z"] = as_float_parameter(domain_parameters["length_z"])
+    domain_parameters["length"] = jnp.asarray(domain_parameters["length"], dtype=float)
+    domain_parameters["length_y"] = jnp.asarray(domain_parameters["length_y"], dtype=float)
+    domain_parameters["length_z"] = jnp.asarray(domain_parameters["length_z"], dtype=float)
 
     assert type(domain_parameters["total_steps"]) == int and domain_parameters["total_steps"] > 0, "Total number of time steps must be an integer."
     assert domain_parameters["length"] > 0, "Length of the simulation box must be positive."

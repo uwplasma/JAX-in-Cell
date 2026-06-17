@@ -1,3 +1,8 @@
+import pytest
+
+pytestmark = pytest.mark.skip(reason="scaffold only")
+
+
 def test_overlay_parameter_defaults_precedence_and_no_input_case():
     """Test jaxincell._parameters._utils.overlay_parameter_defaults.
 

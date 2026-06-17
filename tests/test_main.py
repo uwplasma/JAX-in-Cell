@@ -66,6 +66,7 @@ def test_main_no_args_uses_default_parameters(
     assert "Using standard input parameters instead of an input TOML file." in captured.out
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_main_ignores_extra_arguments_after_toml_path():
     """Test jaxincell.__main__.main argument handling.
 
@@ -76,6 +77,7 @@ def test_main_ignores_extra_arguments_after_toml_path():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_main_propagates_simulation_or_plot_errors():
     """Test jaxincell.__main__.main side-effect orchestration.
 

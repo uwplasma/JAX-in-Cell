@@ -1,3 +1,8 @@
+import pytest
+
+pytestmark = pytest.mark.skip(reason="scaffold only")
+
+
 def test_get_S2_weights_and_indices_periodic_CN_wraps_and_normalizes():
     """Test jaxincell._sources.get_S2_weights_and_indices_periodic_CN.
 

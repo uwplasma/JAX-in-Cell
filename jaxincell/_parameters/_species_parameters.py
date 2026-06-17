@@ -1,6 +1,5 @@
 import jax.numpy as jnp
 from .._constants import mass_proton, mass_electron
-from .._utils import as_float_parameter
 from ._species_definitions import (
     SPECIES_AXES,
     SPECIES_CANONICAL_PREFIXES,
@@ -61,13 +60,13 @@ def validate_species_parameters(species_type, species_label, species):
     )
 
     for key in COMMON_SPECIES_FLOAT_PARAMETERS:
-        species[key] = as_float_parameter(species[key])
+        species[key] = jnp.asarray(species[key], dtype=float)
     assert species["weight"] >= 0, f"Weight must be non-negative. Got {species['weight']}."
     #assert species["charge_over_elementary_charge"] != 0, f"Charge over elementary charge must be non-zero. Got {species['charge_over_elementary_charge']}."
 
     if species_type == "ions":
         for key in ION_SPECIES_FLOAT_PARAMETERS:
-            species[key] = as_float_parameter(species[key])
+            species[key] = jnp.asarray(species[key], dtype=float)
         assert species["mass_over_proton_mass"] > 0, (
             f"Mass over proton mass must be positive. Got {species['mass_over_proton_mass']}."
         )

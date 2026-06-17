@@ -141,8 +141,8 @@ def diagnostics(output):
         'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared
     })
 
-    total_energy = (output["electric_field_energy"] +# output["external_electric_field_energy"] +
-                    output["magnetic_field_energy"] +# output["external_magnetic_field_energy"] +
+    total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
+                    output["magnetic_field_energy"] + output["external_magnetic_field_energy"] +
                     output["kinetic_energy"])
 
     output.update({'total_energy': total_energy})

@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 from jax import lax
+from jax.debug import print as jprint
 from jax.random import PRNGKey, normal, uniform
 
 from ._constants import (
@@ -19,6 +20,7 @@ __all__ = [
     "initialize_particle_state",
     "initialize_species_phase_space",
     "make_particles_from_state",
+    "print_simulation_information",
 ]
 
 def build_domain_state(domain_parameters):
@@ -81,6 +83,17 @@ def initialize_species_phase_space(species, seed_position, seed_velocity, number
 
     return jnp.stack(positions, axis=1), jnp.stack(velocities, axis=1)
 
+def species_seed_pair(seed, species_type, rng_index, extra_rng_index=None):
+    if species_type == "electrons" and rng_index == 0:
+        return seed, seed + 3
+    if species_type == "ions" and rng_index == 0:
+        return seed, seed + 6
+
+    if extra_rng_index is None:
+        extra_rng_index = max(rng_index - 1, 0)
+    local_seed = seed + 12 + extra_rng_index * 6
+    return local_seed, local_seed
+
 def make_particles_from_state(
     species_parameters,
     species_type,
@@ -89,6 +102,8 @@ def make_particles_from_state(
     solver_parameters,
     domain_state,
     electron_reference,
+    seed_position=None,
+    seed_velocity=None,
 ):
     species = species_parameters
     if species_type == "electrons":
@@ -112,11 +127,10 @@ def make_particles_from_state(
     number_grid_points = domain_parameters["number_grid_points"]
 
     assert rng_index >= 0
-    local_seed = seed + 12 + rng_index * 6
-    seed_position = local_seed
+    if seed_position is None or seed_velocity is None:
+        seed_position, seed_velocity = species_seed_pair(seed, species_type, rng_index)
     if species["seed_position_override"]:
         seed_position = species["seed_position"]
-    seed_velocity = local_seed
 
     positions, velocities = initialize_species_phase_space(
         species,
@@ -175,10 +189,19 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
     mass_by_species = []
     charge_mass_by_species = []
     electron_reference = None
+    extra_rng_index = 0
 
     for species_type in SPECIES_TYPES:
         for rng_index, species_label in enumerate(species_parameters[species_type]):
             species = species_parameters[species_type][species_label]
+            seed_position, seed_velocity = species_seed_pair(
+                solver_parameters["seed"],
+                species_type,
+                rng_index,
+                extra_rng_index,
+            )
+            if not (rng_index == 0 and species_type in ("electrons", "ions")):
+                extra_rng_index += 1
             species_particle_state, electron_reference = make_particles_from_state(
                 species_parameters=species,
                 species_type=species_type,
@@ -187,6 +210,8 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
                 solver_parameters=solver_parameters,
                 domain_state=domain_state,
                 electron_reference=electron_reference,
+                seed_position=seed_position,
+                seed_velocity=seed_velocity,
             )
 
             number_particles = species["number_pseudoparticles"]
@@ -249,6 +274,83 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
         "vth_electrons_over_c": electron_reference["vth_electrons_over_c"],
         "charge_electrons": electron_reference["charge_electrons"],
     }
+
+def print_simulation_information(
+    domain_parameters,
+    species_parameters,
+    external_field_parameters,
+    solver_parameters,
+    domain_state,
+    particle_state,
+):
+    electron_species = next(iter(species_parameters["electrons"].values()))
+    ion_species = next(iter(species_parameters["ions"].values()))
+
+    length = domain_state["box_size"][0]
+    dx = domain_state["dx"]
+    dt = domain_state["dt"]
+    total_steps = domain_parameters["total_steps"]
+    number_grid_points = domain_parameters["number_grid_points"]
+    number_pseudoelectrons = electron_species["number_pseudoparticles"]
+    weight = particle_state["weights"][0, 0]
+    charge_electrons = particle_state["charge_electrons"]
+    vth_electrons = particle_state["vth_electrons"]
+    Debye_length_per_dx = 1 / electron_species["grid_points_per_Debye_length"]
+    electron_temperature = mass_electron * vth_electrons**2 / 2 / (-charge_electrons)
+    plasma_frequency = (
+        jnp.sqrt(number_pseudoelectrons * weight * charge_electrons**2)
+        / jnp.sqrt(mass_electron)
+        / jnp.sqrt(epsilon_0)
+        / jnp.sqrt(length)
+    )
+    relativistic_gamma_factor = 1 / jnp.sqrt(
+        1 - jnp.sum(particle_state["velocities"]**2, axis=1) / speed_of_light**2
+    )
+
+    lax.cond(
+        solver_parameters["print_info"],
+        lambda _: jprint((
+            "Length of the simulation box: {} Debye lengths or {} Skin Depths\n"
+            "Density of electrons: {} m^-3\n"
+            "Electron temperature: {} eV\n"
+            "Ion temperature / Electron temperature: {}\n"
+            "Debye length: {} m\n"
+            "Skin depth: {} m\n"
+            "Wavenumber * Debye length: {}\n"
+            "Pseudoparticles per cell: {}\n"
+            "Pseudoparticle weight: {}\n"
+            "Steps at each plasma frequency: {}\n"
+            "Total time: {} / plasma frequency\n"
+            "Number of particles on a Debye cube: {}\n"
+            "Relativistic gamma factor: Maximum {}, Average {}\n"
+            "Charge x External electric field x Debye Length / Temperature: {}\n"
+        ),
+            length / (Debye_length_per_dx * dx),
+            length / (speed_of_light / plasma_frequency),
+            number_pseudoelectrons * weight / length,
+            electron_temperature,
+            ion_species["ion_temperature_over_electron_temperature_x"],
+            Debye_length_per_dx * dx,
+            speed_of_light / plasma_frequency,
+            electron_species["perturbation_wavenumber_x"] * Debye_length_per_dx * dx,
+            number_pseudoelectrons / number_grid_points,
+            weight,
+            1 / (plasma_frequency * dt),
+            dt * plasma_frequency * total_steps,
+            number_pseudoelectrons * weight / length * (Debye_length_per_dx * dx)**3,
+            jnp.max(relativistic_gamma_factor),
+            jnp.mean(relativistic_gamma_factor),
+            (
+                -charge_electrons
+                * external_field_parameters["external_electric_field_amplitude"]
+                * Debye_length_per_dx
+                * dx
+                / (mass_electron * vth_electrons**2 / 2)
+            ),
+        ),
+        lambda _: None,
+        operand=None,
+    )
 
 def initialize_field_state(domain_parameters, solver_parameters, external_field_parameters, domain_state, particle_state):
     grid = domain_state["grid"]

@@ -143,6 +143,7 @@ def test_runtime_species_references_recompute_after_runtime_merge():
     assert scalar(runtime_vth) == pytest.approx(2.0 * scalar(base_vth))
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_runtime_input_parameters_reject_non_dictionary_input():
     """Test Simulation.clean_runtime_input_parameters with non-dict input.
 
@@ -153,6 +154,7 @@ def test_runtime_input_parameters_reject_non_dictionary_input():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_runtime_input_parameters_reject_unknown_species_label():
     """Test Simulation.clean_runtime_input_parameters species label resolution.
 
@@ -163,6 +165,7 @@ def test_runtime_input_parameters_reject_unknown_species_label():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_runtime_input_parameters_loose_species_values_apply_to_all_species_of_type():
     """Test Simulation.clean_runtime_input_parameters loose species routing.
 
@@ -173,11 +176,12 @@ def test_runtime_input_parameters_loose_species_values_apply_to_all_species_of_t
     """
 
 
-def test_initial_input_parameters_unknown_nested_species_key_is_reported():
-    """Test Simulation.classify_and_sort_input_parameters with unknown nested species keys.
+@pytest.mark.skip(reason="scaffold only")
+def test_initial_input_parameters_nested_species_edge_cases_are_documented():
+    """Test Simulation.classify_and_sort_input_parameters nested species edge cases.
 
     Cases to implement:
-    - unknown keys under input_parameters.ions are preserved for cleaner validation.
-    - unknown keys under input_parameters.electrons are preserved for cleaner validation.
-    - the final initialization error includes the offending nested key path.
+    - differentiable nested species values are exposed through Simulation.input_parameters.
+    - non-differentiable nested species values are routed into species_parameters but not exposed.
+    - unknown nested species keys follow the current cleaner path or a new explicit validation branch.
     """

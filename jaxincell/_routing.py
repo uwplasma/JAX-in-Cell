@@ -1,7 +1,9 @@
+import jax.numpy as jnp
 from copy import deepcopy
 
 from ._parameters._sections import (
     FLAT_DIFFERENTIABLE_INPUT_PARAMETERS,
+    PARAMETER_SECTION_KEYS,
     PARAMETER_SECTIONS,
 )
 from ._parameters._species_definitions import (
@@ -9,8 +11,6 @@ from ._parameters._species_definitions import (
     SPECIES_PARAMETER_KEYS,
     SPECIES_TYPES,
 )
-from ._utils import as_float_parameter
-
 __all__ = [
     "build_runtime_flat_parameter_routes",
     "build_runtime_parameter_sections",
@@ -19,6 +19,7 @@ __all__ = [
     "iter_species_parameter_groups",
     "merge_parameter_trees",
     "put_parameter_path",
+    "route_flat_initial_parameters",
     "route_nested_initial_species_parameters",
 ]
 
@@ -31,7 +32,7 @@ def merge_parameter_trees(base_parameters, override_parameters):
         if isinstance(value, dict) and isinstance(merged_parameters.get(key), dict):
             merged_parameters[key] = merge_parameter_trees(merged_parameters[key], value)
         else:
-            merged_parameters[key] = value
+            merged_parameters[key] = deepcopy(value)
     return merged_parameters
 
 def put_parameter_path(container, path, value):
@@ -71,7 +72,7 @@ def route_nested_initial_species_parameters(input_parameters, parameters, differ
                     else (species_type, species_label, key)
                 )
                 if key in SPECIES_DIFFERENTIABLE_KEYS.get(species_type, ()):
-                    put_parameter_path(differentiable_parameters, path, as_float_parameter(value))
+                    put_parameter_path(differentiable_parameters, path, jnp.asarray(value, dtype=float))
                     put_parameter_path(cleaner_input_parameters, path, value)
                 elif key in SPECIES_PARAMETER_KEYS.get(species_type, ()):
                     species_parameters = parameters.setdefault("species_parameters", {})
@@ -79,6 +80,30 @@ def route_nested_initial_species_parameters(input_parameters, parameters, differ
                     put_parameter_path(cleaner_input_parameters, path, value)
                 else:
                     put_parameter_path(cleaner_input_parameters, path, value)
+
+def route_flat_initial_parameters(input_parameters, parameters, differentiable_parameters, cleaner_input_parameters):
+    unrouted_input_parameters = {}
+
+    for key, value in input_parameters.items():
+        if key in SPECIES_TYPES:
+            continue
+        if key in FLAT_DIFFERENTIABLE_INPUT_PARAMETERS:
+            differentiable_parameters[key] = jnp.asarray(value, dtype=float)
+            cleaner_input_parameters[key] = value
+            continue
+
+        routed_parameter = False
+        for section_name, section_keys in PARAMETER_SECTION_KEYS.items():
+            if key in section_keys:
+                parameters.setdefault(section_name, {})[key] = value
+                routed_parameter = True
+                break
+
+        if not routed_parameter:
+            cleaner_input_parameters[key] = value
+            unrouted_input_parameters[key] = value
+
+    return unrouted_input_parameters
 
 def build_runtime_flat_parameter_routes():
     flat_routes = {}

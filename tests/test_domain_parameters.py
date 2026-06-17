@@ -12,7 +12,7 @@ def test_clean_and_initialize_domain_parameters_defaults_and_input_precedence():
     Cases to implement:
     - defaults are populated when no domain parameters are supplied.
     - input_parameters override explicit domain_parameters for matching keys.
-    - length, length_y, and length_z are converted through as_float_parameter.
+    - length, length_y, and length_z are converted to JAX float arrays.
     """
     default_applied = clean_and_initialize_domain_parameters({})
     assert default_applied == DEFAULT_DOMAIN_PARAMETERS

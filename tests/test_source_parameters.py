@@ -20,6 +20,28 @@ NORMALIZED_DEFAULT_SOURCE_PARAMETERS = {
 }
 
 
+@pytest.mark.skip(reason="scaffold only")
+def test_make_tuple_scalar_list_and_tuple_cases():
+    """Test jaxincell._parameters._source_parameters.make_tuple.
+
+    Cases to implement:
+    - scalar input is wrapped in a one-item tuple.
+    - list input is converted to a tuple with the same values.
+    - tuple input is returned as an equivalent tuple.
+    """
+
+
+@pytest.mark.skip(reason="scaffold only")
+def test_make_tuple_values_floats_converts_all_entries():
+    """Test jaxincell._parameters._source_parameters.make_tuple_values_floats.
+
+    Cases to implement:
+    - integer and string numeric entries are converted to floats.
+    - tuple and list inputs produce tuple outputs.
+    - invalid nonnumeric values raise the underlying float-conversion error.
+    """
+
+
 def test_clean_and_initialize_source_parameters_inactive_defaults_and_tuple_conversion():
     """Test jaxincell._parameters._source_parameters.clean_and_initialize_source_parameters.
 

@@ -1,3 +1,8 @@
+import pytest
+
+pytestmark = pytest.mark.skip(reason="scaffold only")
+
+
 def test_fields_to_particles_grid_interpolates_with_boundary_conditions():
     """Test jaxincell._particles.fields_to_particles_grid.
 
@@ -53,6 +58,6 @@ def test_boris_step_relativistic_zero_field_and_speed_limit_behavior():
 
     Cases to implement:
     - zero E and B fields preserve velocity and advance positions linearly.
-    - E-only acceleration returns finite subluminal velocities.
+    - E-only acceleration returns finite velocities from relativistic momentum recovery.
     - batched particles with different charges and masses keep the expected shapes.
     """

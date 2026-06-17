@@ -1,6 +1,7 @@
 # tests/test_algorithms.py
 
 import jax.numpy as jnp
+import pytest
 
 from jaxincell._algorithms import Boris_step, CN_step
 from jaxincell._boundary_conditions import set_BC_particles, set_BC_positions
@@ -241,6 +242,7 @@ def test_boris_step_relativistic_and_field_solver_branch():
     assert rho_step.shape == (G,)
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_boris_step_nonrelativistic_branch_and_zero_field_solver_path():
     """Test jaxincell._algorithms.Boris_step.
 
@@ -251,6 +253,7 @@ def test_boris_step_nonrelativistic_branch_and_zero_field_solver_path():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_boris_step_field_solver_switcher_variants():
     """Test jaxincell._algorithms.Boris_step field_solver dispatch.
 
@@ -262,6 +265,7 @@ def test_boris_step_field_solver_switcher_variants():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_cn_step_picard_stopping_conditions():
     """Test jaxincell._algorithms.CN_step Picard while_loop orchestration.
 

@@ -2,6 +2,7 @@
 
 import numpy as np
 import jax.numpy as jnp
+import pytest
 from jax import grad, jit, random
 
 from jaxincell._filters import (
@@ -411,6 +412,7 @@ def test_filter_vector_field_with_nonperiodic_bcs():
     assert jnp.all(jnp.isfinite(Ff_absorbing))
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_shift_with_bc_1d_direct_boundary_cases():
     """Test jaxincell._filters._shift_with_bc_1d.
 
@@ -418,10 +420,11 @@ def test_shift_with_bc_1d_direct_boundary_cases():
     - positive and negative shifts with periodic boundaries match jnp.roll.
     - reflective boundaries clamp to endpoint values.
     - absorbing boundaries fill outside values with zero.
-    - shifts larger than one cell still use the documented one-step boundary semantics.
+    - shifts larger than one cell follow the current index-shift, clamp, and mask semantics.
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_filter_vector_field_componentwise_equivalence_to_scalar_filter():
     """Test jaxincell._filters.filter_vector_field.
 

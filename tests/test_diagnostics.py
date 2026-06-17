@@ -2,6 +2,7 @@
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 from jaxincell._diagnostics import diagnostics
 from jaxincell._constants import epsilon_0, mu_0
 
@@ -165,6 +166,7 @@ def test_diagnostics_basic_energy_and_species():
         assert s["velocities"].shape[2] == 3
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_diagnostics_external_field_energy_nonzero_cases():
     """Test jaxincell._diagnostics.diagnostics external field energy calculations.
 
@@ -175,6 +177,7 @@ def test_diagnostics_external_field_energy_nonzero_cases():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_diagnostics_species_split_with_multiple_species_signs():
     """Test jaxincell._diagnostics.diagnostics species splitting.
 
@@ -185,6 +188,7 @@ def test_diagnostics_species_split_with_multiple_species_signs():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_diagnostics_dominant_frequency_for_oscillatory_energy():
     """Test jaxincell._diagnostics.diagnostics dominant_frequency.
 

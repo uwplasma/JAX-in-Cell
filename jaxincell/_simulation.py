@@ -6,15 +6,9 @@ from jax import lax, jit, config
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
-from ._utils import as_float_parameter
 from ._parameters._sections import (
     DIFFERENTIABLE_INPUT_PARAMETERS,
-    FLAT_DIFFERENTIABLE_INPUT_PARAMETERS,
-    PARAMETER_SECTION_KEYS,
     PARAMETER_SECTIONS,
-)
-from ._parameters._species_definitions import (
-    SPECIES_TYPES,
 )
 from ._parameters._species_parameters import resolve_species_references
 from ._routing import (
@@ -22,9 +16,15 @@ from ._routing import (
     build_runtime_parameter_sections,
     build_runtime_species_label_routes,
     clean_runtime_input_parameters,
+    route_flat_initial_parameters,
     route_nested_initial_species_parameters,
 )
-from ._state_initialization import build_domain_state, initialize_field_state, initialize_particle_state
+from ._state_initialization import (
+    build_domain_state,
+    initialize_field_state,
+    initialize_particle_state,
+    print_simulation_information,
+)
 
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
@@ -84,25 +84,12 @@ class Simulation:
             differentiable_parameters,
             cleaner_input_parameters,
         )
-
-        for key, value in input_parameters.items():
-            if key in SPECIES_TYPES:
-                continue
-            if key in FLAT_DIFFERENTIABLE_INPUT_PARAMETERS:
-                differentiable_parameters[key] = as_float_parameter(value)
-                cleaner_input_parameters[key] = value
-                continue
-
-            routed_parameter = False
-            for section_name, section_keys in PARAMETER_SECTION_KEYS.items():
-                if key in section_keys:
-                    parameters.setdefault(section_name, {})[key] = value
-                    routed_parameter = True
-                    break
-
-            if not routed_parameter:
-                cleaner_input_parameters[key] = value
-                unrouted_input_parameters[key] = value
+        unrouted_input_parameters = route_flat_initial_parameters(
+            input_parameters,
+            parameters,
+            differentiable_parameters,
+            cleaner_input_parameters,
+        )
 
         self._input_parameters = differentiable_parameters
         self.differentiable_input_parameters = DIFFERENTIABLE_INPUT_PARAMETERS
@@ -229,6 +216,14 @@ class Simulation:
             domain_parameters,
             solver_parameters,
             domain_state,
+        )
+        print_simulation_information(
+            domain_parameters,
+            species_parameters,
+            external_field_parameters,
+            solver_parameters,
+            domain_state,
+            particle_state,
         )
         field_state = initialize_field_state(
             domain_parameters,

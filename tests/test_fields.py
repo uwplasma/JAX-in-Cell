@@ -1,3 +1,8 @@
+import pytest
+
+pytestmark = pytest.mark.skip(reason="scaffold only")
+
+
 def test_E_from_Gauss_1D_FFT_zero_mode_and_shape():
     """Test jaxincell._fields.E_from_Gauss_1D_FFT.
 

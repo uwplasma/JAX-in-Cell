@@ -1,5 +1,7 @@
 from copy import deepcopy
 
+import pytest
+
 from jaxincell._parameters._species_parameters import (
     clean_and_initialize_species_parameters,
 )
@@ -189,6 +191,7 @@ def test_nested_input_parameters_override_matching_nested_species_values():
     assert scalar(electron["drift_speed_x"]) == -6.0
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_species_parameter_validation_rejects_invalid_particle_counts_and_weights():
     """Test jaxincell._parameters._species_parameters.validate_species_parameters.
 
@@ -200,6 +203,7 @@ def test_species_parameter_validation_rejects_invalid_particle_counts_and_weight
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_species_parameter_validation_rejects_invalid_ion_specific_values():
     """Test ion-specific validation in clean_and_initialize_species_parameters.
 
@@ -210,6 +214,7 @@ def test_species_parameter_validation_rejects_invalid_ion_specific_values():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_species_reference_resolution_ion_to_electron_and_electron_to_ion():
     """Test jaxincell._parameters._species_parameters.resolve_species_references.
 
@@ -220,6 +225,7 @@ def test_species_reference_resolution_ion_to_electron_and_electron_to_ion():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_species_reference_resolution_rejects_invalid_and_chained_references():
     """Test jaxincell._parameters._species_parameters.resolve_reference_value.
 
@@ -230,6 +236,7 @@ def test_species_reference_resolution_rejects_invalid_and_chained_references():
     """
 
 
+@pytest.mark.skip(reason="scaffold only")
 def test_build_species_hash_stability_and_non_species_metadata():
     """Test jaxincell._parameters._species_parameters.build_species_hash.
 
