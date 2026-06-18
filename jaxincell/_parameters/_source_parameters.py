@@ -50,7 +50,9 @@ def make_tuple_values_floats(thing_to_make_tuple_values_floats):
         thing_to_make_tuple_values_floats[i] = float(thing_to_make_tuple_values_floats[i])
     return tuple(thing_to_make_tuple_values_floats)
 
-def clean_and_initialize_source_parameters(source_parameters, input_parameters={}):
+def clean_and_initialize_source_parameters(source_parameters, input_parameters=None):
+    if input_parameters is None:
+        input_parameters = {}
     source_parameters = overlay_parameter_defaults(
         DEFAULT_SOURCE_PARAMETERS,
         source_parameters,

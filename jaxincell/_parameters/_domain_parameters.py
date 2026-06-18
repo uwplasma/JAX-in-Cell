@@ -33,7 +33,9 @@ DIFFERENTIABLE_DOMAIN_PARAMETERS = [
 
 ALL_DOMAIN_PARAMETERS = list(DEFAULT_DOMAIN_PARAMETERS.keys())
 
-def clean_and_initialize_domain_parameters(domain_parameters, input_parameters={}):
+def clean_and_initialize_domain_parameters(domain_parameters, input_parameters=None):
+    if input_parameters is None:
+        input_parameters = {}
     domain_parameters = overlay_parameter_defaults(
         DEFAULT_DOMAIN_PARAMETERS,
         domain_parameters,

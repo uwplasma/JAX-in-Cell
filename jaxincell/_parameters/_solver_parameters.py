@@ -27,7 +27,9 @@ DIFFERENTIABLE_SOLVER_PARAMETERS = [
 
 ALL_SOLVER_PARAMETERS = list(DEFAULT_SOLVER_PARAMETERS.keys())
 
-def clean_and_initialize_solver_parameters(solver_parameters, input_parameters={}):
+def clean_and_initialize_solver_parameters(solver_parameters, input_parameters=None):
+    if input_parameters is None:
+        input_parameters = {}
     solver_parameters = overlay_parameter_defaults(
         DEFAULT_SOLVER_PARAMETERS,
         solver_parameters,

@@ -20,8 +20,9 @@ DIFFERENTIABLE_EXTERNAL_FIELD_PARAMETERS = []
 
 ALL_EXTERNAL_FIELD_PARAMETERS = list(DEFAULT_EXTERNAL_FIELD_PARAMETERS.keys())
 
-def clean_and_initialize_external_field_parameters(external_field_parameters, input_parameters={}):
-
+def clean_and_initialize_external_field_parameters(external_field_parameters, input_parameters=None):
+    if input_parameters is None:
+        input_parameters = {}
     external_field_parameters = overlay_parameter_defaults(
         DEFAULT_EXTERNAL_FIELD_PARAMETERS,
         external_field_parameters,

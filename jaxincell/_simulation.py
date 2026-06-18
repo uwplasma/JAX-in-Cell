@@ -34,142 +34,93 @@ config.update("jax_enable_x64", True)
 __all__ = ["Simulation", "load_parameters"]
 
 def load_parameters(input_file):
+    """
+        Load parameters from a given .toml input file given the path to the file.
+    """
     parameters = tomllib.load(open(input_file, "rb"))
     return parameters
 
 class Simulation:
-    def __init__(self, parameters={}):
+    """
+        Calling Simulation(parameters) will create a Simulation object with the provided parameters.
+        The parameters should be provided as a dictionary, but can also be provided as a path to
+        a .toml file containing the parameters. The parameters will be cleaned and initialized using
+        the appropriate cleaner functions for each parameter section, and the simulation state will
+        be initialized based on the cleaned parameters.
+
+        The Simulation object will expose any differentiable parameters that were provided in
+        input_parameters through Simulation_object.input_parameters. These input_parameters can then
+        be passed to the simulation() or run() bound functions to run a simulation with these
+        input_parameters exposed such that grads can be taken with respect to them. If simulation()
+        or run() is called without input_parameters, it will use the parameters provided at initialization
+        (which may include user-provided parameters and defaults) and will not overwrite any parameters
+        with the input_parameters.
+
+        Example without input parameters:
+
+        sim = Simulation(parameters)
+        simulation_output = sim.simulation()
+        or
+        simulation_output = sim.run()
+
+        
+        Example with input parameters:
+
+        sim = Simulation(parameters)
+        input_parameters = Simulation.input_parameters
+        simulation_output = sim.simulation(input_parameters)
+        or
+        simulation_output = sim.run(input_parameters)
+
+        
+        Additionally,
+
+        grad(sim.run)(input_parameters)
+
+        will provide the gradient of the simulation output with respect to the input_parameters.
+    """
+    def __init__(self, parameters=None):
+        if parameters is None:
+            parameters = {}
         if type(parameters) != dict:
             parameters = load_parameters(parameters)
         self.clean_and_initialize_parameters(parameters)
         self.reinitialize_simulation_state()
-    
-    def clean_and_initialize_parameters(self, parameters):
-        input_parameters, parameters = self.classify_and_sort_input_parameters(parameters)
 
-        parameter_sections = {
-            section_name: parameters.pop(section_name, {})
-            for section_name in PARAMETER_SECTIONS
-        }
-
-        input_parameters = {**parameters, **input_parameters}
-        self._base_parameter_sections = deepcopy(parameter_sections)
-
-        for section_name, section_metadata in PARAMETER_SECTIONS.items():
-            setattr(
-                self,
-                section_metadata["attribute"],
-                section_metadata["cleaner"](
-                    parameter_sections[section_name],
-                    input_parameters=input_parameters,
-                ),
-            )
-    
-    def classify_and_sort_input_parameters(self, parameters):
+    def simulation(self, input_parameters=None):
         """
-        Sort through input parameters to move parameters into their respective dictionaries to overwrite defaults and
-        move differentiable parameters into a separate input_parameters dictionary. This input_parameters dictionary
-        can then be accessed to use them as inputs to the simulation function without having to write multiple
-        toml files for the differentiable inputs and the non-differentiable parameters.
+            Exposed simulation call which doesn't expose the hash values for each section to prevent
+            unintentionally forcing recompiles or not recompiling when necessary.
+            
+            input_parameters is a dictionary of differentiable parameters
+            If simulation is called without input parameters, it will use
+            the user input parameters or default parameters previously provided.
+            input_parameters will overwrite any differentiable parameters 
+            previously provided. This is meant to make it simple to expose grads
+            derivatives with respect to the input parameters.
         """
-        parameters = deepcopy(parameters)
-        input_parameters = parameters.pop("input_parameters", {})
-        differentiable_parameters = {}
-        cleaner_input_parameters = {}
-        unrouted_input_parameters = {}
-
-        route_nested_initial_species_parameters(
+        if input_parameters is None:
+            input_parameters = {}
+        input_parameters = self.clean_runtime_input_parameters(input_parameters)
+        return self._simulation(
             input_parameters,
-            parameters,
-            differentiable_parameters,
-            cleaner_input_parameters,
+            domain_hash=self.domain_hash,
+            species_hash=self.species_hash,
+            external_field_hash=self.external_field_hash,
+            source_hash=self.source_hash,
+            solver_hash=self.solver_hash,
         )
-        unrouted_input_parameters = route_flat_initial_parameters(
-            input_parameters,
-            parameters,
-            differentiable_parameters,
-            cleaner_input_parameters,
-        )
-
-        self._input_parameters = differentiable_parameters
-        self.differentiable_input_parameters = DIFFERENTIABLE_INPUT_PARAMETERS
-
-        if unrouted_input_parameters:
-            unrouted_keys = ", ".join(unrouted_input_parameters.keys())
-            raise ValueError(
-                "Initial input_parameters included parameter(s) that could not be routed. "
-                f"Unrouted parameter(s): {unrouted_keys}"
-            )
-
-        return cleaner_input_parameters, parameters
+     
+    # See simulation(...) for details on the purpose of input_parameters.
+    def run(self, input_parameters=None):
+        return self.simulation(input_parameters)
     
-    def build_hash_values(self):
-        for section_metadata in PARAMETER_SECTIONS.values():
-            setattr(
-                self,
-                section_metadata["hash_attribute"],
-                section_metadata["hasher"](getattr(self, section_metadata["attribute"])),
-            )
-
-    def reinitialize_simulation_state(self):
-        self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
-        self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
-        self.build_domain()
-        self.initialize_particles()
-        self.initialize_fields()
-        self.build_hash_values()
-
-    def clean_runtime_input_parameters(self, input_parameters=None):
-        return clean_runtime_input_parameters(
-            input_parameters,
-            self._runtime_flat_parameter_routes,
-            self._runtime_species_label_routes,
-            self._species_parameters,
-        )
-
-    def current_domain_state(self):
-        return {
-            "box_size": self.box_size,
-            "dx": self.dx,
-            "dt": self.dt,
-            "grid": self.grid,
-        }
-
-    def build_domain(self):
-        domain_state = build_domain_state(self._domain_parameters)
-        self.box_size = domain_state["box_size"]
-        self.dx = domain_state["dx"]
-        self.dt = domain_state["dt"]
-        self.grid = domain_state["grid"]
-
-    def initialize_particles(self):
-        domain_state = self.current_domain_state()
-        particle_state = initialize_particle_state(
-            self._species_parameters,
-            self._domain_parameters,
-            self._solver_parameters,
-            domain_state,
-        )
-        for key, value in particle_state.items():
-            setattr(self, key, value)
-
-    def initialize_fields(self):
-        domain_state = self.current_domain_state()
-        particle_state = {
-            "positions": self.positions,
-            "charges": self.charges,
-        }
-        field_state = initialize_field_state(
-            self._domain_parameters,
-            self._solver_parameters,
-            self._external_field_parameters,
-            domain_state,
-            particle_state,
-        )
-        self.fields = field_state["fields"]
-        self.external_magnetic_field = field_state["external_magnetic_field"]
-        self.external_electric_field = field_state["external_electric_field"]
-
+    """
+        domain_hash, species_hash, external_field_hash, source_hash, solver_hash
+        are included as arguments here to ensure that changes to any of these hashes will trigger a recompilation of the
+        simulation function with the new parameters. This is necessary because the simulation function is jitted and we
+        want to make sure that it uses the most up-to-date parameters whenever it is called.
+    """
     @partial(jit, static_argnames=['self', 'domain_hash', 'species_hash', 'external_field_hash', 'source_hash', 'solver_hash'])
     def _simulation(self, input_parameters=None, domain_hash='', species_hash='', external_field_hash='', source_hash='', solver_hash=''):
         """
@@ -357,24 +308,159 @@ class Simulation:
 
         return temporary_output
         #return output
-
-    def simulation(self, input_parameters=None):
-        if input_parameters is None:
-            input_parameters = {}
-        input_parameters = self.clean_runtime_input_parameters(input_parameters)
-        return self._simulation(
-            input_parameters,
-            domain_hash=self.domain_hash,
-            species_hash=self.species_hash,
-            external_field_hash=self.external_field_hash,
-            source_hash=self.source_hash,
-            solver_hash=self.solver_hash,
-        )
     
-    def run(self, input_parameters=None):
-        return self.simulation(input_parameters)
+    def clean_and_initialize_parameters(self, parameters):
+        # Sort parameters to intended locations in parameters
+        input_parameters, parameters = self.classify_and_sort_input_parameters(parameters)
+
+        # Build initial structure of parameters with canonical section names
+        parameter_sections = {
+            section_name: parameters.pop(section_name, {})
+            for section_name in PARAMETER_SECTIONS
+        }
+
+        input_parameters = {**parameters, **input_parameters}
+        self._base_parameter_sections = deepcopy(parameter_sections)
+
+        # Set the self. parameter sections of the Simulation object
+        for section_name, section_metadata in PARAMETER_SECTIONS.items():
+            setattr(
+                self,
+                section_metadata["attribute"],
+                section_metadata["cleaner"](
+                    parameter_sections[section_name],
+                    input_parameters=input_parameters,
+                ),
+            )
+    
+    def classify_and_sort_input_parameters(self, parameters):
+        """
+        Sort through input parameters to move parameters into their respective dictionaries to overwrite defaults and
+        move differentiable parameters into a separate input_parameters dictionary. This input_parameters dictionary
+        can then be accessed to use them as inputs to the simulation function without having to write multiple
+        toml files for the differentiable inputs and the non-differentiable parameters.
+        """
+        parameters = deepcopy(parameters)
+        input_parameters = parameters.pop("input_parameters", {})
+        differentiable_parameters = {}
+        cleaner_input_parameters = {}
+        unrouted_input_parameters = {}
+
+        # Route species parameters to correct place in parameters dictionary
+        route_nested_initial_species_parameters(
+            input_parameters,
+            parameters,
+            differentiable_parameters,
+            cleaner_input_parameters,
+        )
+        # Route non-species parameters to correct place in parameters dictionary
+        unrouted_input_parameters = route_flat_initial_parameters(
+            input_parameters,
+            parameters,
+            differentiable_parameters,
+            cleaner_input_parameters,
+        )
+
+        # Separate differentiable parameters inserted into input_parameters in provided parameters
+        # and expose them via Simulation_object.input_parameters for ease of use when passing to simulation(...) or run(...)
+        self._input_parameters = differentiable_parameters
+        self.differentiable_input_parameters = DIFFERENTIABLE_INPUT_PARAMETERS
+
+        # Flag any unrecognized user provided parameters
+        if unrouted_input_parameters:
+            unrouted_keys = ", ".join(unrouted_input_parameters.keys())
+            raise ValueError(
+                "Initial input_parameters included parameter(s) that could not be routed. "
+                f"Unrouted parameter(s): {unrouted_keys}"
+            )
+
+        return cleaner_input_parameters, parameters
+    
+    def build_hash_values(self):
+        """
+            Build the hashes for each of the parameter sections to help with determining when Jax
+            needs to recompile the _simulation() function due to new parameters being passed.
+        """
+        for section_metadata in PARAMETER_SECTIONS.values():
+            setattr(
+                self,
+                section_metadata["hash_attribute"],
+                section_metadata["hasher"](getattr(self, section_metadata["attribute"])),
+            )
+
+    def reinitialize_simulation_state(self):
+        """
+            Reinitialize the simulation state based on the current parameter sections.
+            This should be called whenever parameters are updated after initialization to
+            ensure that the simulation state is consistent with the new parameters.
+        """
+        self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
+        self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
+        self.build_domain()
+        self.initialize_particles()
+        self.initialize_fields()
+        self.build_hash_values()
+
+    def clean_runtime_input_parameters(self, input_parameters=None):
+        """
+            Clean the input_parameters provided to the simulation(...) or run(...) functions at runtime.
+        """
+        return clean_runtime_input_parameters(
+            input_parameters,
+            self._runtime_flat_parameter_routes,
+            self._runtime_species_label_routes,
+            self._species_parameters,
+        )
+
+    def current_domain_state(self):
+        return {
+            "box_size": self.box_size,
+            "dx": self.dx,
+            "dt": self.dt,
+            "grid": self.grid,
+        }
+
+    def build_domain(self):
+        domain_state = build_domain_state(self._domain_parameters)
+        self.box_size = domain_state["box_size"]
+        self.dx = domain_state["dx"]
+        self.dt = domain_state["dt"]
+        self.grid = domain_state["grid"]
+
+    def initialize_particles(self):
+        domain_state = self.current_domain_state()
+        particle_state = initialize_particle_state(
+            self._species_parameters,
+            self._domain_parameters,
+            self._solver_parameters,
+            domain_state,
+        )
+        for key, value in particle_state.items():
+            setattr(self, key, value)
+
+    def initialize_fields(self):
+        domain_state = self.current_domain_state()
+        particle_state = {
+            "positions": self.positions,
+            "charges": self.charges,
+        }
+        field_state = initialize_field_state(
+            self._domain_parameters,
+            self._solver_parameters,
+            self._external_field_parameters,
+            domain_state,
+            particle_state,
+        )
+        self.fields = field_state["fields"]
+        self.external_magnetic_field = field_state["external_magnetic_field"]
+        self.external_electric_field = field_state["external_electric_field"]
 
     def set_parameter_section(self, section_name, new_parameters):
+        """
+            Helper which is used by setters for the parameter sections to automatically
+            clean parameters and reinitialize the state of the simulation including creating
+            new hashes.
+        """
         section_metadata = PARAMETER_SECTIONS[section_name]
         new_parameters = deepcopy(new_parameters)
         self._base_parameter_sections[section_name] = deepcopy(new_parameters)
@@ -385,6 +471,7 @@ class Simulation:
         )
         self.reinitialize_simulation_state()
     
+    # Getters and setters from here on
     @property
     def domain_parameters(self):
         return self._domain_parameters

@@ -152,7 +152,9 @@ def resolve_species_references(species_parameters):
                 )
     return species_parameters
 
-def clean_and_initialize_species_parameters(species_parameters, input_parameters={}):
+def clean_and_initialize_species_parameters(species_parameters, input_parameters=None):
+    if input_parameters is None:
+        input_parameters = {}
     for species_type in SPECIES_TYPES:
         species_values = normalize_species_inputs(
             species_parameters,
