@@ -33,8 +33,8 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
     E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
     # Add external fields
-    total_E = E_field #+ external_field_parameters["external_electric_field"]
-    total_B = B_field #+ external_field_parameters["external_magnetic_field"]
+    total_E = E_field + external_field_parameters["external_electric_field"]
+    total_B = B_field + external_field_parameters["external_magnetic_field"]
 
     # Interpolate fields to particle positions
     def interpolate_fields(x_n):

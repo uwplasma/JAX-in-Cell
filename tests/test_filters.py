@@ -6,6 +6,7 @@ import pytest
 from jax import grad, jit, random
 
 from jaxincell._filters import (
+    _shift_with_bc_1d,
     binomial_filter_3point,
     _repeat_filter,
     filter_scalar_field,
@@ -412,24 +413,104 @@ def test_filter_vector_field_with_nonperiodic_bcs():
     assert jnp.all(jnp.isfinite(Ff_absorbing))
 
 
-@pytest.mark.skip(reason="scaffold only")
 def test_shift_with_bc_1d_direct_boundary_cases():
     """Test jaxincell._filters._shift_with_bc_1d.
 
-    Cases to implement:
+    Cases:
     - positive and negative shifts with periodic boundaries match jnp.roll.
     - reflective boundaries clamp to endpoint values.
     - absorbing boundaries fill outside values with zero.
     - shifts larger than one cell follow the current index-shift, clamp, and mask semantics.
     """
+    x = jnp.arange(5.0)
+
+    for shift in (-2, -1, 1, 2):
+        shifted = _shift_with_bc_1d(x, shift, bc_left=0, bc_right=0)
+        np.testing.assert_allclose(
+            np.asarray(shifted),
+            np.asarray(jnp.roll(x, shift)),
+            rtol=0,
+            atol=1e-12,
+        )
+
+    np.testing.assert_allclose(
+        np.asarray(_shift_with_bc_1d(x, 1, bc_left=1, bc_right=1)),
+        np.array([1.0, 2.0, 3.0, 4.0, 4.0]),
+        rtol=0,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(_shift_with_bc_1d(x, -1, bc_left=1, bc_right=1)),
+        np.array([0.0, 0.0, 1.0, 2.0, 3.0]),
+        rtol=0,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(_shift_with_bc_1d(x, 2, bc_left=1, bc_right=1)),
+        np.array([2.0, 3.0, 4.0, 4.0, 4.0]),
+        rtol=0,
+        atol=1e-12,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(_shift_with_bc_1d(x, 1, bc_left=2, bc_right=2)),
+        np.array([1.0, 2.0, 3.0, 4.0, 0.0]),
+        rtol=0,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(_shift_with_bc_1d(x, -1, bc_left=2, bc_right=2)),
+        np.array([0.0, 0.0, 1.0, 2.0, 3.0]),
+        rtol=0,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(_shift_with_bc_1d(x, 2, bc_left=2, bc_right=2)),
+        np.array([2.0, 3.0, 4.0, 0.0, 0.0]),
+        rtol=0,
+        atol=1e-12,
+    )
 
 
-@pytest.mark.skip(reason="scaffold only")
 def test_filter_vector_field_componentwise_equivalence_to_scalar_filter():
     """Test jaxincell._filters.filter_vector_field.
 
-    Cases to implement:
+    Cases:
     - each vector component equals filter_scalar_field applied to that component.
     - custom strides, passes, alpha, and boundary conditions are forwarded to each component.
     - shape and dtype are preserved.
     """
+    grid = jnp.linspace(0.0, 1.0, 9, dtype=jnp.float32)
+    F = jnp.stack(
+        [
+            jnp.sin(2 * jnp.pi * grid),
+            jnp.cos(4 * jnp.pi * grid),
+            grid**2 - 0.25,
+        ],
+        axis=1,
+    )
+    kwargs = {
+        "passes": 3,
+        "alpha": 0.35,
+        "strides": (1, 3),
+        "bc_left": 1,
+        "bc_right": 2,
+    }
+
+    vector_filtered = filter_vector_field(F, **kwargs)
+    component_filtered = jnp.stack(
+        [
+            filter_scalar_field(F[:, component], **kwargs)
+            for component in range(F.shape[1])
+        ],
+        axis=1,
+    )
+
+    assert vector_filtered.shape == F.shape
+    assert vector_filtered.dtype == F.dtype
+    np.testing.assert_allclose(
+        np.asarray(vector_filtered),
+        np.asarray(component_filtered),
+        rtol=1e-6,
+        atol=1e-6,
+    )

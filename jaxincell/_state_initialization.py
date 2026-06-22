@@ -12,6 +12,7 @@ from ._constants import (
 )
 from ._fields import E_from_Gauss_1D_Cartesian
 from ._parameters._species_definitions import SPECIES_AXES, SPECIES_TYPES
+from ._parameters._species_parameters import coerce_species_initial_phase_space_parameters
 from ._sources import calculate_charge_density
 
 __all__ = [
@@ -139,6 +140,14 @@ def make_particles_from_state(
         number_particles,
         box_size,
     )
+    coerce_species_initial_phase_space_parameters(
+        species,
+        f"{species_type}{rng_index}",
+    )
+    if species["initial_positions"] is not None:
+        positions = species["initial_positions"]
+    if species["initial_velocities"] is not None:
+        velocities = species["initial_velocities"]
 
     out = {
         "charge": charge,
@@ -260,6 +269,7 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
         "weights": weights,
         "species_index": species_index,
         "unique_species_indices": unique_species_indices,
+        "species_integer_index": species_integer_index,
         "integer_key_map": integer_key_map,
         "charge_lookup": charge_lookup,
         "mass_lookup": mass_lookup,

@@ -27,6 +27,8 @@ EXPECTED_SHARED_SPECIES_KEYS = [
     "charge_over_elementary_charge",
     "seed_position_override",
     "seed_position",
+    "initial_positions",
+    "initial_velocities",
 ]
 EXPECTED_SHARED_AXIS_PREFIXES = [
     "perturbation_amplitude",
@@ -58,6 +60,8 @@ EXPECTED_SHARED_DIFFERENTIABLE_KEYS = [
     "drift_speed_x",
     "drift_speed_y",
     "drift_speed_z",
+    "initial_positions",
+    "initial_velocities",
 ]
 EXPECTED_DIFFERENTIABLE_ELECTRON_KEYS = [
     *EXPECTED_SHARED_DIFFERENTIABLE_KEYS,

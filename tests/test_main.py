@@ -66,26 +66,75 @@ def test_main_no_args_uses_default_parameters(
     assert "Using standard input parameters instead of an input TOML file." in captured.out
 
 
-@pytest.mark.skip(reason="scaffold only")
-def test_main_ignores_extra_arguments_after_toml_path():
+def test_main_ignores_extra_arguments_after_toml_path(
+    mock_simulation_class,
+    mock_load_parameters,
+    mock_plot,
+    mock_diagnostics,
+    capsys,
+):
     """Test jaxincell.__main__.main argument handling.
 
-    Cases to implement:
+    Cases:
     - when more than one CLI argument is supplied, only cl_args[0] is passed to load_parameters.
     - Simulation, diagnostics, and plot still run exactly once.
     - no default-parameters message is printed in this branch.
     """
+    main(["first.toml", "ignored.toml", "--ignored-flag"])
+
+    mock_load_parameters.assert_called_once_with("first.toml")
+    mock_simulation_class.assert_called_once_with(mock_load_parameters.return_value)
+    mock_simulation_class.return_value.run.assert_called_once_with()
+
+    output = mock_simulation_class.return_value.run.return_value
+    mock_diagnostics.assert_called_once_with(output)
+    mock_plot.assert_called_once_with(output)
+    assert "Using standard input parameters" not in capsys.readouterr().out
 
 
-@pytest.mark.skip(reason="scaffold only")
-def test_main_propagates_simulation_or_plot_errors():
+def test_main_propagates_simulation_or_plot_errors(
+    mock_simulation_class,
+    mock_load_parameters,
+    mock_plot,
+    mock_diagnostics,
+):
     """Test jaxincell.__main__.main side-effect orchestration.
 
-    Cases to implement:
+    Cases:
     - Simulation construction errors are not swallowed.
     - run errors are not swallowed and diagnostics/plot are not called afterward.
     - plot errors are not swallowed after diagnostics has been called.
     """
+    mock_simulation_class.side_effect = RuntimeError("construction failed")
+    with pytest.raises(RuntimeError, match="construction failed"):
+        main(["input.toml"])
+    mock_diagnostics.assert_not_called()
+    mock_plot.assert_not_called()
+
+    mock_simulation_class.reset_mock(side_effect=True)
+    mock_load_parameters.reset_mock()
+    mock_diagnostics.reset_mock()
+    mock_plot.reset_mock()
+    mock_simulation_class.return_value.run.side_effect = RuntimeError("run failed")
+    with pytest.raises(RuntimeError, match="run failed"):
+        main(["input.toml"])
+    mock_load_parameters.assert_called_once_with("input.toml")
+    mock_simulation_class.assert_called_once_with(mock_load_parameters.return_value)
+    mock_diagnostics.assert_not_called()
+    mock_plot.assert_not_called()
+
+    mock_simulation_class.reset_mock()
+    mock_load_parameters.reset_mock()
+    mock_diagnostics.reset_mock()
+    mock_plot.reset_mock()
+    mock_simulation_class.return_value.run.side_effect = None
+    mock_simulation_class.return_value.run.return_value = {"dummy": "output"}
+    mock_plot.side_effect = RuntimeError("plot failed")
+    with pytest.raises(RuntimeError, match="plot failed"):
+        main(["input.toml"])
+    output = mock_simulation_class.return_value.run.return_value
+    mock_diagnostics.assert_called_once_with(output)
+    mock_plot.assert_called_once_with(output)
 
 
 def test_main_with_toml_argument(

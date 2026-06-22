@@ -9,7 +9,7 @@ from jaxincell._parameters._solver_parameters import (
 def test_clean_and_initialize_solver_parameters_defaults_and_tuple_coercion():
     """Test jaxincell._parameters._solver_parameters.clean_and_initialize_solver_parameters.
 
-    Cases to implement:
+    Cases:
     - defaults are populated when no solver parameters are supplied.
     - input_parameters override explicit solver_parameters for matching keys.
     - list filter_strides are converted to tuples.
@@ -31,7 +31,7 @@ def test_clean_and_initialize_solver_parameters_defaults_and_tuple_coercion():
 def test_clean_and_initialize_solver_parameters_rejects_invalid_values():
     """Test jaxincell._parameters._solver_parameters.clean_and_initialize_solver_parameters.
 
-    Cases to implement:
+    Cases:
     - field_solver and time_evolution_algorithm reject unsupported values.
     - Picard iteration counts and substeps must be positive integers.
     - filter_passes must be a nonnegative integer.
@@ -104,7 +104,7 @@ def test_clean_and_initialize_solver_parameters_rejects_invalid_values():
 def test_build_solver_hash_is_stable_and_sensitive_to_values():
     """Test jaxincell._parameters._solver_parameters.build_solver_hash.
 
-    Cases to implement:
+    Cases:
     - identical cleaned solver parameters produce identical hashes.
     - changing filter_alpha changes the hash.
     - changing an algorithm selection changes the hash.

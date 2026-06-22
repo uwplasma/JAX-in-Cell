@@ -54,6 +54,8 @@ DEFAULT_CHARGED_SPECIES_PARAMETERS = {
     "velocity_plus_minus_z": False,
     "seed_position_override": False,
     "seed_position": None,
+    "initial_positions": None,
+    "initial_velocities": None,
 }
 
 DEFAULT_ELECTRON_PARAMETERS = {
@@ -124,6 +126,8 @@ DIFFERENTIABLE_CHARGED_SPECIES_PARAMETERS = [
     "drift_speed_x",
     "drift_speed_y",
     "drift_speed_z",
+    "initial_positions",
+    "initial_velocities",
 ]
 
 DIFFERENTIABLE_ELECTRON_PARAMETERS = [

@@ -7,7 +7,7 @@ from jaxincell._parameters._external_field_parameters import (
 def test_clean_and_initialize_external_field_parameters_defaults_and_float_conversion():
     """Test jaxincell._parameters._external_field_parameters.clean_and_initialize_external_field_parameters.
 
-    Cases to implement:
+    Cases:
     - defaults are populated when no external field parameters are supplied.
     - input_parameters override explicit external_field_parameters for matching keys.
     - electric and magnetic amplitudes and wavenumbers are converted to floats.
@@ -40,7 +40,7 @@ def test_clean_and_initialize_external_field_parameters_defaults_and_float_conve
 def test_build_external_field_hash_is_stable_and_sensitive_to_values():
     """Test jaxincell._parameters._external_field_parameters.build_external_field_hash.
 
-    Cases to implement:
+    Cases:
     - identical cleaned external field parameters produce identical hashes.
     - changing electric or magnetic amplitude changes the hash.
     - changing electric or magnetic wavenumber changes the hash.

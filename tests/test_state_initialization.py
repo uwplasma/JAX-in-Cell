@@ -357,6 +357,68 @@ def test_make_particles_from_state_electron_reference_and_weight_logic():
     assert not jnp.allclose(first_seed_state["velocities"][:, 0], second_seed_state["velocities"][:, 0])
 
 
+def test_initial_phase_space_overrides_replace_generated_species_block():
+    """Test per-species initial_positions and initial_velocities overrides.
+
+    Cases covered:
+    - overrides replace generated phase space for the selected species.
+    - another species can continue using generated phase space.
+    - raw list overrides are coerced to JAX arrays before concatenation.
+    """
+    number_particles = 3
+    domain = domain_parameters(length=3.0, length_y=3.0, length_z=3.0)
+    solver = solver_parameters(seed=21)
+    domain_state = build_domain_state(domain)
+    electron_positions = [
+        [-0.5, -0.4, -0.3],
+        [0.0, 0.1, 0.2],
+        [0.5, 0.6, 0.7],
+    ]
+    electron_velocities = [
+        [1.0, 1.1, 1.2],
+        [1.3, 1.4, 1.5],
+        [1.6, 1.7, 1.8],
+    ]
+    species_parameters = {
+        "electrons": {
+            "_electrons0": electron_species(
+                number_pseudoparticles=number_particles,
+                weight=1.0,
+                initial_positions=electron_positions,
+                initial_velocities=electron_velocities,
+            ),
+        },
+        "ions": {
+            "_ions0": ion_species(
+                number_pseudoparticles=number_particles,
+                weight=1.0,
+            ),
+        },
+    }
+
+    particle_state = initialize_particle_state(
+        species_parameters,
+        domain,
+        solver,
+        domain_state,
+    )
+
+    electron_slice = slice(0, number_particles)
+    ion_slice = slice(number_particles, 2 * number_particles)
+    generated_ion_positions, generated_ion_velocities = initialize_species_phase_space(
+        species_parameters["ions"]["_ions0"],
+        seed_position=solver["seed"],
+        seed_velocity=solver["seed"] + 6,
+        number_particles=number_particles,
+        box_size=domain_state["box_size"],
+    )
+
+    assert jnp.allclose(particle_state["positions"][electron_slice], jnp.asarray(electron_positions))
+    assert jnp.allclose(particle_state["velocities"][electron_slice], jnp.asarray(electron_velocities))
+    assert jnp.allclose(particle_state["positions"][ion_slice], generated_ion_positions)
+    assert jnp.allclose(particle_state["velocities"][ion_slice], generated_ion_velocities)
+
+
 def test_initialize_particle_state_uses_main_branch_seed_offsets_for_base_species():
     """Test base electron and ion RNG seed compatibility with the main branch.
 

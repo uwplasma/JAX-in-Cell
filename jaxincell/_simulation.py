@@ -102,7 +102,7 @@ class Simulation:
         if input_parameters is None:
             input_parameters = {}
         input_parameters = self.clean_runtime_input_parameters(input_parameters)
-        return self._simulation(
+        simulation_output = self._simulation(
             input_parameters,
             domain_hash=self.domain_hash,
             species_hash=self.species_hash,
@@ -110,6 +110,7 @@ class Simulation:
             source_hash=self.source_hash,
             solver_hash=self.solver_hash,
         )
+        return self.assemble_output(simulation_output, input_parameters)
      
     # See simulation(...) for details on the purpose of input_parameters.
     def run(self, input_parameters=None):
@@ -183,6 +184,11 @@ class Simulation:
             domain_state,
             particle_state,
         )
+        runtime_external_field_parameters = {
+            **external_field_parameters,
+            "external_electric_field": field_state["external_electric_field"],
+            "external_magnetic_field": field_state["external_magnetic_field"],
+        }
 
         total_steps = domain_parameters["total_steps"]
 
@@ -200,21 +206,8 @@ class Simulation:
         particle_BC_left = domain_parameters["particle_BC_left"]
         particle_BC_right = domain_parameters["particle_BC_right"]
 
-        # **Use provided positions/velocities if given, otherwise use defaults**
-        # Need to add this functionality back in
-        positions = None
-        velocities = None
-        if positions is None:
-            positions = particle_state["positions"]
-        if velocities is None:
-            velocities = particle_state["velocities"]
-        '''
-        # Ensure the provided positions/velocities match the expected shape
-        if positions.shape != parameters["initial_positions"].shape:
-            raise ValueError(f"Expected positions shape {parameters['initial_positions'].shape}, got {positions.shape}")
-        if velocities.shape != parameters["initial_velocities"].shape:
-            raise ValueError(f"Expected velocities shape {parameters['initial_velocities'].shape}, got {velocities.shape}")
-        '''
+        positions = particle_state["positions"]
+        velocities = particle_state["velocities"]
 
         # Leapfrog integration: positions at half-step before the start
         positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
@@ -233,7 +226,7 @@ class Simulation:
                 positions_plus1_2, velocities, qs, ms, q_ms,
             )
             step_func = lambda carry, step_index: Boris_step(
-                carry, step_index, solver_parameters, external_field_parameters, dx, dt, grid, box_size,
+                carry, step_index, solver_parameters, runtime_external_field_parameters, dx, dt, grid, box_size,
                 particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
             )
         else:
@@ -284,6 +277,14 @@ class Simulation:
             "velocities": velocities_over_time,
             "masses": masses,
             "charges": charges,
+            "charge_to_mass_ratios": charge_to_mass_ratios,
+            "initial_positions": positions,
+            "initial_velocities": velocities,
+            "weights": particle_state["weights"],
+            "species_integer_index": particle_state["species_integer_index"],
+            "charge_integer_lookup": particle_state["charge_integer_lookup"],
+            "mass_integer_lookup": particle_state["mass_integer_lookup"],
+            "charge_mass_integer_lookup": particle_state["charge_mass_integer_lookup"],
             "electric_field":  electric_field_over_time,
             "magnetic_field":  magnetic_field_over_time,
             "current_density": current_density_over_time,
@@ -295,19 +296,48 @@ class Simulation:
             "grid": grid,
             "dt": dt,
             "plasma_frequency": plasma_frequency,
+            "max_initial_vth_electrons": particle_state["vth_electrons"],
+            "vth_electrons_over_c": particle_state["vth_electrons_over_c"],
+            "charge_electrons": particle_state["charge_electrons"],
             'dx': dx,
             'length': box_size[0],
-            "external_electric_field": self.external_electric_field,
-            "external_magnetic_field": self.external_magnetic_field,
+            "box_size": box_size,
+            "fields": field_state["fields"],
+            "external_electric_field": field_state["external_electric_field"],
+            "external_magnetic_field": field_state["external_magnetic_field"],
         }
 
-        # Might want to do more here
-        output = {**temporary_output, **domain_parameters, **species_parameters, **external_field_parameters, **source_parameters, **solver_parameters}
-
-        # diagnostics(output)
-
         return temporary_output
-        #return output
+
+    def assemble_output(self, simulation_output, input_parameters):
+        base_parameter_sections = {
+            section_name: getattr(self, section_metadata["attribute"])
+            for section_name, section_metadata in PARAMETER_SECTIONS.items()
+        }
+        parameter_sections = build_runtime_parameter_sections(
+            base_parameter_sections,
+            input_parameters,
+        )
+        resolve_species_references(parameter_sections["species_parameters"])
+
+        domain_parameters = parameter_sections["domain_parameters"]
+        external_field_parameters = parameter_sections["external_field_parameters"]
+        source_parameters = parameter_sections["source_parameters"]
+        solver_parameters = parameter_sections["solver_parameters"]
+
+        return {
+            **domain_parameters,
+            **external_field_parameters,
+            **source_parameters,
+            **solver_parameters,
+            **simulation_output,
+            "domain_parameters": domain_parameters,
+            "species_parameters": parameter_sections["species_parameters"],
+            "external_field_parameters": external_field_parameters,
+            "source_parameters": source_parameters,
+            "solver_parameters": solver_parameters,
+            "parameter_sections": parameter_sections,
+        }
     
     def clean_and_initialize_parameters(self, parameters):
         # Sort parameters to intended locations in parameters

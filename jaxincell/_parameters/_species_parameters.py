@@ -11,6 +11,7 @@ from ._species_definitions import (
 
 __all__ = [
     "clean_and_initialize_species_parameters",
+    "coerce_species_initial_phase_space_parameters",
     "resolve_species_references",
     "build_species_hash",
 ]
@@ -35,6 +36,19 @@ COMMON_SPECIES_BOOLEAN_PARAMETERS = (
     *(f"velocity_plus_minus_{axis}" for axis in SPECIES_AXES),
     "seed_position_override",
 )
+INITIAL_PHASE_SPACE_PARAMETERS = ("initial_positions", "initial_velocities")
+
+def coerce_species_initial_phase_space_parameters(species, species_label):
+    for key in INITIAL_PHASE_SPACE_PARAMETERS:
+        if species[key] is None:
+            continue
+
+        species[key] = jnp.asarray(species[key], dtype=float)
+        expected_shape = (species["number_pseudoparticles"], 3)
+        assert species[key].shape == expected_shape, (
+            f"{key} for {species_label} must have shape {expected_shape}. "
+            f"Got {species[key].shape}."
+        )
 
 def normalize_species_inputs(species_parameters, input_parameters, species_type, default_species_label):
     species_values = {**species_parameters.pop(species_type, {})}
@@ -55,6 +69,7 @@ def validate_species_parameters(species_type, species_label, species):
         f"Number of pseudoparticles for {species_label} must be a positive integer. "
         f"Got {species['number_pseudoparticles']}."
     )
+    coerce_species_initial_phase_space_parameters(species, species_label)
     assert species["grid_points_per_Debye_length"] > 0, (
         f"Grid points per Debye length must be positive. Got {species['grid_points_per_Debye_length']}."
     )
@@ -122,11 +137,13 @@ def resolve_species_references(species_parameters):
             for key, value in list(sp.items()):
                 if key == "user_label" or key.startswith(REFERENCE_PREFIX):
                     continue
+                if not isinstance(value, str):
+                    continue
                 if value in all_ion_species:
                     sp[f"{REFERENCE_PREFIX}{key}"] = ("ions", value)
                 elif value in all_electron_species:
                     sp[f"{REFERENCE_PREFIX}{key}"] = ("electrons", value)
-                elif type(value) == str:
+                else:
                     raise ValueError(
                         f"Cross referenced species value did not reference another species. "
                         f"{species_type} {species} referenced {value} for {key}. "

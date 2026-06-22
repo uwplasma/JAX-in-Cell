@@ -1,5 +1,6 @@
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any
 
 import jax.numpy as jnp
 import pytest
@@ -19,7 +20,7 @@ from tests.helpers import base_simulation_parameters
 class DifferentiableParameterCase:
     section: str
     key: str
-    value: float
+    value: Any
 
     @property
     def id(self):
@@ -36,6 +37,14 @@ PARAMETER_VALUES = {
     "ion_temperature_over_electron_temperature_x": 1.0,
     "ion_temperature_over_electron_temperature_y": 1.0,
     "ion_temperature_over_electron_temperature_z": 1.0,
+    "initial_positions": jnp.array([
+        [-4.0e-3, -4.0e-3, -4.0e-3],
+        [4.0e-3, 4.0e-3, 4.0e-3],
+    ]),
+    "initial_velocities": jnp.array([
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+    ]),
     "length": 0.01,
     "length_y": 0.01,
     "length_z": 0.01,

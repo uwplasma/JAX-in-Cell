@@ -9,7 +9,7 @@ from jaxincell._parameters._domain_parameters import (
 def test_clean_and_initialize_domain_parameters_defaults_and_input_precedence():
     """Test jaxincell._parameters._domain_parameters.clean_and_initialize_domain_parameters.
 
-    Cases to implement:
+    Cases:
     - defaults are populated when no domain parameters are supplied.
     - input_parameters override explicit domain_parameters for matching keys.
     - length, length_y, and length_z are converted to JAX float arrays.
@@ -38,7 +38,7 @@ def test_clean_and_initialize_domain_parameters_defaults_and_input_precedence():
 def test_clean_and_initialize_domain_parameters_rejects_invalid_values():
     """Test jaxincell._parameters._domain_parameters.clean_and_initialize_domain_parameters.
 
-    Cases to implement:
+    Cases:
     - total_steps must be a positive integer.
     - length must be positive and transverse lengths must be nonnegative.
     - particle and field boundary conditions must be one of 0, 1, or 2.
@@ -75,7 +75,7 @@ def test_clean_and_initialize_domain_parameters_rejects_invalid_values():
 def test_build_domain_hash_is_stable_and_sensitive_to_values():
     """Test jaxincell._parameters._domain_parameters.build_domain_hash.
 
-    Cases to implement:
+    Cases:
     - identical cleaned domain parameters produce identical hashes.
     - changing a differentiable domain parameter changes the hash.
     - changing a non-differentiable domain parameter changes the hash.

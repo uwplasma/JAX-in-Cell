@@ -40,6 +40,18 @@ def put_parameter_path(container, path, value):
         container = container.setdefault(key, {})
     container[path[-1]] = value
 
+def _get_initial_species_target_labels(parameters, species_type):
+    species_values = parameters.get("species_parameters", {}).get(species_type, {})
+    if not isinstance(species_values, dict):
+        return (None,)
+    if not any(isinstance(value, dict) for value in species_values.values()):
+        return (None,)
+    return tuple(
+        species_label
+        for species_label, species_parameters in species_values.items()
+        if isinstance(species_parameters, dict)
+    )
+
 def iter_species_parameter_groups(species_type, species_values, strict=False):
     '''
     Iterate over nested or loose species parameter groups.
@@ -65,21 +77,35 @@ def iter_species_parameter_groups(species_type, species_values, strict=False):
 def route_nested_initial_species_parameters(input_parameters, parameters, differentiable_parameters, cleaner_input_parameters):
     for species_type in SPECIES_TYPES:
         for species_label, species_values in iter_species_parameter_groups(species_type, input_parameters.get(species_type, {})):
+            target_species_labels = (
+                (species_label,)
+                if species_label is not None
+                else _get_initial_species_target_labels(parameters, species_type)
+            )
             for key, value in species_values.items():
-                path = (
+                input_path = (
                     (species_type, key)
                     if species_label is None
                     else (species_type, species_label, key)
                 )
+                target_paths = tuple(
+                    (species_type, key)
+                    if target_species_label is None
+                    else (species_type, target_species_label, key)
+                    for target_species_label in target_species_labels
+                )
                 if key in SPECIES_DIFFERENTIABLE_KEYS.get(species_type, ()):
-                    put_parameter_path(differentiable_parameters, path, jnp.asarray(value, dtype=float))
-                    put_parameter_path(cleaner_input_parameters, path, value)
+                    put_parameter_path(differentiable_parameters, input_path, jnp.asarray(value, dtype=float))
+                    for target_path in target_paths:
+                        put_parameter_path(cleaner_input_parameters, target_path, value)
                 elif key in SPECIES_PARAMETER_KEYS.get(species_type, ()):
                     species_parameters = parameters.setdefault("species_parameters", {})
-                    put_parameter_path(species_parameters, path, value)
-                    put_parameter_path(cleaner_input_parameters, path, value)
+                    for target_path in target_paths:
+                        put_parameter_path(species_parameters, target_path, value)
+                        put_parameter_path(cleaner_input_parameters, target_path, value)
                 else:
-                    put_parameter_path(cleaner_input_parameters, path, value)
+                    for target_path in target_paths:
+                        put_parameter_path(cleaner_input_parameters, target_path, value)
 
 def route_flat_initial_parameters(input_parameters, parameters, differentiable_parameters, cleaner_input_parameters):
     unrouted_input_parameters = {}
