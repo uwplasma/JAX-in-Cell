@@ -67,7 +67,7 @@ class Simulation:
         Example with input parameters:
 
         sim = Simulation(parameters)
-        input_parameters = Simulation.input_parameters
+        input_parameters = sim.input_parameters
         simulation_output = sim.simulation(input_parameters)
         or
         simulation_output = sim.run(input_parameters)
@@ -75,9 +75,13 @@ class Simulation:
         
         Additionally,
 
-        grad(sim.run)(input_parameters)
+        def scalar_objective(input_parameters):
+            simulation_output = sim.run(input_parameters)
+            return some_scalar_function_of(simulation_output)
 
-        will provide the gradient of the simulation output with respect to the input_parameters.
+        grad(scalar_objective)(input_parameters)
+
+        will provide the gradient of some scalar objective function of the simulation output with respect to the input_parameters.
     """
     def __init__(self, parameters=None):
         if parameters is None:
