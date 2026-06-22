@@ -74,6 +74,7 @@ def _robust_vmax_clipped(
     still get too large and wash out the bulk ion dynamics visually.
     """
     a = np.abs(np.asarray(v_tn, dtype=np.float64)).ravel()
+    a = a[np.isfinite(a)]
     if a.size == 0:
         return eps
     med = float(np.median(a))
@@ -271,6 +272,8 @@ def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray) -> np.ndar
     v = np.asarray(v_frames_n, dtype=np.float64)
     F, N = v.shape
     B = len(edges) - 1
+    if N == 0:
+        return np.zeros((F, B), dtype=np.float32)
 
     # bin index in [0, B-1]
     idx = np.searchsorted(edges, v, side="right") - 1

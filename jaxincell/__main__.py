@@ -1,7 +1,7 @@
 """Main command line interface to JAX-in-Cell."""
 import sys
 from ._plot import plot
-from ._simulation import simulation, load_parameters
+from ._simulation import Simulation, load_parameters
 from ._diagnostics import diagnostics
 
 def main(cl_args=sys.argv[1:]):
@@ -13,10 +13,11 @@ def main(cl_args=sys.argv[1:]):
     """
     if len(cl_args) == 0:
         print("Using standard input parameters instead of an input TOML file.")
-        output = simulation()
+        sim = Simulation()
     else:
-        input_parameters, solver_parameters = load_parameters(cl_args[0])
-        output = simulation(input_parameters, **solver_parameters)
+        parameters = load_parameters(cl_args[0])
+        sim = Simulation(parameters)
+    output = sim.run()
     diagnostics(output)
     plot(output)
 
