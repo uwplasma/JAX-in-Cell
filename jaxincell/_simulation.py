@@ -11,6 +11,7 @@ from ._parameters._sections import (
     PARAMETER_SECTIONS,
 )
 from ._parameters._species_parameters import resolve_species_references
+from ._openpmd import write_openpmd
 from ._routing import (
     build_runtime_flat_parameter_routes,
     build_runtime_parameter_sections,
@@ -114,7 +115,10 @@ class Simulation:
             source_hash=self.source_hash,
             solver_hash=self.solver_hash,
         )
-        return self.assemble_output(simulation_output, input_parameters)
+        output = self.assemble_output(simulation_output, input_parameters)
+        if output["solver_parameters"]["openpmd_output"]:
+            output["openpmd_files"] = write_openpmd(output)
+        return output
      
     # See simulation(...) for details on the purpose of input_parameters.
     def run(self, input_parameters=None):
@@ -212,6 +216,18 @@ class Simulation:
 
         positions = particle_state["positions"]
         velocities = particle_state["velocities"]
+        algorithm_solver_parameters = {
+            "filter_passes": solver_parameters["filter_passes"],
+            "filter_alpha": solver_parameters["filter_alpha"],
+            "filter_strides": solver_parameters["filter_strides"],
+            "relativistic": solver_parameters["relativistic"],
+            "tolerance_Picard_iterations_implicit_CN": solver_parameters[
+                "tolerance_Picard_iterations_implicit_CN"
+            ],
+            "max_number_of_Picard_iterations_implicit_CN": solver_parameters[
+                "max_number_of_Picard_iterations_implicit_CN"
+            ],
+        }
 
         # Leapfrog integration: positions at half-step before the start
         positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
@@ -230,8 +246,9 @@ class Simulation:
                 positions_plus1_2, velocities, qs, ms, q_ms,
             )
             step_func = lambda carry, step_index: Boris_step(
-                carry, step_index, solver_parameters, runtime_external_field_parameters, dx, dt, grid, box_size,
-                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
+                carry, step_index, algorithm_solver_parameters, runtime_external_field_parameters,
+                dx, dt, grid, box_size, particle_BC_left, particle_BC_right,
+                field_BC_left, field_BC_right, solver_parameters['field_solver']
             )
         else:
             initial_carry = (
@@ -239,7 +256,7 @@ class Simulation:
                 velocities, qs, ms, q_ms,
             )
             step_func = lambda carry, step_index: CN_step(
-                carry, step_index, solver_parameters, dx, dt, grid, box_size,
+                carry, step_index, algorithm_solver_parameters, dx, dt, grid, box_size,
                 particle_BC_left, particle_BC_right, field_BC_left, field_BC_right,
                 solver_parameters["number_of_particle_substeps_implicit_CN"]
             )

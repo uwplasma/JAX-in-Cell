@@ -14,9 +14,14 @@ def test_clean_and_initialize_solver_parameters_defaults_and_tuple_coercion():
     - input_parameters override explicit solver_parameters for matching keys.
     - list filter_strides are converted to tuples.
     - tolerance_Picard_iterations_implicit_CN is converted to float.
+    - openPMD output defaults are disabled and groupBased.
     """
     default_applied = clean_and_initialize_solver_parameters({})
     assert default_applied == DEFAULT_SOLVER_PARAMETERS
+    assert default_applied["openpmd_output"] is False
+    assert default_applied["openpmd_filename"] == "jaxincell_openpmd.h5"
+    assert default_applied["openpmd_iteration_encoding"] == "groupBased"
+    assert default_applied["openpmd_iteration_stride"] == 1
 
     input_parameters = {"filter_strides": [1, 3, 5], "tolerance_Picard_iterations_implicit_CN": "1e-2"}
     overridden = clean_and_initialize_solver_parameters(input_parameters)
@@ -37,6 +42,7 @@ def test_clean_and_initialize_solver_parameters_rejects_invalid_values():
     - filter_passes must be a nonnegative integer.
     - filter_alpha must be strictly between zero and one.
     - filter_strides must contain positive integers.
+    - openPMD options reject invalid types and reserved fileBased encoding.
     """
     input_parameters = {"field_solver": 2}
     with pytest.raises(AssertionError, match="Invalid field solver. Must be 0"):
@@ -98,6 +104,50 @@ def test_clean_and_initialize_solver_parameters_rejects_invalid_values():
         clean_and_initialize_solver_parameters({}, input_parameters)
     input_parameters = {"filter_strides": (1, 2.5, 3)}
     with pytest.raises(AssertionError, match="Filter strides must be a tuple of positive integers."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_output": "yes"}
+    with pytest.raises(AssertionError, match="openpmd_output must be a boolean."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_filename": ""}
+    with pytest.raises(AssertionError, match="openpmd_filename must be a non-empty string."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_meshes_path": ""}
+    with pytest.raises(AssertionError, match="openpmd_meshes_path must be a non-empty string."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_particles_path": ""}
+    with pytest.raises(AssertionError, match="openpmd_particles_path must be a non-empty string."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_iteration_encoding": "variableBased"}
+    with pytest.raises(AssertionError, match="openpmd_iteration_encoding must be 'groupBased' or 'fileBased'."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_iteration_encoding": "fileBased"}
+    with pytest.raises(NotImplementedError, match="openPMD fileBased iteration encoding is not implemented yet."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_overwrite": "no"}
+    with pytest.raises(AssertionError, match="openpmd_overwrite must be a boolean."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_iteration_stride": 0}
+    with pytest.raises(AssertionError, match="openpmd_iteration_stride must be a positive integer."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_iteration_stride": 1.5}
+    with pytest.raises(AssertionError, match="openpmd_iteration_stride must be a positive integer."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_separate_particles_and_meshes": "false"}
+    with pytest.raises(AssertionError, match="openpmd_separate_particles_and_meshes must be a boolean."):
+        clean_and_initialize_solver_parameters({}, input_parameters)
+
+    input_parameters = {"openpmd_write_pmd_sidecar": "true"}
+    with pytest.raises(AssertionError, match="openpmd_write_pmd_sidecar must be a boolean."):
         clean_and_initialize_solver_parameters({}, input_parameters)
 
 
