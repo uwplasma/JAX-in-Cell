@@ -8,7 +8,7 @@ def test_package_exports_core_public_functions():
     Cases:
     - Simulation and load_parameters are exported.
     - diagnostics and plot are exported.
-    - write_openpmd is exported without requiring openpmd_api at import time.
+    - write_openpmd is exported with the required openpmd_api dependency installed.
     - field, particle, source, filter, and boundary-condition helpers expected by examples remain importable.
     """
     import jaxincell

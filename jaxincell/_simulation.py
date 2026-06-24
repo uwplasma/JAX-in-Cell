@@ -114,9 +114,10 @@ class Simulation:
             external_field_hash=self.external_field_hash,
             source_hash=self.source_hash,
             solver_hash=self.solver_hash,
+            export_hash=self.export_hash,
         )
         output = self.assemble_output(simulation_output, input_parameters)
-        if output["solver_parameters"]["openpmd_output"]:
+        if output["export_parameters"]["openpmd_output"]:
             output["openpmd_files"] = write_openpmd(output)
         return output
      
@@ -125,13 +126,13 @@ class Simulation:
         return self.simulation(input_parameters)
     
     """
-        domain_hash, species_hash, external_field_hash, source_hash, solver_hash
+        domain_hash, species_hash, external_field_hash, source_hash, solver_hash, export_hash
         are included as arguments here to ensure that changes to any of these hashes will trigger a recompilation of the
         simulation function with the new parameters. This is necessary because the simulation function is jitted and we
         want to make sure that it uses the most up-to-date parameters whenever it is called.
     """
-    @partial(jit, static_argnames=['self', 'domain_hash', 'species_hash', 'external_field_hash', 'source_hash', 'solver_hash'])
-    def _simulation(self, input_parameters=None, domain_hash='', species_hash='', external_field_hash='', source_hash='', solver_hash=''):
+    @partial(jit, static_argnames=['self', 'domain_hash', 'species_hash', 'external_field_hash', 'source_hash', 'solver_hash', 'export_hash'])
+    def _simulation(self, input_parameters=None, domain_hash='', species_hash='', external_field_hash='', source_hash='', solver_hash='', export_hash=''):
         """
         Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
 
@@ -345,6 +346,7 @@ class Simulation:
         external_field_parameters = parameter_sections["external_field_parameters"]
         source_parameters = parameter_sections["source_parameters"]
         solver_parameters = parameter_sections["solver_parameters"]
+        export_parameters = parameter_sections["export_parameters"]
 
         return {
             **domain_parameters,
@@ -357,6 +359,7 @@ class Simulation:
             "external_field_parameters": external_field_parameters,
             "source_parameters": source_parameters,
             "solver_parameters": solver_parameters,
+            "export_parameters": export_parameters,
             "parameter_sections": parameter_sections,
         }
     
@@ -562,6 +565,14 @@ class Simulation:
     @solver_parameters.setter
     def solver_parameters(self, new_solver_parameters):
         self.set_parameter_section("solver_parameters", new_solver_parameters)
+
+    @property
+    def export_parameters(self):
+        return self._export_parameters
+
+    @export_parameters.setter
+    def export_parameters(self, new_export_parameters):
+        self.set_parameter_section("export_parameters", new_export_parameters)
     
     @property
     def input_parameters(self):

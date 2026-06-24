@@ -10,6 +10,12 @@ from ._external_field_parameters import (
     build_external_field_hash,
     clean_and_initialize_external_field_parameters,
 )
+from ._export_parameters import (
+    ALL_EXPORT_PARAMETERS,
+    DIFFERENTIABLE_EXPORT_PARAMETERS,
+    build_export_hash,
+    clean_and_initialize_export_parameters,
+)
 from ._solver_parameters import (
     ALL_SOLVER_PARAMETERS,
     DIFFERENTIABLE_SOLVER_PARAMETERS,
@@ -77,6 +83,14 @@ PARAMETER_SECTIONS = {
         "hasher": build_solver_hash,
         "attribute": "_solver_parameters",
         "hash_attribute": "solver_hash",
+    },
+    "export_parameters": {
+        "all": ALL_EXPORT_PARAMETERS,
+        "differentiable": DIFFERENTIABLE_EXPORT_PARAMETERS,
+        "cleaner": clean_and_initialize_export_parameters,
+        "hasher": build_export_hash,
+        "attribute": "_export_parameters",
+        "hash_attribute": "export_hash",
     },
 }
 

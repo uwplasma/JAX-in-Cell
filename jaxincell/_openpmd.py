@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 import numpy as np
+import openpmd_api as io
 
 from ._constants import speed_of_light
 from ._parameters._species_definitions import SPECIES_TYPES
@@ -17,8 +18,10 @@ __all__ = [
     "write_openpmd",
 ]
 
-SUPPORTED_OPENPMD_EXTENSIONS = (".h5", ".bp")
+SUPPORTED_OPENPMD_EXTENSIONS = (".h5", ".bp", ".json")
 DEFAULT_BASE_PATH = "/data/%T/"
+DEFAULT_FILE_BASED_TOKEN = "%06T"
+ITERATION_TOKEN_PATTERN = re.compile(r"%(0\d+)?T")
 UNIT_DIMENSION_ORDER = ("L", "M", "T", "I", "theta", "N", "J")
 UNIT_DIMENSIONS = {
     "dimensionless": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
@@ -41,17 +44,6 @@ MESH_RECORDS = (
 )
 
 
-def _import_openpmd_api():
-    try:
-        import openpmd_api as io
-    except ImportError as exc:
-        raise ImportError(
-            "openPMD output requires the optional dependency 'openpmd-api'. "
-            "Install it before setting solver_parameters['openpmd_output'] = True."
-        ) from exc
-    return io
-
-
 def _set_attr(target, name, value):
     setter = getattr(target, "set_attribute", None)
     if setter is not None:
@@ -65,6 +57,8 @@ def openpmd_output_paths(
     overwrite=False,
     separate_particles_and_meshes=False,
     write_pmd_sidecar=True,
+    iteration_encoding="groupBased",
+    iteration_indices=None,
 ):
     filename = os.fspath(filename)
     root, extension = os.path.splitext(filename)
@@ -75,37 +69,76 @@ def openpmd_output_paths(
         raise ValueError(
             f"openpmd_filename must end in one of {supported}. Got {filename!r}."
         )
-    
-    all_suffixes = ["_meshes", "_particles"] if separate_particles_and_meshes else [""]
+    if iteration_encoding not in ("groupBased", "fileBased"):
+        raise ValueError("iteration_encoding must be 'groupBased' or 'fileBased'.")
 
-    paths = {
-        "data": [f"{root}{suffix}{extension}" for suffix in all_suffixes],
-        "sidecar": [f"{root}{suffix}.pmd" for suffix in all_suffixes],
-    }
+    series_keys = (
+        ("meshes", "particles") if separate_particles_and_meshes else ("combined",)
+    )
+    suffixes = ("_meshes", "_particles") if separate_particles_and_meshes else ("",)
+    iteration_indices = (
+        [0]
+        if iteration_indices is None
+        else [int(index) for index in iteration_indices] or [0]
+    )
+
+    token_match = ITERATION_TOKEN_PATTERN.search(root)
+    if iteration_encoding == "fileBased":
+        iteration_token = (
+            token_match.group(0) if token_match is not None else DEFAULT_FILE_BASED_TOKEN
+        )
+        base_root = ITERATION_TOKEN_PATTERN.sub("", root).rstrip("_-")
+    else:
+        iteration_token = ""
+        base_root = root
+    if not base_root:
+        base_root = root
+
+    file_based = iteration_encoding == "fileBased"
+    iteration_piece = f"_{iteration_token}" if file_based else ""
     index = 0
-    while not overwrite and any(
-        os.path.exists(path)
-        for path in (*paths["data"], *paths["sidecar"])
-    ):
-        paths = {
-            "data": [f"{root}{index}{suffix}{extension}" for suffix in all_suffixes],
-            "sidecar": [f"{root}{index}{suffix}.pmd" for suffix in all_suffixes],
-        }
+    while True:
+        index_suffix = "" if index == 0 else str(index - 1)
+        indexed_root = f"{base_root}{index_suffix}"
+        data_paths = [
+            f"{indexed_root}{suffix}{iteration_piece}{extension}"
+            for suffix in suffixes
+        ]
+        sidecar_paths = [f"{indexed_root}{suffix}.pmd" for suffix in suffixes]
+        collision_paths = list(sidecar_paths)
+
+        if file_based:
+            for data_path in data_paths:
+                match = ITERATION_TOKEN_PATTERN.search(data_path)
+                if match is None:
+                    collision_paths.append(data_path)
+                    continue
+
+                width_text = match.group(1)
+                for iteration_index in iteration_indices:
+                    if width_text is None:
+                        index_text = str(iteration_index)
+                    else:
+                        index_text = f"{iteration_index:0{int(width_text[1:])}d}"
+                    collision_paths.append(
+                        f"{data_path[:match.start()]}{index_text}{data_path[match.end():]}"
+                    )
+        else:
+            collision_paths.extend(data_paths)
+
+        if overwrite or not any(os.path.exists(path) for path in collision_paths):
+            break
         index += 1
 
-    if separate_particles_and_meshes:
-        data_paths = {"meshes": paths["data"][0], "particles": paths["data"][1]}
-        sidecar_paths = {"meshes": paths["sidecar"][0], "particles": paths["sidecar"][1]}
-    else:
-        data_paths = {"combined": paths["data"][0]}
-        sidecar_paths = {"combined": paths["sidecar"][0]}
-    
+    data_paths = dict(zip(series_keys, data_paths))
+    sidecar_paths = dict(zip(series_keys, sidecar_paths))
+
     if not write_pmd_sidecar:
         sidecar_paths = {}
     return {"data": data_paths, "sidecar": sidecar_paths}
 
 
-def _open_series(path, io, meshes_path=None, particles_path=None):
+def _open_series(path, io, iteration_encoding, meshes_path=None, particles_path=None):
     parent = Path(path).parent
     if str(parent) != ".":
         parent.mkdir(parents=True, exist_ok=True)
@@ -119,21 +152,41 @@ def _open_series(path, io, meshes_path=None, particles_path=None):
             "Check that the installed openpmd-api package supports this backend."
         ) from exc
 
-    encoding = "groupBased"
+    encoding = iteration_encoding
     encoding_enum = getattr(io, "Iteration_Encoding", None)
     if encoding_enum is not None:
-        encoding = (
-            getattr(encoding_enum, "group_based", None)
-            or getattr(encoding_enum, "groupBased", None)
-            or encoding
+        enum_names = (
+            ("file_based", "fileBased")
+            if iteration_encoding == "fileBased"
+            else ("group_based", "groupBased")
+        )
+        encoding = next(
+            (
+                getattr(encoding_enum, enum_name)
+                for enum_name in enum_names
+                if getattr(encoding_enum, enum_name, None) is not None
+            ),
+            iteration_encoding,
         )
     if hasattr(series, "set_iteration_encoding"):
         try:
             series.set_iteration_encoding(encoding)
         except TypeError:
-            series.set_iteration_encoding("groupBased")
+            series.set_iteration_encoding(iteration_encoding)
     else:
-        _set_attr(series, "iterationEncoding", "groupBased")
+        _set_attr(series, "iterationEncoding", iteration_encoding)
+
+    if iteration_encoding == "fileBased":
+        iteration_format = os.path.basename(path)
+        setter = getattr(series, "set_iteration_format", None)
+        if setter is not None:
+            try:
+                setter(iteration_format)
+            except TypeError:
+                setter(path)
+        else:
+            _set_attr(series, "iterationFormat", iteration_format)
+    elif not hasattr(series, "set_iteration_encoding"):
         _set_attr(series, "iterationFormat", DEFAULT_BASE_PATH)
 
     _set_attr(series, "software", "JAX-in-Cell")
@@ -360,64 +413,66 @@ def _write_iterations(series, output, io, iteration_stride, write_meshes, write_
     series.close()
 
 
-def write_openpmd(output, solver_parameters=None):
-    if solver_parameters is None:
-        solver_parameters = output["solver_parameters"]
-    if solver_parameters["openpmd_iteration_encoding"] != "groupBased":
-        raise NotImplementedError("Only groupBased openPMD output is implemented.")
+def write_openpmd(output, export_parameters=None):
+    if export_parameters is None:
+        export_parameters = output["export_parameters"]
+    iteration_encoding = export_parameters["openpmd_iteration_encoding"]
+    iteration_stride = export_parameters["openpmd_iteration_stride"]
+    iteration_indices = range(0, int(output["total_steps"]), iteration_stride)
 
     paths = openpmd_output_paths(
-        solver_parameters["openpmd_filename"],
-        overwrite=solver_parameters["openpmd_overwrite"],
-        separate_particles_and_meshes=solver_parameters[
+        export_parameters["openpmd_filename"],
+        overwrite=export_parameters["openpmd_overwrite"],
+        separate_particles_and_meshes=export_parameters[
             "openpmd_separate_particles_and_meshes"
         ],
-        write_pmd_sidecar=solver_parameters["openpmd_write_pmd_sidecar"],
+        write_pmd_sidecar=export_parameters["openpmd_write_pmd_sidecar"],
+        iteration_encoding=iteration_encoding,
+        iteration_indices=iteration_indices,
     )
-    io = _import_openpmd_api()
-
-    if solver_parameters["openpmd_separate_particles_and_meshes"]:
-        mesh_series = _open_series(
-            paths["data"]["meshes"],
-            io,
-            meshes_path=solver_parameters["openpmd_meshes_path"],
-        )
-        _write_iterations(
-            mesh_series,
-            output,
-            io,
-            solver_parameters["openpmd_iteration_stride"],
-            write_meshes=True,
-            write_particles=False,
-        )
-
-        particle_series = _open_series(
-            paths["data"]["particles"],
-            io,
-            particles_path=solver_parameters["openpmd_particles_path"],
-        )
-        _write_iterations(
-            particle_series,
-            output,
-            io,
-            solver_parameters["openpmd_iteration_stride"],
-            write_meshes=False,
-            write_particles=True,
+    if export_parameters["openpmd_separate_particles_and_meshes"]:
+        series_specs = (
+            (
+                "meshes",
+                True,
+                False,
+                export_parameters["openpmd_meshes_path"],
+                None,
+            ),
+            (
+                "particles",
+                False,
+                True,
+                None,
+                export_parameters["openpmd_particles_path"],
+            ),
         )
     else:
+        series_specs = (
+            (
+                "combined",
+                True,
+                True,
+                export_parameters["openpmd_meshes_path"],
+                export_parameters["openpmd_particles_path"],
+            ),
+        )
+
+    for key, write_meshes, write_particles, meshes_path, particles_path in series_specs:
         series = _open_series(
-            paths["data"]["combined"],
+            paths["data"][key],
             io,
-            meshes_path=solver_parameters["openpmd_meshes_path"],
-            particles_path=solver_parameters["openpmd_particles_path"],
+            iteration_encoding,
+            meshes_path=meshes_path,
+            particles_path=particles_path,
         )
         _write_iterations(
             series,
             output,
             io,
-            solver_parameters["openpmd_iteration_stride"],
-            write_meshes=True,
-            write_particles=True,
+            iteration_stride,
+            write_meshes=write_meshes,
+            write_particles=write_particles,
         )
 
     for key, sidecar_path in paths["sidecar"].items():
