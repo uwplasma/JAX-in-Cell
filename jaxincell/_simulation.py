@@ -217,18 +217,6 @@ class Simulation:
 
         positions = particle_state["positions"]
         velocities = particle_state["velocities"]
-        algorithm_solver_parameters = {
-            "filter_passes": solver_parameters["filter_passes"],
-            "filter_alpha": solver_parameters["filter_alpha"],
-            "filter_strides": solver_parameters["filter_strides"],
-            "relativistic": solver_parameters["relativistic"],
-            "tolerance_Picard_iterations_implicit_CN": solver_parameters[
-                "tolerance_Picard_iterations_implicit_CN"
-            ],
-            "max_number_of_Picard_iterations_implicit_CN": solver_parameters[
-                "max_number_of_Picard_iterations_implicit_CN"
-            ],
-        }
 
         # Leapfrog integration: positions at half-step before the start
         positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
@@ -247,7 +235,7 @@ class Simulation:
                 positions_plus1_2, velocities, qs, ms, q_ms,
             )
             step_func = lambda carry, step_index: Boris_step(
-                carry, step_index, algorithm_solver_parameters, runtime_external_field_parameters,
+                carry, step_index, solver_parameters, runtime_external_field_parameters,
                 dx, dt, grid, box_size, particle_BC_left, particle_BC_right,
                 field_BC_left, field_BC_right, solver_parameters['field_solver']
             )
@@ -257,7 +245,7 @@ class Simulation:
                 velocities, qs, ms, q_ms,
             )
             step_func = lambda carry, step_index: CN_step(
-                carry, step_index, algorithm_solver_parameters, dx, dt, grid, box_size,
+                carry, step_index, solver_parameters, dx, dt, grid, box_size,
                 particle_BC_left, particle_BC_right, field_BC_left, field_BC_right,
                 solver_parameters["number_of_particle_substeps_implicit_CN"]
             )
