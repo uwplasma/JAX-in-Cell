@@ -1,10 +1,19 @@
+import builtins
+import importlib
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from jaxincell import Simulation
-from jaxincell._openpmd import openpmd_output_paths, write_openpmd
+from jaxincell._openpmd import (
+    _open_series,
+    _set_record_metadata,
+    _store,
+    _write_meshes,
+    openpmd_output_paths,
+    write_openpmd,
+)
 from jaxincell._parameters._export_parameters import clean_and_initialize_export_parameters
 from jaxincell._parameters._solver_parameters import clean_and_initialize_solver_parameters
 from tests.helpers import base_simulation_parameters
@@ -96,6 +105,83 @@ class FakeSeries:
         self.closed = True
 
 
+class AttributeOnlySeries:
+    created = []
+
+    def __init__(self, path, access):
+        self.path = path
+        self.access = access
+        AttributeOnlySeries.created.append(self)
+
+
+class CompatibilitySeries:
+    created = []
+
+    def __init__(self, path, access):
+        self.path = path
+        self.access = access
+        self.attributes = {}
+        self.encoding_values = []
+        self.format_values = []
+        CompatibilitySeries.created.append(self)
+
+    def set_attribute(self, name, value):
+        self.attributes[name] = value
+
+    def set_iteration_encoding(self, value):
+        self.encoding_values.append(value)
+        if value == "enum-file":
+            raise TypeError("old bindings only accept raw strings")
+        self.iteration_encoding = value
+
+    def set_iteration_format(self, value):
+        self.format_values.append(value)
+        if len(self.format_values) == 1:
+            raise TypeError("old bindings require the full path")
+        self.iteration_format = value
+
+    def set_meshes_path(self, value):
+        raise TypeError("old bindings reject this setter")
+
+    def set_particles_path(self, value):
+        self.particles_path_setter_value = value
+
+    @property
+    def particles_path(self):
+        return None
+
+    @particles_path.setter
+    def particles_path(self, value):
+        raise AttributeError("read-only property")
+
+
+class StrictMetadataRecord:
+    def __init__(self):
+        self.attributes = {}
+
+    def __setattr__(self, name, value):
+        if name in ("unit_dimension", "time_offset"):
+            raise AttributeError(f"{name} is read-only")
+        object.__setattr__(self, name, value)
+
+    def set_attribute(self, name, value):
+        self.attributes[name] = value
+
+
+class StrictRecordComponent(FakeRecord):
+    def __setattr__(self, name, value):
+        if name == "unit_SI":
+            raise AttributeError("unit_SI is read-only")
+        object.__setattr__(self, name, value)
+
+
+class StrictMesh(FakeGroup):
+    def __setattr__(self, name, value):
+        if name in ("grid_unit_SI", "unit_SI"):
+            raise AttributeError(f"{name} is read-only")
+        object.__setattr__(self, name, value)
+
+
 def fake_openpmd_module():
     FakeSeries.created = []
     return SimpleNamespace(
@@ -110,6 +196,26 @@ def fake_openpmd_module():
             file_based="fileBased",
         ),
     )
+
+
+def test_openpmd_version_import_fallback(monkeypatch):
+    """Test the fallback used if jaxincell.version cannot be imported."""
+    import jaxincell._openpmd as openpmd_module
+
+    real_import = builtins.__import__
+
+    def fail_version_import(name, globals=None, locals=None, fromlist=(), level=0):
+        package = None if globals is None else globals.get("__package__")
+        if name == "version" and package == "jaxincell" and level == 1:
+            raise ImportError("version unavailable")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_version_import)
+    try:
+        assert importlib.reload(openpmd_module).__version__ == "unknown"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(openpmd_module)
 
 
 def tiny_openpmd_output(tmp_path, **export_overrides):
@@ -262,6 +368,165 @@ def test_openpmd_output_paths_file_based_templates(tmp_path, extension):
     assert separate["sidecar"]["meshes"] == str(tmp_path / "split0_meshes.pmd")
 
 
+def test_openpmd_output_paths_edge_cases(monkeypatch, tmp_path):
+    """Test less common openPMD output path branches."""
+    with pytest.raises(ValueError, match="iteration_encoding must be"):
+        openpmd_output_paths(
+            str(tmp_path / "series.h5"),
+            iteration_encoding="iterationBased",
+        )
+
+    monkeypatch.chdir(tmp_path)
+    token_only = openpmd_output_paths(
+        "%T.h5",
+        iteration_encoding="fileBased",
+        write_pmd_sidecar=False,
+    )
+    assert token_only["data"]["combined"] == "%T_%T.h5"
+
+    class OneShotPattern:
+        def __init__(self):
+            self.search_calls = 0
+
+        def search(self, text):
+            self.search_calls += 1
+            if self.search_calls == 1:
+                return SimpleNamespace(group=lambda index: "%T")
+            return None
+
+        def sub(self, replacement, text):
+            return "series"
+
+    monkeypatch.setattr("jaxincell._openpmd.ITERATION_TOKEN_PATTERN", OneShotPattern())
+    paths = openpmd_output_paths(
+        "ignored.h5",
+        iteration_encoding="fileBased",
+        write_pmd_sidecar=False,
+    )
+    assert paths["data"]["combined"] == "series_%T.h5"
+
+
+def test_open_series_compatibility_fallbacks(tmp_path):
+    """Test compatibility paths for older or restricted openpmd_api objects."""
+
+    class FailingSeries:
+        def __init__(self, path, access):
+            raise OSError("backend unavailable")
+
+    failing_io = SimpleNamespace(
+        Series=FailingSeries,
+        Access=SimpleNamespace(create="create"),
+    )
+    with pytest.raises(RuntimeError, match="Could not create openPMD .bp series"):
+        _open_series(str(tmp_path / "broken.bp"), failing_io, "groupBased")
+
+    AttributeOnlySeries.created = []
+    attribute_io = SimpleNamespace(
+        Series=AttributeOnlySeries,
+        Access=SimpleNamespace(create="create"),
+    )
+    group_series = _open_series(
+        "attribute_only.h5",
+        attribute_io,
+        "groupBased",
+        meshes_path="meshes",
+    )
+    assert group_series.iterationEncoding == "groupBased"
+    assert group_series.iterationFormat == "/data/%T/"
+    assert group_series.meshesPath == "meshes/"
+
+    file_series = _open_series(
+        "attribute_%T.h5",
+        attribute_io,
+        "fileBased",
+    )
+    assert file_series.iterationEncoding == "fileBased"
+    assert file_series.iterationFormat == "attribute_%T.h5"
+
+    CompatibilitySeries.created = []
+    compatibility_io = SimpleNamespace(
+        Series=CompatibilitySeries,
+        Access=SimpleNamespace(create="create"),
+        Iteration_Encoding=SimpleNamespace(file_based="enum-file"),
+    )
+    compatibility_path = tmp_path / "compat_%06T.h5"
+    compatibility_series = _open_series(
+        str(compatibility_path),
+        compatibility_io,
+        "fileBased",
+        meshes_path="meshes",
+        particles_path="particles",
+    )
+    assert compatibility_series.encoding_values == ["enum-file", "fileBased"]
+    assert compatibility_series.format_values == [
+        compatibility_path.name,
+        str(compatibility_path),
+    ]
+    assert compatibility_series.iteration_format == str(compatibility_path)
+    assert compatibility_series.meshes_path == "meshes/"
+    assert compatibility_series.particles_path_setter_value == "particles/"
+    assert compatibility_series.attributes["meshesPath"] == "meshes/"
+    assert compatibility_series.attributes["particlesPath"] == "particles/"
+
+
+def test_record_metadata_and_store_fallbacks():
+    """Test metadata and component storage fallbacks."""
+    unit_dimension = SimpleNamespace(
+        L="L",
+        M="M",
+        T="T",
+        I="I",
+        theta="theta",
+        N="N",
+        J="J",
+    )
+    record = FakeRecord("record")
+    _set_record_metadata(
+        record,
+        SimpleNamespace(Unit_Dimension=unit_dimension),
+        "charge",
+    )
+    assert record.unit_dimension == {"T": 1.0, "I": 1.0}
+
+    fallback_record = StrictMetadataRecord()
+    _set_record_metadata(
+        fallback_record,
+        SimpleNamespace(),
+        "electric_field",
+        macro_weighted=1,
+        weighting_power=0.0,
+    )
+    assert fallback_record.attributes["unitDimension"].shape == (7,)
+    assert fallback_record.attributes["timeOffset"] == 0.0
+    assert fallback_record.attributes["macroWeighted"] == np.uint32(1)
+    assert fallback_record.attributes["weightingPower"] == 0.0
+
+    component = StrictRecordComponent("component")
+    _store(component, np.array([1.0, 2.0]), SimpleNamespace(Dataset=FakeDataset))
+    assert component.attributes["unitSI"] == 1.0
+
+
+def test_write_meshes_skips_missing_records_and_uses_unit_fallbacks():
+    """Test mesh writing branches for optional records and unit fallbacks."""
+    iteration = SimpleNamespace(meshes=FakeMap(lambda name: StrictMesh(name)))
+    output = {
+        "electric_field": np.ones((1, 4, 3)),
+        "dx": 0.25,
+        "length": 1.0,
+    }
+    fake_io = SimpleNamespace(
+        Dataset=FakeDataset,
+        Geometry=SimpleNamespace(cartesian="cartesian"),
+    )
+
+    _write_meshes(iteration, output, 0, fake_io)
+
+    assert set(iteration.meshes.entries) == {"E"}
+    mesh = iteration.meshes.entries["E"]
+    assert mesh.attributes["gridUnitSI"] == 1.0
+    assert mesh.components["x"].data.shape == (4,)
+
+
 @pytest.mark.parametrize("extension", OPENPMD_EXTENSIONS)
 def test_write_openpmd_combined_series(monkeypatch, tmp_path, extension):
     """Test jaxincell._openpmd.write_openpmd with a fake openpmd_api module.
@@ -360,6 +625,41 @@ def test_write_openpmd_file_based_series(monkeypatch, tmp_path, extension):
     assert series.iteration_encoding == "fileBased"
     assert series.iteration_format == f"filebased_%06T{extension}"
     assert set(series.iterations.entries) == {0, 1, 2}
+
+
+def test_write_openpmd_computed_time_and_particle_edge_cases(monkeypatch, tmp_path):
+    """Test writer branches for computed time and particle naming edge cases."""
+    monkeypatch.setattr("jaxincell._openpmd.io", fake_openpmd_module())
+    output = tiny_openpmd_output(
+        tmp_path,
+        openpmd_filename=str(tmp_path / "particle_edges.h5"),
+    )
+    output.pop("time_array")
+    output.pop("external_electric_field")
+    output.pop("external_magnetic_field")
+    output["solver_parameters"]["time_evolution_algorithm"] = 1
+    output["species_parameters"] = {
+        "electrons": {
+            "_electrons0": {"user_label": "beam"},
+            "_electrons1": {"user_label": "beam"},
+        },
+        "ions": {
+            "_ions0": {"user_label": "beam"},
+        },
+    }
+
+    write_openpmd(output)
+
+    series = FakeSeries.created[0]
+    assert series.iterations.entries[2].time == pytest.approx(0.2)
+    iteration = series.iterations.entries[0]
+    assert "external_E" not in iteration.meshes.entries
+    assert "external_B" not in iteration.meshes.entries
+    assert set(iteration.particles.entries) == {"beam", "beam_1"}
+    assert (
+        iteration.particles.entries["beam"].attributes["particlePush"]
+        == "Implicit Crank-Nicolson"
+    )
 
 
 def test_simulation_run_writes_openpmd_when_enabled(monkeypatch, tmp_path):
