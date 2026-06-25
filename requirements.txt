@@ -2,3 +2,4 @@ jax
 jaxlib
 jax_tqdm
 matplotlib
+openpmd-api
