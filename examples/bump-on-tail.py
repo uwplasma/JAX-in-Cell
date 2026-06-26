@@ -8,13 +8,13 @@ slowly-growing Langmuir waves with Im(omega) << omega_pe.
 import os
 from datetime import datetime
 from jax import block_until_ready
-from jaxincell import plot, simulation, load_parameters, diagnostics
+from jaxincell import plot, Simulation, load_parameters, diagnostics
 
 input_file = 'bump-on-tail.toml'
 current_directory = os.path.dirname(os.path.abspath(__file__))
 input_toml_path = os.path.join(current_directory, input_file)
 
-input_parameters, solver_parameters = load_parameters(input_toml_path)
+parameters = load_parameters(input_toml_path)
 
 simulation_type = 2
 if simulation_type == 0:
@@ -22,23 +22,24 @@ if simulation_type == 0:
     save_mp4_name = "bump_on_tail_explicit_periodic.mp4"
 elif simulation_type == 1:
     print("Running bump-on-tail with reflective BCs...")
-    input_parameters["particle_BC_left"] = 1
-    input_parameters["particle_BC_right"] = 1
-    input_parameters["field_BC_left"] = 1
-    input_parameters["field_BC_right"] = 1
+    parameters.setdefault("domain_parameters", {})["particle_BC_left"] = 1
+    parameters.setdefault("domain_parameters", {})["particle_BC_right"] = 1
+    parameters.setdefault("domain_parameters", {})["field_BC_left"] = 1
+    parameters.setdefault("domain_parameters", {})["field_BC_right"] = 1
     save_mp4_name = "bump_on_tail_explicit_reflective.mp4"
 elif simulation_type == 2:
     print("Running bump-on-tail with implicit field solver...")
-    solver_parameters["time_evolution_algorithm"] = 1
+    parameters.setdefault("solver_parameters", {})["time_evolution_algorithm"] = 1
     save_mp4_name = "bump_on_tail_implicit_periodic.mp4"
 elif simulation_type == 3:
     print("Running bump-on-tail with digital filtering...")
-    input_parameters["filter_passes"] = 5
+    parameters.setdefault("solver_parameters", {})["filter_passes"] = 5
     save_mp4_name = "bump_on_tail_explicit_periodic_filtered.mp4"
 
 # Run the simulation
 started = datetime.now()
-output = block_until_ready(simulation(input_parameters, **solver_parameters))
+sim = Simulation(parameters)
+output = block_until_ready(sim.run())
 print("Simulation done, elapsed:", datetime.now()-started)
 
 # Post-process: segregate ions/electrons, compute energies, compute FFT

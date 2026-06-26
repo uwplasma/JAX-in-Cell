@@ -371,3 +371,116 @@ def test_plot_show_true_calls_show(monkeypatch):
 
     plot_mod.plot(out, direction="x", show=True, save_mp4=None)
     assert called["n"] == 1
+
+
+def test_combine_by_charge_sign_handles_missing_and_multiple_species():
+    """Test jaxincell._plot._combine_by_charge_sign.
+
+    Cases:
+    - multiple species with matching charge sign are concatenated in stable order.
+    - missing matching species raises the current requested-sign error.
+    - species entries without charge metadata are handled according to the intended contract.
+    """
+    T = 2
+    neg_pos_0 = jnp.ones((T, 1, 3))
+    neg_vel_0 = jnp.ones((T, 1, 3)) * 10
+    neg_pos_1 = jnp.ones((T, 2, 3)) * 2
+    neg_vel_1 = jnp.ones((T, 2, 3)) * 20
+    pos_pos = jnp.ones((T, 1, 3)) * 3
+    pos_vel = jnp.ones((T, 1, 3)) * 30
+
+    output = {
+        "species": [
+            {"charge": -1.0, "positions": neg_pos_0, "velocities": neg_vel_0},
+            {"charge": 1.0, "positions": pos_pos, "velocities": pos_vel},
+            {"charge": -2.0, "positions": neg_pos_1, "velocities": neg_vel_1},
+        ]
+    }
+
+    negative_positions, negative_velocities = plot_mod._combine_by_charge_sign(
+        output,
+        want_negative=True,
+    )
+    positive_positions, positive_velocities = plot_mod._combine_by_charge_sign(
+        output,
+        want_negative=False,
+    )
+
+    assert negative_positions.shape == (T, 3, 3)
+    assert negative_velocities.shape == (T, 3, 3)
+    np.testing.assert_allclose(np.asarray(negative_positions[:, :1, :]), np.asarray(neg_pos_0))
+    np.testing.assert_allclose(np.asarray(negative_positions[:, 1:, :]), np.asarray(neg_pos_1))
+    np.testing.assert_allclose(np.asarray(negative_velocities[:, :1, :]), np.asarray(neg_vel_0))
+    np.testing.assert_allclose(np.asarray(negative_velocities[:, 1:, :]), np.asarray(neg_vel_1))
+    np.testing.assert_allclose(np.asarray(positive_positions), np.asarray(pos_pos))
+    np.testing.assert_allclose(np.asarray(positive_velocities), np.asarray(pos_vel))
+
+    with pytest.raises(RuntimeError, match="No particles found"):
+        plot_mod._combine_by_charge_sign(
+            {"species": [{"charge": 1.0, "positions": pos_pos, "velocities": pos_vel}]},
+            want_negative=True,
+        )
+
+    with pytest.raises(KeyError):
+        plot_mod._combine_by_charge_sign(
+            {"species": [{"positions": pos_pos, "velocities": pos_vel}]},
+            want_negative=True,
+        )
+
+
+def test_robust_vmax_clipped_edge_cases():
+    """Test jaxincell._plot._robust_vmax_clipped.
+
+    Cases:
+    - all-zero and all-NaN sample arrays fall back to eps.
+    - clipping limits outliers while preserving useful central spread.
+    - q, pad, and eps parameters affect the result as documented.
+    """
+    assert plot_mod._robust_vmax_clipped(np.zeros((2, 3)), eps=1e-6) == 1e-6
+    assert plot_mod._robust_vmax_clipped(np.full((2, 3), np.nan), eps=1e-5) == 1e-5
+
+    clipped = plot_mod._robust_vmax_clipped(
+        np.array([1.0, 2.0, 1000.0]),
+        q=100.0,
+        pad=1.0,
+        clip_multiple_of_median=10.0,
+        eps=1e-12,
+    )
+    assert clipped == 20.0
+
+    padded = plot_mod._robust_vmax_clipped(
+        np.array([1.0, 2.0, 3.0]),
+        q=50.0,
+        pad=2.0,
+        clip_multiple_of_median=100.0,
+        eps=1e-12,
+    )
+    assert padded == 4.0
+
+
+def test_pdf_over_frames_numpy_normalization_and_empty_bins():
+    """Test jaxincell._plot._pdf_over_frames_numpy.
+
+    Cases:
+    - per-frame histograms integrate to one when samples are present.
+    - empty frames return zero density rather than NaN.
+    - bin edge handling is consistent for samples on the first and last edges.
+    """
+    edges = np.array([0.0, 0.5, 1.0])
+    widths = np.diff(edges)
+    samples = np.array([
+        [0.0, 0.25, 0.75],
+        [1.0, 0.5, 0.5],
+    ])
+
+    pdf = plot_mod._pdf_over_frames_numpy(samples, edges)
+
+    assert pdf.shape == (2, 2)
+    np.testing.assert_allclose(np.sum(pdf * widths[None, :], axis=1), np.ones(2))
+
+    edge_pdf = plot_mod._pdf_over_frames_numpy(np.array([[0.0, 1.0]]), edges)
+    np.testing.assert_allclose(edge_pdf, np.array([[1.0, 1.0]], dtype=np.float32))
+
+    empty_pdf = plot_mod._pdf_over_frames_numpy(np.empty((3, 0)), edges)
+    assert empty_pdf.shape == (3, 2)
+    np.testing.assert_allclose(empty_pdf, np.zeros((3, 2), dtype=np.float32))

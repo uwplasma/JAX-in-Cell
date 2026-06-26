@@ -14,7 +14,7 @@ except ModuleNotFoundError: import pip._vendor.tomli as tomllib
 __all__ = ['Boris_step', 'CN_step']
 
 #Boris step
-def Boris_step(carry, step_index, parameters, dxyz, dt, gridxyz, box_size,
+def Boris_step(carry, step_index, solver_parameters, external_field_parameters, dxyz, dt, gridxyz, box_size,
                       particle_BC_left, particle_BC_right,
                       field_BC_left, field_BC_right,
                       field_solver):
@@ -24,9 +24,9 @@ def Boris_step(carry, step_index, parameters, dxyz, dt, gridxyz, box_size,
     dx, dy, dz = dxyz
     grid, grid_y, grid_z = gridxyz
 
-    fpasses  = parameters["filter_passes"]
-    falpha   = parameters["filter_alpha"]
-    fstrides = parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
+    fpasses  = solver_parameters["filter_passes"]
+    falpha   = solver_parameters["filter_alpha"]
+    fstrides = solver_parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
     
     J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
                 qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
@@ -35,8 +35,8 @@ def Boris_step(carry, step_index, parameters, dxyz, dt, gridxyz, box_size,
     E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
     # Add external fields
-    #total_E = E_field + parameters["external_electric_field"]
-    #total_B = B_field + parameters["external_magnetic_field"]
+    #total_E = E_field + external_field_parameters["external_electric_field"]
+    #total_B = B_field + external_field_parameters["external_magnetic_field"]
 
     # Interpolate fields to particle positions
     def interpolate_fields(x_n):
@@ -48,7 +48,7 @@ def Boris_step(carry, step_index, parameters, dxyz, dt, gridxyz, box_size,
 
     # Particle update: Boris pusher
     positions_plus3_2, velocities_plus1 = lax.cond(
-        parameters["relativistic"],
+        solver_parameters["relativistic"],
         lambda _: boris_step_relativistic(dt, positions_plus1_2, velocities, qs, ms, E_field_at_x, B_field_at_x),
         lambda _: boris_step(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
         operand=None
@@ -100,7 +100,7 @@ def Boris_step(carry, step_index, parameters, dxyz, dt, gridxyz, box_size,
 
 # Implicit Crank-Nicolson step
 @partial(jit, static_argnames=('num_substeps', 'particle_BC_left', 'particle_BC_right', 'field_BC_left', 'field_BC_right'))
-def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
+def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
                                   particle_BC_left, particle_BC_right,
                                   field_BC_left, field_BC_right, num_substeps):
     (E_field, B_field, positions,
@@ -203,8 +203,8 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # --- Picard Loop ---
     picard_init = (E_new, E_new, B_new, positions, positions_new, velocities, velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
     
-    tol = parameters["tolerance_Picard_iterations_implicit_CN"]
-    max_iter = parameters["max_number_of_Picard_iterations_implicit_CN"]
+    tol = solver_parameters["tolerance_Picard_iterations_implicit_CN"]
+    max_iter = solver_parameters["max_number_of_Picard_iterations_implicit_CN"]
 
     # Initial state
     state0 = (picard_init, jnp.zeros_like(E_new), jnp.array(jnp.inf), jnp.array(0))

@@ -27,18 +27,53 @@ import jax.nn as jnn
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
-from jaxincell import simulation
+from jaxincell import Simulation
 
 # ---------------------------------------------------------------------------
 # 0. Global solver parameters (moderate size)
 # ---------------------------------------------------------------------------
-solver_parameters = {
-    "field_solver": 0,                 # Curl_EB
-    "number_grid_points": 80,
-    "number_pseudoelectrons": 4500,
-    "total_steps": 400,
-    "time_evolution_algorithm": 0,     # Boris
+parameters = {
+    "domain_parameters": {
+        "length": 0.01,
+        "timestep_over_spatialstep_times_c": 4.5,
+        "number_grid_points": 80,
+        "total_steps": 400,
+    },
+    "species_parameters": {
+        "electrons": {
+            "electrons0": {
+                "number_pseudoparticles": 4500,
+                "grid_points_per_Debye_length": 0.50265482457,
+                "perturbation_amplitude_x": 5.0e-7,
+                "perturbation_wavenumber_x": 1.0,
+                "vth_over_c_x": 0.05,
+                "drift_speed_x": 4.0e7,
+                "velocity_plus_minus_x": True,
+                "velocity_plus_minus_y": False,
+                "velocity_plus_minus_z": False,
+            },
+        },
+        "ions": {
+            "ions0": {
+                "number_pseudoparticles": 4500,
+                "grid_points_per_Debye_length": 0.50265482457,
+                "vth_over_c_x": "_electrons0",
+                "vth_over_c_y": "_electrons0",
+                "vth_over_c_z": "_electrons0",
+                "ion_temperature_over_electron_temperature_x": 0.01,
+                "ion_temperature_over_electron_temperature_y": 0.01,
+                "ion_temperature_over_electron_temperature_z": 0.01,
+            },
+        },
+    },
+    "solver_parameters": {
+        "field_solver": 0,
+        "time_evolution_algorithm": 0,
+        "print_info": True,
+    },
 }
+
+sim = Simulation(parameters)
 
 # Fixed linear-phase window as FRACTIONS of total time series.
 # These DO NOT depend on v_d, which is crucial for smooth autodiff.
@@ -49,23 +84,13 @@ FIT_FRAC_END   = 0.50
 # ---------------------------------------------------------------------------
 # 1. Utilities: build input parameters, run simulation
 # ---------------------------------------------------------------------------
-def make_input_parameters(electron_drift_speed_x: float,
-                          print_info: bool = True):
+def make_runtime_input_parameters(electron_drift_speed_x: float):
     return {
-        "length": 0.01,
-        "amplitude_perturbation_x": 5.0e-7,
-        "wavenumber_electrons_x": 1.0,
-        "grid_points_per_Debye_length": 0.50265482457,
-        "vth_electrons_over_c_x": 0.05,
-        "ion_temperature_over_electron_temperature_x": 0.01,
-        "ion_temperature_over_electron_temperature_y": 0.01,
-        "ion_temperature_over_electron_temperature_z": 0.01,
-        "timestep_over_spatialstep_times_c": 4.5,
-        "electron_drift_speed_x": electron_drift_speed_x,
-        "velocity_plus_minus_electrons_x": True,
-        "velocity_plus_minus_electrons_y": False,
-        "velocity_plus_minus_electrons_z": False,
-        "print_info": print_info,
+        "electrons": {
+            "electrons0": {
+                "drift_speed_x": electron_drift_speed_x,
+            },
+        },
     }
 
 
@@ -73,7 +98,7 @@ def run_two_stream(v_d: float):
     """Run JAX-in-Cell two-stream simulation and return the output dict."""
     print("\n=== Running two-stream simulation ===")
     print(f"electron_drift_speed_x = {v_d:.3e} m/s")
-    out = simulation(make_input_parameters(v_d), **solver_parameters)
+    out = sim.run(make_runtime_input_parameters(v_d))
     return out
 
 
@@ -185,8 +210,7 @@ def gamma_amp_from_vd(v_d: float):
       - disables JAX-in-Cell's internal printing (`print_info=False`)
       - calls energy_gamma_from_output(..., for_jit=True)
     """
-    params = make_input_parameters(v_d, print_info=False)
-    out = simulation(params, **solver_parameters)
+    out = sim.run(make_runtime_input_parameters(v_d))
     info = energy_gamma_from_output(out, for_jit=True)
     return info["gamma_amp"]
 
@@ -200,8 +224,7 @@ def gamma_hat_from_vd(v_d: float):
     This is what we actually optimize in the inverse problem, to keep the
     scales O(1) instead of O(1e10).
     """
-    params = make_input_parameters(v_d, print_info=False)
-    out = simulation(params, **solver_parameters)
+    out = sim.run(make_runtime_input_parameters(v_d))
     info = energy_gamma_from_output(out, for_jit=True)
     return info["gamma_amp"] / info["omega_p"]
 
@@ -506,8 +529,7 @@ def make_two_panel_figure(
     tau_true  = t_true * omega_p
 
     def energy_trace(vd: float):
-        params = make_input_parameters(vd, print_info=False)
-        out = simulation(params, **solver_parameters)
+        out = sim.run(make_runtime_input_parameters(vd))
         info = energy_gamma_from_output(out, for_jit=False)
         t    = info["t"]
         tau  = t * float(info["omega_p"])
@@ -624,8 +646,7 @@ def main():
 
     # 3) Compute target γ from synthetic "experiment"
     print("\n=== Computing target gamma from synthetic experiment ===")
-    params_true = make_input_parameters(v_true, print_info=True)
-    out_true = simulation(params_true, **solver_parameters)
+    out_true = sim.run(make_runtime_input_parameters(v_true))
     info_true = energy_gamma_from_output(out_true, for_jit=False)
     gamma_target = float(info_true["gamma_amp"])
     omega_p = float(info_true["omega_p"])
