@@ -14,15 +14,16 @@ except ModuleNotFoundError: import pip._vendor.tomli as tomllib
 __all__ = ['Boris_step', 'CN_step']
 
 #Boris step
-def Boris_step(carry, step_index, solver_parameters, external_field_parameters, dxyz, dt, gridxyz, box_size,
+def Boris_step(carry, step_index, solver_parameters, external_field_parameters,
+                      dxyz, dt, gridxyz, box_size, dimensions,
                       particle_BC_left, particle_BC_right,
                       field_BC_left, field_BC_right,
                       field_solver):
 
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
-    dx, dy, dz = dxyz
-    grid, grid_y, grid_z = gridxyz
+    dx = dxyz['x']
+    grid = gridxyz['x']
 
     fpasses  = solver_parameters["filter_passes"]
     falpha   = solver_parameters["filter_alpha"]
@@ -34,14 +35,10 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
                 field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
-    # Add external fields
-    #total_E = E_field + external_field_parameters["external_electric_field"]
-    #total_B = B_field + external_field_parameters["external_magnetic_field"]
-
-    # Interpolate fields to particle positions
+    # Interpolate internal and external fields to particle positions
     def interpolate_fields(x_n):
-        E = fields_to_particles_grid(x_n, E_field, parameters['external_electric_field'], dxyz, (grid + dx/2, grid_y + dy/2, grid_z + dz/2), (grid[0], grid_y[0], grid_z[0]), field_BC_left, field_BC_right)
-        B = fields_to_particles_grid(x_n, B_field, parameters['external_magnetic_field'], dxyz, (grid, grid_y, grid_z), (grid[0] - dx/2, grid_y[0] - dy/2, grid_z[0] - dz/2), field_BC_left, field_BC_right)
+        E = fields_to_particles_grid(x_n, E_field, external_field_parameters['padded_external_electric_field'], dxyz, gridxyz, 1/2, dimensions, field_BC_left, field_BC_right)
+        B = fields_to_particles_grid(x_n, B_field, external_field_parameters['padded_external_magnetic_field'], dxyz, gridxyz, 0, dimensions, field_BC_left, field_BC_right)
         return E, B
 
     E_field_at_x, B_field_at_x = vmap(interpolate_fields)(positions_plus1_2)

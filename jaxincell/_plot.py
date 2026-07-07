@@ -400,7 +400,7 @@ def plot(
     dirs = _parse_direction(direction)
     dir_indices = [_AXIS_TO_INDEX[d] for d in dirs]
 
-    grid = np.asarray(output["gridxyz"][0])
+    grid = np.asarray(output["grid_xyz"]['x'])
     time = np.asarray(output["time_array"]) * float(np.asarray(output["plasma_frequency"]))
     total_steps = int(output["total_steps"])
     box_size_x = float(output["length"])

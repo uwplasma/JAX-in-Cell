@@ -14,6 +14,7 @@ from ._fields import E_from_Gauss_1D_Cartesian
 from ._parameters._species_definitions import SPECIES_AXES, SPECIES_TYPES
 from ._parameters._species_parameters import coerce_species_initial_phase_space_parameters
 from ._sources import calculate_charge_density
+from ._boundary_conditions import field_2_ghost_cells
 
 __all__ = [
     "build_domain_state",
@@ -28,24 +29,37 @@ def build_domain_state(domain_parameters):
     length = domain_parameters["length"]
     length_y = jnp.where(domain_parameters["length_y"] == 0, length, domain_parameters["length_y"])
     length_z = jnp.where(domain_parameters["length_z"] == 0, length, domain_parameters["length_z"])
+    length_xyz = {'x': length, 'y': length_y, 'z': length_z}
 
-    number_grid_points = domain_parameters["number_grid_points"]
+    dimensions = ('x',)
+    number_grid_points_xyz = {'x': domain_parameters["number_grid_points"]}
     number_grid_points_y = domain_parameters["number_grid_points_y"]
     number_grid_points_z = domain_parameters["number_grid_points_z"]
-    if number_grid_points_y == 0:
-        number_grid_points_y = 3
-    if number_grid_points_z == 0:
-        number_grid_points_z = 3
 
-    dx = length / number_grid_points
-    grid = jnp.linspace(-length / 2 + dx / 2, length / 2 - dx / 2, number_grid_points)
-    dt = domain_parameters["timestep_over_spatialstep_times_c"] * dx / speed_of_light
+    if number_grid_points_y is not None and number_grid_points_y > 0:
+        dimensions = dimensions + ('y',)
+        number_grid_points_xyz['y'] = number_grid_points_y
+    if number_grid_points_z is not None and number_grid_points_z > 0:
+        dimensions = dimensions + ('z',)
+        number_grid_points_xyz['z'] = number_grid_points_z
+
+    dxyz = {}
+    grid_xyz = {}
+    for dim in dimensions:
+        dxyz[dim] = length_xyz[dim] / number_grid_points_xyz[dim]
+        grid_xyz[dim] = jnp.linspace(-length_xyz[dim] / 2 + dxyz[dim] / 2, length_xyz[dim] / 2 - dxyz[dim] / 2, number_grid_points_xyz[dim])
+
+    dt = domain_parameters["timestep_over_spatialstep_times_c"] * dxyz['x'] / speed_of_light
 
     return {
         "box_size": (length, length_y, length_z),
-        "dx": dx,
+        "dx": dxyz['x'],
+        "dxyz": dxyz,
         "dt": dt,
-        "grid": grid,
+        "grid": grid_xyz['x'],
+        "grid_xyz": grid_xyz,
+        "number_grid_points_xyz": number_grid_points_xyz,
+        "dimensions": dimensions,
     }
 
 def initialize_species_phase_space(species, seed_position, seed_velocity, number_particles, box_size):
@@ -297,7 +311,7 @@ def print_simulation_information(
     ion_species = next(iter(species_parameters["ions"].values()))
 
     length = domain_state["box_size"][0]
-    dx = domain_state["dx"]
+    dxyz = domain_state["dxyz"]
     dt = domain_state["dt"]
     total_steps = domain_parameters["total_steps"]
     number_grid_points = domain_parameters["number_grid_points"]
@@ -335,26 +349,26 @@ def print_simulation_information(
             "Relativistic gamma factor: Maximum {}, Average {}\n"
             "Charge x External electric field x Debye Length / Temperature: {}\n"
         ),
-            length / (Debye_length_per_dx * dx),
+            length / (Debye_length_per_dx * dxyz['x']),
             length / (speed_of_light / plasma_frequency),
             number_pseudoelectrons * weight / length,
             electron_temperature,
             ion_species["ion_temperature_over_electron_temperature_x"],
-            Debye_length_per_dx * dx,
+            Debye_length_per_dx * dxyz['x'],
             speed_of_light / plasma_frequency,
-            electron_species["perturbation_wavenumber_x"] * Debye_length_per_dx * dx,
+            electron_species["perturbation_wavenumber_x"] * Debye_length_per_dx * dxyz['x'],
             number_pseudoelectrons / number_grid_points,
             weight,
             1 / (plasma_frequency * dt),
             dt * plasma_frequency * total_steps,
-            number_pseudoelectrons * weight / length * (Debye_length_per_dx * dx)**3,
+            number_pseudoelectrons * weight / length * (Debye_length_per_dx * dxyz['x'])**3,
             jnp.max(relativistic_gamma_factor),
             jnp.mean(relativistic_gamma_factor),
             (
                 -charge_electrons
                 * external_field_parameters["external_electric_field_amplitude"]
                 * Debye_length_per_dx
-                * dx
+                * dxyz['x']
                 / (mass_electron * vth_electrons**2 / 2)
             ),
         ),
@@ -363,36 +377,96 @@ def print_simulation_information(
     )
 
 def initialize_field_state(domain_parameters, solver_parameters, external_field_parameters, domain_state, particle_state):
-    grid = domain_state["grid"]
+    grid_xyz = domain_state["grid_xyz"]
     positions = particle_state["positions"]
     charges = particle_state["charges"]
-    dx = domain_state["dx"]
+    dxyz = domain_state["dxyz"]
+    grid = grid_xyz['x']
 
     B_field = jnp.zeros((grid.size, 3))
     E_field = jnp.zeros((grid.size, 3))
 
-    charge_density = calculate_charge_density(positions, charges, dx, grid, domain_parameters["particle_BC_left"], domain_parameters["particle_BC_right"],
+    charge_density = calculate_charge_density(positions, charges, dxyz['x'], grid, domain_parameters["particle_BC_left"], domain_parameters["particle_BC_right"],
                                             solver_parameters["filter_passes"], solver_parameters["filter_alpha"], solver_parameters["filter_strides"],
                                             field_BC_left=domain_parameters["field_BC_left"], field_BC_right=domain_parameters["field_BC_right"])
-    E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
+    E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dxyz['x'])
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
 
-    G = domain_parameters['number_grid_points']
+    G_xyz = domain_state['number_grid_points_xyz'].values()
 
     secB = external_field_parameters.get("external_magnetic_field")
     secE = external_field_parameters.get("external_electric_field")
-    if isinstance(secB, dict) and "B" in secB:
-        external_magnetic_field = jnp.asarray(secB["B"], dtype=jnp.float32)
+    magnetic_field_input = secB.get("B") if isinstance(secB, dict) else secB
+    electric_field_input = secE.get("E") if isinstance(secE, dict) else secE
+    if magnetic_field_input is not None:
+        external_magnetic_field = jnp.asarray(magnetic_field_input, dtype=jnp.float32)
     else:
-        external_magnetic_field = jnp.zeros((G, 3), dtype=jnp.float32)
+        external_magnetic_field = jnp.zeros((*G_xyz, 3), dtype=jnp.float32)
+    assert external_magnetic_field.shape == (*G_xyz, 3)
 
-    if isinstance(secE, dict) and "E" in secE:
-        external_electric_field = jnp.asarray(secE["E"], dtype=jnp.float32)
+    if electric_field_input is not None:
+        external_electric_field = jnp.asarray(electric_field_input, dtype=jnp.float32)
     else:
-        external_electric_field = jnp.zeros((G, 3), dtype=jnp.float32)
+        external_electric_field = jnp.zeros((*G_xyz, 3), dtype=jnp.float32)
+    assert external_electric_field.shape == (*G_xyz, 3)
+
+    padded_external_electric_field, padded_external_magnetic_field = set_external_fields(
+        external_electric_field,
+        external_magnetic_field,
+        domain_state["dimensions"],
+    )
 
     return {
         "fields": (E_field, B_field),
         "external_magnetic_field": external_magnetic_field,
         "external_electric_field": external_electric_field,
+        "padded_external_magnetic_field": padded_external_magnetic_field,
+        "padded_external_electric_field": padded_external_electric_field,
     }
+
+def add_ghost_cells_along_axis(field, axis, field_BC_left=0, field_BC_right=0):
+    field = jnp.moveaxis(field, axis, 0)
+    ghost_cell_L2, ghost_cell_L1, ghost_cell_R = field_2_ghost_cells(
+        field_BC_left,
+        field_BC_right,
+        field,
+    )
+
+    field = jnp.concatenate(
+        (
+            ghost_cell_L2[jnp.newaxis, ...],
+            ghost_cell_L1[jnp.newaxis, ...],
+            field,
+            ghost_cell_R[jnp.newaxis, ...],
+        ),
+        axis=0,
+    )
+    return jnp.moveaxis(field, 0, axis)
+
+def set_external_fields(external_electric_field, external_magnetic_field, dimensions):
+    """
+    Set external fields based on user input and simulation dimensions.
+
+    Parameters:
+    ----------
+    external_electric_field : jnp.ndarray
+        User-provided external electric field array of shape (G, 3) or (G,).
+    external_magnetic_field : jnp.ndarray
+        User-provided external magnetic field array of shape (G, 3) or (G,).
+    dimensions : tuple
+        Tuple of dimension names ("x", "y", "z") present in the simulation.
+    number_grid_pointsxyz : tuple
+        Tuple of grid point counts in x, y, z directions.
+
+    Returns:
+    -------
+    external_electric_field : jnp.ndarray
+        External electric field array reshaped to match simulation grid.
+    external_magnetic_field : jnp.ndarray
+        External magnetic field array reshaped to match simulation grid.
+    """
+    for axis, _ in enumerate(dimensions):
+        external_electric_field = add_ghost_cells_along_axis(external_electric_field, axis, field_BC_left=0, field_BC_right=0)
+        external_magnetic_field = add_ghost_cells_along_axis(external_magnetic_field, axis, field_BC_left=0, field_BC_right=0)
+
+    return external_electric_field, external_magnetic_field

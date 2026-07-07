@@ -13,8 +13,8 @@ DEFAULT_DOMAIN_PARAMETERS = {
         "total_steps": 350,                       # Total number of time steps to evolve the simulation
         "timestep_over_spatialstep_times_c": 1.0,   # dt * speed_of_light / dx
         "number_grid_points": 50,                       # Number of grid points in the simulation box
-        "number_grid_points_y": 0,                       # Number of grid points in the y direction (if None, same as number_grid_points)
-        "number_grid_points_z": 0,                       # Number of grid points in the z direction (if None, same as number_grid_points)
+        "number_grid_points_y": 0,                       # Number of grid points in the y direction; 0 disables y
+        "number_grid_points_z": 0,                       # Number of grid points in the z direction; 0 disables z
         "length": 1e-2,                           # Dimensions of the simulation box
         "length_y": 0,                           # Dimensions of the simulation box in y
         "length_z": 0,                           # Dimensions of the simulation box in z
@@ -45,8 +45,14 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters=N
     domain_parameters["length"] = jnp.asarray(domain_parameters["length"], dtype=float)
     domain_parameters["length_y"] = jnp.asarray(domain_parameters["length_y"], dtype=float)
     domain_parameters["length_z"] = jnp.asarray(domain_parameters["length_z"], dtype=float)
+    for grid_points_key in ("number_grid_points_y", "number_grid_points_z"):
+        if domain_parameters[grid_points_key] is None:
+            domain_parameters[grid_points_key] = 0
 
     assert type(domain_parameters["total_steps"]) == int and domain_parameters["total_steps"] > 0, "Total number of time steps must be an integer."
+    assert type(domain_parameters["number_grid_points"]) == int and domain_parameters["number_grid_points"] > 0, "Number of grid points must be a positive integer."
+    assert type(domain_parameters["number_grid_points_y"]) == int and domain_parameters["number_grid_points_y"] >= 0, "Number of grid points in y must be a nonnegative integer."
+    assert type(domain_parameters["number_grid_points_z"]) == int and domain_parameters["number_grid_points_z"] >= 0, "Number of grid points in z must be a nonnegative integer."
     assert domain_parameters["length"] > 0, "Length of the simulation box must be positive."
     assert domain_parameters["length_y"] >= 0, "Length of the simulation box in y must be positive."
     assert domain_parameters["length_z"] >= 0, "Length of the simulation box in z must be positive."

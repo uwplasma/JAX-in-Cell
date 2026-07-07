@@ -43,8 +43,8 @@ def small_simulation_parameters(total_steps=10, number_grid_points=8, number_pse
         "domain_parameters": {
             "total_steps": total_steps,
             "number_grid_points": number_grid_points,
-            "number_grid_points_y": 3,
-            "number_grid_points_z": 3,
+            "number_grid_points_y": 0,
+            "number_grid_points_z": 0,
             "length": 0.01,
             "length_y": 0.01,
             "length_z": 0.01,
@@ -115,6 +115,8 @@ def assert_simulation_output_contract(
         "fields",
         "external_electric_field",
         "external_magnetic_field",
+        "padded_external_electric_field",
+        "padded_external_magnetic_field",
     }
 
     assert expected_keys <= set(output)
@@ -135,6 +137,8 @@ def assert_simulation_output_contract(
     assert output["time_array"].shape == (total_steps,)
     assert output["external_electric_field"].shape == (number_grid_points, 3)
     assert output["external_magnetic_field"].shape == (number_grid_points, 3)
+    assert output["padded_external_electric_field"].shape == (number_grid_points + 3, 3)
+    assert output["padded_external_magnetic_field"].shape == (number_grid_points + 3, 3)
     assert output["fields"][0].shape == (number_grid_points, 3)
     assert output["fields"][1].shape == (number_grid_points, 3)
     assert output["number_grid_points"] == number_grid_points

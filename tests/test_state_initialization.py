@@ -25,6 +25,7 @@ from jaxincell._state_initialization import (
     initialize_particle_state,
     initialize_species_phase_space,
     make_particles_from_state,
+    set_external_fields,
 )
 from tests.helpers import scalar
 
@@ -64,6 +65,55 @@ def solver_parameters(**overrides):
     }
     parameters.update(overrides)
     return clean_and_initialize_solver_parameters(parameters)
+
+
+def test_set_external_fields_adds_ghost_cells_by_dimension():
+    """Test jaxincell._state_initialization.set_external_fields.
+
+    Cases covered:
+    - 1D external fields are padded as [L2, L1, physical..., R].
+    - 3D external fields preserve the physical interior after padding every axis.
+    - periodic ghost slabs are added along x, y, and z without manual slice loops.
+    """
+    electric_1d = jnp.arange(12, dtype=jnp.float32).reshape(4, 3)
+    magnetic_1d = -electric_1d
+
+    padded_electric_1d, padded_magnetic_1d = set_external_fields(
+        electric_1d,
+        magnetic_1d,
+        ("x",),
+    )
+
+    assert padded_electric_1d.shape == (7, 3)
+    assert padded_magnetic_1d.shape == (7, 3)
+    np.testing.assert_allclose(np.asarray(padded_electric_1d[2:-1]), np.asarray(electric_1d))
+    np.testing.assert_allclose(np.asarray(padded_electric_1d[0]), np.asarray(electric_1d[-2]))
+    np.testing.assert_allclose(np.asarray(padded_electric_1d[1]), np.asarray(electric_1d[-1]))
+    np.testing.assert_allclose(np.asarray(padded_electric_1d[-1]), np.asarray(electric_1d[0]))
+    np.testing.assert_allclose(np.asarray(padded_magnetic_1d), -np.asarray(padded_electric_1d))
+
+    electric_3d = jnp.arange(2 * 3 * 4 * 3, dtype=jnp.float32).reshape(2, 3, 4, 3)
+    magnetic_3d = -electric_3d
+
+    padded_electric_3d, padded_magnetic_3d = set_external_fields(
+        electric_3d,
+        magnetic_3d,
+        ("x", "y", "z"),
+    )
+
+    assert padded_electric_3d.shape == (5, 6, 7, 3)
+    assert padded_magnetic_3d.shape == (5, 6, 7, 3)
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[2:-1, 2:-1, 2:-1]), np.asarray(electric_3d))
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[0, 2:-1, 2:-1]), np.asarray(electric_3d[-2]))
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[1, 2:-1, 2:-1]), np.asarray(electric_3d[-1]))
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[-1, 2:-1, 2:-1]), np.asarray(electric_3d[0]))
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[2:-1, 0, 2:-1]), np.asarray(electric_3d[:, -2]))
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[2:-1, 1, 2:-1]), np.asarray(electric_3d[:, -1]))
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[2:-1, -1, 2:-1]), np.asarray(electric_3d[:, 0]))
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[2:-1, 2:-1, 0]), np.asarray(electric_3d[:, :, -2]))
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[2:-1, 2:-1, 1]), np.asarray(electric_3d[:, :, -1]))
+    np.testing.assert_allclose(np.asarray(padded_electric_3d[2:-1, 2:-1, -1]), np.asarray(electric_3d[:, :, 0]))
+    np.testing.assert_allclose(np.asarray(padded_magnetic_3d), -np.asarray(padded_electric_3d))
 
 
 def electron_species(**overrides):
@@ -786,6 +836,10 @@ def test_initialize_field_state_default_and_provided_external_fields():
     assert jnp.allclose(B_field, 0.0)
     assert jnp.allclose(field_state["external_electric_field"], jnp.zeros((4, 3)))
     assert jnp.allclose(field_state["external_magnetic_field"], jnp.zeros((4, 3)))
+    assert field_state["padded_external_electric_field"].shape == (7, 3)
+    assert field_state["padded_external_magnetic_field"].shape == (7, 3)
+    assert jnp.allclose(field_state["padded_external_electric_field"], 0.0)
+    assert jnp.allclose(field_state["padded_external_magnetic_field"], 0.0)
 
     E_external = np.arange(12, dtype=np.float32).reshape(4, 3)
     B_external = -E_external
@@ -805,6 +859,8 @@ def test_initialize_field_state_default_and_provided_external_fields():
     assert provided_field_state["external_magnetic_field"].dtype == jnp.float32
     assert jnp.allclose(provided_field_state["external_electric_field"], E_external)
     assert jnp.allclose(provided_field_state["external_magnetic_field"], B_external)
+    assert jnp.allclose(provided_field_state["padded_external_electric_field"][2:-1], E_external)
+    assert jnp.allclose(provided_field_state["padded_external_magnetic_field"][2:-1], B_external)
 
     incomplete_external_fields = clean_and_initialize_external_field_parameters({
         "external_electric_field": {},

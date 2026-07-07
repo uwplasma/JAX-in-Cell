@@ -2,6 +2,7 @@ import jax.numpy as jnp
 from jax import grad
 from numpy.testing import assert_allclose
 
+from jaxincell._boundary_conditions import field_2_ghost_cells
 from jaxincell._constants import speed_of_light
 from jaxincell._particles import (
     boris_step,
@@ -12,6 +13,7 @@ from jaxincell._particles import (
     rotation,
 )
 from jaxincell._sources import get_S2_weights_and_indices_periodic_CN
+from jaxincell._state_initialization import set_external_fields
 
 
 def expected_relativistic_e_only_step(dt, positions, velocities, charges, masses, electric_fields):
@@ -26,137 +28,144 @@ def expected_relativistic_e_only_step(dt, positions, velocities, charges, masses
     return positions_nplus3_2, velocities_nplus1
 
 
+def old_fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):
+    ghost_cell_L2, ghost_cell_L1, ghost_cell_R = field_2_ghost_cells(
+        field_BC_left,
+        field_BC_right,
+        field,
+    )
+    field = jnp.insert(field, 0, ghost_cell_L1, axis=0)
+    field = jnp.insert(field, 0, ghost_cell_L2, axis=0)
+    field = jnp.append(field, jnp.array([ghost_cell_R]), axis=0)
+    x = x_n[0]
+
+    grid = jnp.insert(grid, 0, grid[0] - dx, axis=0)
+    i = ((x - grid_start + dx) // dx).astype(int)
+
+    return (
+        0.5 * field[i] * (0.5 + (grid[i] - x) / dx) ** 2
+        + field[i + 1] * (0.75 - (grid[i] - x) ** 2 / dx**2)
+        + 0.5 * field[i + 2] * (0.5 - (grid[i] - x) / dx) ** 2
+    )
+
+
 def test_fields_to_particles_grid_interpolates_with_boundary_conditions():
     """Test jaxincell._particles.fields_to_particles_grid.
 
     Cases covered:
-    - interpolate a hand-computable quadratic stencil for a particle near the grid center.
-    - exercise periodic, reflective, and absorbing field boundary conditions through ghost cells.
-    - verify the staggered-grid offset and grid_start logic near both domain edges.
-    - cover runtime-style E-grid and B-grid staggering with grid_start != grid[0].
-    - verify interpolation scales correctly when dx != 1.
+    - 1D internal-only interpolation matches the original helper for E-grid staggering.
+    - 1D internal-only interpolation matches the original helper for B-grid staggering.
+    - periodic, reflective, and absorbing field boundary conditions match original behavior.
+    - external-only interpolation uses the separated external path and matches original behavior.
     """
-    dx = 1.0
-    grid = jnp.arange(4.0)
-    grid_start = 0.0
-    field = jnp.array(
+    grid_size = 8
+    length = 1.0
+    dx = length / grid_size
+    grid = jnp.linspace(-length / 2 + dx / 2, length / 2 - dx / 2, grid_size)
+    internal_field = jnp.stack(
         [
-            [0.0, 0.0, 0.0],
-            [2.0, 10.0, -1.0],
-            [5.0, 20.0, 3.0],
-            [9.0, 30.0, 2.0],
-        ]
+            jnp.arange(grid_size, dtype=float),
+            2 * jnp.arange(grid_size, dtype=float),
+            -jnp.arange(grid_size, dtype=float),
+        ],
+        axis=1,
     )
+    zero_external_field, _ = set_external_fields(
+        jnp.zeros_like(internal_field),
+        jnp.zeros_like(internal_field),
+        ("x",),
+    )
+    positions = jnp.array([
+        [-0.49, 0.0, 0.0],
+        [-0.43, 0.1, -0.2],
+        [-0.01, 0.0, 0.0],
+        [0.43, 0.0, 0.0],
+    ])
 
-    centered = fields_to_particles_grid(
-        jnp.array([1.0, 0.0, 0.0]),
-        field,
-        dx,
-        grid,
-        grid_start,
-        field_BC_left=1,
-        field_BC_right=1,
-    )
-    expected_centered = 0.125 * field[0] + 0.75 * field[1] + 0.125 * field[2]
-    assert_allclose(centered, expected_centered)
+    for field_BC_left, field_BC_right in ((0, 0), (1, 1), (2, 2)):
+        e_grid_actual = jnp.stack([
+            fields_to_particles_grid(
+                position,
+                internal_field,
+                zero_external_field,
+                {"x": dx},
+                {"x": grid},
+                0.5,
+                ("x",),
+                field_BC_left,
+                field_BC_right,
+            )
+            for position in positions
+        ])
+        e_grid_expected = jnp.stack([
+            old_fields_to_particles_grid(
+                position,
+                internal_field,
+                dx,
+                grid + dx / 2,
+                grid[0],
+                field_BC_left,
+                field_BC_right,
+            )
+            for position in positions
+        ])
+        assert_allclose(e_grid_actual, e_grid_expected, rtol=1e-12, atol=1e-12)
 
-    left_periodic = fields_to_particles_grid(
-        jnp.array([-0.5, 0.0, 0.0]),
-        field,
-        dx,
-        grid,
-        grid_start,
-        field_BC_left=0,
-        field_BC_right=0,
-    )
-    left_reflective = fields_to_particles_grid(
-        jnp.array([-0.5, 0.0, 0.0]),
-        field,
-        dx,
-        grid,
-        grid_start,
-        field_BC_left=1,
-        field_BC_right=1,
-    )
-    left_absorbing = fields_to_particles_grid(
-        jnp.array([-0.5, 0.0, 0.0]),
-        field,
-        dx,
-        grid,
-        grid_start,
-        field_BC_left=2,
-        field_BC_right=2,
-    )
-    assert_allclose(left_periodic, 0.5 * field[-1] + 0.5 * field[0])
-    assert_allclose(left_reflective, field[0])
-    assert_allclose(left_absorbing, 0.5 * field[0])
+        b_grid_actual = jnp.stack([
+            fields_to_particles_grid(
+                position,
+                internal_field,
+                zero_external_field,
+                {"x": dx},
+                {"x": grid},
+                0.0,
+                ("x",),
+                field_BC_left,
+                field_BC_right,
+            )
+            for position in positions
+        ])
+        b_grid_expected = jnp.stack([
+            old_fields_to_particles_grid(
+                position,
+                internal_field,
+                dx,
+                grid,
+                grid[0] - dx / 2,
+                field_BC_left,
+                field_BC_right,
+            )
+            for position in positions
+        ])
+        assert_allclose(b_grid_actual, b_grid_expected, rtol=1e-12, atol=1e-12)
 
-    right_periodic = fields_to_particles_grid(
-        jnp.array([3.5, 0.0, 0.0]),
-        field,
+    external_field = 10.0 + internal_field
+    padded_external_field, _ = set_external_fields(
+        external_field,
+        external_field,
+        ("x",),
+    )
+    external_only_actual = fields_to_particles_grid(
+        positions[1],
+        jnp.zeros_like(internal_field),
+        padded_external_field,
+        {"x": dx},
+        {"x": grid},
+        0.5,
+        ("x",),
+        0,
+        0,
+    )
+    external_only_expected = old_fields_to_particles_grid(
+        positions[1],
+        external_field,
         dx,
-        grid,
-        grid_start,
-        field_BC_left=0,
-        field_BC_right=0,
+        grid + dx / 2,
+        grid[0],
+        0,
+        0,
     )
-    right_reflective = fields_to_particles_grid(
-        jnp.array([3.5, 0.0, 0.0]),
-        field,
-        dx,
-        grid,
-        grid_start,
-        field_BC_left=1,
-        field_BC_right=1,
-    )
-    right_absorbing = fields_to_particles_grid(
-        jnp.array([3.5, 0.0, 0.0]),
-        field,
-        dx,
-        grid,
-        grid_start,
-        field_BC_left=2,
-        field_BC_right=2,
-    )
-    assert_allclose(right_periodic, 0.5 * field[-1] + 0.5 * field[0])
-    assert_allclose(right_reflective, field[-1])
-    assert_allclose(right_absorbing, 0.5 * field[-1])
-
-    runtime_grid = jnp.arange(4.0)
-    e_grid_value = fields_to_particles_grid(
-        jnp.array([1.0, 0.0, 0.0]),
-        field,
-        dx,
-        runtime_grid + dx / 2,
-        grid_start=runtime_grid[0],
-        field_BC_left=1,
-        field_BC_right=1,
-    )
-    assert_allclose(e_grid_value, 0.5 * field[0] + 0.5 * field[1])
-
-    b_grid_value = fields_to_particles_grid(
-        jnp.array([1.0, 0.0, 0.0]),
-        field,
-        dx,
-        runtime_grid,
-        grid_start=runtime_grid[0] - dx / 2,
-        field_BC_left=1,
-        field_BC_right=1,
-    )
-    assert_allclose(b_grid_value, 0.125 * field[0] + 0.75 * field[1] + 0.125 * field[2])
-
-    dx_half = 0.5
-    half_grid = dx_half * jnp.arange(4.0)
-    half_dx_value = fields_to_particles_grid(
-        jnp.array([0.5, 0.0, 0.0]),
-        field,
-        dx_half,
-        half_grid,
-        grid_start=half_grid[0] - dx_half / 2,
-        field_BC_left=1,
-        field_BC_right=1,
-    )
-    assert_allclose(half_dx_value, 0.125 * field[0] + 0.75 * field[1] + 0.125 * field[2])
+    assert_allclose(external_only_actual, external_only_expected, rtol=1e-12, atol=1e-12)
 
 
 def test_fields_to_particles_periodic_CN_wraps_indices():
@@ -506,17 +515,24 @@ def test_particle_helpers_are_differentiable_for_small_inputs():
     assert float(jnp.linalg.norm(interpolation_gradient)) > 0
 
     grid = jnp.arange(4.0)
+    zero_external_field, _ = set_external_fields(
+        jnp.zeros_like(field),
+        jnp.zeros_like(field),
+        ("x",),
+    )
 
     def grid_interpolation_loss(field):
         return jnp.sum(
             fields_to_particles_grid(
                 jnp.array([1.0, 0.0, 0.0]),
                 field,
-                dx=1.0,
-                grid=grid,
-                grid_start=0.0,
-                field_BC_left=1,
-                field_BC_right=1,
+                zero_external_field,
+                {"x": 1.0},
+                {"x": grid},
+                0.0,
+                ("x",),
+                1,
+                1,
             )
         )
 

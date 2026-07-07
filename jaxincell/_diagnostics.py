@@ -66,7 +66,7 @@ def diagnostics(output):
 
     # --- All your existing energy/FFT/diagnostics code continues below unchanged ---
     E_field_over_time = output['electric_field']
-    grid              = output['gridxyz'][0]
+    grid              = output['grid_xyz']['x']
 
     # Make sure these are plain Python scalars for indexing / fftfreq
     total_steps_val = output['total_steps']
@@ -100,12 +100,12 @@ def diagnostics(output):
 
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
     #abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
-    integral_E_squared         = integrate(abs_E_squared, dx=output['dxyz'][0])
+    integral_E_squared         = integrate(abs_E_squared, dx=output['dxyz']['x'])
     #integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dxyz'][0])
 
     abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
     #abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
-    integral_B_squared         = integrate(abs_B_squared, dx=output['dxyz'][0])
+    integral_B_squared         = integrate(abs_B_squared, dx=output['dxyz']['x'])
     #integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dxyz'][0])
 
     # CHANGED: Calculate v^2 per particle (sum over spatial dims x,y,z only)
