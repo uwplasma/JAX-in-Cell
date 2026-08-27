@@ -150,3 +150,19 @@ def diagnostics(output):
                     output["kinetic_energy"])
 
     output.update({'total_energy': total_energy})
+
+    if "mus" in output:
+        all_mu = output["mus"]
+        if all_mu.ndim == 3 and all_mu.shape[-1] == 1:
+            all_mu = all_mu[..., 0]
+
+        electron_mus = all_mu[:, esel]
+        ion_mus = all_mu[:, isel]
+        output.update({
+            "all_mu": all_mu,
+            "total_mu": jnp.sum(all_mu, axis=-1),
+            "electron_mus": electron_mus,
+            "ion_mus": ion_mus,
+            "electron_total_mu": jnp.sum(electron_mus, axis=-1),
+            "ion_total_mu": jnp.sum(ion_mus, axis=-1),
+        })

@@ -172,3 +172,4 @@ jaxincell/version.py
 *.npz
 *.mp4
 *.png
+CODEX_CONTEXT.md

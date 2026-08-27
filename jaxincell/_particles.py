@@ -67,7 +67,7 @@ def fields_to_particles_grid(x_n, internal_field, external_field, dxyz, gridxyz,
             + 0.5*external_field_at_particle[i+2]*(0.5-(grid_dim[i] - position_dim)/d_dim)**2
         )
 
-    return internal_field_at_particle + external_field_at_particle
+    return internal_field_at_particle + external_field_at_particle, external_field_at_particle
 
 @jit
 def fields_to_particles_periodic_CN(x_n, field, dx, grid_start):

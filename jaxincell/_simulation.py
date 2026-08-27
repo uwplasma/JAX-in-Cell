@@ -260,7 +260,8 @@ class Simulation:
 
         # Unpack results
         positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+        magnetic_field_over_time, current_density_over_time, \
+        charge_density_over_time, mus_over_time = results
 
         # **Output results**
         from ._constants import epsilon_0, mass_electron
@@ -299,6 +300,7 @@ class Simulation:
             "magnetic_field":  magnetic_field_over_time,
             "current_density": current_density_over_time,
             "charge_density":  charge_density_over_time,
+            "mus": mus_over_time,
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,

@@ -11,7 +11,29 @@ from ._fields import (E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, curlB,curl
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
 
-__all__ = ['Boris_step', 'CN_step']
+__all__ = ['Boris_step', 'CN_step', 'calculate_mu']
+
+
+def calculate_mu(velocities, magnetic_field, masses):
+    magnetic_field_strength = jnp.sqrt(
+        jnp.sum(magnetic_field ** 2, axis=-1, keepdims=True)
+    )
+    active_field = magnetic_field_strength > 0.0
+    safe_magnetic_field_strength = jnp.where(
+        active_field,
+        magnetic_field_strength,
+        1.0,
+    )
+    b_hat = magnetic_field / safe_magnetic_field_strength
+    v_parallel = jnp.sum(velocities * b_hat, axis=-1, keepdims=True) * b_hat
+    v_perpendicular = velocities - v_parallel
+    mu = (
+        0.5
+        * masses
+        * jnp.sum(v_perpendicular ** 2, axis=-1, keepdims=True)
+        / safe_magnetic_field_strength
+    )
+    return jnp.where(active_field, mu, 0.0)
 
 #Boris step
 def Boris_step(carry, step_index, solver_parameters, external_field_parameters,
@@ -37,11 +59,11 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters,
     
     # Interpolate internal and external fields to particle positions
     def interpolate_fields(x_n):
-        E = fields_to_particles_grid(x_n, E_field, external_field_parameters['padded_external_electric_field'], dxyz, gridxyz, 1/2, dimensions, field_BC_left, field_BC_right)
-        B = fields_to_particles_grid(x_n, B_field, external_field_parameters['padded_external_magnetic_field'], dxyz, gridxyz, 0, dimensions, field_BC_left, field_BC_right)
-        return E, B
+        E, _ = fields_to_particles_grid(x_n, E_field, external_field_parameters['padded_external_electric_field'], dxyz, gridxyz, 1/2, dimensions, field_BC_left, field_BC_right)
+        B, B_ext = fields_to_particles_grid(x_n, B_field, external_field_parameters['padded_external_magnetic_field'], dxyz, gridxyz, 0, dimensions, field_BC_left, field_BC_right)
+        return E, B, B_ext
 
-    E_field_at_x, B_field_at_x = vmap(interpolate_fields)(positions_plus1_2)
+    E_field_at_x, B_field_at_x, B_ext_at_x = vmap(interpolate_fields)(positions_plus1_2)
 
     # Particle update: Boris pusher
     positions_plus3_2, velocities_plus1 = lax.cond(
@@ -50,11 +72,17 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters,
         lambda _: boris_step(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
         operand=None
     )
+    mus = calculate_mu(
+        0.5 * (velocities + velocities_plus1),
+        B_ext_at_x,
+        ms,
+    )
 
     # Apply boundary conditions
     positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
         positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
         *box_size, particle_BC_left, particle_BC_right)
+    mus = jnp.where(qs != 0, mus, 0.0)
     
     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
@@ -89,7 +117,7 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters,
     charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right,
                                               filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                                               field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-    step_data = (positions, velocities, E_field, B_field, J, charge_density)
+    step_data = (positions, velocities, E_field, B_field, J, charge_density, mus)
     
     return carry, step_data
 
@@ -235,6 +263,7 @@ def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
                                               filter_passes=0, filter_alpha=0.5, filter_strides=(1, 2, 4),
                                               field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
-    step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
+    mus = jnp.zeros_like(ms)
+    step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density, mus)
     
     return carry, step_data
