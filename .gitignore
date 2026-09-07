@@ -172,8 +172,8 @@ jaxincell/version.py
 *.npz
 *.mp4
 *.png
-# Documentation figures and logo are committed
-!docs/_static/JAX-in-Cell_logo.png
+# Documentation figures, logo and icon are committed
+!docs/_static/*.png
 !docs/_static/figures/*.png
 
 # Logs of the documentation figure scripts

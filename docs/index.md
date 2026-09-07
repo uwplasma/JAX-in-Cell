@@ -5,9 +5,17 @@ html_theme.sidebar_secondary.remove: true
 # JAX-in-Cell
 
 ```{image} _static/JAX-in-Cell_logo.png
-:width: 160px
+:width: 420px
 :align: center
-:alt: JAX-in-Cell logo
+:alt: JAX-in-Cell
+:class: only-light
+```
+
+```{image} _static/JAX-in-Cell_logo_dark.png
+:width: 420px
+:align: center
+:alt: JAX-in-Cell
+:class: only-dark
 ```
 
 <p class="lead" style="text-align:center; max-width: 46rem; margin: 1rem auto;">
