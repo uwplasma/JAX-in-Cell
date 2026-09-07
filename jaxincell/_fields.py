@@ -7,14 +7,18 @@ __all__ = ['E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cart
 
 @jit
 def E_from_Gauss_1D_FFT(charge_density, dx):
-    """
-    Solve for the electric field E = -d(phi)/dx using FFT, 
-    where phi is derived from the 1D Gauss' law equation.
-    Parameters:
-    charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
-    dx : float, grid spacing in the x-direction
+    """Solve Gauss's law for the longitudinal electric field with an FFT.
+
+    Solves ``dE/dx = rho / epsilon_0`` in Fourier space, ``E(k) = -i rho(k) / (epsilon_0 k)``,
+    with the mean field set to zero. Exact for the discrete Fourier modes of a
+    periodic box.
+
+    Args:
+        charge_density (array): Charge density on the grid, shape ``(G,)``, in C/m^3.
+        dx (float): Grid spacing in metres.
+
     Returns:
-    E : 1D numpy array, electric field
+        array: Electric field on the grid, shape ``(G,)``, in V/m.
     """
     # Get the number of grid points
     nx = len(charge_density)
@@ -32,14 +36,18 @@ def E_from_Gauss_1D_FFT(charge_density, dx):
 
 @jit
 def E_from_Poisson_1D_FFT(charge_density, dx):
-    """
-    Solve for the electric field E = -d(phi)/dx using FFT, 
-    where phi is derived from the 1D Poisson equation.
-    Parameters:
-    charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
-    dx : float, grid spacing in the x-direction
+    """Solve Poisson's equation for the potential with an FFT, then differentiate it.
+
+    Solves ``d2 phi/dx2 = -rho / epsilon_0`` in Fourier space and returns
+    ``E = -d phi/dx``, with the mean potential set to zero. Gives the same field as
+    :func:`E_from_Gauss_1D_FFT` and is provided as an independent route to it.
+
+    Args:
+        charge_density (array): Charge density on the grid, shape ``(G,)``, in C/m^3.
+        dx (float): Grid spacing in metres.
+
     Returns:
-    E : 1D numpy array, electric field
+        array: Electric field on the grid, shape ``(G,)``, in V/m.
     """
     # Get the number of grid points
     nx = len(charge_density)

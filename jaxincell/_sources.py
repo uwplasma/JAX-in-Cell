@@ -239,10 +239,24 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf,
 
 @partial(jit, static_argnames=('grid_size',))
 def current_density_periodic_CN(xs_n, vs_n, qs, dx, grid_start, grid_size):
-    """
-    Deposits Current J using Periodic BCs.
-    Note: We removed xs_nminushalf/plus half arguments as we use the midpoint 
-    approximation (xs_n, vs_n) consistent with CN.
+    """Deposit the current density on a periodic grid, for the implicit scheme.
+
+    Uses the midpoint approximation ``J = q v S2(x) / dx`` at the given positions
+    and velocities, rather than the charge-conserving deposit of the explicit
+    scheme, which is what the time-centred Crank-Nicolson discretisation calls for.
+    Indices are wrapped with the modulus operator, so the deposit is periodic
+    whatever the field boundary conditions are.
+
+    Args:
+        xs_n (array): Particle positions, shape ``(N, 3)``; only x is used.
+        vs_n (array): Particle velocities, shape ``(N, 3)``.
+        qs (array): Particle charges, shape ``(N, 1)``.
+        dx (float): Grid spacing in metres.
+        grid_start (float): Position of the first grid point of the target grid.
+        grid_size (int): Number of grid points; static.
+
+    Returns:
+        array: Current density on the grid, shape ``(G, 3)``, in A/m^2.
     """
     
     def compute_single_particle_J(i):
