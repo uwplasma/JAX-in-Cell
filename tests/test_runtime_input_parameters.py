@@ -44,6 +44,7 @@ def test_runtime_input_parameters_are_cleaned_to_canonical_section_overrides():
     assert cleaned_input_parameters["external_field_parameters"] == {}
     assert cleaned_input_parameters["source_parameters"] == {}
     assert cleaned_input_parameters["solver_parameters"] == {}
+    assert cleaned_input_parameters["export_parameters"] == {}
 
 
 def test_runtime_input_parameters_reject_removed_flat_species_values():
@@ -286,6 +287,7 @@ def test_runtime_species_references_recompute_after_runtime_merge():
         "external_field_parameters": sim.external_field_parameters,
         "source_parameters": sim.source_parameters,
         "solver_parameters": sim.solver_parameters,
+        "export_parameters": sim.export_parameters,
     }
     runtime_sections = build_runtime_parameter_sections(
         base_sections,

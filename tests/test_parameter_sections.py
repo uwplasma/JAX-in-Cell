@@ -10,6 +10,12 @@ from jaxincell._parameters._external_field_parameters import (
     build_external_field_hash,
     clean_and_initialize_external_field_parameters,
 )
+from jaxincell._parameters._export_parameters import (
+    ALL_EXPORT_PARAMETERS,
+    DIFFERENTIABLE_EXPORT_PARAMETERS,
+    build_export_hash,
+    clean_and_initialize_export_parameters,
+)
 from jaxincell._parameters._sections import (
     DIFFERENTIABLE_INPUT_PARAMETERS,
     FLAT_DIFFERENTIABLE_INPUT_PARAMETERS,
@@ -83,6 +89,14 @@ EXPECTED_SECTION_METADATA = {
         "hasher": build_solver_hash,
         "attribute": "_solver_parameters",
         "hash_attribute": "solver_hash",
+    },
+    "export_parameters": {
+        "all": ALL_EXPORT_PARAMETERS,
+        "differentiable": DIFFERENTIABLE_EXPORT_PARAMETERS,
+        "cleaner": clean_and_initialize_export_parameters,
+        "hasher": build_export_hash,
+        "attribute": "_export_parameters",
+        "hash_attribute": "export_hash",
     },
 }
 

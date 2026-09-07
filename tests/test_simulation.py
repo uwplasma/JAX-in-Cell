@@ -495,9 +495,11 @@ ion_temperature_over_electron_temperature_z = 1.0
     assert dict_sim.domain_parameters == path_sim.domain_parameters
     assert dict_sim.species_parameters == path_sim.species_parameters
     assert dict_sim.solver_parameters == path_sim.solver_parameters
+    assert dict_sim.export_parameters == path_sim.export_parameters
     assert dict_sim.domain_hash == path_sim.domain_hash
     assert dict_sim.species_hash == path_sim.species_hash
     assert dict_sim.solver_hash == path_sim.solver_hash
+    assert dict_sim.export_hash == path_sim.export_hash
 
     with pytest.raises(TypeError):
         Simulation(object())
@@ -509,7 +511,7 @@ def test_simulation_property_setters_reinitialize_state_and_hashes():
     Cases:
     - setting domain_parameters rebuilds domain state and updates domain_hash.
     - setting species_parameters rebuilds particle state and updates species_hash.
-    - setting external_field_parameters, source_parameters, and solver_parameters updates the matching hash.
+    - setting external_field_parameters, source_parameters, solver_parameters, and export_parameters updates the matching hash.
     - unrelated base parameter sections remain unchanged.
     """
     parameters = small_simulation_parameters(
@@ -524,6 +526,7 @@ def test_simulation_property_setters_reinitialize_state_and_hashes():
     original_external_field_hash = sim.external_field_hash
     original_source_hash = sim.source_hash
     original_solver_hash = sim.solver_hash
+    original_export_hash = sim.export_hash
 
     new_domain_parameters = deepcopy(parameters["domain_parameters"])
     new_domain_parameters["number_grid_points"] = 5
@@ -574,6 +577,14 @@ def test_simulation_property_setters_reinitialize_state_and_hashes():
     assert sim.solver_hash != original_solver_hash
     assert sim.domain_parameters["number_grid_points"] == 5
     assert sim.positions.shape == (5, 3)
+
+    sim.export_parameters = {
+        "openpmd_output": True,
+        "openpmd_filename": "changed.h5",
+    }
+    assert sim.export_hash == original_export_hash
+    assert sim.export_parameters["openpmd_output"] is True
+    assert sim.export_parameters["openpmd_filename"] == "changed.h5"
 
 
 def test_simulation_input_parameters_setter_reclassifies_and_reinitializes():
@@ -748,6 +759,7 @@ def test_simulation_simulation_method_cleans_runtime_input_and_delegates_to_jitt
         external_field_hash="",
         source_hash="",
         solver_hash="",
+        export_hash="",
     ):
         calls.append(
             {
@@ -757,6 +769,7 @@ def test_simulation_simulation_method_cleans_runtime_input_and_delegates_to_jitt
                 "external_field_hash": external_field_hash,
                 "source_hash": source_hash,
                 "solver_hash": solver_hash,
+                "export_hash": export_hash,
             }
         )
         return expected_output
@@ -768,6 +781,7 @@ def test_simulation_simulation_method_cleans_runtime_input_and_delegates_to_jitt
     assert set(output["parameter_sections"]) == set(PARAMETER_SECTIONS)
     assert scalar(output["domain_parameters"]["length"]) == scalar(sim.domain_parameters["length"])
     assert output["species_parameters"]["ions"]["_ions0"]["user_label"] == "ions0"
+    assert output["export_parameters"]["openpmd_output"] is False
     assert calls[-1]["input_parameters"] == {
         section_name: {}
         for section_name in PARAMETER_SECTIONS
@@ -777,6 +791,7 @@ def test_simulation_simulation_method_cleans_runtime_input_and_delegates_to_jitt
     assert calls[-1]["external_field_hash"] == sim.external_field_hash
     assert calls[-1]["source_hash"] == sim.source_hash
     assert calls[-1]["solver_hash"] == sim.solver_hash
+    assert calls[-1]["export_hash"] == sim.export_hash
 
     runtime_input_parameters = {
         "length": 0.02,
@@ -806,6 +821,7 @@ def test_simulation_simulation_method_cleans_runtime_input_and_delegates_to_jitt
         "external_field_parameters": {},
         "source_parameters": {},
         "solver_parameters": {"filter_alpha": 0.25},
+        "export_parameters": {},
     }
 
     with pytest.raises(ValueError, match="total_steps"):
@@ -873,6 +889,7 @@ def test_simulation_jitted_core_orchestrates_runtime_sections_and_output_contrac
             external_field_hash=sim.external_field_hash,
             source_hash=sim.source_hash,
             solver_hash=sim.solver_hash,
+            export_hash=sim.export_hash,
         )
 
         assert_simulation_output_contract(
