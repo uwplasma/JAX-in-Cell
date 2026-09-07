@@ -1,3 +1,5 @@
+import pytest
+
 from jaxincell._parameters._external_field_parameters import (
     clean_and_initialize_external_field_parameters,
     DEFAULT_EXTERNAL_FIELD_PARAMETERS,
@@ -58,3 +60,33 @@ def test_build_external_field_hash_is_stable_and_sensitive_to_values():
     wavenumber_modified_parameters = clean_and_initialize_external_field_parameters({"external_magnetic_field_wavenumber": 1.0})
     wavenumber_modified_hash = build_external_field_hash(wavenumber_modified_parameters)
     assert default_hash != wavenumber_modified_hash
+
+
+def test_analytic_external_field_request_warns_that_it_is_not_applied():
+    """Test jaxincell._parameters._external_field_parameters.clean_and_initialize_external_field_parameters.
+
+    Cases:
+    - a non-zero amplitude warns, because no code path builds a field from it.
+    - a field function warns for the same reason.
+    - the parameters are still preserved, so the branches that implement them keep working.
+    """
+    with pytest.warns(UserWarning, match="not applied"):
+        cleaned = clean_and_initialize_external_field_parameters(
+            {"external_magnetic_field_amplitude": 0.5})
+    assert cleaned["external_magnetic_field_amplitude"] == 0.5
+
+    with pytest.warns(UserWarning, match="external_electric_field_function"):
+        clean_and_initialize_external_field_parameters(
+            {"external_electric_field_function": lambda x, y, z, t: (0.0, 0.0, 0.0)})
+
+
+def test_external_field_defaults_do_not_warn(recwarn):
+    """Test jaxincell._parameters._external_field_parameters.clean_and_initialize_external_field_parameters.
+
+    Cases:
+    - zero amplitudes, including a wavenumber set on its own, request no field and stay silent.
+    """
+    clean_and_initialize_external_field_parameters({})
+    clean_and_initialize_external_field_parameters(
+        {"external_electric_field_amplitude": 0.0, "external_electric_field_wavenumber": 3.0})
+    assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []

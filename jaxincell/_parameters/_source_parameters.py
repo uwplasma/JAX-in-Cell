@@ -1,3 +1,5 @@
+import warnings
+
 from ._utils import build_parameter_hash, overlay_parameter_defaults
 
 __all__ = [
@@ -87,6 +89,16 @@ def clean_and_initialize_source_parameters(source_parameters, input_parameters=N
 
     for key in SOURCE_INJECTION_SPEED_PARAMETERS:
         assert all(isinstance(value, float) for value in source_parameters[key]), f"All values in '{key}' must be floats. Got {source_parameters[key]}."
+
+    if source_parameters["source_term_active"]:
+        warnings.warn(
+            "source_term_active is set but particle sources are not implemented in "
+            "this release: the source parameters are validated and carried into the "
+            "output, but no particles are injected and the run is identical to one "
+            "with source_term_active = 0.",
+            UserWarning,
+            stacklevel=3,
+        )
 
     return source_parameters
 
