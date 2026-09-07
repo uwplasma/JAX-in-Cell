@@ -6,13 +6,15 @@ The script defines a differentiable growth-rate estimator, checks it against a s
 and then recovers the drift speed with a damped Newton iteration in $\log_{10}v_d$
 driven by forward-mode derivatives.
 
+The core of the script is the estimator, which turns one simulation into a single
+differentiable number:
+
 ```{literalinclude} ../../examples/inference_two_stream.py
 :language: python
-:lines: 1-120
+:lines: 105-155
 ```
 
-The full script is longer; the part shown covers the growth-rate estimator. Three
-choices make the inverse problem well behaved:
+Three choices make the inverse problem well behaved:
 
 * the fit window is a fixed fraction of the time series and does not depend on the
   drift speed, so that the estimator is a smooth function of its input;
