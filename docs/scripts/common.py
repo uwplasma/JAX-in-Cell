@@ -7,6 +7,9 @@ the plots always come from the same run.
 """
 import json
 import os
+import pathlib
+import shutil
+import subprocess
 from pathlib import Path
 
 import matplotlib
@@ -72,12 +75,37 @@ plt.rcParams.update({
 })
 
 
+def compress_png(path, colors=256):
+    """Shrink a figure for the repository: quantise to a palette, then optipng.
+
+    Matplotlib output uses far fewer than 256 distinct colours outside the
+    colour maps, so an adaptive palette is visually indistinguishable here while
+    roughly halving the file. Both steps are optional: if Pillow or optipng is
+    missing the original file is left in place.
+    """
+    path = pathlib.Path(path)
+    before = path.stat().st_size
+    try:
+        from PIL import Image
+        image = Image.open(path).convert("RGB")
+        image.quantize(colors=colors, method=Image.MEDIANCUT, dither=Image.NONE).save(
+            path, optimize=True)
+    except Exception as error:                       # Pillow missing or unusual image
+        print(f"    (palette step skipped: {error})")
+    if shutil.which("optipng"):
+        subprocess.run(["optipng", "-quiet", "-o5", "-strip", "all", str(path)], check=False)
+    after = path.stat().st_size
+    return before, after
+
+
 def savefig(fig, name):
     FIGURE_DIR.mkdir(parents=True, exist_ok=True)
     path = FIGURE_DIR / f"{name}.png"
     fig.savefig(path)
     plt.close(fig)
-    print(f"wrote {path.relative_to(HERE.parent.parent)}")
+    before, after = compress_png(path)
+    print(f"wrote {path.relative_to(HERE.parent.parent)} "
+          f"({before/1024:.0f} kB -> {after/1024:.0f} kB)")
     return path
 
 
@@ -203,3 +231,65 @@ def phase_space_hist(ax, x, v, box_length, v_max, weights=None, bins=(70, 90), c
     ax.set_ylim(-v_max, v_max)
     ax.grid(False)
     return im
+
+
+def robust_growth_fit(time, energy, min_r2=0.95, min_duration=15.0, min_efolds=1.5,
+                      min_points=12):
+    """Fit an exponential to a mode energy, choosing the window by a stated rule.
+
+    Scans windows inside the growth phase (everything before the peak) and keeps
+    the **longest** one whose straight-line fit to ``ln(energy)`` reaches
+    ``min_r2``. Requiring length rather than the steepest or best-correlated
+    window avoids two failure modes: a short window sitting on a noise excursion,
+    which can return an arbitrarily large rate, and the seed transient at the
+    start of a run, during which the initial perturbation has not yet settled
+    onto the growing eigenmode.
+
+    Returns ``None`` when no window qualifies. That is the honest outcome for a
+    mode that never grew cleanly, and such modes are left out of the comparison
+    with theory rather than being fitted anyway.
+
+    Args:
+        time (array): Times, shape ``(S,)``, in units of the inverse plasma frequency.
+        energy (array): Mode energy (amplitude squared), shape ``(S,)``.
+        min_r2 (float): Required coefficient of determination of the fit.
+        min_duration (float): Required window length, in the units of ``time``.
+        min_efolds (float): Required growth of the amplitude across the window.
+        min_points (int): Required number of samples in the window.
+
+    Returns:
+        dict or None: ``{"gamma", "intercept", "slope", "r2", "t0", "t1", "efolds",
+        "duration"}`` with ``gamma`` the amplitude growth rate (half the slope of
+        the energy), or ``None``.
+    """
+    time = np.asarray(time)
+    energy = np.asarray(energy)
+    if (energy > 0).sum() < min_points:
+        return None
+    i_peak = int(np.argmax(energy))
+    if i_peak < min_points:
+        return None
+
+    edges = np.unique(np.linspace(0, i_peak, 60).astype(int))
+    best = None
+    for index, a in enumerate(edges[:-1]):
+        for b in edges[index + 1:]:
+            t_seg, y = time[a:b + 1], energy[a:b + 1]
+            duration = t_seg[-1] - t_seg[0]
+            if len(t_seg) < min_points or duration < min_duration or np.any(y <= 0):
+                continue
+            log_y = np.log(y)
+            slope, intercept = np.polyfit(t_seg, log_y, 1)
+            if slope <= 0 or 0.5 * slope * duration < min_efolds:
+                continue
+            residual = log_y - (intercept + slope * t_seg)
+            spread = log_y - log_y.mean()
+            r2 = 1.0 - residual.dot(residual) / max(spread.dot(spread), 1e-300)
+            if r2 < min_r2:
+                continue
+            if best is None or duration > best["duration"]:
+                best = {"gamma": 0.5 * slope, "intercept": float(intercept),
+                        "slope": float(slope), "r2": float(r2), "t0": float(t_seg[0]),
+                        "t1": float(t_seg[-1]), "efolds": float(0.5 * slope * duration),
+                        "duration": float(duration)}
+    return best

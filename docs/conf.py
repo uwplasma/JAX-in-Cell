@@ -103,13 +103,13 @@ html_theme = "pydata_sphinx_theme"
 html_title = "JAX-in-Cell"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-html_favicon = "_static/JAX-in-Cell_logo.png"
+html_favicon = "_static/JAX-in-Cell_icon.png"
 html_show_sourcelink = False
 html_theme_options = {
     "logo": {
         "image_light": "_static/JAX-in-Cell_logo.png",
-        "image_dark": "_static/JAX-in-Cell_logo.png",
-        "text": "JAX-in-Cell",
+        "image_dark": "_static/JAX-in-Cell_logo_dark.png",
+        "alt_text": "JAX-in-Cell",
     },
     "github_url": "https://github.com/uwplasma/JAX-in-Cell",
     "icon_links": [

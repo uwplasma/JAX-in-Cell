@@ -45,17 +45,28 @@ have zero charge and appear among the ions.
 
 ## Growth and damping rates
 
-The code does not fit rates. The documentation figures use the following recipe,
+The code does not fit rates. The documentation figures use the following procedure,
 implemented in `docs/scripts/common.py`:
 
-1. take the Fourier transform of $E_x(x, t)$ (or $B_y$) in $x$ at every step and
-   follow the amplitude of the mode of interest;
-2. choose a window in which the mode energy is well above its initial noise level and
-   well below its saturation value;
-3. fit a straight line to the logarithm of the mode energy in that window; the
-   growth rate of the amplitude is half the slope.
+1. Fourier transform $E_x(x, t)$ (or $B_y$) in $x$ at every step and follow the
+   complex amplitude of the mode of interest.
+2. Choose the fitting window with `robust_growth_fit`: among all windows inside the
+   growth phase, keep the **longest** whose straight-line fit to the logarithm of the
+   mode energy reaches $R^2 \ge 0.95$, requiring at least 15 $\omega_{pe}^{-1}$ and
+   1.5 e-foldings. Length is the right thing to maximise: the steepest or
+   best-correlated window tends to be a short one sitting on a noise excursion, and
+   the first inverse plasma times of a seeded run are the perturbation settling onto
+   the growing eigenmode.
+3. The growth rate of the amplitude is half the slope of the log of the energy.
+4. If no window qualifies, report the mode as unmeasured instead of fitting it.
 
 For damped waves the fit goes through the local maxima of the energy. Frequencies are
-measured from the zero crossings of the mode amplitude. Both are compared with the
-roots of the kinetic dispersion relation computed in `docs/scripts/dispersion.py`
-with the plasma dispersion function {cite}`fried1961`.
+measured from the zero crossings of the real part of the mode amplitude. Both are
+compared with the roots of the kinetic dispersion relation computed in
+`docs/scripts/dispersion.py` with the plasma dispersion function {cite}`fried1961`.
+
+Measuring a rate at all requires the mode to grow over a usable range. A mode that
+starts at the particle-noise floor and saturates two e-foldings later does not, which
+is why the verification runs load the plasma quietly (equally spaced positions,
+velocities at quantiles of a bit-reversed sequence) and seed a single mode; see
+{doc}`verification`.

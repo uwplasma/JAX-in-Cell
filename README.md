@@ -1,8 +1,7 @@
 <p align="center">
-    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/JAX-in-Cell_logo.png" width="180" alt="JAX-in-Cell">
+    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/JAX-in-Cell_logo.png#gh-light-mode-only" width="460" alt="JAX-in-Cell">
+    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/JAX-in-Cell_logo_dark.png#gh-dark-mode-only" width="460" alt="JAX-in-Cell">
 </p>
-
-<h1 align="center">JAX-in-Cell</h1>
 
 <p align="center">
 A one-dimensional, three-velocity electromagnetic particle-in-cell code written in JAX.<br>
