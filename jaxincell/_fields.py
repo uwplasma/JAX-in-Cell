@@ -174,6 +174,22 @@ def field_update(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
 
 @jit
 def field_update1(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
+    """Advance the fields by ``dt``: Ampere's law first, then Faraday's law.
+
+    ``E`` is updated with the curl of the current ``B`` and the current density
+    ``j``; ``B`` is then updated with the curl of the new ``E``. Used for the
+    first half step of the explicit scheme.
+
+    Args:
+        E_fields, B_fields (array): Fields on the grid, shape ``(G, 3)``.
+        dx (float): Cell size.
+        dt (float): Time increment (half a step in the explicit scheme).
+        j (array): Current density, shape ``(G, 3)``.
+        field_BC_left, field_BC_right (int): Field boundary codes.
+
+    Returns:
+        tuple: Updated ``(E, B)``.
+    """
     #First, update E (Ampere's)
     curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
     E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
@@ -184,6 +200,21 @@ def field_update1(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
 
 @jit
 def field_update2(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
+    """Advance the fields by ``dt``: Faraday's law first, then Ampere's law.
+
+    The mirror image of :func:`field_update1`, used for the second half step of
+    the explicit scheme so that the composition over a full step is symmetric.
+
+    Args:
+        E_fields, B_fields (array): Fields on the grid, shape ``(G, 3)``.
+        dx (float): Cell size.
+        dt (float): Time increment (half a step in the explicit scheme).
+        j (array): Current density, shape ``(G, 3)``.
+        field_BC_left, field_BC_right (int): Field boundary codes.
+
+    Returns:
+        tuple: Updated ``(E, B)``.
+    """
     #First, update B (Faraday's)
     curl_E = curlE(E_fields, B_fields, dx, dt, field_BC_left, field_BC_right)
     B_fields -= dt*curl_E

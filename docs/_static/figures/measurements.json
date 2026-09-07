@@ -1,0 +1,197 @@
+{
+  "autodiff_best_epsilon": 0.03162277660168379,
+  "autodiff_best_finite_difference": 2.093254678267785e-05,
+  "autodiff_grad_time_first_s": 42.10274899999786,
+  "autodiff_grad_time_warm_s": 23.12009716698958,
+  "autodiff_gradient_jax": 2.0932715398859976e-05,
+  "bump_on_tail_beam_fraction": 0.02999999999980864,
+  "bump_on_tail_fastest_mode": 7,
+  "bump_on_tail_fit_window": [
+    11.565631262745077,
+    32.38376753568622
+  ],
+  "bump_on_tail_gamma_energy_fit": 0.021977194676088666,
+  "bump_on_tail_gamma_mode_fit": 0.06201572715548988,
+  "bump_on_tail_gamma_theory": 0.08076193615779868,
+  "bump_on_tail_kc_over_wpe": 4.899169830066318,
+  "bump_on_tail_omega_theory": 0.9904797248142987,
+  "energy_c_dt_over_dx": 4.5,
+  "energy_error_final_explicit": 0.0016857997116163357,
+  "energy_error_final_implicit": 2.1169081202928258e-13,
+  "energy_error_max_explicit": 0.0032144758203864377,
+  "energy_error_max_implicit": 2.1169081202928258e-13,
+  "energy_omega_pe_dt": 0.07997189288615582,
+  "landau_example_a_k": 0.16022122533307948,
+  "landau_example_bounce_over_wpe": 0.4002764361451714,
+  "landau_example_dominant_frequency_over_wpe": 1.269395125188105,
+  "landau_example_gamma_measured": -0.17948769416511362,
+  "landau_gamma_measured": -0.14369746998216917,
+  "landau_gamma_theory": -0.15405317471103305,
+  "landau_k_lambda_D": 0.5006913291658733,
+  "landau_omega_measured": 1.403632320652353,
+  "landau_omega_theory": 1.4165655814665996,
+  "landau_quiet_a_k": 0.01,
+  "landau_quiet_bounce_over_wpe": 0.1,
+  "landau_quiet_efolds": 5.512692080019359,
+  "landau_quiet_energy_error": 3.307227229853993e-07,
+  "landau_quiet_particles": 300000,
+  "landau_quiet_peaks_used": 8,
+  "scaling_cpu": "Apple M3 Max",
+  "scaling_device": "cpu",
+  "scaling_grid_points": {
+    "values": [
+      32,
+      64,
+      128,
+      256,
+      512
+    ],
+    "seconds": [
+      0.6390587919886457,
+      0.9784286670037545,
+      1.430932125003892,
+      2.6626838749944,
+      5.330435041003511
+    ],
+    "compile_seconds": [
+      0.905271249008365,
+      0.9841495830041822,
+      0.8935271249938523,
+      0.9180040000064764,
+      0.8910172509931726
+    ]
+  },
+  "scaling_jax_version": "0.11.1",
+  "scaling_pseudo_particles_per_species": {
+    "values": [
+      1000,
+      2000,
+      4000,
+      8000,
+      16000,
+      32000
+    ],
+    "seconds": [
+      0.45205775000795256,
+      0.6958557500038296,
+      1.086091542005306,
+      2.106655999989016,
+      4.157292042000336,
+      8.061472375004087
+    ],
+    "compile_seconds": [
+      0.9183109589939704,
+      0.9497591249964898,
+      0.9016866669844603,
+      0.9201095000171335,
+      1.001790541005903,
+      0.9347452499932842
+    ]
+  },
+  "scaling_seconds_per_step_per_particle": 2.519210117188777e-07,
+  "scaling_time_steps": {
+    "values": [
+      250,
+      500,
+      1000,
+      2000,
+      4000
+    ],
+    "seconds": [
+      0.5290627920039697,
+      1.063671500000055,
+      2.128845665996778,
+      4.264581125011318,
+      8.629658707999624
+    ],
+    "compile_seconds": [
+      0.8910903739888454,
+      0.8776304579951102,
+      0.9394902089989046,
+      0.8632177499966929,
+      0.8346774170058779
+    ]
+  },
+  "two_stream_convergence_gamma": [
+    0.2213143621067681,
+    0.04107750204272166,
+    0.1131437962215334,
+    0.13893403780650046,
+    0.12731747672277616
+  ],
+  "two_stream_convergence_particles": [
+    3500,
+    7000,
+    14000,
+    28000,
+    56000
+  ],
+  "two_stream_fit_window": [
+    7.844376754438215,
+    28.175720587369913
+  ],
+  "two_stream_gamma_measured": 0.11473964376340333,
+  "two_stream_gamma_measured_energy": 0.11314883586911788,
+  "two_stream_gamma_theory": 0.10595361715812841,
+  "two_stream_k_lambda_D": 0.17857142857297997,
+  "two_stream_k_vd_over_wpe": 1.0108518586157897,
+  "two_stream_omega_pe": 37294398305.50523,
+  "two_stream_omega_pe_dt": 0.07997189288615582,
+  "two_stream_particles_example": 3500,
+  "two_stream_particles_main": 14000,
+  "two_stream_scan_drifts_over_c": [
+    0.08,
+    0.1,
+    0.12,
+    0.14,
+    0.16,
+    0.18,
+    0.2,
+    0.22,
+    0.24,
+    0.26
+  ],
+  "two_stream_scan_gamma_measured": [
+    NaN,
+    NaN,
+    NaN,
+    0.3071567374844848,
+    0.27768712785333305,
+    0.23595427378428335,
+    0.11684013447844138,
+    NaN,
+    NaN,
+    NaN
+  ],
+  "two_stream_scan_gamma_theory": [
+    0.19726067201012226,
+    0.2643436791537331,
+    0.3025173008248367,
+    0.31518133333311826,
+    0.3015164762584753,
+    0.25407318390525535,
+    0.10635296440034511,
+    2.1438981198079796e-06,
+    5.772962930145306e-09,
+    5.589686339840074e-11
+  ],
+  "two_stream_scan_max_relative_deviation": 0.09860721924608844,
+  "two_stream_scan_mean_relative_deviation": 0.06860321931708323,
+  "weibel_anisotropy": 100.0,
+  "weibel_check_courant": 0.5,
+  "weibel_check_particles": 30000,
+  "weibel_check_steps": 6000,
+  "weibel_energy_error": 0.05238802182019642,
+  "weibel_fastest_mode": 4,
+  "weibel_fit_window": [
+    32.09031858277006,
+    53.13378810189564
+  ],
+  "weibel_gamma_energy_fit": 0.04485752772962776,
+  "weibel_gamma_measured_fastest": 0.05363811267486771,
+  "weibel_gamma_theory_max": 0.0589937343074898,
+  "weibel_kc_over_wpe_fastest": 2.154125060925268,
+  "weibel_max_relative_deviation": 0.9171543761763251,
+  "weibel_mean_relative_deviation": 0.3258039112768683,
+  "weibel_modes_compared": 5
+}
