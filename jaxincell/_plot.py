@@ -367,32 +367,40 @@ def plot(
     save_preset: Optional[str] = None,  # for libx264/libx265 hardware encoders
     save_codec: Optional[str] = None,  # e.g. "libx264", "h264_videotoolbox", "libx265", "hevc_videotoolbox"
 ):
-    """
-    Production-ready plotting/animation for JAX-in-Cell outputs.
+    """Animated overview figure of a simulation output, optionally saved to MP4.
 
-    What you get:
-      1) Heatmaps (x vs time): E, B (nonzero components), charge density.
-         - IMPORTANT: heatmap color limits are fixed over the whole run using a robust
-           percentile, so growth/decay in time is visible (no per-frame re-normalization).
+    The figure contains space-time heat maps of the non-zero field components
+    and of the charge density, the velocity distributions of electrons and ions
+    (current frame solid, initial frame dashed), and the x-v phase space of each
+    species as a two-dimensional histogram with a logarithmic colour scale.
+    Colour limits are fixed over the whole run so that growth and decay are
+    visible. Works on the raw output of ``Simulation.run`` and on the dictionary
+    after ``diagnostics``; populations of the same charge sign are drawn together.
 
-      2) Instantaneous E(x,t) overlay:
-         - For each plotted electric-field component, we draw a line on top of the heatmap.
-         - The line is normalized by a single GLOBAL robust scale over the whole run,
-           so amplitude growth is visible.
-         - Overlay axes have no ticks (prevents clashes with colorbars).
+    Args:
+        output (dict): Output of ``Simulation.run``, before or after ``diagnostics``.
+        direction (str): One or two of ``"x"``, ``"y"``, ``"z"`` (for example
+            ``"xz"``) selecting the velocity components shown in the distribution
+            and phase-space panels. The spatial axis is always x.
+        threshold (float): Field components whose largest absolute value is below
+            this are not plotted.
+        save_mp4 (str or None): File name of the MP4 to write with ``ffmpeg``;
+            ``None`` writes nothing.
+        fps (int): Frames per second of the saved file.
+        dpi (int): Resolution of the on-screen figure.
+        show (bool): Call ``matplotlib.pyplot.show``.
+        animation_interval (int): Delay between frames in milliseconds on screen.
+        save_stride (int): Keep every n-th frame in the saved file.
+        save_dpi (int or None): Resolution of the saved file; ``None`` uses ``dpi``.
+        save_crf (int or None): Constant-rate-factor quality of the encoder; ``None``
+            uses a codec-dependent default.
+        save_preset (str or None): Encoder preset for ``libx264`` and ``libx265``.
+        save_codec (str or None): Encoder name such as ``"libx264"`` or
+            ``"h264_videotoolbox"``; ``None`` uses the first available one from a
+            list that prefers hardware H.264 encoders.
 
-      3) Distribution functions f(v,t) (LAB FRAME; NO drift centering):
-         - Shown as clean line plots in their own subplot(s) (no current-density heatmap).
-         - Solid: current frame
-         - Dashed: initial (t=0), labeled "(initial)"
-
-      4) Phase space (x vs v) for electrons and ions for each requested component:
-         - Uses a robust velocity range per species per component, so ion dynamics remains visible.
-         - Uses LogNorm on counts (with +1 internally) so low-density structure is visible.
-
-    Multi-species:
-      - Uses diagnostics() legacy split if present (velocity_electrons/velocity_ions).
-      - Otherwise combines output["species"] by charge sign (q<0 as electrons, q>0 as ions).
+    Returns:
+        None. The figure is shown and/or written to ``save_mp4``.
     """
     # ----------------------------
     # Parse directions and basic arrays

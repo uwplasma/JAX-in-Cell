@@ -18,6 +18,36 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
                       particle_BC_left, particle_BC_right,
                       field_BC_left, field_BC_right,
                       field_solver):
+    """One explicit leapfrog step with the Boris pusher.
+
+    Deposits the current from the motion between the two half-step positions,
+    advances the fields by half a step (Ampere then Faraday), gathers the fields
+    at the half-step positions, pushes the particles with the Boris rotation,
+    applies the boundary conditions, deposits the new current, advances the fields
+    by the second half step (Faraday then Ampere) and, if ``field_solver`` is not
+    zero, replaces the longitudinal electric field by the solution of Gauss's law.
+
+    Args:
+        carry (tuple): ``(E, B, x_minus_half, x, x_plus_half, v, q, m, q_over_m)``
+            with fields of shape ``(G, 3)`` and particle arrays of shape ``(N, 3)``
+            or ``(N, 1)``.
+        step_index (int): Index of the step, unused apart from the progress bar.
+        solver_parameters (dict): Cleaned solver section (filter settings,
+            ``relativistic`` flag).
+        external_field_parameters (dict): Contains the ``external_electric_field``
+            and ``external_magnetic_field`` arrays of shape ``(G, 3)``.
+        dx (float): Cell size.
+        dt (float): Time step.
+        grid (array): Cell centres, shape ``(G,)``.
+        box_size (tuple): ``(L, L_y, L_z)``.
+        particle_BC_left, particle_BC_right (int): Particle boundary codes.
+        field_BC_left, field_BC_right (int): Field boundary codes.
+        field_solver (int): ``0`` electromagnetic, ``1`` Gauss's law by FFT.
+
+    Returns:
+        tuple: The new carry and the per-step output
+        ``(x, v, E, B, J, rho)`` at the end of the step.
+    """
 
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
@@ -101,6 +131,33 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
 def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
                                   particle_BC_left, particle_BC_right,
                                   field_BC_left, field_BC_right, num_substeps):
+    """One implicit Crank-Nicolson step solved by Picard iteration.
+
+    Fields and particles are advanced with time-centred averages; the particles
+    take ``num_substeps`` Boris sub-steps in the mid-point fields and their
+    orbit-averaged current, minus its spatial mean, drives Ampere's law. The
+    iteration on the new electric field stops when its relative change falls
+    below ``tolerance_Picard_iterations_implicit_CN`` or after
+    ``max_number_of_Picard_iterations_implicit_CN`` iterations. Deposition and
+    interpolation use periodic wrapping; the digital filter is not applied.
+
+    Args:
+        carry (tuple): ``(E, B, x, v, q, m, q_over_m)`` with fields of shape
+            ``(G, 3)`` and particle arrays of shape ``(N, 3)`` or ``(N, 1)``.
+        step_index (int): Index of the step, unused apart from the progress bar.
+        solver_parameters (dict): Cleaned solver section (Picard tolerance and cap).
+        dx (float): Cell size.
+        dt (float): Time step.
+        grid (array): Cell centres, shape ``(G,)``.
+        box_size (tuple): ``(L, L_y, L_z)``.
+        particle_BC_left, particle_BC_right (int): Particle boundary codes.
+        field_BC_left, field_BC_right (int): Field boundary codes (used by the
+            curl operators only).
+        num_substeps (int): Particle sub-steps per field step; static.
+
+    Returns:
+        tuple: The new carry and the per-step output ``(x, v, E, B, J, rho)``.
+    """
     (E_field, B_field, positions,
     velocities, qs, ms, q_ms) = carry
     
