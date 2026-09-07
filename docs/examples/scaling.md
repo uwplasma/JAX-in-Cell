@@ -5,9 +5,12 @@ energy error as the number of grid points, the number of particles, the number o
 steps and the time step are increased by a factor 1.5 four times. Each configuration is
 a new compilation, so the script first runs one warm-up simulation.
 
+The measurement loop times each configuration and records the largest relative
+energy error of the run:
+
 ```{literalinclude} ../../examples/scaling_energy_time.py
 :language: python
-:lines: 1-60
+:lines: 80-124
 ```
 
 The figure below is the equivalent measurement made for this documentation, timed
