@@ -41,47 +41,53 @@ def load_parameters(input_file):
     return parameters
 
 class Simulation:
-    """
-        Calling Simulation(parameters) will create a Simulation object with the provided parameters.
-        The parameters should be provided as a dictionary, but can also be provided as a path to
-        a .toml file containing the parameters. The parameters will be cleaned and initialized using
-        the appropriate cleaner functions for each parameter section, and the simulation state will
-        be initialized based on the cleaned parameters.
+    """A particle-in-cell simulation: parameters, initial state and the time loop.
 
-        The Simulation object will expose any differentiable parameters that were provided in
-        input_parameters through Simulation_object.input_parameters. These input_parameters can then
-        be passed to the simulation() or run() bound functions to run a simulation with these
-        input_parameters exposed such that grads can be taken with respect to them. If simulation()
-        or run() is called without input_parameters, it will use the parameters provided at initialization
-        (which may include user-provided parameters and defaults) and will not overwrite any parameters
-        with the input_parameters.
+    The constructor takes a nested dictionary of parameters, or a path to a TOML
+    file containing one. Each section is validated, the defaults are filled in,
+    and the grid, the pseudo-particles and the initial fields are built. Nothing
+    is compiled until :meth:`run` is called.
 
-        Example without input parameters:
+    Parameters that are floating-point physical inputs can be changed at run time
+    without recompiling, and differentiated with respect to. They are exposed as
+    ``Simulation.input_parameters`` and accepted as the argument of :meth:`run`.
 
-        sim = Simulation(parameters)
-        simulation_output = sim.simulation()
-        or
-        simulation_output = sim.run()
+    Args:
+        parameters (dict or str or pathlib.Path, optional): The parameter tree, or
+            a path to a TOML file. Defaults to the built-in configuration, which
+            runs a two-stream instability.
 
-        
-        Example with input parameters:
+    Example:
+        Run with the parameters given at construction:
 
-        sim = Simulation(parameters)
-        input_parameters = sim.input_parameters
-        simulation_output = sim.simulation(input_parameters)
-        or
-        simulation_output = sim.run(input_parameters)
+        .. code-block:: python
 
-        
-        Additionally,
+            sim = Simulation(parameters)
+            output = sim.run()
 
-        def scalar_objective(input_parameters):
-            simulation_output = sim.run(input_parameters)
-            return some_scalar_function_of(simulation_output)
+        Re-run with a different drift speed, reusing the compiled program:
 
-        grad(scalar_objective)(input_parameters)
+        .. code-block:: python
 
-        will provide the gradient of some scalar objective function of the simulation output with respect to the input_parameters.
+            output = sim.run({"electrons": {"electrons0": {"drift_speed_x": 7e7}}})
+
+        Differentiate a scalar diagnostic with respect to that drift speed:
+
+        .. code-block:: python
+
+            import jax.numpy as jnp
+            from jax import grad
+
+            def mean_field(drift_speed):
+                out = sim.run({"electrons": {"electrons0": {"drift_speed_x": drift_speed}}})
+                return jnp.mean(out["electric_field"][:, :, 0])
+
+            derivative = grad(mean_field)(6e7)
+
+    Note:
+        Reverse-mode differentiation works with the explicit integrator only; the
+        implicit one uses a while loop, for which forward mode (``jax.jvp``,
+        ``jax.jacfwd``) must be used instead.
     """
     def __init__(self, parameters=None):
         if parameters is None:
