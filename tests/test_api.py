@@ -472,9 +472,14 @@ def test_openpmd_export_can_leave_out_the_meshes_or_the_particles():
 
 def test_toml_loading_falls_back_to_tomli_before_python_311():
     """`tomllib` arrived in 3.11; below that the loader uses the tomli backport, which
-    is declared as a conditional dependency. Hide tomllib to take that path."""
-    import tomllib
+    is declared as a conditional dependency. Hiding tomllib takes that path on a newer
+    interpreter, and on 3.10 it is the only path there is."""
     from jaxincell import load_toml
+
+    try:
+        import tomllib as parser
+    except ModuleNotFoundError:                  # Python 3.10, where tomli is the real one
+        import tomli as parser
 
     text = """
 [domain]
@@ -494,7 +499,7 @@ steps = 3
         path = os.path.join(folder, "in.toml")
         with open(path, "w") as f:
             f.write(text)
-        with mock.patch.dict(sys.modules, {"tomllib": None, "tomli": tomllib}):
+        with mock.patch.dict(sys.modules, {"tomllib": None, "tomli": parser}):
             sim, run = load_toml(path)
     assert run["steps"] == 3 and sim.species[0].n == 100
 
