@@ -171,6 +171,8 @@ theory; see {doc}`collisions` for the figure and the details.
 | energy error, explicit | {{ energy_error_max_explicit }} |
 | energy error, implicit (8 Picard) | {{ energy_error_max_implicit_8 }} |
 | Gauss-law residual | {{ gauss_residual_max_explicit }} |
+| Gauss-law residual, reflective walls | {{ gauss_residual_reflective_wall }} |
+| Gauss-law residual, absorbing walls | {{ gauss_residual_absorbing_wall }} |
 | charge, deposited against carried | {{ charge_error_relative }} |
 | momentum drift | {{ momentum_error_relative }} |
 

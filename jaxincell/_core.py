@@ -212,16 +212,31 @@ def wrap_positions(x, box, bc, dx):
 # --- digital filter --------------------------------------------------------------------
 
 def _shift(f, s, bc):
-    """``f`` shifted by ``s`` cells with the wall treatment of the fields."""
+    """``f`` shifted by ``s`` cells with the wall treatment of the sources.
+
+    A reflective wall mirrors the stencil back into the box, which is what keeps
+    the filter conservative: what a cell would have sent through the wall stays
+    on this side, so smoothing redistributes the source without creating or
+    destroying any of it. An absorbing wall drops it, which is what letting it
+    leave means. Clamping instead of mirroring is a zero-gradient extrapolation;
+    that is right for a field but it invents source at a reflective wall, by
+    several per cent of the total for a stride-two stencil.
+    """
     if bc[0] == 0:
         return jnp.roll(f, s, axis=0)
     n = f.shape[0]
     idx = jnp.arange(n) - s
+    outside_left, outside_right = idx < 0, idx >= n
+    if bc[0] == 1:
+        idx = jnp.where(outside_left, -idx - 1, idx)
+    if bc[1] == 1:
+        idx = jnp.where(outside_right, 2 * n - idx - 1, idx)
     g = f[jnp.clip(idx, 0, n - 1)]
+    expand = (slice(None),) + (None,) * (f.ndim - 1)
     if bc[0] == 2:
-        g = jnp.where((idx < 0)[(slice(None),) + (None,) * (f.ndim - 1)], 0.0, g)
+        g = jnp.where(outside_left[expand], 0.0, g)
     if bc[1] == 2:
-        g = jnp.where((idx >= n)[(slice(None),) + (None,) * (f.ndim - 1)], 0.0, g)
+        g = jnp.where(outside_right[expand], 0.0, g)
     return g
 
 

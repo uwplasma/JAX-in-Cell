@@ -110,8 +110,12 @@ box accelerates itself. The test suite checks the momentum budget directly.
 ## Cost
 
 Each particle touches three cells, so one deposit is $3N$ scatter-adds and one gather
-is $3N$ reads, independent of $N_x$. A step performs four deposits (two charge
-densities for the continuity current, two transverse currents) and two gathers.
+is $3N$ reads, independent of $N_x$. A step performs three charge deposits and four
+transverse-current deposits, and two gathers, one for $\mathbf E$ and one for
+$\mathbf B$. Three charge deposits and not four: the density at $t^{n+1/2}$ that the
+second half step starts from is the one the first half step ended on, and reusing it
+is not only cheaper but necessary, for the reason given under
+{doc}`boundaries`.
 Measured on one CPU core, the explicit scheme costs
 {{ scaling_ns_per_particle_step }} ns per particle per step at
 {{ scaling_particles_max }} particles; see {doc}`../user_guide/performance`.

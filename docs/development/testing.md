@@ -5,8 +5,10 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Thirty-six tests in three files, a minute on one CPU core, covering 95 per cent of
-the package.
+Fifty-seven tests in three files, about a minute on one CPU core, covering 99 per cent
+of the package. The five statements left are the ones this environment cannot reach:
+the `__main__` guard, and the two import fallbacks for an older Python and for a source
+tree without a generated version file.
 
 | file | what it covers |
 |---|---|

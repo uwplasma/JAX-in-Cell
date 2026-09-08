@@ -68,8 +68,19 @@ interest before turning passes on. The verification runs in {doc}`verification` 
 `filter_passes=0` for exactly this reason, and the growth rates they report agree with
 kinetic theory to a few per cent without any smoothing.
 
-Charge conservation survives filtering. Because the filter is a linear, translation
-invariant operator applied to $\rho$ and $J_x$ alike, and because
-{eq}`discrete-continuity` is linear, the filtered pair satisfies it whenever the
-unfiltered pair does. The Gauss residual with `filter_passes=2` is the same
-{{ gauss_residual_max_explicit }} as without.
+Charge conservation survives filtering, for a more direct reason than commuting
+operators: the current is taken from the *filtered* density by the cumulative sum of
+{eq}`cumsum-current`, so {eq}`discrete-continuity` holds for whatever the filter
+produced. The Gauss residual with `filter_passes=2` is the same
+{{ gauss_residual_max_explicit }} as without, at every wall type.
+
+The filter is also conservative in its own right, which is a separate requirement:
+smoothing should move source around, not create it. At a periodic wall that is
+automatic. At a reflective wall the stencil is **mirrored** back into the box, so what
+a cell would have sent through the wall stays on this side and the total is untouched
+for any stride. Clamping to the boundary cell instead — the zero-gradient
+extrapolation that is right for a *field* — invents charge at the wall, several per
+cent of the total for a stride-two stencil, which shows up as a spurious sheath field
+and an energy error an order of magnitude larger than it should be. Only an absorbing
+wall drops the part of the stencil that falls outside, which is what letting charge
+leave means.

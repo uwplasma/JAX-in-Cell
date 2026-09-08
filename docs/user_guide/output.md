@@ -14,6 +14,7 @@ dataclass and a pytree. Histories have the stored step as their first axis.
 | `charge`, `mass`, `weight` | `(N,)` | per pseudo-particle; `charge` is zero for absorbed particles |
 | `species` | `(N,)` | index of the species each particle belongs to |
 | `names`, `counts` | tuples | species names and particle counts |
+| `field_bc` | tuple | wall codes the fields were solved with, which the Gauss diagnostic needs |
 | `state` | pytree | the final loop state, for a restart |
 
 `E` and `J` are at the cell faces, `B` and `rho` at the centres

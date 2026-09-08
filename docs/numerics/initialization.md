@@ -94,11 +94,19 @@ electrons = Species.electrons(n=n, density=n_e, vth=(vx, 0.0, vz)).replace(x=x, 
 
 ## Fields
 
-$\mathbf B$ starts at zero. $E_x$ is taken from the discrete Gauss law applied to the
-charge density deposited from the initial positions ({doc}`field_solvers`), so the
-constraint holds from the first step; the transverse components of $\mathbf E$ start
-at zero. Static external fields, if given, are added at the gather and never evolve.
+$\mathbf B$ starts at zero, and so do the transverse components of $\mathbf E$.
+$E_x$ is taken from the discrete Gauss law applied to the charge density
+({doc}`field_solvers`), so the constraint holds from the first step. Static external
+fields, if given, are added at the gather and never evolve.
 
-Finally, in the explicit scheme, positions are displaced by
-$+\tfrac12\Delta t\,\mathbf v$ to set up the leapfrog, and velocities are clipped to
-$0.99c$ so that the relativistic $\gamma$ is finite.
+The order matters at a wall. In the explicit scheme positions are first displaced by
+$+\tfrac12\Delta t\,\mathbf v$ to set up the leapfrog, and the density the initial
+field is built from is then deposited at
+$\mathrm{wrap}(x^{1/2} - \tfrac12\Delta t\,\mathbf v)$ — the integer-time position
+the *loop* will reconstruct, not the one the particles were placed at. For a periodic
+box the two are the same; at a reflecting or absorbing wall a particle whose half step
+crossed the wall comes back somewhere else, and building the field from the placed
+positions leaves the discrete Gauss law violated from the first step and violated for
+the rest of the run.
+
+Velocities are clipped to $0.99c$ so that the relativistic $\gamma$ is finite.

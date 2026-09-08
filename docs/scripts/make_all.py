@@ -31,6 +31,9 @@ SCRIPTS = [
 
 if __name__ == "__main__":
     selected = sys.argv[1:] or SCRIPTS
+    # the repository root first, so that the figures come from the checked-out code
+    # rather than from whatever copy of jaxincell happens to be installed
+    sys.path.insert(0, str(HERE.parent.parent))
     sys.path.insert(0, str(HERE))
     for script in selected:
         start = time.perf_counter()

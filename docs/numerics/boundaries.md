@@ -68,6 +68,20 @@ $10^{-3}$ of the total.
 For a periodic box no charge is lost at all: the two agree to
 {{ charge_error_relative }}, which is round-off.
 
+What does hold at every wall is the discrete Gauss law, to round-off, because the
+current is derived from the same density the field is checked against
+({doc}`deposition`). Three things have to line up for that, and the test suite checks
+all three at every wall type, with and without filtering:
+
+* the density at $t^{n+1/2}$ has to be shared between the two half steps, or the
+  charge an absorbing wall removes disappears between them uncounted;
+* the initial field has to be built from the density the loop starts from. The
+  leapfrog carries $x^{n+1/2}$ and reconstructs $x^n$ as
+  $\mathrm{wrap}(x^{n+1/2} - \tfrac12\Delta t\,\mathbf v)$, which at a reflecting
+  wall is not where the particles were placed;
+* the residual has to be measured with the same $E_{-1/2}$ the solver used: zero at a
+  wall, the far end of the box only when the wall is periodic.
+
 ## Choosing
 
 Periodic walls are the right default for studying a wave or an instability, because

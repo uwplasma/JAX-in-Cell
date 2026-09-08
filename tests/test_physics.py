@@ -243,3 +243,111 @@ def test_collisions_through_the_simulation_conserve_momentum_and_isotropise():
     start, end = T[0], T[-1]
     assert end[2] > start[2] and end[0] < start[0]          # the cold axis heats
     assert abs(end[2] / end[0] - 1) < abs(start[2] / start[0] - 1)
+
+
+@pytest.mark.parametrize("wall", ["periodic", "reflective", "absorbing"])
+@pytest.mark.parametrize("filter_passes", [0, 2])
+def test_gauss_law_holds_at_every_wall_with_and_without_filtering(wall, filter_passes):
+    """The discrete Gauss law is exact for every wall type, because the current
+    is derived from the same charge density the field is checked against.
+
+    Three things have to line up for that, and each was wrong once. The density
+    at the half step has to be the one the first half of the step ended on, or
+    the charge a wall absorbs disappears between the halves with no current to
+    carry it. The initial field has to be built from the density the loop starts
+    from, which at a wall is not where the particles were placed. And the filter
+    has to be applied to the density before the current is taken from it.
+    """
+    e = Species.electrons(n=2000, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), quiet=True)
+    i = Species.ions(n=2000, density=1e17, electrons=e, quiet=True)
+    domain = Domain(length=1e-2, cells=32, dt_over_dx_c=1.0, particle_bc=wall, field_bc=wall)
+    out = Simulation(domain, [e, i], Solver(filter_passes=filter_passes,
+                                            filter_strides=(1, 2))).run(120, seed=0)
+    assert float(np.asarray(diagnostics(out)["gauss_residual"]).max()) < 1e-10
+
+
+@pytest.mark.parametrize("wall, conserving", [("periodic", True), ("reflective", True),
+                                              ("absorbing", False)])
+def test_the_filter_moves_the_sources_around_without_inventing_any(wall, conserving):
+    """Smoothing redistributes charge; it must not create it. A reflective wall
+    mirrors the stencil back into the box, so the total is untouched; only an
+    absorbing wall, which is supposed to let charge leave, may lose any."""
+    from jaxincell._core import smooth
+
+    rho = np.zeros(24)
+    rho[[0, 3, 20, 23]] = 1.0                    # deliberately loaded against both walls
+    code = {"periodic": (0, 0), "reflective": (1, 1), "absorbing": (2, 2)}[wall]
+    total = float(jnp.sum(smooth(jnp.asarray(rho), 2, 0.5, (1, 2, 4), code)))
+    if conserving:
+        assert abs(total / rho.sum() - 1) < 1e-12
+    else:
+        assert total < 0.95 * rho.sum()
+
+
+def test_electrostatic_solvers_agree_and_both_satisfy_gauss():
+    """`field_solver="gauss"` recomputes E_x from the charge density instead of
+    advancing it with the current. On an electrostatic problem the two must
+    agree to the discretisation error, and both must satisfy the discrete Gauss
+    law: one by construction, the other because the current conserves charge."""
+    def run(field_solver):
+        e = Species.electrons(n=4000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(5e7, 0, 0),
+                              plus_minus=True, quiet=True, perturbation_amplitude=5e-7,
+                              perturbation_mode=1)
+        i = Species.ions(n=4000, density=4.37e17, electrons=e, quiet=True)
+        return Simulation(Domain(length=0.01, cells=64, dt_over_dx_c=4.5), [e, i],
+                          Solver(field_solver=field_solver)).run(300, seed=3)
+
+    ampere, gauss = run("ampere"), run("gauss")
+    for out in (ampere, gauss):
+        assert float(np.asarray(diagnostics(out)["gauss_residual"]).max()) < 1e-10
+    field = np.asarray(ampere.E[:, :, 0])
+    assert np.abs(np.asarray(gauss.E[:, :, 0]) - field).max() < 1e-3 * np.abs(field).max()
+
+
+def test_relativistic_run_conserves_the_energy_the_pusher_conserves():
+    """With `relativistic=True` the kinetic energy is sum (gamma - 1) m c^2, and
+    the diagnostic has to follow the solver: reporting the Newtonian energy for a
+    relativistic run would show a spurious drift where there is none."""
+    def run(relativistic):
+        e = Species.electrons(n=2000, density=1e17, vth=(0.3 * c, 0, 0), quiet=True,
+                              perturbation_amplitude=1e-5, perturbation_mode=1)
+        i = Species.ions(n=2000, density=1e17, electrons=e, quiet=True)
+        out = Simulation(Domain(length=0.05, cells=32, dt_over_dx_c=1.0), [e, i],
+                         Solver(relativistic=relativistic)).run(200, seed=0)
+        return out, np.asarray(diagnostics(out)["total"])
+
+    out, total = run(True)
+    assert float(np.abs(np.asarray(out.v)).max()) > 0.5 * c      # relativity matters here
+    assert float(np.max(np.abs(total / total[0] - 1))) < 1e-3
+    gamma = 1 / np.sqrt(1 - np.sum(np.asarray(out.v[0]) ** 2, axis=-1) / c ** 2)
+    expected = float(np.sum((gamma - 1) * np.asarray(out.mass) * c ** 2))
+    assert abs(float(diagnostics(out)["kinetic"][0]) / expected - 1) < 1e-12
+    assert float(diagnostics(run(False)[0])["kinetic"][0]) < expected   # Newtonian is lower
+
+
+def test_an_external_magnetic_field_magnetises_the_plasma():
+    """A uniform external B_x is the one field the code cannot generate itself,
+    because the curl has no x component in one dimension. Particles in it gyrate
+    at Omega_c = qB/m in the y-z plane at constant speed, since a magnetic field
+    does no work."""
+    B0, cells, length, n = 5e-4, 32, 1.0, 2000
+    omega_c = elementary_charge * B0 / mass_electron
+    # tenuous and cold, so that the self-consistent fields do not compete
+    e = Species.electrons(n=n, density=1e6, vth=(0, 0, 0), drift=(0, 1e5, 0), quiet=True)
+    i = Species.ions(n=n, density=1e6, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
+    external = np.zeros((cells, 3))
+    external[:, 0] = B0
+    domain = Domain(length=length, cells=cells, dt_over_dx_c=1.0)
+    out = Simulation(domain, [e, i], Solver(filter_passes=0), external_B=external).run(400, seed=0)
+
+    v_y = np.asarray(out.v[:, :n, 1]).mean(axis=1)
+    v_z = np.asarray(out.v[:, :n, 2]).mean(axis=1)
+    speed = np.hypot(v_y, v_z)
+    assert abs(speed[-1] / speed[0] - 1) < 1e-5                      # no work done
+    phase = np.unwrap(np.arctan2(v_z, v_y))
+    measured = abs(phase[-1] - phase[0]) / float(out.t[-1] - out.t[0])
+    assert abs(measured / omega_c - 1) < 1e-3
+
+    # without the external field there is nothing to rotate into z
+    plain = Simulation(domain, [e, i], Solver(filter_passes=0)).run(400, seed=0)
+    assert float(np.abs(np.asarray(plain.v[:, :n, 2])).max()) == 0.0

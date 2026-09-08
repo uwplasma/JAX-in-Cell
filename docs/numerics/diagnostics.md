@@ -46,8 +46,15 @@ its $x$ component should stay put: over the two-stream run it drifts by
 \Big/ \max_i\left|\frac{\rho_i}{\epsilon_0}\right| .
 ```
 
-It should sit at round-off, {{ gauss_residual_max_explicit }}, for the whole run. It
-will not if the current deposit is bypassed, which makes it a good regression check.
+with $E_{-1/2}$ taken as the solver takes it: the far end of the box for a periodic
+wall, zero otherwise. Measuring it as periodic regardless reports a violation in the
+first cell that the solver never committed, which at an absorbing wall — where the
+field at the far end is the sheath field and nowhere near zero — can be larger than
+the density itself.
+
+It should sit at round-off, {{ gauss_residual_max_explicit }}, for the whole run, at
+every wall type. It will not if the current deposit is bypassed, which makes it a good
+regression check.
 
 ## Temperatures
 

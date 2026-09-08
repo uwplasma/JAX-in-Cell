@@ -1,9 +1,14 @@
 """Behaviour of the public interface: reproducibility, differentiation,
 storage options, restarts, input files and the command line."""
+import builtins
+import gc
 import os
+import pathlib
 import shutil
+import sys
 import tempfile
 import warnings
+from unittest import mock
 
 import numpy as np
 import jax
@@ -211,3 +216,215 @@ def test_courant_warning_fires_only_when_a_light_wave_can_be_seeded():
 def test_command_line_reports_usage_without_a_file(capsys):
     assert main([]) == 1
     assert "usage" in capsys.readouterr().out
+
+
+def test_quiet_start_samples_the_maxwellian_and_fills_the_box():
+    """The public helper that custom initial conditions build on: equally spaced
+    positions inside the box and velocities at the quantiles of the Maxwellian,
+    with vth the sqrt(2) kT/m convention, so the standard deviation is vth/sqrt2."""
+    from jaxincell import quiet_start
+
+    n, length, vth, drift = 20000, 0.5, (1e6, 0.0, 5e6), (2e6, 0.0, 0.0)
+    x, v = quiet_start(n, length, vth=vth, drift=drift)
+    assert x.shape == v.shape == (n, 3)
+    assert np.abs(x[:, 0]).max() < length / 2
+    spacing = np.diff(x[:, 0])
+    assert np.allclose(spacing, length / n)                  # equally spaced
+    assert np.allclose(v.mean(axis=0), drift, atol=1e-3 * max(vth))
+    assert np.allclose(v.std(axis=0), np.asarray(vth) / np.sqrt(2), rtol=2e-3)
+
+
+def test_plasma_frequency_and_debye_length_by_species_name():
+    """Both accept a species name and default to the first species."""
+    from jaxincell import Domain, Solver, Species, elementary_charge, epsilon_0, mass_electron
+
+    density = 4e17
+    electrons = Species.electrons(n=100, density=density, vth=(1e6, 0, 0), name="electrons")
+    ions = Species.ions(n=100, density=density, electrons=electrons, name="ions")
+    sim = Simulation(Domain(length=0.01, cells=16), [electrons, ions], Solver())
+    expected = np.sqrt(density * elementary_charge ** 2 / (epsilon_0 * mass_electron))
+    assert abs(float(sim.plasma_frequency()) / expected - 1) < 1e-12
+    assert abs(float(sim.plasma_frequency("electrons")) / expected - 1) < 1e-12
+    assert float(sim.plasma_frequency("ions")) < 0.05 * expected          # heavier, slower
+    assert abs(float(sim.debye_length()) - 1e6 / (np.sqrt(2) * expected)) < 1e-12 * float(sim.debye_length())
+    # ions derived from these electrons are at the same temperature, and the Debye
+    # length depends on the temperature and the density, not on the mass
+    assert abs(float(sim.debye_length("ions")) / float(sim.debye_length("electrons")) - 1) < 1e-12
+    colder = Species.ions(n=100, density=density, electrons=electrons, temperature_ratio=0.25, name="cold")
+    sim = Simulation(Domain(length=0.01, cells=16), [electrons, colder], Solver())
+    assert abs(float(sim.debye_length("cold")) / float(sim.debye_length("electrons")) - 0.5) < 1e-9
+
+
+def test_random_positions_and_a_scalar_thermal_speed():
+    """`random_positions` places particles uniformly instead of on a lattice, and
+    a bare number for vth or drift is taken as the x component."""
+    from jaxincell import Domain, Solver, Species
+
+    assert Species.electrons(n=10, density=1e17, vth=2e6).vth == (2e6, 0.0, 0.0)
+    assert Species.electrons(n=10, density=1e17, drift=3e6).drift == (3e6, 0.0, 0.0)
+
+    # cold, so that the half-step displacement does not disturb the spacing
+    domain = Domain(length=0.01, cells=16)
+    spread = {}
+    for name, random_positions in (("random", True), ("lattice", False)):
+        species = Species.electrons(n=1000, density=1e17, random_positions=random_positions)
+        sim = Simulation(domain, [species], Solver())
+        (_, _, x, _, _, _, _), _ = sim.initial_state(jax.random.PRNGKey(0))
+        spacing = np.diff(np.sort(np.asarray(x[:, 0])))
+        spread[name] = spacing.std() / spacing.mean()
+    assert spread["lattice"] < 1e-9 < 0.1 < spread["random"]
+
+
+def test_coulomb_logarithm_follows_the_formulary_in_both_regimes():
+    """The NRL electron-ion Coulomb logarithm switches formula at 10 Z^2 eV; both
+    branches are used, and it is what `Collisions()` falls back on."""
+    from jaxincell._collisions import coulomb_logarithm
+
+    density = 1e19                                            # 1e13 cm^-3
+    cold, hot = float(coulomb_logarithm(density, 1.0)), float(coulomb_logarithm(density, 1000.0))
+    assert abs(cold - (23.0 - np.log(np.sqrt(1e13) * 1.0 ** -1.5))) < 1e-9
+    assert abs(hot - (24.0 - np.log(np.sqrt(1e13) / 1000.0))) < 1e-9
+    assert 5 < cold < 25 and 5 < hot < 25 and hot > cold       # both physically sensible
+
+
+def test_collisions_default_to_every_pair_and_the_formulary_logarithm():
+    """`Collisions()` with no arguments collides every combination and takes the
+    Coulomb logarithm from the first species, rather than needing either spelled out."""
+    from jaxincell import Collisions, Domain, Solver, Species
+
+    electrons = Species.electrons(n=800, density=1e20, vth=(2e6, 2e6, 2e6), quiet=True)
+    ions = Species.ions(n=800, density=1e20, electrons=electrons, quiet=True)
+    domain = Domain(length=1e-4, cells=8, dt_over_dx_c=1.0)
+    quiet = Simulation(domain, [electrons, ions], Solver()).run(20, seed=0)
+    collided = Simulation(domain, [electrons, ions], Solver(),
+                          Collisions()).run(20, seed=0)
+    assert np.isfinite(np.asarray(collided.v)).all()
+    assert not np.allclose(np.asarray(collided.v), np.asarray(quiet.v))
+    momentum = np.asarray(diagnostics(collided)["momentum"])[:, 0]
+    content = float(np.sum(np.asarray(collided.mass) * np.abs(np.asarray(collided.v[0, :, 0]))))
+    assert float(np.abs(momentum - momentum[0]).max()) < 1e-4 * content
+
+
+def test_plot_animates_on_screen_and_warns_instead_of_failing_without_ffmpeg(monkeypatch):
+    """Without `save` the figure carries a live animation; with `save` but no
+    ffmpeg on the path the call warns and returns rather than raising, so a long
+    run is not lost to a missing tool."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation
+    from jaxincell import plot
+
+    out = small_simulation(n=200).run(8, seed=0)
+    shown = []
+    monkeypatch.setattr(plt, "show", lambda *a, **k: shown.append(True))
+    figure = plot(out, direction="x", show=True)
+    assert shown == [True]
+    assert isinstance(figure.animation, FuncAnimation)
+    with warnings.catch_warnings():                  # never rendered, which is the point
+        warnings.simplefilter("ignore", UserWarning)
+        figure.animation = None
+        plt.close(figure)
+        gc.collect()
+
+    def no_ffmpeg(*args, **kwargs):
+        raise FileNotFoundError("ffmpeg")
+
+    monkeypatch.setattr("jaxincell._plot.subprocess.Popen", no_ffmpeg)
+    with pytest.warns(RuntimeWarning, match="ffmpeg was not found"):
+        plot(out, direction="x", save="never-written.mp4", show=False)
+    assert not os.path.exists("never-written.mp4")
+
+
+def test_command_line_plots_when_the_input_asks_for_it(tmp_path, monkeypatch):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    monkeypatch.setattr(plt, "show", lambda *a, **k: None)
+
+    path = tmp_path / "run.toml"
+    path.write_text("""
+[domain]
+length = 0.01
+cells = 16
+dt_over_dx_c = 2.0
+[[species]]
+name = "electrons"
+n = 200
+charge = -1
+mass = "electron"
+density = 4e17
+vth = [1.5e7, 0.0, 0.0]
+[[species]]
+name = "ions"
+n = 200
+charge = 1
+mass = "proton"
+density = 4e17
+vth = [3.5e5, 0.0, 0.0]
+[run]
+steps = 6
+plot = true
+""")
+    assert main([str(path)]) == 0
+    with warnings.catch_warnings():                  # the animation is never rendered here
+        warnings.simplefilter("ignore", UserWarning)
+        plt.close("all")
+        gc.collect()
+
+
+def test_the_package_imports_without_matplotlib_but_without_plot():
+    """`plot` is the only part that needs matplotlib, and its import is guarded so
+    that the package still works where matplotlib is not installed."""
+    import importlib
+    import jaxincell
+
+    source = pathlib.Path(jaxincell.__file__).read_text()
+    namespace = {"__name__": "jaxincell_no_matplotlib", "__package__": "jaxincell"}
+    real_import = builtins.__import__
+
+    def refuse_plot(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "_plot" or name.endswith("._plot"):
+            raise ImportError("no matplotlib")
+        return real_import(name, globals, locals, fromlist, level)
+
+    with mock.patch.object(builtins, "__import__", refuse_plot):
+        exec(compile(source, jaxincell.__file__, "exec"), namespace)
+    assert "Simulation" in namespace["__all__"] and "plot" not in namespace["__all__"]
+    importlib.reload(jaxincell)                      # leave the real module intact
+
+
+def test_openpmd_says_what_to_install_when_the_dependency_is_missing():
+    from jaxincell.openpmd import write_openpmd
+
+    with mock.patch.dict(sys.modules, {"openpmd_api": None}):
+        with pytest.raises(ImportError, match="pip install openpmd-api"):
+            write_openpmd(small_simulation(n=100).run(2, seed=0), "unused.json")
+
+
+def test_configuration_objects_normalise_what_they_are_given():
+    """The constructors accept the shapes a user naturally writes and store one
+    canonical form, so that the pytree structure does not depend on how a value
+    was spelled."""
+    from jaxincell import Collisions, Domain, Species
+    from jaxincell._config import BOUNDARIES, _float
+
+    # bool is a subclass of int in Python; without a guard, a flag handed to a
+    # float field would silently become 1.0 and change the leaf's dtype
+    assert _float(True) is True and _float(1) == 1.0 and isinstance(_float(1), float)
+
+    # species pairs may be any sequence and are stored as hashable tuples, since
+    # they are static and become part of the compiled program's cache key
+    collisions = Collisions(pairs=[["electrons", "ions"], ("electrons", "electrons")])
+    assert collisions.pairs == (("electrons", "ions"), ("electrons", "electrons"))
+    assert hash(collisions.pairs)
+
+    # walls may be one name for both ends or a pair, and are stored as codes
+    assert Domain(particle_bc="reflective").particle_bc == (BOUNDARIES["reflective"],) * 2
+    assert Domain(particle_bc=("reflective", "absorbing")).particle_bc == (1, 2)
+    with pytest.raises(AssertionError, match="periodic wall needs a periodic partner"):
+        Domain(particle_bc=("periodic", "absorbing"))
+    with pytest.raises(AssertionError, match="at least four cells"):
+        Domain(cells=2)
+    with pytest.raises(AssertionError, match="must have shape"):
+        Species.electrons(n=10, density=1e17, vth=(1e6, 0, 0)).replace(x=np.zeros((9, 3)))

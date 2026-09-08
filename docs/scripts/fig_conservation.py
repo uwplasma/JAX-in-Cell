@@ -44,6 +44,16 @@ panel_label(axes[1], "b")
 fig.tight_layout()
 savefig(fig, "conservation")
 
+# the Gauss law has to hold at every wall, not only in a periodic box
+walls = {}
+for wall in ("periodic", "reflective", "absorbing"):
+    e = Species.electrons(n=2000, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), quiet=True)
+    i = Species.ions(n=2000, density=1e17, electrons=e, quiet=True)
+    domain = Domain(length=1e-2, cells=32, dt_over_dx_c=1.0, particle_bc=wall, field_bc=wall)
+    out = Simulation(domain, [e, i], Solver(filter_passes=2, filter_strides=(1, 2))).run(120, seed=0)
+    walls[wall] = float(np.asarray(diagnostics(out)["gauss_residual"]).max())
+    print(f"  {wall:11s}: gauss residual {walls[wall]:.1e}")
+
 charge = np.asarray(explicit.charge)
 on_grid = np.asarray(explicit.rho).sum(axis=1) * explicit.dx
 momentum = np.asarray(diagnostics(explicit)["momentum"])[:, 0]
@@ -54,4 +64,5 @@ record(energy_courant=COURANT, energy_steps=STEPS,
        **{f"energy_error_max_implicit_{n}": f"{float(error(out).max()):.1e}" for n, out in implicit.items()},
        gauss_residual_max_explicit=f"{float(np.asarray(diagnostics(explicit)['gauss_residual']).max()):.1e}",
        charge_error_relative=f"{float(np.abs(on_grid - charge.sum()).max() / np.abs(charge).sum()):.1e}",
-       momentum_error_relative=f"{float(np.abs(momentum - momentum[0]).max() / content):.1e}")
+       momentum_error_relative=f"{float(np.abs(momentum - momentum[0]).max() / content):.1e}",
+       **{f"gauss_residual_{wall}_wall": f"{value:.1e}" for wall, value in walls.items()})

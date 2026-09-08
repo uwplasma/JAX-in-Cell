@@ -21,7 +21,7 @@ jax.config.update("jax_enable_x64", True)
 __all__ = ["Simulation", "Output", "load_toml", "quiet_start"]
 
 
-@pytree_dataclass(static=("names", "counts", "relativistic"))
+@pytree_dataclass(static=("names", "counts", "relativistic", "field_bc"))
 class Output:
     """Result of :meth:`Simulation.run`. Histories have the stored step as their
     first axis; ``t`` is the time of each stored state. ``state`` is the final
@@ -45,6 +45,7 @@ class Output:
     names: tuple
     counts: tuple
     relativistic: bool
+    field_bc: tuple
 
     def particles(self, name):
         """Positions and velocities ``(S, n, 3)`` of the species called ``name``."""
@@ -193,11 +194,20 @@ class Simulation:
         limit = 0.99 * c
         v = jnp.clip(v, -limit, limit)
         q_pseudo, qm = q * w, q / m
-        rho = self._smooth(deposit(x[:, 0], q_pseudo, d.grid[0], dx, d.cells, d.particle_bc))
+        box = (L, d.length_y, d.length_z)
+        if self.solver.algorithm == "explicit":
+            # The leapfrog carries the half-step position and reconstructs the
+            # integer-time one as wrap(x - dt v / 2). At a reflecting or absorbing wall
+            # that is not the position the run started from, so the initial field has to
+            # be built from the density the first step will actually see; otherwise the
+            # discrete Gauss law starts out violated and stays that way for the whole run.
+            x = wrap_positions(x + 0.5 * dt * v, box, d.particle_bc, dx)
+            x_integer = wrap_positions(x - 0.5 * dt * v, box, d.particle_bc, dx)
+        else:
+            x_integer = x
+        rho = self._smooth(deposit(x_integer[:, 0], q_pseudo, d.grid[0], dx, d.cells, d.particle_bc))
         E = jnp.zeros((d.cells, 3)).at[:, 0].set(E_x_from_rho(rho, dx, d.field_bc))
         B = jnp.zeros((d.cells, 3))
-        if self.solver.algorithm == "explicit":
-            x = wrap_positions(x + 0.5 * dt * v, (L, d.length_y, d.length_z), d.particle_bc, dx)
         return (E, B, x, v, q_pseudo, qm, key), (w, m, q)
 
     def _smooth(self, f):
@@ -246,7 +256,7 @@ class Simulation:
         # first half step: sources from the motion x^n -> x^{n+1/2}
         x_n = wrap_positions(x_half - 0.5 * dt * v, box, d.particle_bc, dx)
         rho_n = self._smooth(deposit(x_n[:, 0], q, d.grid[0], dx, d.cells, d.particle_bc))
-        _, J1 = self._sources(x_half, v, q, dt / 2, jnp.sum(q * v[:, 0]) / L, rho_n)
+        rho_half, J1 = self._sources(x_half, v, q, dt / 2, jnp.sum(q * v[:, 0]) / L, rho_n)
         E, B = half_step_fields(E, B, J1, dt / 2, dx, d.field_bc, electric_first=True)
         # push with the fields at t^{n+1/2}
         v = self._push(x_half, v, q, qm, m * w, E, B, dt)
@@ -255,8 +265,11 @@ class Simulation:
         x_next_half = x_half + dt * v
         x_next_half, v, q, qm = apply_particle_bc(x_next_half, v, q, qm, box, d.particle_bc, d.restitution, dx)
         x_next = wrap_positions(x_next_half - 0.5 * dt * v, box, d.particle_bc, dx)
-        # second half step: sources from x^{n+1/2} -> x^{n+1}
-        rho_half = self._smooth(deposit(x_half[:, 0], q, d.grid[0], dx, d.cells, d.particle_bc))
+        # Second half step, x^{n+1/2} -> x^{n+1}, starting from the charge density the
+        # first half already ended on. Depositing it again here would use the charges
+        # that apply_particle_bc has just zeroed, so the density at x^{n+1/2} would jump
+        # by the charge absorbed at the wall with no current to account for it, and the
+        # discrete Gauss law would drift by that much every step.
         rho_next, J2 = self._sources(x_next, v, q, dt / 2, jnp.sum(q * v[:, 0]) / L, rho_half)
         E, B = half_step_fields(E, B, J2, dt / 2, dx, d.field_bc, electric_first=False)
         if self.solver.field_solver == "gauss":
@@ -353,7 +366,7 @@ def _run(sim, steps, seed, store_every, store_particles, state):
                   length=d.length, charge=carry[4], mass=m * w, weight=w,
                   species=jnp.concatenate([jnp.full((s.n,), i) for i, s in enumerate(sim.species)]),
                   state=carry, names=tuple(s.name for s in sim.species), counts=tuple(s.n for s in sim.species),
-                  relativistic=sim.solver.relativistic)
+                  relativistic=sim.solver.relativistic, field_bc=d.field_bc)
 
 
 def load_toml(path):

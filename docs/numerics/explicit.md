@@ -33,7 +33,12 @@ position reconstructed from the state.
 4. **Collisions**, if a {class}`~jaxincell.Collisions` model is set ({doc}`collisions`).
 5. **Move.** $x^{n+3/2} = x^{n+1/2} + \Delta t\,\mathbf v^{n+1}$, then the boundary
    conditions of {doc}`boundaries` are applied.
-6. **Sources over the second half step**, from $x^{n+1/2}$ to $x^{n+1}$.
+6. **Sources over the second half step**, from $x^{n+1/2}$ to $x^{n+1}$, starting from
+   the density step 1 already computed at $x^{n+1/2}$ rather than depositing it again.
+   That matters at an absorbing wall: step 5 has just zeroed the charge of the
+   particles that hit it, so a second deposit at $x^{n+1/2}$ would return a different
+   density from the one the first half step ended on, and the charge would vanish
+   between the two halves with no current to account for it.
 7. **Second half field update**, Faraday then Ampere.
 8. **Electrostatic correction**, only with `field_solver="gauss"`: $E_x$ is replaced by
    the solution of the discrete Gauss law from $\rho^{n+1}$ ({doc}`field_solvers`).

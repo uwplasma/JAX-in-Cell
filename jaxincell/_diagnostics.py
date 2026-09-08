@@ -31,9 +31,15 @@ def energies(out):
 
 def gauss_residual(out):
     """Relative violation of the discrete Gauss law at every stored step,
-    :math:`\\max_i |(E_{i+1/2} - E_{i-1/2})/\\Delta x - \\rho_i/\\epsilon_0| / \\max_i |\\rho_i/\\epsilon_0|`."""
+    :math:`\\max_i |(E_{i+1/2} - E_{i-1/2})/\\Delta x - \\rho_i/\\epsilon_0| / \\max_i |\\rho_i/\\epsilon_0|`.
+
+    The field beyond the left wall, :math:`E_{-1/2}`, is the one the solver used:
+    the far end of the box when the wall is periodic, and zero otherwise, since a
+    wall carries no field from the other side. Taking it as periodic regardless
+    reports a violation in the first cell that the solver never committed."""
     E = out.E[:, :, 0]
-    div = (E - jnp.roll(E, 1, axis=1)) / out.dx
+    ghost = E[:, -1] if out.field_bc[0] == 0 else jnp.zeros_like(E[:, -1])
+    div = (E - jnp.concatenate([ghost[:, None], E[:, :-1]], axis=1)) / out.dx
     rhs = out.rho / epsilon_0
     return jnp.max(jnp.abs(div - rhs), axis=1) / jnp.maximum(jnp.max(jnp.abs(rhs), axis=1), 1e-300)
 
