@@ -1,148 +1,71 @@
-from jax import lax
+"""Post-processing of an :class:`Output`: energies, momentum, Gauss-law residual,
+temperatures and the dominant frequency. Everything is a plain function of the
+stored arrays and can be recomputed at will."""
 import jax.numpy as jnp
-from jax.numpy.fft import fft, fftfreq
-from ._constants import epsilon_0, mu_0
 
-__all__ = ['diagnostics']
+from ._constants import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
-def diagnostics(output):
-    # --- Keep legacy split first (unchanged) ---
-    isel = (output["charges"] >= 0)[:, 0]  # cannot use masks in jitted functions
-    esel = (output["charges"] <  0)[:, 0]
-    segregated = {
-        "position_electrons": output["positions"] [:, esel, :],
-        "velocity_electrons": output["velocities"][:, esel, :],
-        "mass_electrons":     output["masses"]    [   esel],
-        "charge_electrons":   output["charges"]   [   esel],
-        "position_ions":      output["positions"] [:, isel, :],
-        "velocity_ions":      output["velocities"][:, isel, :],
-        "mass_ions":          output["masses"]    [   isel],
-        "charge_ions":        output["charges"]   [   isel],
-    }
-    output.update(**segregated)
+__all__ = ["diagnostics", "energies", "gauss_residual", "temperatures"]
 
-    # --- NEW: multi-species view, fully additive/back-compat ---
-    # Group by (q, m) exact pairs
-    import numpy as np
-    q = np.asarray(output["charges"]).reshape(-1)
-    m = np.asarray(output["masses"]).reshape(-1)
-    qm = np.stack([q, m], axis=1)
-    unique_pairs, labels = np.unique(qm, axis=0, return_inverse=True)
 
-    species_list = []
-    for si, (qv, mv) in enumerate(unique_pairs):
-        mask = (labels == si)
-        pos_s = output["positions"][:, mask, :]
-        vel_s = output["velocities"][:, mask, :]
+def energies(out):
+    """Field and kinetic energies per unit area (J/m^2) at every stored step."""
+    field_E = 0.5 * epsilon_0 * jnp.sum(out.E ** 2, axis=(1, 2)) * out.dx
+    field_B = 0.5 / mu_0 * jnp.sum(out.B ** 2, axis=(1, 2)) * out.dx
+    result = {"electric": field_E, "magnetic": field_B}
+    if out.v is not None:
+        v2 = jnp.sum(out.v ** 2, axis=-1)
+        if out.relativistic:                       # the quantity the relativistic pusher conserves
+            gamma = 1 / jnp.sqrt(1 - v2 / c ** 2)
+            kinetic_p = (gamma - 1) * out.mass[None, :] * c ** 2
+        else:                                      # and the one the Boris pusher conserves
+            gamma = jnp.ones_like(v2)
+            kinetic_p = 0.5 * out.mass[None, :] * v2
+        result["kinetic"] = jnp.sum(kinetic_p, axis=1)
+        for i, name in enumerate(out.names):
+            result[f"kinetic_{name}"] = jnp.sum(jnp.where(out.species[None, :] == i, kinetic_p, 0.0), axis=1)
+        result["total"] = field_E + field_B + result["kinetic"]
+        result["momentum"] = jnp.sum(gamma[..., None] * out.mass[None, :, None] * out.v, axis=1)
+    return result
 
-        # Names chosen to keep the first negative = "electrons", first positive = "ions"
-        if qv < 0 and not any(sp.get("name") == "electrons" for sp in species_list):
-            name = "electrons"
-        elif qv > 0 and not any(sp.get("name") == "ions" for sp in species_list):
-            name = "ions"
-        else:
-            name = f"species_{si}"
 
-        species_list.append({
-            "name": name,
-            "charge": float(qv),
-            "mass": float(mv),
-            "positions": pos_s,
-            "velocities": vel_s,
-        })
+def gauss_residual(out):
+    """Relative violation of the discrete Gauss law at every stored step,
+    :math:`\\max_i |(E_{i+1/2} - E_{i-1/2})/\\Delta x - \\rho_i/\\epsilon_0| / \\max_i |\\rho_i/\\epsilon_0|`."""
+    E = out.E[:, :, 0]
+    div = (E - jnp.roll(E, 1, axis=1)) / out.dx
+    rhs = out.rho / epsilon_0
+    return jnp.max(jnp.abs(div - rhs), axis=1) / jnp.maximum(jnp.max(jnp.abs(rhs), axis=1), 1e-300)
 
-    output["species"] = species_list
 
-    # --- Preserve legacy memory behavior exactly ---
-    del output["positions"]
-    del output["velocities"]
-    del output["masses"]
-    del output["charges"]
+def temperatures(out):
+    """Temperature per species and component in eV, from the velocity variance
+    about the mean velocity: :math:`k_B T = m\\,\\mathrm{var}(v)`."""
+    result = {}
+    for i, name in enumerate(out.names):
+        sel = out.species == i
+        v = out.v[:, sel]
+        m = out.mass[sel] / out.weight[sel]
+        var = jnp.var(v, axis=1)
+        result[name] = m[0] * var / elementary_charge
+    return result
 
-    # CHANGED: Use reshape(-1) to flatten shape from (N, 1) to (N,)
-    # This allows broadcasting against velocity array of shape (Time, N)
-    mass_electrons_array = output["mass_electrons"].reshape(-1)
-    mass_ions_array      = output["mass_ions"].reshape(-1)
 
-    # --- All your existing energy/FFT/diagnostics code continues below unchanged ---
-    E_field_over_time = output['electric_field']
-    grid              = output['grid']
+def dominant_frequency(out):
+    """Angular frequency of the strongest peak of :math:`E_x` at the box centre."""
+    signal = out.E[:, out.E.shape[1] // 2, 0]
+    signal = signal - jnp.mean(signal)
+    spectrum = jnp.abs(jnp.fft.rfft(signal))
+    dt = out.t[1] - out.t[0] if out.t.shape[0] > 1 else out.dt
+    freqs = 2 * jnp.pi * jnp.fft.rfftfreq(signal.shape[0], d=dt)
+    return freqs[jnp.argmax(spectrum[1:]) + 1]
 
-    # Make sure these are plain Python scalars for indexing / fftfreq
-    total_steps_val = output['total_steps']
-    dt_val          = output['dt']
 
-    # Coerce JAX scalars or numpy scalars to Python ints/floats
-    total_steps = int(total_steps_val)
-    dt          = float(dt_val)
-
-    # Now safe to use in len/indexing/XLA primitives on all Python versions
-    # (including 3.8)
-    # ------------------------------------------------------------------
-    # FFT-based dominant frequency at the middle grid point
-    array_to_do_fft_on = E_field_over_time[:, len(grid)//2, 0]
-    array_to_do_fft_on = (array_to_do_fft_on - jnp.mean(array_to_do_fft_on)) / jnp.max(array_to_do_fft_on)
-    plasma_frequency = output['plasma_frequency']
-
-    half = total_steps // 2
-    fft_full = fft(array_to_do_fft_on)
-    fft_values = lax.slice(fft_full, (0,), (half,))
-    freqs = fftfreq(total_steps, d=dt)[:half] * 2 * jnp.pi
-    magnitude = jnp.abs(fft_values)
-    peak_index = jnp.argmax(magnitude)
-    dominant_frequency = jnp.abs(freqs[peak_index])
-
-    # def integrate(y, dx):
-    #     return 0.5 * (jnp.asarray(dx) * (y[..., 1:] + y[..., :-1])).sum(-1)
-    
-    def integrate(y, dx):
-        return jnp.sum(y, axis=-1) * dx
-
-    abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
-    abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
-    integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
-    integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dx'])
-
-    abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
-    abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
-    integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
-    integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
-
-    # CHANGED: Calculate v^2 per particle (sum over spatial dims x,y,z only)
-    # Shape becomes (Time, N_particles)
-    v_sq_electrons_per_particle = jnp.sum(output['velocity_electrons']**2, axis=-1)
-    v_sq_ions_per_particle      = jnp.sum(output['velocity_ions']**2,      axis=-1)
-
-    # CHANGED: Calculate KE = sum(0.5 * m_i * v_i^2)
-    # Mass (N,) broadcasts against V_sq (Time, N) -> Result (Time, N)
-    # Sum over axis=-1 (particles) -> Result (Time,)
-    total_ke_electrons = 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle, axis=-1)
-    total_ke_ions      = 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle,      axis=-1)
-    
-    # Debug print (optional, can be removed)
-    # print(mass_electrons_array) 
-
-    output.update({ 
-        'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
-        'electric_field_energy':         (epsilon_0/2) * integral_E_squared,
-        'magnetic_field_energy_density': 1/(2*mu_0)    * abs_B_squared,
-        'magnetic_field_energy':         1/(2*mu_0)    * integral_B_squared,
-        'dominant_frequency': dominant_frequency,
-        'plasma_frequency':   plasma_frequency,
-        
-        # Updated kinetic energy keys to use the corrected totals
-        'kinetic_energy':           total_ke_electrons + total_ke_ions,
-        'kinetic_energy_electrons': total_ke_electrons,
-        'kinetic_energy_ions':      total_ke_ions,
-        
-        'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
-        'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
-        'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
-        'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared
-    })
-
-    total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
-                    output["magnetic_field_energy"] + output["external_magnetic_field_energy"] +
-                    output["kinetic_energy"])
-
-    output.update({'total_energy': total_energy})
+def diagnostics(out):
+    """All of the above in one dictionary."""
+    result = energies(out)
+    result["gauss_residual"] = gauss_residual(out)
+    result["dominant_frequency"] = dominant_frequency(out)
+    if out.v is not None:
+        result["temperatures"] = temperatures(out)
+    return result

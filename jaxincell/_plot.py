@@ -1,894 +1,194 @@
-# jaxincell/_plot.py
-import os
-import shutil
+"""Animated overview figure of a simulation output."""
 import subprocess
-from functools import lru_cache
-
 import warnings
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Set
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.animation import FuncAnimation
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import LogNorm
-
-import jax.numpy as jnp
 
 __all__ = ["plot"]
 
-# ======================================================================================
-# Helpers (kept small + classroom-friendly)
-# ======================================================================================
+_AXIS = {"x": 0, "y": 1, "z": 2}
+_MAX_ELEMENTS = 2e8  # bound on the total size of the precomputed phase-space histograms
 
-_AXIS_TO_INDEX = {"x": 0, "y": 1, "z": 2}
-max_bins_phase_space = 251  # max number of velocity bins in phase space plots
-min_bins_phase_space = 111  # min number of velocity bins in phase space plots
 
-def _parse_direction(direction: str) -> List[str]:
+def _index(a, lo, hi, n):
+    """Bin index of ``a`` on ``n`` equal bins over ``[lo, hi]``, clipped to the edge bins."""
+    return np.clip(((a - lo) * (n / (hi - lo))).astype(np.int32), 0, n - 1)
+
+
+def _write_movie(fig, update, animated, frames, path, fps):
+    """Pipe raw frames to ffmpeg, redrawing only the artists that move.
+
+    Caching the static background once and blitting the handful of animated
+    artists onto it is what makes this quick: a full redraw of the figure costs
+    about 60 ms a frame, restoring the background and blitting about 6 ms.
     """
-    direction:
-      - "x"  -> ["x"]
-      - "xz" -> ["x","z"]
-      - "xy" -> ["x","y"]
-    """
-    if not isinstance(direction, str):
-        raise TypeError("direction must be a string like 'x' or 'xz'.")
-
-    direction = direction.strip().lower()
-    if len(direction) not in (1, 2) or any(c not in "xyz" for c in direction):
-        raise ValueError("direction must be one or two of 'x', 'y', or 'z' (e.g. 'x', 'xz').")
-
-    # Keep order, disallow duplicates like "xx"
-    dirs = list(direction)
-    if len(dirs) == 2 and dirs[0] == dirs[1]:
-        raise ValueError("direction with two letters must be distinct (e.g. 'xz', not 'xx').")
-    return dirs
-
-
-def _robust_abs_max(a, q: float = 99.0, eps: float = 1e-30) -> float:
-    """Robust symmetric scale: percentile(|a|)."""
-    an = np.asarray(a)
-    return float(max(np.percentile(np.abs(an), q), eps))
-
-
-def _robust_vmax_from_samples(v_tn: np.ndarray, q: float = 99.5, pad: float = 1.25, eps: float = 1e-30) -> float:
-    """
-    Robust symmetric velocity span based on percentile(|v|) across the provided samples.
-    This is what fixes the "ions look frozen because the v-axis is too wide" issue.
-    """
-    val = np.percentile(np.abs(v_tn), q)
-    return float(max(pad * val, eps))
-
-def _robust_vmax_clipped(
-    v_tn: np.ndarray,
-    q: float = 99.0,
-    pad: float = 1.20,
-    clip_multiple_of_median: float = 25.0,
-    eps: float = 1e-30,
-) -> float:
-    """
-    Robust symmetric velocity span that *clips* the percentile using a multiple of the median(|v|).
-
-    Why: if 0.01% of ions get fast (numerical heating / rare acceleration), a plain percentile can
-    still get too large and wash out the bulk ion dynamics visually.
-    """
-    a = np.abs(np.asarray(v_tn, dtype=np.float64)).ravel()
-    a = a[np.isfinite(a)]
-    if a.size == 0:
-        return eps
-    med = float(np.median(a))
-    p = float(np.percentile(a, q))
-    cap = clip_multiple_of_median * max(med, eps)
-    return float(max(pad * min(p, cap), eps))
-
-
-def _make_overlay_axes(fig: plt.Figure, ax_base: plt.Axes) -> plt.Axes:
-    """
-    Transparent axes placed exactly on top of ax_base. Used for instantaneous lines
-    so they don't "climb" on the time axis.
-    """
-    bb = ax_base.get_position()
-    ax_ov = fig.add_axes([bb.x0, bb.y0, bb.width, bb.height], frameon=False)
-    ax_ov.patch.set_alpha(0.0)
-    ax_ov.set_zorder(ax_base.get_zorder() + 10)
-
-    # Keep it visually clean: no ticks/labels (avoids clashes with the colorbar).
-    ax_ov.set_xticks([])
-    ax_ov.set_yticks([])
-    return ax_ov
-
-
-def _is_nonzero(field: jnp.ndarray, threshold: float) -> bool:
-    return bool(jnp.max(jnp.abs(field)) > threshold)
-
-
-def _combine_by_charge_sign(output: dict, want_negative: bool) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    """
-    Return (positions, velocities) for:
-      want_negative=True  -> all q < 0 (electrons + any extra negative species)
-      want_negative=False -> all q > 0 (ions + any extra positive species)
-
-    We try in order:
-      1) legacy split from diagnostics(): position_electrons/ions, velocity_electrons/ions
-      2) output["species"] list from diagnostics() (multi-species view)
-    """
-    if want_negative and ("position_electrons" in output) and ("velocity_electrons" in output):
-        return output["position_electrons"], output["velocity_electrons"]
-    if (not want_negative) and ("position_ions" in output) and ("velocity_ions" in output):
-        return output["position_ions"], output["velocity_ions"]
-
-    if "species" not in output:
-        raise RuntimeError(
-            "Could not find electron/ion velocities. "
-            "Call diagnostics(output) before plot(output)."
-        )
-
-    pos_list, vel_list = [], []
-    for sp in output["species"]:
-        q = float(sp["charge"])
-        if want_negative and q < 0:
-            pos_list.append(sp["positions"])
-            vel_list.append(sp["velocities"])
-        if (not want_negative) and q > 0:
-            pos_list.append(sp["positions"])
-            vel_list.append(sp["velocities"])
-
-    if not vel_list:
-        raise RuntimeError("No particles found for the requested charge sign.")
-    return jnp.concatenate(pos_list, axis=1), jnp.concatenate(vel_list, axis=1)
-
-@lru_cache(maxsize=1)
-def _ffmpeg_encoders_text() -> str:
-    """
-    Return the output of `ffmpeg -encoders` as a string, or "" if ffmpeg missing.
-    Cached so we only run the subprocess once.
-    """
-    if shutil.which("ffmpeg") is None:
-        return ""
+    original, canvas = fig.canvas, FigureCanvasAgg(fig)   # blitting needs an Agg canvas
+    for artist in animated:
+        artist.set_animated(True)                         # keep them out of the cached background
+    canvas.draw()
+    background = canvas.copy_from_bbox(fig.bbox)
+    width, height = canvas.get_width_height()
+    command = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
+               "-s", f"{width}x{height}", "-r", str(fps), "-i", "-", "-an", "-c:v", "libx264",
+               "-preset", "ultrafast", "-crf", "28", "-pix_fmt", "yuv420p",
+               "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(path)]
     try:
-        out = subprocess.check_output(
-            ["ffmpeg", "-hide_banner", "-encoders"],
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        return out
-    except Exception:
-        return ""
-
-
-def _ffmpeg_has_encoder(name: str) -> bool:
-    txt = _ffmpeg_encoders_text()
-    if not txt:
-        return False
-    # encoder lines typically contain: " V....D h264_videotoolbox ..."
-    return f" {name} " in txt or f"\t{name} " in txt
-
-
-def _auto_codec_order_for_mp4() -> List[str]:
-    """
-    Prefer codecs that are broadly playable by QuickTime / Windows players.
-    (H.264 first; HEVC only if explicitly requested or as a later fallback.)
-    """
-    candidates = [
-        # macOS hardware (fast + compatible)
-        "h264_videotoolbox",
-        # NVIDIA
-        "h264_nvenc",
-        # Intel QuickSync
-        "h264_qsv",
-        # AMD AMF (Windows)
-        "h264_amf",
-        # software fallback
-        "libx264",
-
-        # HEVC options (smaller, but more compatibility pitfalls)
-        "hevc_videotoolbox",
-        "hevc_nvenc",
-        "hevc_qsv",
-        "hevc_amf",
-        "libx265",
-    ]
-    return [c for c in candidates if _ffmpeg_has_encoder(c)]
-
-
-def _make_ffmpeg_writer_auto(
-    out_path: str,
-    fps: int,
-    crf: Optional[int],
-    preset: Optional[str],
-    pix_fmt: str = "yuv420p",
-    codec_override: Optional[str] = None,
-):
-    """
-    Auto-select codec + args optimized for small files *and* player compatibility.
-
-    Key compatibility rules:
-      - Force even dimensions (yuv420p/h264 common requirement).
-      - If HEVC in MP4, tag as hvc1 for QuickTime.
-    """
-    from matplotlib.animation import FFMpegWriter
-
-    ext = os.path.splitext(out_path)[1].lower()
-    if ext not in (".mp4", ".m4v", ".mov", ".webm"):
-        ext = ".mp4"
-
-    # Always force even pixel dims (Matplotlib dpi/figsize can produce odd sizes)
-    vf_even = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
-
-    if ext == ".webm":
-        codec = "libvpx-vp9" if _ffmpeg_has_encoder("libvpx-vp9") else "libx264"
-        extra = ["-vf", vf_even, "-pix_fmt", pix_fmt]
-        if codec == "libvpx-vp9":
-            q = crf if crf is not None else 38
-            extra = ["-b:v", "0", "-crf", str(q), "-row-mt", "1", "-speed", "4", "-vf", vf_even, "-pix_fmt", pix_fmt]
-        return FFMpegWriter(fps=fps, codec=codec, bitrate=-1, extra_args=extra)
-
-    # MP4 family: pick codec
-    if codec_override is not None:
-        if not _ffmpeg_has_encoder(codec_override):
-            raise RuntimeError(f"Requested codec '{codec_override}' not available in your ffmpeg.")
-        codec = codec_override
+        ffmpeg = subprocess.Popen(command, stdin=subprocess.PIPE)
+    except FileNotFoundError:
+        warnings.warn(f"ffmpeg was not found on PATH, so {path} was not written; install it, for "
+                      "example with `conda install -c conda-forge ffmpeg`", RuntimeWarning, stacklevel=3)
     else:
-        codecs = _auto_codec_order_for_mp4()
-        codec = codecs[0] if codecs else "libx264"
-
-    # Defaults
-    if preset is None:
-        preset = "veryfast" if codec in ("libx264", "libx265") else None
-
-    if crf is None:
-        crf = 32 if ("hevc" in codec or codec == "libx265") else 30
-
-    # MP4 tags for Apple players
-    tag_args: List[str] = []
-    if "hevc" in codec or codec == "libx265":
-        tag_args = ["-tag:v", "hvc1"]  # QuickTime compatibility for HEVC in MP4 
-    elif "h264" in codec or codec == "libx264":
-        tag_args = ["-tag:v", "avc1"]
-
-    extra_args: List[str] = ["-vf", vf_even, "-pix_fmt", pix_fmt, "-movflags", "+faststart"] + tag_args
-
-    if codec in ("libx264", "libx265"):
-        if preset is not None:
-            extra_args = ["-preset", preset] + extra_args
-        extra_args = ["-crf", str(crf)] + extra_args
-    else:
-        # Hardware encoders: CRF support varies; keep it conservative.
-        # If you want *smallest* with HEVC, prefer libx265 (slower but predictable).
-        pass
-
-    return FFMpegWriter(fps=fps, codec=codec, bitrate=-1, extra_args=extra_args)
+        for i in frames:
+            canvas.restore_region(background)
+            update(i)
+            for artist in animated:
+                fig.draw_artist(artist)
+            canvas.blit(fig.bbox)
+            ffmpeg.stdin.write(canvas.buffer_rgba())
+        ffmpeg.stdin.close()
+        ffmpeg.wait()
+    for artist in animated:
+        artist.set_animated(False)
+    fig.canvas = original
 
 
-def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray) -> np.ndarray:
-    """
-    PDF histogram for many frames, fast-ish numpy implementation.
-
-    v_frames_n: shape (F, N)
-    edges: shape (B+1,) covering the full plotting range
-    returns: pdf shape (F, B), with integral ~ 1 for each frame.
-    """
-    v = np.asarray(v_frames_n, dtype=np.float64)
-    F, N = v.shape
-    B = len(edges) - 1
-    if N == 0:
-        return np.zeros((F, B), dtype=np.float32)
-
-    # bin index in [0, B-1]
-    idx = np.searchsorted(edges, v, side="right") - 1
-    idx = np.clip(idx, 0, B - 1)
-
-    counts = np.zeros((F, B), dtype=np.float32)
-    f_idx = np.repeat(np.arange(F, dtype=np.int32), N)
-    np.add.at(counts, (f_idx, idx.reshape(-1)), 1.0)
-
-    widths = np.diff(edges).astype(np.float32)
-    pdf = counts / (N * widths[None, :])
-    return pdf
+def _hist(codes, shape):
+    """Histogram of combined integer codes, e.g. ``(frame * nv + iv) * nx + ix``, as float32."""
+    return np.bincount(codes.ravel(), minlength=int(np.prod(shape))).reshape(shape).astype(np.float32)
 
 
-@dataclass
-class _PrecomputedPhaseSpace:
-    # counts per frame, shape (F, Xbins, Vbins)
-    e_counts: np.ndarray
-    i_counts: np.ndarray
-    v_edges_e: np.ndarray
-    v_edges_i: np.ndarray
-    v_range_e: Tuple[float, float]
-    v_range_i: Tuple[float, float]
-    norm_e: LogNorm
-    norm_i: LogNorm
+def plot(out, direction="x", omega=None, save=None, fps=25, stride=1, dpi=80, interval=30,
+         show=True, vbins=96):
+    """Animate the fields, velocity distributions and phase space of a run.
 
-
-@dataclass
-class _PrecomputedPDF:
-    # pdf per frame, shape (F, B)
-    e_pdf: np.ndarray
-    i_pdf: np.ndarray
-    v_centers: np.ndarray
-    scale_e0: float
-    scale_i0: float
-
-def _pick_best_component_field(
-    output: dict,
-    field: str,
-    threshold: float,
-    allowed_axes: Optional[Set[str]] = None,
-) -> Optional[Tuple[str, np.ndarray]]:
-    """
-    Pick the component (x/y/z) of a vector field with the largest robust amplitude.
-    Optionally restrict to allowed_axes (e.g. set(dirs)).
-    Returns (component_letter, data_2d) or None if field missing/all ~0.
-    """
-    if field not in output:
-        return None
-
-    best = None
-    best_score = -np.inf
-
-    for comp_i, axis in enumerate("xyz"):
-        if allowed_axes is not None and axis not in allowed_axes:
-            continue
-        data = np.asarray(output[field][:, :, comp_i])
-        if np.max(np.abs(data)) <= threshold:
-            continue
-        score = _robust_abs_max(data, q=99.0)
-        if score > best_score:
-            best_score = score
-            best = (axis, data)
-
-    return best
-
-def _cbar_label_top(cb, text: str, fontsize: Optional[int] = None, pad: float = 6):
-    cb.ax.set_title(text, pad=pad)
-    # cb.set_label(text, rotation=0, labelpad=pad)
-    # cb.ax.xaxis.set_label_position("top")
-    # cb.ax.xaxis.set_ticks_position("default")
-    if fontsize is not None:
-        cb.ax.xaxis.label.set_size(fontsize)
-
-# ======================================================================================
-# Main plot()
-# ======================================================================================
-
-def plot(
-    output,
-    direction: str = "x",
-    threshold: float = 1e-12,
-    save_mp4: Optional[str] = None,
-    fps: int = 30,
-    dpi: int = 150,
-    show: bool = True,
-    animation_interval: int = 1,
-    save_stride: int = 1,          # downsample frames for saving only (1 = keep all)
-    save_dpi: Optional[int] = None,# if None, uses dpi; recommend 60 for small files
-    save_crf: Optional[int] = None,# if None, uses codec-dependent default (small)
-    save_preset: Optional[str] = None,  # for libx264/libx265 hardware encoders
-    save_codec: Optional[str] = None,  # e.g. "libx264", "h264_videotoolbox", "libx265", "hevc_videotoolbox"
-):
-    """Animated overview figure of a simulation output, optionally saved to MP4.
-
-    The figure contains space-time heat maps of the non-zero field components
-    and of the charge density, the velocity distributions of electrons and ions
-    (current frame solid, initial frame dashed), and the x-v phase space of each
-    species as a two-dimensional histogram with a logarithmic colour scale.
-    Colour limits are fixed over the whole run so that growth and decay are
-    visible. Works on the raw output of ``Simulation.run`` and on the dictionary
-    after ``diagnostics``; populations of the same charge sign are drawn together.
+    One figure, animated over the stored steps. It holds a space-time heat map
+    of every non-zero component of ``E`` and ``B`` and of the charge density,
+    with a line marking the current time and the instantaneous profile drawn
+    over it; the velocity distribution ``f(v)`` of each species (solid: current
+    step, dashed: initial step); and the ``x``-``v`` phase space of each species
+    as a histogram with a logarithmic colour scale. Colour limits and axes are
+    fixed over the whole run. Every per-frame array is computed once, up front,
+    so both the on-screen animation and the file are one render per frame.
 
     Args:
-        output (dict): Output of ``Simulation.run``, before or after ``diagnostics``.
-        direction (str): One or two of ``"x"``, ``"y"``, ``"z"`` (for example
-            ``"xz"``) selecting the velocity components shown in the distribution
-            and phase-space panels. The spatial axis is always x.
-        threshold (float): Field components whose largest absolute value is below
-            this are not plotted.
-        save_mp4 (str or None): File name of the MP4 to write with ``ffmpeg``;
-            ``None`` writes nothing.
+        out (Output): Result of :meth:`Simulation.run`.
+        direction (str): Velocity components to show, one or more of ``"x"``,
+            ``"y"``, ``"z"`` (for example ``"xz"``). The spatial axis is always x.
+        omega (float or None): Frequency (rad/s) that makes the time axis
+            dimensionless, labelled :math:`t\\,\\omega_{pe}`; ``None`` keeps seconds.
+        save (str or None): File name of the MP4 to write with ffmpeg (H.264).
         fps (int): Frames per second of the saved file.
-        dpi (int): Resolution of the on-screen figure.
-        show (bool): Call ``matplotlib.pyplot.show``.
-        animation_interval (int): Delay between frames in milliseconds on screen.
-        save_stride (int): Keep every n-th frame in the saved file.
-        save_dpi (int or None): Resolution of the saved file; ``None`` uses ``dpi``.
-        save_crf (int or None): Constant-rate-factor quality of the encoder; ``None``
-            uses a codec-dependent default.
-        save_preset (str or None): Encoder preset for ``libx264`` and ``libx265``.
-        save_codec (str or None): Encoder name such as ``"libx264"`` or
-            ``"h264_videotoolbox"``; ``None`` uses the first available one from a
-            list that prefers hardware H.264 encoders.
+        stride (int): Keep every n-th stored step in the saved file.
+        dpi (int): Resolution of the figure, on screen and in the file.
+        interval (int): Delay between frames of the on-screen animation, ms.
+        show (bool): Call :func:`matplotlib.pyplot.show`; without ``save`` the
+            figure animates on screen and the animation is kept in ``fig.animation``.
+        vbins (int): Number of velocity bins; reduced if the histograms of all
+            stored steps would exceed about ``2e8`` elements.
 
     Returns:
-        None. The figure is shown and/or written to ``save_mp4``.
+        matplotlib.figure.Figure: The figure, drawn at the last frame written
+        (or at the first stored step when nothing was saved).
     """
-    # ----------------------------
-    # Parse directions and basic arrays
-    # ----------------------------
-    dirs = _parse_direction(direction)
-    dir_indices = [_AXIS_TO_INDEX[d] for d in dirs]
+    dirs = direction.lower()
+    if not dirs or any(c not in _AXIS for c in dirs):
+        raise ValueError("direction must be one or more of 'x', 'y', 'z', e.g. 'xz'")
+    t, grid, rho = np.asarray(out.t, float), np.asarray(out.grid, float), np.asarray(out.rho, float)
+    S, G, L, dx = len(t), len(grid), float(out.length), float(out.dx)
+    tt, tlabel, tfmt = ((t * float(omega), r"$t\,\omega_{pe}$", r"$t\,\omega_{pe}$ = %.3g") if omega
+                        else (t, "t (s)", "t = %.3g s"))
+    h = (tt[-1] - tt[0]) / max(S - 1, 1) or 1.0
+    extent = (grid[0] - dx / 2, grid[-1] + dx / 2, tt[0] - h / 2, tt[-1] + h / 2)
 
-    grid = np.asarray(output["grid"])
-    time = np.asarray(output["time_array"]) * float(np.asarray(output["plasma_frequency"]))
-    total_steps = int(output["total_steps"])
-    box_size_x = float(output["length"])
+    fields = []  # (title, (S, G) array, unit) for every non-zero field component
+    for name, F, unit in (("E", out.E, "V/m"), ("B", out.B, "T")):
+        F = np.asarray(F, float)
+        for c in "xyz":
+            if np.abs(F[:, :, _AXIS[c]]).max() > 1e-12:
+                fields.append((rf"${name}_{c}$", F[:, :, _AXIS[c]], unit))
+    fields.append((r"$\rho$", rho, r"C/m$^3$"))
 
-    # frames we will actually render
-    nframes = int(len(time))
-
-    # SHOW: always every simulation frame
-    frames_show = np.arange(nframes, dtype=np.int32)
-
-    # SAVE: can downsample independently for smaller/faster files
-    save_stride = max(1, int(save_stride))
-    frames_save = np.arange(0, nframes, save_stride, dtype=np.int32)
-
-
-    # multi-species safe combined arrays
-    pos_e, vel_e = _combine_by_charge_sign(output, want_negative=True)
-    pos_i, vel_i = _combine_by_charge_sign(output, want_negative=False)
-
-    # to numpy for plotting/hist
-    x_e = np.asarray(pos_e[:, :, 0])  # spatial axis is always x in this codebase
-    x_i = np.asarray(pos_i[:, :, 0])
-
-    # ----------------------------
-    # Decide which heatmaps to show (CURRENT DENSITY REMOVED by request)
-    # ----------------------------
-    heatmaps = []
-
-    def add_vector_field(field: str, unit: str, label_prefix: str, components: str = "xyz"):
-        if field not in output:
-            return
-        for axis in components:
-            comp_i = _AXIS_TO_INDEX[axis]
-            data = output[field][:, :, comp_i]
-            if _is_nonzero(data, threshold):
-                heatmaps.append(
-                    dict(
-                        field=field,
-                        component=axis,
-                        data=np.asarray(data),
-                        title=f"{label_prefix} in the {axis} direction",
-                        xlabel="x Position (m)",
-                        ylabel=r"Time ($\omega_{pe}^{-1}$)",
-                        cbar=f"({unit})",
-                    )
-                )
-
-    add_vector_field("electric_field", "V/m", "Electric Field", components="xyz")
-    add_vector_field("magnetic_field", "T", "Magnetic Field", components="xyz")
-
-    # Add ONE current-density panel ONLY if magnetic-field is also plotted in these directions
-    has_B = any(hm["field"] == "magnetic_field" for hm in heatmaps)
-    if has_B:
-        best_J = _pick_best_component_field(output, "current_density", threshold, allowed_axes=None)
-        if best_J is not None:
-            axis, data = best_J
-            heatmaps.append(
-                dict(
-                    field="current_density",
-                    component=axis,
-                    data=data,
-                    title=f"Current Density in the {axis} direction",
-                    xlabel="x Position (m)",
-                    ylabel=r"Time ($\omega_{pe}^{-1}$)",
-                    cbar=r"(A/m$^2$)",
-                )
-            )
-
-    # charge density always
-    if "charge_density" in output:
-        heatmaps.append(
-            dict(
-                field="charge_density",
-                component=None,
-                data=np.asarray(output["charge_density"]),
-                title="Charge Density",
-                xlabel="x Position (m)",
-                ylabel=r"Time ($\omega_{pe}^{-1}$)",
-                cbar=r"(C/m$^3$)",
-            )
-        )
-
-    # ----------------------------
-    # Precompute PDFs + phase space for each requested velocity component
-    # ----------------------------
-    bins_v = int(max(min_bins_phase_space, min(max_bins_phase_space, len(grid))))
-    bins_x = int(len(grid))
-
-    pre_pdf: Dict[str, _PrecomputedPDF] = {}
-    pre_ps: Dict[str, _PrecomputedPhaseSpace] = {}
-
-    for d, di in zip(dirs, dir_indices):
-        ve = np.asarray(vel_e[:, :, di])
-        vi = np.asarray(vel_i[:, :, di])
-
-        # Robust velocity spans (THIS fixes ion "no dynamics" view)
-        # electrons: keep wide enough (fast physics)
-        vmax_e = _robust_vmax_from_samples(ve, q=99.5, pad=1.25)
-
-        # ions: tighter, clipped to avoid rare fast-ion outliers destroying contrast
-        vmax_i = _robust_vmax_clipped(vi, q=99.0, pad=1.20, clip_multiple_of_median=25.0)
-
-        v_edges_e = np.linspace(-vmax_e, vmax_e, bins_v + 1)
-        v_edges_i = np.linspace(-vmax_i, vmax_i, bins_v + 1)
-
-        # Use a single common v_centers for plotting the two species:
-        # choose the wider range and interpolate the narrower if needed (keep simple: common = max span)
-        vmax_common = max(vmax_e, vmax_i)
-        v_edges = np.linspace(-vmax_common, vmax_common, bins_v + 1)
-        v_centers = 0.5 * (v_edges[:-1] + v_edges[1:])
-
-        # PDFs over rendered frames only
-        e_pdf = _pdf_over_frames_numpy(ve, v_edges)
-        i_pdf = _pdf_over_frames_numpy(vi, v_edges)
-
-        # Scale each species by its INITIAL max (axis fixed; bump/drift shows naturally)
-        scale_e0 = float(max(np.max(e_pdf[0]), 1e-30))
-        scale_i0 = float(max(np.max(i_pdf[0]), 1e-30))
-
-        pre_pdf[d] = _PrecomputedPDF(
-            e_pdf=e_pdf,
-            i_pdf=i_pdf,
-            v_centers=v_centers,
-            scale_e0=scale_e0,
-            scale_i0=scale_i0,
-        )
-
-        # Phase space histograms over rendered frames only
-        x_range = (-box_size_x / 2, box_size_x / 2)
-        v_range_e = (-vmax_e, vmax_e)
-        v_range_i = (-vmax_i, vmax_i)
-
-        e_counts = np.empty((nframes, bins_x, bins_v), dtype=np.float32)
-        i_counts = np.empty((nframes, bins_x, bins_v), dtype=np.float32)
-
-        for t in range(nframes):
-            e_counts[t] = np.histogram2d(
-                x_e[t], ve[t],
-                bins=[bins_x, bins_v],
-                range=[x_range, v_range_e],
-            )[0].astype(np.float32)
-
-            i_counts[t] = np.histogram2d(
-                x_i[t], vi[t],
-                bins=[bins_x, bins_v],
-                range=[x_range, v_range_i],
-            )[0].astype(np.float32)
-
-
-        # LogNorm for visibility at low counts (add 1 in the images)
-        e_vmax = float(max(np.percentile(e_counts + 1.0, 99.5), 2.0))
-        i_vmax = float(max(np.percentile(i_counts + 1.0, 99.5), 2.0))
-        norm_e = None#LogNorm(vmin=1.0, vmax=e_vmax)
-        norm_i = None#LogNorm(vmin=1.0, vmax=i_vmax)
-
-        pre_ps[d] = _PrecomputedPhaseSpace(
-            e_counts=e_counts,
-            i_counts=i_counts,
-            v_edges_e=v_edges_e,
-            v_edges_i=v_edges_i,
-            v_range_e=v_range_e,
-            v_range_i=v_range_i,
-            norm_e=norm_e,
-            norm_i=norm_i,
-        )
-
-    # ----------------------------
-    # Layout (heatmaps + f(v) panels + phase space panels + energy)
-    # ----------------------------
-    ncols = 3
-    n_heat = len(heatmaps)
-    n_fv = len(dirs)              # one f(v) panel per requested velocity component
-    n_ps = 2 * len(dirs)          # electron + ion phase space per component
-    n_energy = 1                  # if there is space
-    n_total = n_heat + n_fv + n_ps + n_energy
-    nrows = int(np.ceil(n_total / ncols))
-
-    base_w = 5.5   # per column
-    base_h = 3.0  # per row
-    fig_w = min(15.0, base_w * ncols)  # ncols=3 -> ~11.7
-    fig_h = min(9.0, base_h * nrows)   # cap height so it fits
-
-    fig, axes = plt.subplots(nrows, ncols, figsize=(fig_w, fig_h), squeeze=False)
-
-    # ---- draw heatmaps with fixed clim (robust over the whole run) ----
-    B_heat_axes: Dict[Tuple[str, str], plt.Axes] = {}
-    J_heat_axes: Dict[Tuple[str, str], plt.Axes] = {}
-    E_heat_axes: Dict[Tuple[str, str], plt.Axes] = {}  # (field, component) -> ax
-    heatmap_images = []
-    idx = 0
-    for hm in heatmaps:
-        r, c = divmod(idx, ncols)
-        ax = axes[r, c]
-        data = hm["data"]
-
-        vlim = _robust_abs_max(data, q=99.0)
-        im = ax.imshow(
-            data,
-            aspect="auto",
-            cmap="RdBu",
-            origin="lower",
-            extent=[grid[0], grid[-1], time[0], time[-1]],
-            vmin=-vlim,
-            vmax=vlim,
-        )
-        ax.set_title(hm["title"])
-        ax.set_xlabel(hm["xlabel"])
-        ax.set_ylabel(hm["ylabel"])
-        cb = fig.colorbar(im, ax=ax, fraction=0.038, pad=0.02)
-        _cbar_label_top(cb, hm["cbar"])
-
-        heatmap_images.append(im)
-
-        if hm["field"] == "electric_field" and hm["component"] is not None:
-            E_heat_axes[(hm["field"], hm["component"])] = ax
-        if hm["field"] == "magnetic_field" and hm["component"] is not None:
-            B_heat_axes[(hm["field"], hm["component"])] = ax
-        if hm["field"] == "current_density" and hm["component"] is not None:
-            J_heat_axes[(hm["field"], hm["component"])] = ax
-
-        idx += 1
-
-    # ---- f(v) panels (clean line plots; replaces current density subplot) ----
-    fv_axes: Dict[str, plt.Axes] = {}
-    fv_lines: Dict[str, Dict[str, plt.Line2D]] = {}  # d -> {"e":..., "i":..., "e0":..., "i0":...}
-    fv_time_text: Dict[str, plt.Text] = {}
-
-    # global velocity extent for f(v) x-axes (use the largest across requested components)
-    vmax_global_fv = max(float(np.max(np.abs(pre_pdf[d].v_centers))) for d in dirs)
+    # Particles: species by out.species, absorbed (charge == 0) ones excluded.
+    have = out.x is not None and out.v is not None
+    species, alive = np.asarray(out.species), np.asarray(out.charge) != 0
+    groups = [(n, (species == k) & alive) for k, n in enumerate(out.names)] if have else []
+    groups = [(n, m) for n, m in groups if m.any()]
+    dirs = dirs if groups else ""
+    vbins = max(8, min(int(vbins), int(_MAX_ELEMENTS // max(1, S * G * len(groups) * len(dirs)))))
+    frame = np.arange(S, dtype=np.int32)[:, None]
+    ix = [_index(np.asarray(out.x)[:, m, 0], -L / 2, L / 2, G) for _, m in groups]
+    fv, ps, vmax, span = {}, {}, {}, {}  # keyed by direction (and species index)
     for d in dirs:
-        r, c = divmod(idx, ncols)
-        ax = axes[r, c]
-        fv_axes[d] = ax
+        vs = [np.asarray(out.v)[:, m, _AXIS[d]] for _, m in groups]
+        vmax[d] = [1.25 * float(np.percentile(np.abs(v), 99.5)) or 1.0 for v in vs]
+        span[d] = max(vmax[d])
+        for k, v in enumerate(vs):
+            iv = _index(v, -vmax[d][k], vmax[d][k], vbins)
+            ps[k, d] = _hist((frame * vbins + iv) * G + ix[k], (S, vbins, G)) + 1.0
+            f = _hist(frame * vbins + _index(v, -span[d], span[d], vbins), (S, vbins))
+            fv[k, d] = f / max(float(f[0].max()), 1.0)
 
-        pdf = pre_pdf[d]
-        v = pdf.v_centers
+    n = len(fields) + len(dirs) * (1 + len(groups))
+    rows = -(-n // 3)
+    fig, axes = plt.subplots(rows, 3, figsize=(15, min(10.0, 3.2 * rows)), dpi=dpi, squeeze=False)
+    axes = list(axes.ravel())
+    images, lines = [], []  # (artist, per-frame array) pairs updated by ``update``
 
-        # initial dashed
-        (l_e0,) = ax.plot(v, pdf.e_pdf[0] / pdf.scale_e0, linestyle="--", linewidth=1.8, label="e− (initial)")
-        (l_i0,) = ax.plot(v, pdf.i_pdf[0] / pdf.scale_i0, linestyle="--", linewidth=1.8, label="i+ (initial)")
-
-        # current solid (initialized at frame 0)
-        (l_e,) = ax.plot(v, pdf.e_pdf[0] / pdf.scale_e0, linewidth=2.4, label="e−")
-        (l_i,) = ax.plot(v, pdf.i_pdf[0] / pdf.scale_i0, linewidth=2.4, label="i+")
-
-        ax.set_title(rf"Distribution functions $f(v_{d})$")
-        ax.set_xlabel(rf"$v_{d}$ (m/s)")
-        ax.set_ylabel(r"$f(v)/\max(f_0)$")
-        ax.set_ylim(0.0, 1.10)
-        ax.legend(fontsize=8, frameon=False, loc="upper right")
-        ax.set_xlim(-vmax_global_fv, vmax_global_fv)
-        ax.set_xticks(np.linspace(-vmax_global_fv, vmax_global_fv, 5))
-
-        txt = ax.text(
-            0.15, 0.92, "", transform=ax.transAxes,
-            ha="center", va="top", fontsize=11,
-            bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
-        )
-
-        for artist in (l_e0, l_i0, l_e, l_i, txt):
-            artist.set_animated(True)
-
-        fv_lines[d] = {"e": l_e, "i": l_i, "e0": l_e0, "i0": l_i0}
-        fv_time_text[d] = txt
-
-        idx += 1
-
-    # ---- phase space panels (x vs v_d) for each d ----
-    ps_images: Dict[str, Dict[str, plt.Axes]] = {}
-    ps_ims: Dict[str, Dict[str, any]] = {}  # d -> {"e": im, "i": im}
-    ps_time_text: Dict[str, plt.Text] = {}
+    for title, F, unit in fields:
+        ax = axes.pop(0)
+        lim = float(np.percentile(np.abs(F), 99.5)) or 1.0
+        im = ax.imshow(F, cmap="RdBu_r", vmin=-lim, vmax=lim, aspect="auto", origin="lower",
+                       extent=extent, interpolation="nearest")
+        fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02).set_label(unit)
+        lines.append((ax.axhline(tt[0], color="k", lw=0.8, ls="--"), np.stack([tt, tt], 1)))
+        line, = ax.plot(grid, 0.5 + 0 * grid, "k", lw=1.2, transform=ax.get_xaxis_transform())
+        lines.append((line, 0.5 + 0.475 * np.clip(F / lim, -1, 1)))
+        ax.set(title=title, xlabel="x (m)", ylabel=tlabel, xlim=extent[:2], ylim=extent[2:])
 
     for d in dirs:
-        # electrons
-        r, c = divmod(idx, ncols)
-        ax_e = axes[r, c]
-        ps_images.setdefault(d, {})["e_ax"] = ax_e
+        ax = axes.pop(0)
+        vc = np.linspace(-span[d], span[d], 2 * vbins + 1)[1::2]
+        for k, (name, _) in enumerate(groups):
+            ax.plot(vc, fv[k, d][0], "--", color=f"C{k}", lw=1)
+            lines.append((ax.plot(vc, fv[k, d][0], color=f"C{k}", lw=2, label=name)[0], fv[k, d]))
+        ax.legend(frameon=False, fontsize=8)
+        ax.set(title=rf"$f(v_{d})$ (dashed: initial)", xlabel=rf"$v_{d}$ (m/s)",
+               ylabel=r"$f/\max f_0$", xlim=(-span[d], span[d]), ylim=(0, 1.1))
 
-        ps = pre_ps[d]
-        im_e = ax_e.imshow(
-            (ps.e_counts[0] + 1.0).T,
-            aspect="auto",
-            origin="lower",
-            cmap="twilight",
-            extent=[-box_size_x / 2, box_size_x / 2, ps.v_range_e[0], ps.v_range_e[1]],
-            norm=ps.norm_e,
-        )
-        ax_e.set_title(rf"Electron phase space $(x, v_{d})$")
-        ax_e.set_xlabel("x (m)")
-        ax_e.set_ylabel(rf"$v_{d}$ (m/s)")
-        cb = fig.colorbar(im_e, ax=ax_e, fraction=0.038, pad=0.02)
-        _cbar_label_top(cb, "counts")
+    for d in dirs:
+        for k, (name, _) in enumerate(groups):
+            ax = axes.pop(0)
+            C = ps[k, d]
+            im = ax.imshow(C[0], cmap="magma", norm=LogNorm(1.0, float(C.max())), aspect="auto",
+                           origin="lower", interpolation="nearest",
+                           extent=(-L / 2, L / 2, -vmax[d][k], vmax[d][k]))
+            fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02).set_label("counts + 1")
+            images.append((im, C))
+            ax.set(title=rf"{name}: $(x, v_{d})$", xlabel="x (m)", ylabel=rf"$v_{d}$ (m/s)")
 
-        idx += 1
+    for ax in axes:
+        ax.axis("off")
+    text = fig.suptitle("")
 
-        # ions
-        r, c = divmod(idx, ncols)
-        ax_i = axes[r, c]
-        ps_images.setdefault(d, {})["i_ax"] = ax_i
+    def update(i):
+        for im, data in images:
+            im.set_array(data[i])
+        for line, y in lines:
+            line.set_ydata(y[i])
+        text.set_text(tfmt % tt[i])
 
-        im_i = ax_i.imshow(
-            (ps.i_counts[0] + 1.0).T,
-            aspect="auto",
-            origin="lower",
-            cmap="twilight",
-            extent=[-box_size_x / 2, box_size_x / 2, ps.v_range_i[0], ps.v_range_i[1]],
-            norm=ps.norm_i,
-        )
-        ax_i.set_title(rf"Ion phase space $(x, v_{d})$")
-        ax_i.set_xlabel("x (m)")
-        ax_i.set_ylabel(rf"$v_{d}$ (m/s)")
-        cb = fig.colorbar(im_i, ax=ax_i, fraction=0.038, pad=0.02)
-        _cbar_label_top(cb, "counts")
-
-        idx += 1
-
-        # one shared time label (put it on electron panel of the first direction)
-        if d == dirs[0]:
-            txt = ax_e.text(
-                0.15, 0.92, "", transform=ax_e.transAxes,
-                ha="center", va="top", fontsize=11,
-                bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
-            )
-            txt.set_animated(True)
-            ps_time_text[d] = txt
-
-        im_e.set_animated(True)
-        im_i.set_animated(True)
-        ps_ims[d] = {"e": im_e, "i": im_i}
-
-    # ---- energy panel (static) ----
-    # If we ran out of axes, just skip.
-    axes_flat = np.ravel(axes)
-    if idx < len(axes_flat) and all(k in output for k in ("total_energy", "electric_field_energy", "kinetic_energy_electrons", "kinetic_energy_ions")):
-        ax_en = axes_flat[idx]
-        ax_en.plot(time, np.asarray(output["total_energy"]), label="Total energy")
-        ax_en.plot(time, np.asarray(output["kinetic_energy_electrons"]), label="Kinetic energy electrons")
-        ax_en.plot(time, np.asarray(output["kinetic_energy_ions"]), label="Kinetic energy ions")
-        ax_en.plot(time, np.asarray(output["electric_field_energy"]), label="Electric field energy")
-        if "magnetic_field_energy" in output and np.max(np.asarray(output["magnetic_field_energy"])) > 1e-12:
-            ax_en.plot(time, np.asarray(output["magnetic_field_energy"]), label="Magnetic field energy")
-
-        # relative energy error
-        te = np.asarray(output["total_energy"])
-        denom = float(max(abs(te[0]), 1e-30))
-        ax_en.plot(time[1:], np.abs(te[1:] - te[0]) / denom, label="Relative energy error")
-
-        ax_en.set_title("Energy")
-        ax_en.set_xlabel(r"Time ($\omega_{pe}^{-1}$)")
-        ax_en.set_ylabel("Energy (J)")
-        ax_en.set_yscale("log")
-        ax_en.legend(fontsize=8, frameon=False)
-        idx += 1
-
-    # Hide any unused axes
-    for j in range(idx, len(axes_flat)):
-        axes_flat[j].axis("off")
-
-    # Tight layout BEFORE overlays (prevents the "not centered" + overlay misalignment issues)
+    update(0)
     fig.tight_layout()
-    fig.canvas.draw()
-    fig.subplots_adjust(wspace=0.25, hspace=0.75)
-    fig.canvas.draw()
 
-    # ----------------------------
-    # Instantaneous overlays on heatmaps: E, B, J
-    # ----------------------------
-    Field_overlays: List[Tuple[plt.Line2D, np.ndarray, plt.Text]] = []
-
-    def _add_overlays_for(field_name: str, axes_dict: Dict[Tuple[str, str], plt.Axes]):
-        for (_, comp), ax in axes_dict.items():
-            comp_i = _AXIS_TO_INDEX[comp]
-            F_all = np.asarray(output[field_name][:, :, comp_i])  # (T, X)
-            F_scale = _robust_abs_max(F_all, q=99.0)
-            F_lines = np.clip(F_all / F_scale, -1.0, 1.0)
-
-            ax_ov = _make_overlay_axes(fig, ax)
-            (line,) = ax_ov.plot(grid, F_lines[0], color="black", linewidth=2.4, alpha=0.95)
-            ax_ov.set_xlim(grid[0], grid[-1])
-            ax_ov.set_ylim(-1.05, 1.05)
-
-            txt = ax_ov.text(
-                0.15, 0.92, "", transform=ax_ov.transAxes,
-                ha="center", va="top", fontsize=10,
-                bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
-            )
-
-            line.set_animated(True)
-            txt.set_animated(True)
-            Field_overlays.append((line, F_lines, txt))
-
-    _add_overlays_for("electric_field", E_heat_axes)
-    _add_overlays_for("magnetic_field", B_heat_axes)
-    _add_overlays_for("current_density", J_heat_axes)
-
-    # ----------------------------
-    # Animation update
-    # ----------------------------
-    def _render_at_time_index(t: int):
-        artists = []
-
-        # phase space updates
-        for d in dirs:
-            ps = pre_ps[d]
-            ps_ims[d]["e"].set_array((ps.e_counts[t] + 1.0).T)
-            ps_ims[d]["i"].set_array((ps.i_counts[t] + 1.0).T)
-            artists += [ps_ims[d]["e"], ps_ims[d]["i"]]
-
-        # time label (only once)
-        if dirs[0] in ps_time_text:
-            ps_time_text[dirs[0]].set_text(f"Time: {time[t]:.2f} ωₚ")
-            artists.append(ps_time_text[dirs[0]])
-
-        # distribution function updates (solid curves only)
-        for d in dirs:
-            pdf = pre_pdf[d]
-            fv_lines[d]["e"].set_ydata(pdf.e_pdf[t] / pdf.scale_e0)
-            fv_lines[d]["i"].set_ydata(pdf.i_pdf[t] / pdf.scale_i0)
-            fv_time_text[d].set_text(f"t = {time[t]:.2f} ωₚ")
-            artists += [fv_lines[d]["e"], fv_lines[d]["i"], fv_time_text[d]]
-            artists += [fv_lines[d]["e0"], fv_lines[d]["i0"]]
-
-        # E overlays
-        for line, F_lines, txt in Field_overlays:
-            line.set_ydata(F_lines[t])
-            txt.set_text(f"t = {time[t]:.2f} ωₚ")
-            artists += [line, txt]
-
-        return artists
-
-
-    def update_show(frame_i: int):
-        t = int(frames_show[frame_i])
-        return _render_at_time_index(t)
-
-    # SHOW animation (always every frame)
-    ani_show = FuncAnimation(
-        fig, update_show,
-        frames=len(frames_show),
-        blit=True,
-        interval=animation_interval,
-        repeat_delay=800,
-    )
-
-    # SAVE (optional): make a separate animation with its own frame list
-    if save_mp4 is not None:
-        try:
-            save_dpi_eff = dpi if save_dpi is None else int(save_dpi)
-
-            def update_save(frame_i: int):
-                t = int(frames_save[frame_i])
-                return _render_at_time_index(t)
-
-            ani_save = FuncAnimation(
-                fig, update_save,
-                frames=len(frames_save),
-                blit=True,
-                interval=animation_interval,  # doesn't matter much for saving
-                repeat_delay=800,
-            )
-
-            writer = _make_ffmpeg_writer_auto(
-                out_path=save_mp4,
-                fps=fps,
-                crf=save_crf,
-                preset=save_preset,
-                codec_override=save_codec,
-            )
-            ani_save.save(save_mp4, writer=writer, dpi=save_dpi_eff)
-            print(f"Saved animation to: {save_mp4}")
-        except Exception as e:
-            warnings.warn(
-                "Failed to save video. This usually means ffmpeg is not installed or not on PATH.\n"
-                f"Error was: {e}\n"
-                "Install ffmpeg (e.g. `conda install -c conda-forge ffmpeg`) and try again.",
-                RuntimeWarning,
-            )
-
-
+    if save is not None:
+        _write_movie(fig, update, [a for a, _ in images] + [a for a, _ in lines] + [text],
+                     range(0, S, max(1, int(stride))), save, fps)
+    elif show:
+        fig.animation = FuncAnimation(fig, update, frames=S, interval=interval, blit=False)
     if show:
         plt.show()
-    else:
-        plt.close(fig)
+    return fig
