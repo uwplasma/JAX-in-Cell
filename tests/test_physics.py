@@ -351,3 +351,69 @@ def test_an_external_magnetic_field_magnetises_the_plasma():
     # without the external field there is nothing to rotate into z
     plain = Simulation(domain, [e, i], Solver(filter_passes=0)).run(400, seed=0)
     assert float(np.abs(np.asarray(plain.v[:, :n, 2])).max()) == 0.0
+
+
+def test_absorbing_walls_build_a_sheath_and_float_the_plasma():
+    """A plasma between two absorbing walls charges them negative until the
+    electron flux is throttled to the ion flux. What is left is a quasi-neutral
+    bulk joined to each wall by a positively charged layer a few Debye lengths
+    thick, with the bulk floating above the walls by about
+    (T_e/2e) ln(m_i/2 pi m_e) and the ions entering the sheath at the Bohm speed
+    c_s = sqrt(T_e/m_i) (Bohm 1949; Lieberman and Lichtenberg, section 6.2).
+
+    Absorbing walls are conductors short-circuited to one another, so both stay
+    at the same potential -- the standard bounded-plasma closure (Verboncoeur,
+    J. Comput. Phys. 104, 321, 1993).
+
+    The band on the drop is deliberately wide. The formula assumes a Maxwellian
+    tail and m_i >> m_e, and this run has neither: nothing sustains the plasma, so
+    the walls take the tail the flux balance is derived from, and the mass ratio is
+    reduced to 100 to bring the ion transit within a test. Each shifts the answer by
+    tens of per cent, in opposite directions -- at 100 it comes out high, at the 400
+    of examples/sheath.py it comes out low. What is checked sharply is the structure
+    that has no free parameters: the two walls sitting at one potential, a charged
+    layer at each of them with a neutral bulk between, and ions leaving at the Bohm
+    speed.
+    """
+    from jaxincell import potential, quiet_start
+
+    T_e, density, mass_ratio, n, cells = 1.0, 1e16, 100.0, 20000, 120
+    v_th = np.sqrt(2 * T_e * elementary_charge / mass_electron)
+    omega_pe = np.sqrt(density * elementary_charge ** 2 / (epsilon_0 * mass_electron))
+    debye = v_th / (np.sqrt(2) * omega_pe)
+    length = 60 * debye
+    v_th_ion = v_th * np.sqrt(1 / (40 * mass_ratio))
+    x, v = quiet_start(n, length, vth=(v_th, 0, 0))
+    electrons = Species.electrons(n=n, density=density, vth=(v_th, 0, 0)).replace(x=x, v=v)
+    x, v = quiet_start(n, length, vth=(v_th_ion, 0, 0))
+    ions = Species("ions", n, 1.0, mass_ratio * mass_electron, density,
+                   (v_th_ion, 0, 0)).replace(x=x, v=v)
+    domain = Domain(length=length, cells=cells, particle_bc="absorbing", field_bc="absorbing",
+                    dt_over_dx_c=(0.2 / omega_pe) * c / (length / cells))
+    out = Simulation(domain, [electrons, ions], Solver(filter_passes=4)).run(1500, seed=0,
+                                                                            store_every=50)
+    phi = np.asarray(potential(out))
+    v_x = np.asarray(out.v[..., 0])
+    bulk = np.abs(np.asarray(out.x[:, :n, 0])) < length / 5
+    T_bulk = np.array([mass_electron * np.var(v_x[k, :n][bulk[k]]) / elementary_charge
+                       for k in range(phi.shape[0])])
+
+    # the two electrodes are short-circuited, so the far wall stays at zero
+    assert float(np.abs(phi[:, -1]).max()) < 1e-9 * T_bulk.max()
+
+    late = slice(phi.shape[0] // 2, None)
+    drop = (phi[late, 2 * cells // 5:3 * cells // 5].mean(axis=1) / T_bulk[late]).mean()
+    theory = 0.5 * np.log(mass_ratio / (2 * np.pi))
+    assert 0.6 * theory < drop < 1.5 * theory
+
+    # the sheath is where quasi-neutrality fails: net positive charge at the walls,
+    # none in the middle
+    rho = np.asarray(out.rho)[late].mean(axis=0) / (density * elementary_charge)
+    assert rho[:3].mean() > 0.02 and rho[-3:].mean() > 0.02
+    assert abs(rho[2 * cells // 5:3 * cells // 5].mean()) < 0.005
+
+    # and the pre-sheath has accelerated the ions towards the Bohm speed
+    c_s = np.sqrt(T_bulk[-1] * elementary_charge / (mass_ratio * mass_electron))
+    x_i = np.asarray(out.x[-1, n:, 0])
+    edge = (x_i > 0.30 * length) & (x_i < 0.40 * length)
+    assert v_x[-1, n:][edge].mean() > 0.5 * c_s

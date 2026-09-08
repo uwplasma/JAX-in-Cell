@@ -22,7 +22,10 @@
 ## Planned
 
 * Particle sources and sinks, which need a pool of inactive particles because array
-  shapes are static.
+  shapes are static. An ionisation source is what a bounded-plasma run needs to reach a
+  true steady state instead of draining ({doc}`../examples/sheath`).
+* A series RLC circuit between the two electrodes, so that a wall can be biased or left
+  genuinely floating rather than short-circuited to its partner {cite}`verboncoeur1993`.
 * Time-dependent external fields.
 * Ionisation and recombination.
 * Velocity-dependent boundary conditions (secondary emission, thermal re-injection).

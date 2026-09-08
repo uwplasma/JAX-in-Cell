@@ -66,11 +66,23 @@ def gather(field, x, x0, dx, bc):
 def current_from_continuity(rho_old, rho_new, dt, dx, mean_current, bc):
     """Longitudinal current at the faces that satisfies the discrete continuity
     equation :math:`(\\rho_i^{new} - \\rho_i^{old})/\\Delta t + (J_{i+1/2} - J_{i-1/2})/\\Delta x = 0`
-    exactly. In a periodic box the integration constant is fixed by the mean
-    current of the particles; at a wall the current through the wall is zero."""
+    exactly. What is left free is the integration constant, the current through the
+    left wall, and that is where the boundary condition enters:
+
+    * **Periodic**: there is no wall, so the constant is fixed instead by making the
+      mean of :math:`J` the mean current the particles carry.
+    * **Absorbing on both sides**: the walls are conductors that collect the charge
+      they absorb, short-circuited to each other, so they stay at one potential and
+      :math:`\\sum_i E_{i+1/2} = 0` holds for all time. That requires the mean of
+      :math:`J` to vanish; the difference is the current in the external circuit.
+    * **Otherwise**: a reflecting wall is a symmetry plane, nothing crosses it, and
+      the current through it is zero.
+    """
     J = -dx * jnp.cumsum((rho_new - rho_old) / dt)
     if bc[0] == 0:
         J = J - jnp.mean(J) + mean_current
+    elif bc == (2, 2):
+        J = J - jnp.mean(J)
     return J
 
 
@@ -136,7 +148,10 @@ def E_x_from_rho(rho, dx, bc):
     """Solve the discrete Gauss law :math:`(E_{i+1/2} - E_{i-1/2})/\\Delta x = \\rho_i/\\epsilon_0`
     for the longitudinal field at the faces. Periodic: by FFT with the
     finite-difference symbol :math:`(1 - e^{-ik\\Delta x})/\\Delta x` and zero mean.
-    Otherwise: integrated from the left wall, where :math:`E_{-1/2} = 0`."""
+    Otherwise: integrated from the left wall. Two absorbing walls are conductors
+    short-circuited to each other, so the potential across the box is zero and the
+    mean of :math:`E` is subtracted; any other wall is a symmetry plane, where
+    :math:`E_{-1/2} = 0`."""
     if bc[0] == 0:
         n = rho.shape[0]
         k = 2 * jnp.pi * jnp.fft.fftfreq(n, d=dx)
@@ -144,7 +159,8 @@ def E_x_from_rho(rho, dx, bc):
         symbol = symbol.at[0].set(1.0)
         E_hat = jnp.fft.fft(rho) / epsilon_0 / symbol
         return jnp.fft.ifft(E_hat.at[0].set(0.0)).real
-    return dx / epsilon_0 * jnp.cumsum(rho)
+    E = dx / epsilon_0 * jnp.cumsum(rho)
+    return E - jnp.mean(E) if bc == (2, 2) else E
 
 
 # --- particles --------------------------------------------------------------------------

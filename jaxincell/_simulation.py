@@ -128,8 +128,14 @@ class Simulation:
         courant = self.domain.dt_over_dx_c
         if self.solver.algorithm != "explicit" or not plain(courant) or courant <= 1:
             return
-        if any(s.v is not None or any(plain(u) and u != 0 for u in tuple(s.vth[1:]) + tuple(s.drift[1:]))
-               for s in self.species):
+
+        def transverse(s):
+            if s.v is not None:                      # given as an array: look at it
+                v = np.asarray(s.v) if not isinstance(s.v, jax.core.Tracer) else None
+                return v is None or bool(np.any(v[:, 1:]))
+            return any(plain(u) and u != 0 for u in tuple(s.vth[1:]) + tuple(s.drift[1:]))
+
+        if any(transverse(s) for s in self.species):
             warnings.warn(f"c dt / dx = {courant:g} exceeds one while the particles carry transverse "
                           "velocity: the explicit field solver is unstable for electromagnetic waves. "
                           "Use dt_over_dx_c <= 1, or algorithm='implicit'.", stacklevel=3)

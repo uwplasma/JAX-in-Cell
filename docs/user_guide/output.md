@@ -41,6 +41,7 @@ from jaxincell import diagnostics
 d = diagnostics(output)
 d["total"]            # total energy at every stored step
 d["gauss_residual"]   # relative violation of the discrete Gauss law
+d["potential"]        # electrostatic potential at the faces, zero at the left wall
 d["temperatures"]     # per species, per component, in eV
 ```
 

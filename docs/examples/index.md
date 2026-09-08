@@ -1,7 +1,7 @@
 # Examples
 
-Every script in `examples/` runs on its own on a laptop in seconds to a couple of
-minutes, and each one reproduces a result from the literature rather than making a
+Every script in `examples/` runs on its own on a laptop in seconds to about half a
+minute, and each one reproduces a result from the literature rather than making a
 picture for its own sake.
 
 ```bash
@@ -55,6 +55,12 @@ python two_stream.py
 `collisions.py` — the Takizuka-Abe operator against the Fokker-Planck rates.
 :::
 
+:::{grid-item-card} Plasma sheath
+:link: sheath
+:link-type: doc
+`sheath.py` — a plasma against absorbing walls floats, and the ions leave at the Bohm speed.
+:::
+
 :::{grid-item-card} Optimisation
 :link: optimisation
 :link-type: doc
@@ -73,6 +79,7 @@ bump_on_tail
 weibel
 energy_conservation
 collisions
+sheath
 optimisation
 ```
 

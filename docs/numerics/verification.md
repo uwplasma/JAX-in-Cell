@@ -157,6 +157,18 @@ part of the recorded result.
 
 The total energy changes by {{ weibel_energy_error }} over the run.
 
+## Sheath formation
+
+A plasma between two absorbing walls floats positive until the electron and ion fluxes
+to the walls balance, leaving a quasi-neutral bulk joined to each wall by a charged
+layer a few Debye lengths thick. Two closed-form results follow with no free parameter:
+the plasma-wall drop $(T_e/2e)\ln(m_i/2\pi m_e)$ {cite}`lieberman2005` and the Bohm
+criterion, that ions enter the sheath at $c_s=\sqrt{T_e/m_i}$ {cite}`bohm1949sheath`.
+The run reaches {{ sheath_bohm_ratio }} $c_s$ at the sheath edge and a drop of
+{{ sheath_drop_measured }} against {{ sheath_drop_theory }}, low by
+{{ sheath_drop_deviation_percent }} per cent for a reason worth reading:
+{doc}`../examples/sheath`.
+
 ## Collisions
 
 The Takizuka-Abe operator is checked against the Fokker-Planck relaxation rates in the

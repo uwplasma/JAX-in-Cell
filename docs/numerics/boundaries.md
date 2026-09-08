@@ -54,6 +54,40 @@ system, which is what an open boundary means. The field ghosts use the first-ord
 radiating condition of {doc}`field_solvers`, so an outgoing electromagnetic wave leaves
 without reflection.
 
+## A wall that absorbs charge has to keep it
+
+The longitudinal field is fixed by the charge density only up to a constant, and that
+constant is the boundary condition. Which one is right depends on what the wall is.
+
+A **reflective** wall is a symmetry plane: nothing crosses it, so $E = 0$ there and the
+field is integrated from that wall outwards. An **absorbing** wall is not a symmetry
+plane. It is a conductor, and the particles it absorbs are neutralised on its surface,
+leaving a surface charge that sets the field at the wall. Imposing $E = 0$ at one
+absorbing wall and letting the other float is the same as insisting that all the charge
+collected at both walls sits on one of them; the field there then ramps without bound as
+the plasma drains, which is an artefact and not a sheath.
+
+The standard closure for a bounded plasma is to treat the walls as electrodes carrying
+surface charge, connected by an external circuit {cite}`lawson1989,verboncoeur1993`.
+JAX-in-Cell takes the simplest member of that family: two absorbing walls are conductors
+short-circuited to each other, so they stay at the same potential and
+
+```{math}
+\int_0^L E_x\,dx = \phi(0) - \phi(L) = 0 .
+```
+
+That is one line in each of the two places the constant is chosen — the mean is
+subtracted from $E_x$ in the Gauss solve, and from $J_x$ in the continuity current, the
+difference being the current the external circuit carries. The plasma is then free to
+float to whatever potential balances the two fluxes, which is what a sheath is. A
+biased or floating electrode with a series RLC circuit is the same construction with a
+different equation for the constant {cite}`verboncoeur1993`; it is not implemented.
+
+One consequence for the diagnostics: with a wall, the field beyond it is a degree of
+freedom the output does not carry, so {func}`~jaxincell.gauss_residual` checks the
+discrete Gauss law on the cells that do not need it. See {doc}`../examples/sheath` for
+what the closure produces.
+
 ## Charge accounting at an absorbing wall
 
 Charge leaves an absorbing box by two routes: with the particles that hit the wall, and

@@ -66,6 +66,12 @@ A periodic wall needs a periodic partner, which is checked at construction. The
 particle and field walls are set separately, which is occasionally useful (particles
 reflected while radiation leaves) but usually they should match.
 
+Two absorbing walls are treated as conductors that keep the charge they collect,
+short-circuited to one another, so they stay at the same potential and the plasma is
+free to float above them. That is what makes a sheath form ({doc}`../examples/sheath`);
+{doc}`../numerics/boundaries` explains why the alternative, holding one wall's field at
+zero, piles all the collected charge onto the other.
+
 What each one does to particles, to the fields and to the charge budget is described in
 {doc}`../numerics/boundaries`. In short: periodic recirculates, reflective mirrors the
 position and reverses the normal velocity, absorbing zeroes the particle's charge and

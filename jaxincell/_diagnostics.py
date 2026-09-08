@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 from ._constants import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
-__all__ = ["diagnostics", "energies", "gauss_residual", "temperatures"]
+__all__ = ["diagnostics", "energies", "gauss_residual", "potential", "temperatures"]
 
 
 def energies(out):
@@ -33,15 +33,34 @@ def gauss_residual(out):
     """Relative violation of the discrete Gauss law at every stored step,
     :math:`\\max_i |(E_{i+1/2} - E_{i-1/2})/\\Delta x - \\rho_i/\\epsilon_0| / \\max_i |\\rho_i/\\epsilon_0|`.
 
-    The field beyond the left wall, :math:`E_{-1/2}`, is the one the solver used:
-    the far end of the box when the wall is periodic, and zero otherwise, since a
-    wall carries no field from the other side. Taking it as periodic regardless
-    reports a violation in the first cell that the solver never committed."""
+    In a periodic box the field beyond the left wall is the field at the far end,
+    and the law is checked in every cell. At a wall it is not: :math:`E_{-1/2}` is
+    the field at the electrode, set by the charge that has collected on it, and the
+    output does not carry it. The equation for the first cell then *defines* that
+    field rather than testing anything, so the residual is taken over the
+    remaining cells, which are still one independent check short of the number of
+    stored values."""
     E = out.E[:, :, 0]
-    ghost = E[:, -1] if out.field_bc[0] == 0 else jnp.zeros_like(E[:, -1])
-    div = (E - jnp.concatenate([ghost[:, None], E[:, :-1]], axis=1)) / out.dx
-    rhs = out.rho / epsilon_0
+    if out.field_bc[0] == 0:
+        div = (E - jnp.roll(E, 1, axis=1)) / out.dx
+        rhs = out.rho / epsilon_0
+    else:
+        div = (E[:, 1:] - E[:, :-1]) / out.dx
+        rhs = out.rho[:, 1:] / epsilon_0
     return jnp.max(jnp.abs(div - rhs), axis=1) / jnp.maximum(jnp.max(jnp.abs(rhs), axis=1), 1e-300)
+
+
+def potential(out):
+    """Electrostatic potential at the cell faces,
+    :math:`\\phi_{i+1/2} = \\phi_{-1/2} - \\Delta x\\sum_{j\\le i} E_{x,j+1/2}`.
+
+    The gauge is the wall: :math:`\\phi_{-1/2} = 0`, so entry ``i`` is the potential
+    relative to the left wall and the last entry is the potential of the right wall.
+    Two absorbing walls are short-circuited, so that last entry stays at zero and the
+    bulk floats above both. A periodic box has no wall, so the mean is set to zero
+    instead."""
+    phi = -out.dx * jnp.cumsum(out.E[:, :, 0], axis=1)
+    return phi - jnp.mean(phi, axis=1, keepdims=True) if out.field_bc[0] == 0 else phi
 
 
 def temperatures(out):
@@ -71,6 +90,7 @@ def diagnostics(out):
     """All of the above in one dictionary."""
     result = energies(out)
     result["gauss_residual"] = gauss_residual(out)
+    result["potential"] = potential(out)
     result["dominant_frequency"] = dominant_frequency(out)
     if out.v is not None:
         result["temperatures"] = temperatures(out)

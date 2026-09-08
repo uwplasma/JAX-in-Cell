@@ -33,7 +33,8 @@ fields on a staggered (Yee) grid with Maxwell's equations. It provides
 * binary Coulomb collisions (Takizuka-Abe), verified against the Fokker-Planck
   relaxation rates;
 * periodic, reflective and absorbing boundaries, chosen separately for particles and
-  fields, with a radiating condition on the fields;
+  fields, with a radiating condition on the fields and absorbing walls treated as
+  short-circuited conductors, so that a plasma against them forms a sheath;
 * any number of species, each with its own density, drift, temperature anisotropy,
   seed and, if needed, a hand-built phase space;
 * gradients of any output with respect to any physical input through `jax.grad`, and
@@ -107,13 +108,14 @@ and no finite differences anywhere.
 
 ## Examples
 
-Eight scripts in `examples/`, each reproducing a result from the literature rather
+Nine scripts in `examples/`, each reproducing a result from the literature rather
 than making a picture: the two-stream instability (Buneman 1959), Landau damping
 (Landau 1946), the Bohm-Gross dispersion relation, the bump-on-tail instability and
 its quasilinear plateau, the Weibel instability and its marginal wavenumber
 (Weibel 1959), explicit against implicit energy conservation, the collision operator
-against the Fokker-Planck rates, and an optimisation that recovers the fastest-growing
-beam by gradient ascent through the solver. Each is described in the
+against the Fokker-Planck rates, the plasma sheath with its floating potential and Bohm
+criterion, and an optimisation that recovers the fastest-growing beam by gradient
+ascent through the solver. Each is described in the
 [documentation](https://jax-in-cell.readthedocs.io/en/latest/examples/index.html).
 
 <p align="center">

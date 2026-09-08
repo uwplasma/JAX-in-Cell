@@ -56,6 +56,15 @@ It should sit at round-off, {{ gauss_residual_max_explicit }}, for the whole run
 every wall type. It will not if the current deposit is bypassed, which makes it a good
 regression check.
 
+## Potential
+
+{func}`~jaxincell.potential` integrates the longitudinal field,
+$\phi_{i+1/2} = -\Delta x\sum_{j\le i} E_{x,j+1/2}$, with the left wall as the gauge,
+so entry $i$ is the potential relative to that wall and the last entry is the potential
+of the right wall. Two absorbing walls are short-circuited conductors, so that last
+entry stays at zero and the bulk floats above both — see {doc}`../examples/sheath`. A
+periodic box has no wall, so the mean is set to zero instead.
+
 ## Temperatures
 
 {func}`~jaxincell.temperatures` returns, per species, the temperature per component in
