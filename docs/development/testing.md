@@ -5,10 +5,15 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Fifty-seven tests in three files, about a minute on one CPU core, covering 99 per cent
-of the package. The five statements left are the ones this environment cannot reach:
-the `__main__` guard, and the two import fallbacks for an older Python and for a source
-tree without a generated version file.
+Sixty-three tests in three files, about a minute on one CPU core, covering every
+statement and every branch of the package.
+
+That number is not the goal in itself, and the suite is not padded to reach it. It is
+worth having because of what chasing it turns up: five of the defects fixed in the
+rewrite were found by writing a test for a path that had never executed — the openPMD
+exporter, which was broken for every input, the relativistic pusher, and three separate
+ways the discrete Gauss law failed next to a wall. A line that no test reaches is a
+line whose behaviour nobody has checked.
 
 | file | what it covers |
 |---|---|
@@ -41,6 +46,12 @@ while the non-relativistic one overshoots by $\gamma$.
 round-off; momentum in a periodic box; total energy, bounded for the explicit scheme
 and at round-off for the implicit one; reflective walls holding every particle inside
 the box and absorbing walls removing some but not all.
+
+**Documented behaviour that is easy to leave untested.** `store_particles=False`
+dropping exactly the diagnostics that need velocities; the openPMD switches and a run
+with no particles to write; the TOML loader's fallback for Python 3.10; `python -m
+jaxincell`; and the version fallback for a fresh clone that has not been installed,
+since `jaxincell/version.py` is generated at build time and is not in the repository.
 
 **The interface.** That two runs with one seed agree bit for bit and two seeds do not;
 that `jax.grad` matches a central difference to one part in $10^4$ through both

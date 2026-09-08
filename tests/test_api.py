@@ -428,3 +428,121 @@ def test_configuration_objects_normalise_what_they_are_given():
         Domain(cells=2)
     with pytest.raises(AssertionError, match="must have shape"):
         Species.electrons(n=10, density=1e17, vth=(1e6, 0, 0)).replace(x=np.zeros((9, 3)))
+
+
+def test_diagnostics_without_particles_gives_the_field_quantities_only():
+    """`store_particles=False` keeps the fields and drops the particle history, so
+    the diagnostics that need velocities are absent rather than wrong. That is the
+    trade a long run makes, and the reason the docs list which keys survive."""
+    out = small_simulation(n=200).run(10, seed=0, store_particles=False)
+    assert out.x is None and out.v is None
+    d = diagnostics(out)
+    for key in ("electric", "magnetic", "gauss_residual", "dominant_frequency"):
+        assert key in d
+    for key in ("kinetic", "total", "momentum", "temperatures"):
+        assert key not in d
+
+
+def test_openpmd_export_can_leave_out_the_meshes_or_the_particles():
+    """The two switches, and a run stored without particles, which has none to write."""
+    io = pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+
+    sim = small_simulation(n=200)
+    out = sim.run(4, seed=0)
+    with tempfile.TemporaryDirectory() as folder:
+        fields_only = write_openpmd(out, os.path.join(folder, "fields"), particles=False)
+        series = io.Series(fields_only, io.Access.read_only)
+        assert set(series.iterations[0].meshes) and not len(series.iterations[0].particles)
+        series.close()
+
+        particles_only = write_openpmd(out, os.path.join(folder, "particles.json"), meshes=False)
+        series = io.Series(particles_only, io.Access.read_only)
+        assert not len(series.iterations[0].meshes) and set(series.iterations[0].particles)
+        series.close()
+
+        light = sim.run(4, seed=0, store_particles=False)
+        path = write_openpmd(light, os.path.join(folder, "light.json"))
+        series = io.Series(path, io.Access.read_only)
+        assert set(series.iterations[0].meshes) and not len(series.iterations[0].particles)
+        series.close()
+
+    assert fields_only.endswith(".json")          # the extension is supplied when omitted
+
+
+def test_toml_loading_falls_back_to_tomli_before_python_311():
+    """`tomllib` arrived in 3.11; below that the loader uses the tomli backport, which
+    is declared as a conditional dependency. Hide tomllib to take that path."""
+    import tomllib
+    from jaxincell import load_toml
+
+    text = """
+[domain]
+length = 0.01
+cells = 16
+[[species]]
+name = "electrons"
+n = 100
+charge = -1
+mass = "electron"
+density = 1e17
+vth = [1e6, 0.0, 0.0]
+[run]
+steps = 3
+"""
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, "in.toml")
+        with open(path, "w") as f:
+            f.write(text)
+        with mock.patch.dict(sys.modules, {"tomllib": None, "tomli": tomllib}):
+            sim, run = load_toml(path)
+    assert run["steps"] == 3 and sim.species[0].n == 100
+
+
+def test_the_module_runs_as_a_script(tmp_path, monkeypatch):
+    """`python -m jaxincell input.toml`, the entry point the documentation gives."""
+    import runpy
+
+    path = tmp_path / "run.toml"
+    path.write_text("""
+[domain]
+length = 0.01
+cells = 16
+dt_over_dx_c = 2.0
+[[species]]
+name = "electrons"
+n = 200
+charge = -1
+mass = "electron"
+density = 4e17
+vth = [1.5e7, 0.0, 0.0]
+[run]
+steps = 4
+plot = false
+""")
+    monkeypatch.setattr(sys, "argv", ["jaxincell", str(path)])
+    with pytest.raises(SystemExit) as exit_code, warnings.catch_warnings():
+        # runpy notes that jaxincell.__main__ is already imported, which is expected
+        warnings.simplefilter("ignore", RuntimeWarning)
+        runpy.run_module("jaxincell", run_name="__main__")
+    assert exit_code.value.code == 0
+
+
+def test_openpmd_reports_an_unknown_version_from_a_bare_source_tree():
+    """`jaxincell/version.py` is generated at build time and is not in the
+    repository, so a fresh clone that has not been installed does not have one.
+    The exporter still has to write a series, with the version left unknown."""
+    import jaxincell.openpmd
+
+    source = pathlib.Path(jaxincell.openpmd.__file__).read_text()
+    namespace = {"__name__": "jaxincell.openpmd_bare", "__package__": "jaxincell"}
+    real_import = builtins.__import__
+
+    def refuse_version(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "version" or name.endswith(".version"):
+            raise ImportError("no generated version file")
+        return real_import(name, globals, locals, fromlist, level)
+
+    with mock.patch.object(builtins, "__import__", refuse_version):
+        exec(compile(source, jaxincell.openpmd.__file__, "exec"), namespace)
+    assert namespace["__version__"] == "unknown"
