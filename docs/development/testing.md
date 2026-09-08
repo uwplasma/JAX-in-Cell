@@ -5,8 +5,8 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Thirty-two tests in three files, about forty seconds on one CPU core, covering
-93 per cent of the package.
+Thirty-six tests in three files, a minute on one CPU core, covering 95 per cent of
+the package.
 
 | file | what it covers |
 |---|---|
@@ -31,7 +31,9 @@ Landau root $1.4157 - 0.1533\,i$ at $k\lambda_D = 0.5$; the cold two-stream rate
 $\omega_{pe}/2\sqrt2$ at $kv_0/\omega_{pe} = \sqrt{3/8}$; the Weibel marginal
 wavenumber $k_c c = \omega_{pe}\sqrt{T_z/T_x - 1}$, checked as a threshold — every
 mode below it grows by more than ten, none above it by more than three; the NRL
-relaxation rates for a fast beam.
+relaxation rates for a fast beam; and the relativistic gyrofrequency
+$\Omega = qB/\gamma m$, which the relativistic pusher reproduces after a full orbit
+while the non-relativistic one overshoots by $\gamma$.
 
 **Conservation laws.** Charge on the grid against charge on the particles, to
 round-off; momentum in a periodic box; total energy, bounded for the explicit scheme
@@ -44,7 +46,9 @@ integrators; that `vmap` over seeds gives an ensemble; that `store_every` and a 
 reproduce the full run exactly; that changing a physical parameter does not change the
 treedef, which is what guarantees no recompilation; that the overview figure has one
 panel per non-zero field component and per species; and that an openPMD export reads
-back with the right iterations, staggering and particle records.
+back with the right iterations, staggering and particle records; and that the
+Courant warning fires for a run that would diverge and stays quiet for the
+electrostatic and implicit runs that would not.
 
 ## Writing a new one
 

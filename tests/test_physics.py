@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 from jax import random
 
-from jaxincell import (Domain, Simulation, Solver, Species, diagnostics, epsilon_0, mass_electron,
+from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, epsilon_0,
+                       elementary_charge, mass_electron, temperatures,
                        elementary_charge as e_charge, speed_of_light as c)
 from jaxincell._collisions import collide
 from conftest import electron_plasma, growth_rate, mode_amplitude, rate_and_frequency
@@ -192,3 +193,53 @@ def test_collisions_reproduce_the_spitzer_relaxation_rates():
     nu_perp = np.polyfit(t, v_perp2, 1)[0] / v_beam ** 2
     assert abs(nu_slow / (2 * nu_0) - 1) < 0.05
     assert abs(nu_perp / (2 * nu_0) - 1) < 0.05
+
+
+def test_relativistic_pusher_gyrates_at_the_relativistic_frequency():
+    """A charge in a uniform magnetic field gyrates at Omega = qB/(gamma m), not
+    qB/m. The relativistic Boris rotation reproduces that frequency and keeps
+    gamma fixed to round-off, because a magnetic field does no work."""
+    from jaxincell._core import boris, boris_relativistic
+
+    B0, speed = 0.05, 0.9 * c
+    gamma = 1 / np.sqrt(1 - (speed / c) ** 2)
+    omega_c = elementary_charge * B0 / (gamma * mass_electron)
+    steps = 400
+    dt = 2 * np.pi / omega_c / steps                       # one relativistic orbit
+    field_E = jnp.zeros((1, 3))
+    field_B = jnp.array([[0.0, 0.0, B0]])
+    charge, mass = jnp.array([[elementary_charge]]), jnp.array([[mass_electron]])
+
+    v = jnp.array([[speed, 0.0, 0.0]])
+    speeds, angles = [], []
+    for _ in range(steps):
+        v = boris_relativistic(v, field_E, field_B, charge, mass, dt)
+        speeds.append(float(jnp.linalg.norm(v)))
+        angles.append(float(jnp.arctan2(v[0, 1], v[0, 0])))
+    assert max(abs(s / speed - 1) for s in speeds) < 1e-12   # gamma is conserved
+    # after one relativistic period the velocity is back where it started
+    assert abs(angles[-1]) < 2 * np.pi / steps
+
+    # the non-relativistic pusher turns gamma times too fast and so overshoots
+    v = jnp.array([[speed, 0.0, 0.0]])
+    for _ in range(steps):
+        v = boris(v, field_E, field_B, jnp.full((1, 1), elementary_charge / mass_electron), dt)
+    assert abs(float(jnp.arctan2(v[0, 1], v[0, 0]))) > 1.0
+
+
+def test_collisions_through_the_simulation_conserve_momentum_and_isotropise():
+    """Wired into a run, the collision operator leaves the total momentum alone
+    and relaxes an anisotropic temperature towards isotropy."""
+    n, density = 4000, 1e21
+    electrons = Species.electrons(n=n, density=density, vth=(3e6, 3e6, 1e6), quiet=True)
+    ions = Species.ions(n=n, density=density, electrons=electrons, quiet=True)
+    simulation = Simulation(Domain(length=2e-5, cells=16, dt_over_dx_c=1.0), [electrons, ions],
+                            Solver(filter_passes=0), Collisions(coulomb_log=1e4))
+    out = simulation.run(300, seed=0)
+    momentum = np.asarray(diagnostics(out)["momentum"])[:, 0]
+    content = float(np.sum(np.asarray(out.mass) * np.abs(np.asarray(out.v[0, :, 0]))))
+    assert float(np.abs(momentum - momentum[0]).max()) < 1e-4 * content
+    T = np.asarray(temperatures(out)["electrons"])
+    start, end = T[0], T[-1]
+    assert end[2] > start[2] and end[0] < start[0]          # the cold axis heats
+    assert abs(end[2] / end[0] - 1) < abs(start[2] / start[0] - 1)

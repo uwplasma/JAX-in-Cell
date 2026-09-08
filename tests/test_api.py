@@ -3,6 +3,7 @@ storage options, restarts, input files and the command line."""
 import os
 import shutil
 import tempfile
+import warnings
 
 import numpy as np
 import jax
@@ -185,3 +186,28 @@ def test_openpmd_export_round_trips():
         assert position.shape == (out.counts[0],)
         assert np.allclose(position, np.asarray(out.x[4, : out.counts[0], 0]))
         series.close()
+
+
+def test_courant_warning_fires_only_when_a_light_wave_can_be_seeded():
+    """Stepping above c dt = dx is safe for an electrostatic run and diverges as
+    soon as the particles carry transverse velocity, so the warning has to
+    distinguish the two rather than firing on the time step alone."""
+    from jaxincell import Domain, Solver, Species
+
+    longitudinal = Species.electrons(n=100, density=1e17, vth=(1e6, 0, 0))
+    isotropic = Species.electrons(n=100, density=1e17, vth=(1e6, 1e6, 1e6))
+    above = Domain(length=0.01, cells=16, dt_over_dx_c=4.5)
+    below = Domain(length=0.01, cells=16, dt_over_dx_c=1.0)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")               # no warning in these three
+        Simulation(above, [longitudinal], Solver())
+        Simulation(below, [isotropic], Solver())
+        Simulation(above, [isotropic], Solver(algorithm="implicit"))
+    with pytest.warns(UserWarning, match="exceeds one"):
+        Simulation(above, [isotropic], Solver())
+
+
+def test_command_line_reports_usage_without_a_file(capsys):
+    assert main([]) == 1
+    assert "usage" in capsys.readouterr().out
