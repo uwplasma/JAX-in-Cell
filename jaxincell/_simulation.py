@@ -2,7 +2,7 @@ import jax.numpy as jnp
 from copy import deepcopy
 from functools import partial
 from jax_tqdm import scan_tqdm
-from jax import lax, jit, config
+from jax import lax, jit, config, eval_shape
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
@@ -250,17 +250,77 @@ class Simulation:
                 solver_parameters["number_of_particle_substeps_implicit_CN"]
             )
 
+        # solver_parameters["snapshot_steps"]: opt-in, memory-bounded history recording.
+        # Left unset, behavior is unchanged (full per-step history, via lax.scan's normal
+        # ys-stacking). When set to an explicit list of step indices (e.g.
+        # np.arange(total_steps)[::save_every], or just [total_steps - 1] for the final
+        # state only), only those snapshots are kept, using a small fixed-size buffer
+        # written into the scan carry instead of letting lax.scan stack an output for
+        # every one of the total_steps iterations -- this is what actually exhausts
+        # device memory for large grids/particle counts/long runs, since
+        # positions/velocities/E/B/J/rho are all stacked over total_steps by default.
+        snapshot_steps = solver_parameters.get("snapshot_steps")
+        if snapshot_steps is not None:
+            snapshot_step_list = sorted(set(int(s) for s in snapshot_steps))
+        else:
+            snapshot_step_list = None  # keep every step (default, original behavior)
+
         @scan_tqdm(total_steps)
         def simulation_step(carry, step_index):
             return step_func(carry, step_index)
 
+        if snapshot_step_list is None:
+            # Original behavior: keep the full per-step history.
+            _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
+            positions_over_time, velocities_over_time, electric_field_over_time, \
+            magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+        else:
+            # Snapshot mode: allocate one small buffer per output, sized
+            # (num_snapshots, *field_shape) instead of (total_steps, *field_shape).
+            snapshot_steps_arr = jnp.array(snapshot_step_list, dtype=jnp.arange(total_steps).dtype)
+            num_snapshots = len(snapshot_step_list)
 
-        # Run simulation
-        _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
+            sample_index = jnp.arange(total_steps)[0]
+            _, sample_step_data = eval_shape(step_func, initial_carry, sample_index)
+            snapshot_buffers = tuple(
+                jnp.zeros((num_snapshots,) + leaf.shape, dtype=leaf.dtype)
+                for leaf in sample_step_data
+            )
 
-        # Unpack results
-        positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+            def scan_body(carry_and_buffers, step_index):
+                sim_carry, buffers = carry_and_buffers
+                new_sim_carry, step_data = simulation_step(sim_carry, step_index)
+
+                matches = snapshot_steps_arr == step_index
+                should_save = jnp.any(matches)
+                # argmax picks the matching slot when should_save is True; the value
+                # is unused (and irrelevant) on non-matching steps, since the false
+                # branch of lax.cond below leaves the buffer untouched either way.
+                snap_idx = jnp.argmax(matches)
+
+                buffers = tuple(
+                    lax.cond(
+                        should_save,
+                        lambda buf, val=value: buf.at[snap_idx].set(val),
+                        lambda buf: buf,
+                        buf,
+                    )
+                    for buf, value in zip(buffers, step_data)
+                )
+                return (new_sim_carry, buffers), None
+
+            (_, snapshot_buffers), _ = lax.scan(
+                scan_body, (initial_carry, snapshot_buffers), jnp.arange(total_steps)
+            )
+            positions_over_time, velocities_over_time, electric_field_over_time, \
+            magnetic_field_over_time, current_density_over_time, charge_density_over_time = snapshot_buffers
+
+        # In snapshot mode, time_array must line up with the recorded snapshots
+        # rather than every one of the total_steps iterations.
+        if snapshot_step_list is None:
+            time_array = jnp.linspace(0, total_steps * dt, total_steps)
+        else:
+            time_array = jnp.array(snapshot_step_list, dtype=dt.dtype if hasattr(dt, "dtype") else jnp.float64) * dt
 
         # **Output results**
         from ._constants import epsilon_0, mass_electron
@@ -302,7 +362,7 @@ class Simulation:
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
-            "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
+            "time_array":  time_array,
             "grid": grid,
             "dt": dt,
             "plasma_frequency": plasma_frequency,
