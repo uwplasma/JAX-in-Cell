@@ -1,6 +1,7 @@
 """Behaviour of the public interface: reproducibility, differentiation,
 storage options, restarts, input files and the command line."""
 import os
+import shutil
 import tempfile
 
 import numpy as np
@@ -131,3 +132,56 @@ def test_diagnostics_keys_and_species_views():
     x_e, v_e = out.particles("electrons")
     assert x_e.shape == (10, 400, 3) and v_e.shape == (10, 400, 3)
     assert np.allclose(np.asarray(d["total"]), np.asarray(d["electric"] + d["magnetic"] + d["kinetic"]))
+
+
+def test_plot_builds_every_panel_and_writes_a_movie(tmp_path):
+    """The overview figure has one panel per non-zero field component, one per
+    velocity direction and one phase space per species, and the movie writer
+    produces a playable file when ffmpeg is available."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from jaxincell import plot
+
+    out = small_simulation(n=200).run(12, seed=0)
+    figure = plot(out, direction="x", show=False)
+    drawn = [ax.get_title() for ax in figure.axes if ax.get_title()]
+    # E_x and rho are non-zero, f(v_x), and one phase space per species
+    assert any("$E_x$" == title for title in drawn) and any(r"$\rho$" == title for title in drawn)
+    assert any("f(v_x)" in title.replace("$", "").replace("\\", "") for title in drawn)
+    assert sum("(x, v_x)" in title.replace("$", "").replace("\\", "") for title in drawn) == 2
+    assert len(plot(out, direction="xz", show=False).axes) > len(figure.axes)
+    with pytest.raises(ValueError):
+        plot(out, direction="q", show=False)
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is not installed")
+    movie = tmp_path / "run.mp4"
+    plot(out, direction="x", save=str(movie), show=False, fps=5)
+    assert movie.stat().st_size > 1000
+    assert movie.read_bytes()[4:8] == b"ftyp"        # an ISO base media file
+
+
+def test_openpmd_export_round_trips():
+    """The exported series carries one iteration per stored step, the meshes on
+    the grids they live on, and one particle species per name."""
+    io = pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+
+    sim = small_simulation(n=200)
+    out = sim.run(6, seed=0)
+    with tempfile.TemporaryDirectory() as folder:
+        path = write_openpmd(out, os.path.join(folder, "run.json"), every=2)
+        series = io.Series(path, io.Access.read_only)
+        assert list(series.iterations) == [0, 2, 4]
+        iteration = series.iterations[4]
+        assert float(iteration.time) == pytest.approx(float(out.t[4]))
+        assert set(iteration.meshes) == {"E", "B", "J", "rho"}
+        assert iteration.meshes["E"]["x"].position == [0.5]     # faces
+        assert iteration.meshes["B"]["x"].position == [0.0]     # centres
+        assert set(iteration.particles) == set(out.names)
+        electrons = iteration.particles["electrons"]
+        position = electrons["position"]["x"].load_chunk()
+        series.flush()
+        assert position.shape == (out.counts[0],)
+        assert np.allclose(position, np.asarray(out.x[4, : out.counts[0], 0]))
+        series.close()

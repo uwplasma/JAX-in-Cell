@@ -41,7 +41,10 @@ def _describe(io, record, name, particle=False):
 
 
 def _store(io, component, data, keep):
-    data = np.ascontiguousarray(data, dtype=np.float64)
+    # np.array copies, which matters twice: a JAX array converts to a read-only
+    # buffer that store_chunk refuses, and the buffer has to stay alive and
+    # writeable until the series is flushed, which is what ``keep`` is for.
+    data = np.array(data, dtype=np.float64, order="C")
     component.reset_dataset(io.Dataset(data.dtype, data.shape))
     component.store_chunk(data)
     component.unit_SI = 1.0

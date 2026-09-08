@@ -5,13 +5,14 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Thirty tests in three files, about forty seconds on one CPU core.
+Thirty-two tests in three files, about forty seconds on one CPU core, covering
+93 per cent of the package.
 
 | file | what it covers |
 |---|---|
 | `tests/test_kernels.py` | the numerical kernels in isolation, against exact results |
 | `tests/test_physics.py` | rates, frequencies and conserved quantities against the literature |
-| `tests/test_api.py` | reproducibility, gradients, `vmap`, storage options, restarts, TOML, the command line |
+| `tests/test_api.py` | reproducibility, gradients, `vmap`, storage options, restarts, TOML, the command line, plotting and openPMD export |
 
 ## What is tested, and how
 
@@ -41,7 +42,9 @@ the box and absorbing walls removing some but not all.
 that `jax.grad` matches a central difference to one part in $10^4$ through both
 integrators; that `vmap` over seeds gives an ensemble; that `store_every` and a restart
 reproduce the full run exactly; that changing a physical parameter does not change the
-treedef, which is what guarantees no recompilation.
+treedef, which is what guarantees no recompilation; that the overview figure has one
+panel per non-zero field component and per species; and that an openPMD export reads
+back with the right iterations, staggering and particle records.
 
 ## Writing a new one
 
@@ -56,7 +59,8 @@ a hurry, and a tolerance chosen to make today's number pass is not a test.
 
 ## Continuous integration
 
-The workflow in `.github/workflows/` runs the suite on every push, and
+The workflow in `.github/workflows/` installs the `dev` extra and runs the suite on
+Python 3.10 to 3.13 on every push, and
 `docs.yml` builds the documentation with `-W`, so a broken cross-reference or a
 missing substitution fails the build. The figures are committed rather than rebuilt in
 CI, because the full set takes a few minutes; regenerate them with
