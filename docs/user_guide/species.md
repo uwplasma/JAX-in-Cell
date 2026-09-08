@@ -1,158 +1,102 @@
 # Species
 
-The `species_parameters` section holds one entry per population. There are two types,
-`electrons` and `ions`; each type can contain any number of labelled populations. The
-type fixes the mass model (electron mass, or a multiple of the proton mass) and the
-default sign of the charge. Everything else is per population.
+A {class}`~jaxincell.Species` is one population of pseudo-particles. Two constructors
+cover the common cases and the general one covers the rest.
 
-```toml
-[species_parameters.electrons.bulk]
-number_pseudoparticles = 12000
-vth_over_c_x = 0.0707
+```python
+from jaxincell import Species, speed_of_light as c
 
-[species_parameters.electrons.beam]
-number_pseudoparticles = 12000
-grid_points_per_Debye_length = 0.444    # 3 % of the bulk density, see below
-drift_speed_x = 7.5e7
-
-[species_parameters.ions.protons]
-number_pseudoparticles = 12000
-vth_over_c_x = "_electrons0"
+electrons = Species.electrons(n=20000, density=1e17, vth=(0.05 * c, 0, 0))
+ions      = Species.ions(n=20000, density=1e17, electrons=electrons)
 ```
 
-## Parameters common to all populations
+`Species.ions` derives the ion thermal speed from the electrons,
+$v_{th,i} = v_{th,e}\sqrt{(T_i/T_e)(m_e/m_i)}$, so that the two are in thermal
+equilibrium unless `temperature_ratio` says otherwise. Pass `vth` explicitly to
+override it, and `mass_ratio` for a species other than protons — `mass_ratio=1e9`
+is the usual way to get an immobile neutralising background.
 
-| parameter | default | differentiable | meaning |
-|---|---|---|---|
-| `number_pseudoparticles` | `500` | no | Number of pseudo-particles $N_s$. |
-| `grid_points_per_Debye_length` | `2` | yes | $\Delta x/\lambda_{D}$ evaluated with this population's density and the reference electron temperature. Sets the density, see below. |
-| `weight` | `0` | yes | Number of physical particles per pseudo-particle, $w_s$. `0` means "compute from `grid_points_per_Debye_length`". |
-| `charge_over_elementary_charge` | `-1` (electrons), `1` (ions) | yes | Charge $q_s/e$. |
-| `vth_over_c_x`, `vth_over_c_y`, `vth_over_c_z` | `0` | yes | Thermal speed per component, $v_{th}/c$, with $f \propto \exp(-v^2/v_{th}^2)$. A string value refers to another population, see below. |
-| `drift_speed_x`, `drift_speed_y`, `drift_speed_z` | `0` | yes | Drift velocity per component in m/s. |
-| `velocity_plus_minus_x`, `_y`, `_z` | `false` | no | If true, every second particle has its velocity component negated, which turns one drifting population into two counter-streaming beams of half density each. |
-| `perturbation_amplitude_x`, `_y`, `_z` | `0.0` | yes | Amplitude $a$ (metres) of a sinusoidal displacement $x \to x + a\sin(k x)$. |
-| `perturbation_wavenumber_x`, `_y`, `_z` | `0` | yes | Mode number $m$ of the displacement, $k = 2\pi m/L$. |
-| `random_positions_x` | `false` | no | Uniform random positions instead of equally spaced ones. |
-| `random_positions_y`, `random_positions_z` | `true` | no | Same for $y$ and $z$. |
-| `seed_position_override`, `seed_position` | `false`, `None` | no | Use `seed_position` as the position seed of this population instead of the derived one. |
-| `initial_positions`, `initial_velocities` | `None` | yes | Arrays of shape `(number_pseudoparticles, 3)` that replace the generated phase space entirely. |
+## Arguments
 
-Ions have four more:
-
-| parameter | default | differentiable | meaning |
-|---|---|---|---|
-| `mass_over_proton_mass` | `1` | yes | $m_s/m_p$. Electrons always have mass $m_e$. |
-| `ion_temperature_over_electron_temperature_x`, `_y`, `_z` | `1` | yes | $T_i/T_e$ per component; used only when `vth_over_c_*` is a reference to an electron population. |
-
-### Defaults of the first populations
-
-The first electron population and the first ion population (`_electrons0`, `_ions0`)
-start from a different set of defaults, chosen so that `Simulation()` with no arguments
-runs a two-stream instability:
-
-| parameter | first electron population | first ion population |
+| argument | meaning | default |
 |---|---|---|
-| `perturbation_amplitude_x` | `1e-7` | `1e-7` |
-| `perturbation_wavenumber_x` | `8` | `0` |
-| `vth_over_c_x` | `0.05` | `"_electrons0"` |
-| `vth_over_c_y`, `vth_over_c_z` | `0` | `"_electrons0"` |
-| `drift_speed_x` | `1e8` | `0` |
-| `velocity_plus_minus_x` | `true` | `false` |
+| `name` | label used in the output and by `Collisions` (static) | — |
+| `n` | number of pseudo-particles (static) | — |
+| `charge` | charge in units of the elementary charge | — |
+| `mass` | mass in kilograms | — |
+| `density` | number density in m⁻³; the weight is `density * length / n` | — |
+| `vth` | thermal speed per component, $\sqrt{2k_BT/m}$ | `(0, 0, 0)` |
+| `drift` | drift velocity per component, m/s | `(0, 0, 0)` |
+| `perturbation_amplitude` | amplitude $a$ of the displacement $x \to x + a\sin(2\pi m x/L)$ | `0.0` |
+| `perturbation_mode` | mode number $m$ of that displacement | `0.0` |
+| `plus_minus` | negate $v_x$ on every second particle: two counter-streaming beams (static) | `False` |
+| `quiet` | quiet start (static) | `False` |
+| `random_positions` | uniformly random rather than equally spaced positions (static) | `False` |
+| `x`, `v` | arrays of shape `(n, 3)` replacing the generated phase space | `None` |
 
-Any further population uses the table above (cold, at rest, unperturbed).
+## Thermal speed and temperature
 
-## Density and pseudo-particle weight
-
-The code has no density parameter. Instead, the electron Debye length is prescribed in
-units of the cell size, and the weight follows. Let $v_{th,e}$ be the largest of the
-three thermal speeds of the first electron population and $q_e$ its charge. For a
-population $s$ with $N_s$ pseudo-particles and $g_s$ = `grid_points_per_Debye_length`,
-
-```{math}
-w_s = \frac{\epsilon_0\, m_e c^2}{q_e^2}\,
-      \frac{N_x^2\, g_s^2}{2\, L\, N_s}\left(\frac{v_{th,e}}{c}\right)^2 ,
-\qquad
-n_s = \frac{N_s w_s}{L} = \frac{\epsilon_0 m_e v_{th,e}^2}{2 q_e^2 \lambda_{D,s}^2},
-\quad \lambda_{D,s} = \frac{\Delta x}{g_s}.
-```
-
-In words: $g_s$ is the number of grid points per Debye length that a plasma of density
-$n_s$ and temperature $k_B T_e = m_e v_{th,e}^2/2$ would have. For the first electron
-population this is exactly the Debye length of the run. For any other population it is
-a convenient way to set a density ratio: because $n_s \propto g_s^2$, a beam with 3 % of
-the bulk density uses $g_{beam} = \sqrt{0.03}\, g_{bulk}$, which is what
-`examples/bump-on-tail.toml` does. Setting `weight` to a positive number bypasses the
-formula.
-
-Charge neutrality is not enforced. With equal $N$ and equal $g$ for electrons and
-singly charged ions, the densities match; otherwise check that
-$\sum_s q_s n_s = 0$ yourself, or expect a uniform background field to build up.
-
-The quantities printed at the start of a run with `print_info = true` (density,
-temperature, Debye length, plasma frequency, particles per cell) all refer to the first
-electron population.
-
-## Thermal speeds and temperature ratios
-
-Each velocity component is drawn from a normal distribution with standard deviation
-$v_{th}/\sqrt{2}$, then the drift is added, then the sign is flipped for every second
-particle if `velocity_plus_minus` is set. With $v_{th} = \sqrt{2 k_B T/m}$ this gives a
-Maxwellian of temperature $T$ in that component. Different values per component produce
-a bi-Maxwellian, which is how the Weibel example sets up its anisotropy.
-
-A string value for `vth_over_c_*` names another population, using its canonical label.
-For an ion population referring to electrons the thermal speed becomes
+The convention throughout is
 
 ```{math}
-v_{th,i} = v_{th,e}\sqrt{\frac{T_i}{T_e}}\sqrt{\frac{m_e}{m_i}},
+f(v) \propto \exp\!\left(-\frac{(v-u)^2}{v_{th}^2}\right), \qquad
+v_{th} = \sqrt{\frac{2k_BT}{m}}, \qquad
+\lambda_D = \frac{v_{th}}{\sqrt2\,\omega_p},
 ```
 
-with the temperature ratio taken from `ion_temperature_over_electron_temperature_*`
-of the ion population. An electron population may refer to an ion population in the
-same way (the inverse formula is used). A referenced value must itself be a number;
-chains of references are rejected. Because `vth_over_c_x` of the first electron
-population defaults to `0.05`, the common pattern `"vth_over_c_x": "_electrons0"` for
-ions works without further input.
+so `vth` is $\sqrt2$ times the standard deviation of the velocity distribution.
+Converting from a temperature in electronvolts:
 
-After initialisation every velocity component is clipped to $\pm 0.99c$.
+```python
+import numpy as np
+from jaxincell import elementary_charge, mass_electron
 
-## Positions and perturbations
+vth = np.sqrt(2 * T_ev * elementary_charge / mass_electron)
+```
 
-Positions are equally spaced over $[-L/2, L/2]$ unless `random_positions_x` is true, in
-which case they are uniform random numbers. The displacement
-$x \to x + a\sin(2\pi m x/L)$ then imposes a density perturbation
-$\delta n/n = -a k\cos(kx)$ to first order in $ak$. For a linear-theory test keep
-$ak \ll 1$; for a strong perturbation note that the sampling noise of $N$ particles per
-mode is of order $1/\sqrt{N}$. The same displacement is applied in $y$ and $z$ with
-their own amplitude and mode number, but nothing depends on $y$ or $z$.
+## Seeding a mode
 
-## Random seeds
+`perturbation_amplitude` is a **displacement** in metres, not a density. To first
+order it produces $\delta n/n = -ak\cos(kx)$ with $k = 2\pi m/L$, so the dimensionless
+seed usually quoted in the literature is $ak$:
 
-All randomness comes from `jax.random` keys derived from `solver_parameters.seed`.
-The first electron population uses `seed` for positions and `seed + 3` for velocities;
-the first ion population `seed` and `seed + 6`; every additional population gets a seed
-of its own derived from its position in the input. Two runs with the same parameters
-are bit-for-bit reproducible on the same hardware. `seed_position_override` lets two
-populations share the same random positions, which `examples/bump-on-tail.toml` uses so
-that the beam electrons and their neutralising ions start at the same places.
+```python
+seed = 0.01                                    # a k, one per cent
+Species.electrons(..., perturbation_mode=1,
+                  perturbation_amplitude=seed * length / (2 * np.pi))
+```
 
-## Supplying the phase space directly
+## Quiet starts
 
-`initial_positions` and `initial_velocities` accept arrays of shape `(N_s, 3)` in SI
-units. They replace the generated phase space after the weight has been computed, so
-`grid_points_per_Debye_length` and `vth_over_c_*` still set the density and are still
-printed; make sure the supplied velocities are consistent with them if you rely on the
-derived quantities. Both arrays are differentiable inputs, which allows gradients with
-respect to the full initial condition. A quiet start built this way is used in
-{doc}`../numerics/verification` to measure Landau damping with a low noise floor.
+`quiet=True` places positions on an even lattice and velocities at the quantiles of the
+Maxwellian, following a bit-reversed sequence. The noise floor drops by orders of
+magnitude, which is what makes a growth rate measurable over more than a couple of
+e-foldings. It is the right default for anything compared against linear theory, and
+the wrong one when the noise itself is the point — see
+{doc}`../numerics/initialization`.
 
-## Accessing per-species output
+## Custom phase space
 
-After {func}`jaxincell.diagnostics`, `output["species"]` is a list with one entry per
-distinct (charge, mass) pair, each holding `positions` and `velocities` of shape
-`(steps, N, 3)`; two populations with the same charge and mass (such as a bulk and a
-beam of electrons) are merged into one entry. To separate them use
-`output["species_integer_index"]`, an integer per pseudo-particle in input order
-(`_electrons0`, `_electrons1`, ..., `_ions0`, ...), together with `output["weights"]`,
-`output["charge_integer_lookup"]` and `output["mass_integer_lookup"]`.
+```python
+from jaxincell import quiet_start
+
+x, v = quiet_start(n, length, vth=(vx, 0.0, vz))
+v[:, 2] += 1e-3 * vz * np.sin(2 * np.pi * x[:, 0] / length)
+electrons = Species.electrons(n=n, density=n_e, vth=(vx, 0.0, vz)).replace(x=x, v=v)
+```
+
+`x` and `v` replace the generated phase space entirely, so `vth`, `drift`,
+`perturbation_*`, `plus_minus` and `quiet` are then ignored for the sampling — though
+`vth` and `density` are still what the linear-theory helpers and the Debye-length
+property read, so keep them consistent with the arrays.
+
+## Changing a species
+
+Every configuration object is frozen and has `.replace()`:
+
+```python
+hotter = electrons.replace(vth=(2 * electrons.vth[0], 0, 0))
+```
+
+Because the physical fields are pytree leaves, replacing them does not trigger a
+recompilation, and `jax.grad` differentiates through them ({doc}`differentiation`).

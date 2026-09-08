@@ -1,11 +1,70 @@
 # Examples
 
-The `examples/` directory of the repository contains runnable scripts and input files.
-Each page below shows the script, explains the physics it sets up and shows the result
-as produced by the documentation build scripts under `docs/scripts/`.
+Every script in `examples/` runs on its own on a laptop in seconds to a couple of
+minutes, and each one reproduces a result from the literature rather than making a
+picture for its own sake.
+
+```bash
+git clone https://github.com/uwplasma/JAX-in-Cell
+cd JAX-in-Cell/examples
+python two_stream.py
+```
+
+::::{grid} 1 2 2 2
+:gutter: 3
+
+:::{grid-item-card} Two-stream instability
+:link: two_stream
+:link-type: doc
+`two_stream.py` — growth, saturation and the phase-space vortex. Buneman 1959.
+:::
+
+:::{grid-item-card} Landau damping
+:link: landau_damping
+:link-type: doc
+`landau_damping.py` — the damping rate and frequency at $k\lambda_D=0.5$. Landau 1946.
+:::
+
+:::{grid-item-card} Langmuir waves
+:link: langmuir_wave
+:link-type: doc
+`langmuir_wave.py` — the Bohm-Gross dispersion relation, scanned in $k$.
+:::
+
+:::{grid-item-card} Bump-on-tail
+:link: bump_on_tail
+:link-type: doc
+`bump_on_tail.py` — a beam-driven instability and the quasilinear plateau.
+:::
+
+:::{grid-item-card} Weibel instability
+:link: weibel
+:link-type: doc
+`weibel.py` — a temperature anisotropy driving magnetic modes. Weibel 1959.
+:::
+
+:::{grid-item-card} Energy conservation
+:link: energy_conservation
+:link-type: doc
+`energy_conservation.py` — explicit against implicit as the Picard iteration converges.
+:::
+
+:::{grid-item-card} Collisions
+:link: collisions
+:link-type: doc
+`collisions.py` — the Takizuka-Abe operator against the Fokker-Planck rates.
+:::
+
+:::{grid-item-card} Optimisation
+:link: optimisation
+:link-type: doc
+`optimisation.py` — gradient ascent through the whole solver finds the fastest beam.
+:::
+
+::::
 
 ```{toctree}
-:maxdepth: 1
+:hidden:
 
 two_stream
 landau_damping
@@ -13,29 +72,16 @@ langmuir_wave
 bump_on_tail
 weibel
 energy_conservation
-autodiff
+collisions
 optimisation
-inference
-scaling
 ```
 
-| script | what it shows | run time on a laptop CPU |
-|---|---|---|
-| `two-stream_instability.py`, `input.toml` | two counter-streaming beams, the default configuration | seconds |
-| `Landau_damping.py` | damping of a Langmuir wave in a warm plasma | seconds |
-| `Langmuir_wave.py` | plasma oscillations at the plasma frequency | seconds |
-| `bump-on-tail.py`, `bump-on-tail.toml` | four populations, a weak beam on a Maxwellian, explicit or implicit | tens of seconds |
-| `Weibel_instability.py` | magnetic field generation from a temperature anisotropy | tens of seconds |
-| `auto-differentiability.py` | gradient of a diagnostic with respect to the drift speed, against finite differences | a minute |
-| `optimize_two_stream_saturation.py` | minimise the saturated field energy over the ion temperature | minutes |
-| `inference_two_stream.py` | recover the drift speed from the growth rate with forward-mode derivatives | minutes |
-| `scaling_energy_time.py` | run time and energy error against resolution | minutes |
-
-Run any of them from the repository root, for example
+There is also `input.toml`, which runs the two-stream case from the command line:
 
 ```bash
-python examples/Landau_damping.py
+jaxincell examples/input.toml
 ```
 
-The scripts open matplotlib windows; set the environment variable `MPLBACKEND=Agg`
-to run them without a display.
+The scripts that produce the figures in this documentation live in `docs/scripts/`.
+They do the same physics at higher resolution and record their results in
+`measurements.json`; see {doc}`../numerics/verification`.

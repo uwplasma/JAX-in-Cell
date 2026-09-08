@@ -107,3 +107,36 @@ def landau_root(k_lambda_D, wp=1.0):
     species = [{"wp": wp, "u": 0.0, "vth": vth}]
     func = lambda w: electrostatic_epsilon(w, k, species)
     return most_unstable_root(func, (0.5, 3.0), (-1.5, 0.05))
+
+
+def purely_growing_roots(func, scale, gamma_max=1.0, samples=2000):
+    """Growth rates of the roots with no real part, by bracketing a sign change.
+
+    A symmetric pair of counter-streaming beams, and the Weibel instability, have
+    purely growing modes: on the imaginary axis the dispersion function is real,
+    so its roots can be bracketed exactly. That is worth doing rather than
+    running :func:`most_unstable_root`, whose Newton iterations can converge onto
+    a different Riemann sheet of ``Z`` and return a root that is not there -- for
+    two beams at ``k v_0 > omega_pe``, where the system is stable, it happily
+    reports a growth rate.
+
+    Args:
+        func: The dispersion function, ``omega -> (value, derivative)``.
+        scale: Frequency scale of the search range, usually a plasma frequency.
+        gamma_max: Upper end of the search range, in units of ``scale``.
+        samples: Number of points used to look for sign changes.
+
+    Returns:
+        list: The growth rates found, ascending; empty when the mode is stable.
+    """
+    real = lambda g: func(1j * g)[0].real
+    grid = np.linspace(1e-4, gamma_max, samples) * scale
+    values = np.array([real(g) for g in grid])
+    roots = []
+    for i in np.nonzero(values[:-1] * values[1:] < 0)[0]:
+        low, high = grid[i], grid[i + 1]
+        for _ in range(80):
+            mid = 0.5 * (low + high)
+            low, high = (low, mid) if real(low) * real(mid) <= 0 else (mid, high)
+        roots.append(0.5 * (low + high))
+    return roots

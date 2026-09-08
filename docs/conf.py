@@ -58,12 +58,9 @@ def _format(value):
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
-        if value == 0:
-            return "0"
-        magnitude = abs(value)
-        if magnitude < 1e-3 or magnitude >= 1e4:
-            return f"{value:.2e}"
-        return f"{value:.3g}"
+        # %g keeps the precision the measurement was recorded with (the scripts
+        # round before writing) instead of trimming 1.4041 to 1.4
+        return f"{value:g}"
     if isinstance(value, list):
         return ", ".join(_format(v) for v in value)
     return str(value)

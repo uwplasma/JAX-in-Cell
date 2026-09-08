@@ -1,35 +1,63 @@
-# Testing
-
-The test suite lives under `tests/` and uses `pytest`. It covers the parameter
-handling (defaults, validation, routing, hashing), every numerical kernel on small
-inputs, the two time steps, the `Simulation` class, the command-line entry point, the
-diagnostics, the plotting code and differentiability with respect to each
-differentiable parameter.
+# Tests
 
 ```bash
-pip install pytest pytest-cov
-pytest
-pytest --cov=jaxincell --cov-branch --cov-report=term-missing
+pip install -e ".[dev]"
+pytest -q
 ```
 
-Most tests run in seconds; the whole suite takes a few minutes on a laptop because
-each distinct configuration compiles its own program. `tests/helpers.py` provides a
-minimal parameter tree with two particles per species and one time step that most
-tests start from.
+Thirty tests in three files, about forty seconds on one CPU core.
+
+| file | what it covers |
+|---|---|
+| `tests/test_kernels.py` | the numerical kernels in isolation, against exact results |
+| `tests/test_physics.py` | rates, frequencies and conserved quantities against the literature |
+| `tests/test_api.py` | reproducibility, gradients, `vmap`, storage options, restarts, TOML, the command line |
+
+## What is tested, and how
+
+The suite is deliberately not a set of regression tests against stored output. A
+regression test tells you that something changed; it does not tell you whether the
+code was ever right. Each test here compares against something known independently:
+
+**Exact results for the kernels.** The shape-function weights sum to one and reproduce
+the spline; the deposit and the gather are adjoint; the discrete curls annihilate a
+constant; a vacuum light wave at Courant number one is translated by exactly one cell
+per step; the Boris rotation conserves speed to round-off and turns through the
+analytic angle; the boundary maps do what they claim, position by position.
+
+**Closed-form physics.** Bohm-Gross frequencies at two wavenumbers; the tabulated
+Landau root $1.4157 - 0.1533\,i$ at $k\lambda_D = 0.5$; the cold two-stream rate
+$\omega_{pe}/2\sqrt2$ at $kv_0/\omega_{pe} = \sqrt{3/8}$; the Weibel marginal
+wavenumber $k_c c = \omega_{pe}\sqrt{T_z/T_x - 1}$, checked as a threshold — every
+mode below it grows by more than ten, none above it by more than three; the NRL
+relaxation rates for a fast beam.
+
+**Conservation laws.** Charge on the grid against charge on the particles, to
+round-off; momentum in a periodic box; total energy, bounded for the explicit scheme
+and at round-off for the implicit one; reflective walls holding every particle inside
+the box and absorbing walls removing some but not all.
+
+**The interface.** That two runs with one seed agree bit for bit and two seeds do not;
+that `jax.grad` matches a central difference to one part in $10^4$ through both
+integrators; that `vmap` over seeds gives an ensemble; that `store_every` and a restart
+reproduce the full run exactly; that changing a physical parameter does not change the
+treedef, which is what guarantees no recompilation.
+
+## Writing a new one
+
+Prefer a comparison with something that can be derived on paper. When that is not
+available, a conservation law or an exact symmetry is the next best thing. Reach for a
+stored reference array only when neither exists, and say in the docstring why.
+
+Keep them fast. The physics tests use the smallest resolution that still resolves the
+result — usually a few tens of thousands of particles for a few hundred steps — and
+state the tolerance they need. A test that takes a minute will be skipped by someone in
+a hurry, and a tolerance chosen to make today's number pass is not a test.
 
 ## Continuous integration
 
-`.github/workflows/build_test.yml` runs on every push and pull request to `main`, on
-Python 3.9 to 3.12. It installs the package, checks that it imports from outside the
-source tree, runs `flake8` for syntax errors and undefined names, runs the suite with
-coverage and uploads the report to Codecov. The documentation is built by
-`.github/workflows/docs.yml` with warnings treated as errors, and by Read the Docs
-for the published site.
-
-## Physics checks
-
-The unit tests check shapes, conservation properties on small cases and consistency
-between code paths. The comparisons with linear theory in {doc}`../numerics/verification`
-are not part of the automated suite; they are produced by the scripts under
-`docs/scripts/` and should be rerun after any change to the deposition, interpolation,
-pushers or field update.
+The workflow in `.github/workflows/` runs the suite on every push, and
+`docs.yml` builds the documentation with `-W`, so a broken cross-reference or a
+missing substitution fails the build. The figures are committed rather than rebuilt in
+CI, because the full set takes a few minutes; regenerate them with
+`python docs/scripts/make_all.py` when the numbers they quote would change.

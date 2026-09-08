@@ -1,92 +1,89 @@
-# Stability and resolution
+# Resolution and stability
 
-The constraints below are the ones that decide whether a run is meaningful. Most of
-them are stated in terms of the electron plasma frequency $\omega_{pe}$ and Debye
-length $\lambda_D$ printed at the start of a run with `print_info = true`.
+Four conditions bound the time step and the cell size. Three are hard stability limits
+of the explicit scheme; the fourth is an accuracy requirement that applies to both
+schemes.
 
-## Time step
+## 1. Plasma oscillations
 
-Plasma oscillations
-: The leapfrog integrator is stable for $\omega_{pe}\Delta t < 2$ and accurate to a
-  few percent in the oscillation frequency for $\omega_{pe}\Delta t \lesssim 0.3$. The
-  examples use $\omega_{pe}\Delta t \approx 0.08$ to $0.1$. The implicit scheme has no
-  stability limit here but the same accuracy consideration, and its Picard iteration
-  converges only for $\omega_{pe}\Delta t$ of order one or smaller.
+The leapfrog integrates the harmonic oscillator $\ddot x = -\omega_p^2 x$ stably only
+for $\omega_p\Delta t < 2$, and its frequency error is
 
-Cell crossing
-: The charge-conserving current deposit sweeps six cells around each particle and
-  assumes that the particle moves by less than one cell per step,
-  $|v_x|\Delta t < \Delta x$. Faster particles deposit a truncated current and Gauss's
-  law is no longer preserved. Check the thermal tails: with $v_{th}/c = 0.05$ and
-  $c\,\Delta t/\Delta x = 4.5$ the bulk moves $0.2$ cells per step but a drift of $0.2c$
-  brings it to $0.9$ cells, which is why the examples with drifts of this size are at
-  the limit.
+```{math}
+\frac{\omega_{\rm numerical}}{\omega_p} = \frac{2}{\omega_p\Delta t}\arcsin\!\left(\frac{\omega_p\Delta t}{2}\right)
+= 1 + \frac{(\omega_p\Delta t)^2}{24} + \mathcal{O}\!\left((\omega_p\Delta t)^4\right).
+```
 
-Light waves
-: The explicit field update is stable for $c\,\Delta t/\Delta x \le 1$. The constraint
-  applies as soon as any transverse field can be excited: transverse thermal spread or
-  drift, an external magnetic field, or the Weibel instability. Purely electrostatic
-  problems (all velocities along $x$, no $\mathbf B$) never excite the transverse
-  equations and can run with larger values, which the two-stream examples exploit.
-  The implicit scheme removes this constraint.
+Take $\omega_p\Delta t \le 0.2$ for a frequency error below $0.2$ per cent. The
+verification runs use {{ energy_omega_pe_dt }} and {{ landau_omega_pe_dt }}.
 
-Gyration
-: With an external magnetic field $B$, resolve the cyclotron motion,
-  $\Omega_c\Delta t \lesssim 0.3$ with $\Omega_c = |q|B/m$. The Boris rotation stays
-  stable for any $\Omega_c\Delta t$ but the gyro-phase becomes inaccurate.
+Print the value before a long run:
 
-## Cell size
+```python
+print(float(simulation.plasma_frequency() * simulation.domain.dt))
+```
 
-Debye length
-: Explicit electrostatic schemes suffer from the finite-grid instability when
-  $\Delta x \gtrsim 3\lambda_D$ with linear weighting {cite}`langdon1970`. The
-  quadratic spline and the filter push the limit to larger cells, and the
-  implicit scheme is not subject to it, but a resolved Debye length,
-  `grid_points_per_Debye_length` $\gtrsim 0.5$, is the safe choice. Coarser grids
-  heat the plasma until $\lambda_D$ grows to the cell size.
+## 2. Light waves (explicit only)
 
-Wavelength
-: A mode of wavenumber $k$ needs $k\Delta x \ll 1$ for the spline and the
-  finite-difference curl to represent it, and it must survive the filter:
-  $k\Delta x \lesssim 0.1\pi$ with the default filter settings, see
-  {doc}`filtering`.
+The Yee update of the transverse fields is stable only for
 
-Skin depth
-: Electromagnetic structures form on the scale $d_e = c/\omega_{pe}$; the Weibel
-  example resolves it with about twelve cells.
+```{math}
+\frac{c\,\Delta t}{\Delta x} \le 1,
+```
 
-## Particle number
+the Courant condition, which is `dt_over_dx_c` directly. At exactly one the scheme is
+*exact* for a plane wave in vacuum — the "magic time step", at which the numerical
+dispersion relation reduces to $\omega = ck$ — and a pulse is translated by a whole
+cell per step with no error at all. Below one the scheme is stable but dispersive;
+above one it blows up.
 
-Noise
-: Fluctuations of the deposited density scale as $1/\sqrt{N_c}$ with $N_c$ particles
-  per cell. Instabilities that grow from noise saturate after
-  $\ln(\text{saturation}/\text{noise})$ e-foldings, so few particles means a short
-  linear phase and a growth rate that is hard to measure; see the two-stream
-  discussion in {doc}`verification`. The examples use 50 to 1000 particles per cell.
+:::{warning}
+Purely electrostatic problems never excite the transverse fields, so they are often
+run at $c\Delta t/\Delta x \gg 1$ on purpose: the two-stream runs here use
+{{ energy_courant }}. That is safe only while $E_y$, $E_z$, $B_y$ and $B_z$ stay
+identically zero. Give the particles any transverse velocity — an isotropic
+temperature, a magnetic field, collisions — and the light-wave branch is seeded and
+the run diverges within a few steps. {class}`~jaxincell.Simulation` emits a
+`UserWarning` when it sees that combination.
+:::
 
-Collisionality
-: The finite number of pseudo-particles introduces numerical collisions at a rate
-  that decreases with the number of particles per Debye length. For runs longer than a
-  few hundred plasma periods, watch the kinetic energy of the ions for spurious heating.
+## 3. Cell crossing
 
-## Length of the run
+A particle should not cross more than about one cell per step, or the deposit and
+gather no longer sample a smooth orbit and the charge-conserving current loses
+accuracy:
 
-Recurrence
-: With equally spaced initial positions and random velocities there is no recurrence
-  in the classical sense, but the noise floor is reached once a damped wave has decayed
-  by $\ln\sqrt{N}$ e-foldings, which limits how long Landau damping can be observed.
+```{math}
+\frac{v_{\max}\Delta t}{\Delta x} \lesssim 1 .
+```
 
-Energy drift
-: The explicit scheme's total energy drifts by $10^{-3}$ to $10^{-2}$ relative over the
-  examples; if the drift matters, use the implicit scheme, whose error stays at
-  round-off.
+Because $\Delta t$ is set through $c\Delta t/\Delta x$, this is automatic for
+non-relativistic particles whenever the Courant condition holds, and is only a
+constraint when the Courant condition is deliberately violated in electrostatic mode.
 
-## Amplitudes
+## 4. Debye length (explicit only)
 
-A displacement perturbation of relative amplitude $ak$ excites a wave with electric
-field $E \approx a k\, n e/(\epsilon_0 k)$ and bounce frequency
-$\omega_b = \sqrt{|q|kE/m} \approx \sqrt{ak}\,\omega_{pe}$. Linear theory applies while
-$\omega_b \ll |\gamma|$; `examples/Landau_damping.py` uses $ak = 0.16$ and
-$\omega_b = 0.4\,\omega_{pe}$, above the linear damping rate, and shows nonlinear
-damping as a result. Small amplitudes need the low noise floor of a quiet start or
-many particles.
+If the cell is much larger than the Debye length the aliased short-wavelength modes
+exchange energy with the particles and the plasma heats until $\lambda_D \sim \Delta x$
+— the finite-grid instability {cite}`birdsall1991`. The threshold for the quadratic
+shape function is around $\Delta x \lesssim 3\lambda_D$; staying below one is
+comfortable. The verification runs use $\Delta x/\lambda_D = $
+{{ two_stream_dx_over_debye }}.
+
+Two things relax this. Digital {doc}`filtering` removes the aliased modes and pushes
+the threshold out by a factor of a few. The {doc}`implicit` scheme does not suffer
+from the instability at all, which is the main reason to use it when the Debye length
+is impossible to resolve.
+
+## Putting it together
+
+For an electromagnetic problem, choose $\Delta x \le \lambda_D$ and
+$c\Delta t/\Delta x \le 1$; check that $\omega_p\Delta t$ came out below $0.2$ and
+lower the Courant number if not. For an electrostatic problem, choose
+$\Delta x \le \lambda_D$ and then $\Delta t$ from $\omega_p\Delta t \le 0.2$, which
+usually means a Courant number above one — allowed, as long as nothing transverse is
+excited.
+
+The single most useful check is the energy budget. Total energy that grows without
+bound means a stability limit has been broken; the {doc}`diagnostics` page shows how
+to watch it.

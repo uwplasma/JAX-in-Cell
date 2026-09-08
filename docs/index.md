@@ -53,13 +53,13 @@ Every input parameter, the output dictionary, plotting, gradients, performance.
 :::{grid-item-card} Examples
 :link: examples/index
 :link-type: doc
-Landau damping, two-stream, bump-on-tail, Weibel, optimisation and inference.
+Landau damping, two-stream, bump-on-tail, Weibel, collisions and optimisation.
 :::
 
 :::{grid-item-card} API reference
 :link: api/index
 :link-type: doc
-`Simulation`, `diagnostics`, `plot` and the numerical kernels.
+`Domain`, `Species`, `Solver`, `Simulation` and the numerical kernels.
 :::
 ::::
 
@@ -67,10 +67,11 @@ Landau damping, two-stream, bump-on-tail, Weibel, optimisation and inference.
 :width: 100%
 :alt: Two-stream instability simulated with JAX-in-Cell
 
-Two counter-streaming electron beams, from `examples/input.toml`. (a) Electrostatic
-energy with the growth rate measured in the linear phase and the rate predicted by
-the kinetic dispersion relation. (b-d) Electron phase space before, during and after
-the instability. See {doc}`numerics/verification` for how these numbers are obtained.
+Two counter-streaming electron beams. (a) The seeded mode, with the measured growth
+rate and the rate predicted by the kinetic dispersion relation, which agree to
+{{ two_stream_gamma_deviation_percent }} per cent. (b) The electron phase space after
+saturation. {doc}`numerics/verification` shows how every number in this documentation
+is produced.
 ```
 
 ## What the code does
@@ -79,7 +80,8 @@ JAX-in-Cell advances charged pseudo-particles in one spatial dimension and three
 velocity components under the Lorentz force, and advances the electric and magnetic
 fields on a staggered grid with Maxwell's equations. Charge and current are deposited
 with a quadratic spline, the current deposit satisfies the discrete continuity
-equation, and an optional compensated binomial filter removes short-wavelength noise.
+equation, and an optional compensated binomial filter removes short-wavelength noise. Binary
+Coulomb collisions are available through the Takizuka-Abe operator.
 
 Two time integrators are available: an explicit leapfrog scheme with the Boris pusher
 (non-relativistic or relativistic) and an implicit Crank-Nicolson scheme solved by Picard
@@ -90,32 +92,46 @@ density, drift, temperature anisotropy and seed.
 
 Because the entire simulation is a pure JAX function, it can be differentiated with
 `jax.grad` with respect to physical inputs such as drift speeds, temperatures,
-perturbation amplitudes or the full initial phase space. The
-{doc}`user_guide/differentiation` page shows how, and the
-{doc}`examples/index` include a parameter scan, a gradient check against finite
-differences, an optimisation and an inverse problem.
+perturbation amplitudes, external field profiles or the full initial phase space. The
+{doc}`user_guide/differentiation` page shows how, and
+{doc}`examples/optimisation` solves an inverse problem whose answer is known from
+linear theory.
+
+Every rate and frequency quoted in this documentation is measured against the linear
+kinetic dispersion relation, not against another simulation: Landau damping to
+{{ landau_gamma_deviation_percent }} per cent, the two-stream growth rate to
+{{ two_stream_scan_mean_deviation_percent }} per cent across the unstable range, the
+Weibel rate to {{ weibel_mean_deviation_percent }} per cent, and the collision
+operator to {{ collisions_max_deviation_percent }} per cent of the Fokker-Planck
+rates. {doc}`numerics/verification` collects them.
 
 ## Quick look
 
 ```python
-from jaxincell import Simulation, diagnostics, plot
+import numpy as np
+from jaxincell import Domain, Simulation, Solver, Species, diagnostics, plot, speed_of_light as c
 
-parameters = {
-    "domain_parameters": {"length": 1e-2, "number_grid_points": 64, "total_steps": 1000,
-                          "timestep_over_spatialstep_times_c": 1.0},
-    "species_parameters": {
-        "electrons": {"electrons0": {"number_pseudoparticles": 5000, "vth_over_c_x": 0.05,
-                                     "drift_speed_x": 6e7, "velocity_plus_minus_x": True,
-                                     "grid_points_per_Debye_length": 0.5,
-                                     "perturbation_amplitude_x": 5e-7, "perturbation_wavenumber_x": 1}},
-        "ions": {"ions0": {"number_pseudoparticles": 5000, "grid_points_per_Debye_length": 0.5,
-                           "vth_over_c_x": "_electrons0"}},
-    },
-}
+electrons = Species.electrons(n=10000, density=4.37e17, vth=(0.05 * c, 0, 0),
+                              drift=(6e7, 0, 0), plus_minus=True,
+                              perturbation_amplitude=5e-7, perturbation_mode=1)
+ions = Species.ions(n=10000, density=4.37e17, electrons=electrons)
 
-output = Simulation(parameters).run()   # compiled with XLA on first call
-diagnostics(output)                     # energies, species split, dominant frequency
+simulation = Simulation(Domain(length=0.01, cells=64, dt_over_dx_c=4.5),
+                        [electrons, ions], Solver(filter_passes=2))
+
+output = simulation.run(1000, seed=0)   # compiled with XLA on the first call
+diagnostics(output)                     # energies, momentum, Gauss residual, temperatures
 plot(output)                            # animated fields, distributions and phase space
+```
+
+Every physical parameter is a JAX pytree leaf, so changing one does not recompile and
+`jax.grad` differentiates through the whole run:
+
+```python
+import jax, jax.numpy as jnp
+
+gradient = jax.grad(lambda s: jnp.sum(s.run(200, seed=0).E ** 2))(simulation)
+print(gradient.species[0].drift, gradient.domain.length)
 ```
 
 ```{toctree}

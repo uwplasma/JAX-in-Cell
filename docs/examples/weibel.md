@@ -1,42 +1,47 @@
 # Weibel instability
 
-`examples/Weibel_instability.py` initialises electrons with a temperature anisotropy
-$T_z/T_x = 100$ ($v_{th,z} = 0.1c$, $v_{th,x} = 0.01c$) and no drift. The transverse
-Weibel instability {cite}`weibel1959` converts the excess thermal energy in $z$ into
-magnetic field $B_y$ and current filaments in $z$.
+`examples/weibel.py`
 
-```{literalinclude} ../../examples/Weibel_instability.py
-:language: python
+A plasma hotter across the simulation axis than along it is unstable to purely growing
+transverse magnetic modes {cite}`weibel1959`. It is the electromagnetic instability of
+the set, and it converts anisotropy in the distribution into magnetic field.
+
+```{figure} ../_static/figures/weibel.png
+:width: 100%
+:alt: Weibel mode growth below and above the cutoff and the growth rate against wavenumber
+
+(a) Modes below the cutoff grow, modes above it do not. (b) Growth rates against the
+kinetic root.
 ```
 
-The example uses `direction="xz"` when plotting so that the $v_z$ distributions and
-the $x$-$v_z$ phase space are shown alongside the fields.
+## The marginal wavenumber
 
-## Physics
-
-For waves with $\mathbf k = k\hat{\mathbf x}$ and $\mathbf E \parallel \hat{\mathbf z}$
-the dispersion relation of a bi-Maxwellian plasma is
+Setting $\omega = 0$ in the transverse dispersion relation gives the boundary of the
+unstable band in closed form,
 
 ```{math}
-\omega^2 - k^2c^2 - \sum_s\omega_{ps}^2\left[1 - \frac{T_{z,s}}{T_{x,s}}\left(1 + \xi_s Z(\xi_s)\right)\right] = 0, \qquad
-\xi_s = \frac{\omega}{k v_{th,x,s}},
+k_c c = \omega_{pe}\sqrt{\frac{T_z}{T_x} - 1},
 ```
 
-which has a purely growing root when $\omega_{pe}^2(T_z/T_x - 1) > k^2c^2$. With the
-anisotropy of the example every mode up to $kc/\omega_{pe} \approx 10$ is unstable and
-the growth rate peaks at $kc/\omega_{pe} \approx 2$, on the scale of the electron skin
-depth. The run resolves the skin depth with about twelve cells and the box holds
-about twelve skin depths.
+which is a sharp prediction needing no fitting: put several wavelengths in one box and
+every mode below $k_c$ grows while none above it does. The example prints the gain of
+each mode and marks the cutoff.
 
-## Result
+## Two things this example needs
 
-With the 3000 particles per species of the script, and the digital filter on, the
-magnetic field grows out of a high noise level and saturates within a few e-foldings;
-the filter's default settings also damp the fastest-growing wavelengths. The run is a
-good demonstration of the physics: filaments appear on the skin-depth scale and merge
-into longer wavelengths, and the animation shows the anisotropy relaxing.
+**A Courant number at or below one.** The instability lives in the transverse fields,
+so the explicit field solve is subject to the light-wave limit. `dt_over_dx_c=0.5`.
 
-To compare growth rates with theory the noise floor has to be lowered instead.
-{doc}`../numerics/verification` runs one simulation per wavenumber from a quiet start,
-seeding a single mode through a small modulation of $v_z$, and compares the measured
-rates with the transverse dispersion relation above. The figure is on that page.
+**A custom initial condition.** A bi-Maxwellian with $T_z \ne T_x$ is
+`vth=(v, 0, v * sqrt(ratio))`, which `Species` supports directly. Seeding one mode
+coherently — the way {doc}`../numerics/verification` measures the rates — needs
+`quiet_start` plus a transverse current, and that is what
+{func}`~jaxincell.quiet_start` is for.
+
+## Things to try
+
+* Change the anisotropy and check that the cutoff moves as $\sqrt{T_z/T_x - 1}$.
+* Let it run past saturation: the field feeds back on the particles, isotropising the
+  distribution and shutting the instability off.
+* Look at $B_y$ in real space rather than in $k$: the growing modes are current
+  filaments, and their merging is what the late nonlinear stage is about.

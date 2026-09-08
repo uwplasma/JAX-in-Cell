@@ -1,101 +1,138 @@
-# Running simulations
-
-## The `Simulation` object
-
-{class}`jaxincell.Simulation` is constructed from a parameter dictionary or a path to a
-TOML file. Construction validates the parameters, builds the grid, generates the
-initial phase space and computes the initial electric field from Gauss's law. Nothing
-is compiled yet.
+# Running a simulation
 
 ```python
-from jaxincell import Simulation
-
-sim = Simulation(parameters)         # dictionary
-sim = Simulation("input.toml")       # path, loaded with load_parameters
-sim = Simulation()                   # built-in defaults
+output = simulation.run(steps, seed=0, store_every=1, store_particles=True, state=None)
 ```
 
-The cleaned parameter sections are attributes: `sim.domain_parameters`,
-`sim.species_parameters`, `sim.solver_parameters`, `sim.external_field_parameters`,
-`sim.source_parameters`. Species are keyed by their canonical labels
-(`sim.species_parameters["electrons"]["_electrons0"]`). The initial state is also
-available: `sim.grid`, `sim.dx`, `sim.dt`, `sim.box_size`, `sim.positions`,
-`sim.velocities`, `sim.weights`, `sim.charges`, `sim.masses`, `sim.fields`.
+| argument | meaning |
+|---|---|
+| `steps` | number of time steps; must be a multiple of `store_every` |
+| `seed` | integer seed of the random numbers; a traced value, so `jax.vmap` over it gives an ensemble from one compilation |
+| `store_every` | keep every n-th state |
+| `store_particles` | keep the particle histories, which are the bulk of the memory |
+| `state` | a previous `Output.state` to continue from |
 
-## `run`
+The whole loop — initialisation, deposition, field solve, push, boundaries,
+diagnostics — is one `jax.jit`-compiled program built around `lax.scan`. The first
+call compiles, which takes a second or two; subsequent calls with the same
+`steps`, `store_every` and `store_particles` reuse it, even when the physical
+parameters change.
+
+## What is static and what is not
+
+`steps`, `store_every` and `store_particles` are static arguments, and so are the
+particle counts, the cell count, the boundary types and every switch in
+{class}`~jaxincell.Solver`. Change one and the program is rebuilt. Everything
+physical — lengths, densities, drifts, thermal speeds, the filter weight, the
+restitution, the external fields — is a pytree leaf, so it can be changed freely:
 
 ```python
-output = sim.run()
-output = sim.run(input_parameters)
+hotter = simulation.replace(species=(electrons.replace(vth=(2e6, 0, 0)), ions))
+output = hotter.run(1000, seed=0)     # no recompilation
 ```
 
-`run` (an alias of `simulation`) executes all `total_steps` steps inside one
-`jax.lax.scan` and returns the output dictionary described in {doc}`output`. The first
-call on a given configuration compiles the program with XLA; the compile time is a few
-seconds for the examples and grows with the code path (the implicit scheme, the
-relativistic pusher and non-periodic boundaries each add branches). Subsequent calls
-are fast. Wrap the call in `jax.block_until_ready` when timing it, because JAX returns
-before the computation has finished.
+## Memory
 
-The optional argument is a dictionary of differentiable parameters (see
-{doc}`differentiation`). It changes the values used in this call without touching the
-stored configuration and without recompiling:
+The particle history dominates. Its size is
+
+```{math}
+\text{bytes} = \frac{\text{steps}}{\text{store\_every}} \times N \times 3 \times 8 \times 2
+```
+
+for the positions and the velocities together. Ten thousand steps of a hundred
+thousand particles is 48 GB, which will not fit anywhere. Two ways out:
 
 ```python
-for drift in (4e7, 6e7, 8e7):
-    output = sim.run({"electrons": {"electrons0": {"drift_speed_x": drift}}})
+output = simulation.run(20000, store_every=20)        # 1/20 of the samples
+output = simulation.run(20000, store_particles=False) # fields only
 ```
 
-Species can be addressed by user label or canonical label, and a value given at the
-type level applies to every population of that type:
+`store_particles=False` keeps the fields and the charge density, which is all the
+field diagnostics need, and is the right choice for a growth-rate measurement. Note
+that `kinetic`, `total`, `momentum` and `temperatures` are then absent from
+{func}`~jaxincell.diagnostics`, because they cannot be computed without the particles.
+
+## Restarts
+
+`Output.state` is the full loop state. Feed it back to continue exactly where the
+previous call stopped:
 
 ```python
-sim.run({"electrons": {"beam": {"drift_speed_x": 8e7}}})       # one population
-sim.run({"electrons": {"drift_speed_x": 8e7}})                 # all electron populations
-sim.run({"timestep_over_spatialstep_times_c": 0.5})            # a domain parameter
+first  = simulation.run(1000, seed=2)
+second = simulation.run(1000, seed=2, state=first.state)
 ```
 
-`sim.input_parameters` returns the differentiable parameters that were given under
-`input_parameters` at construction, as a dictionary ready to be passed back to `run`
-or to `jax.grad`.
+The result is bit-identical to a single 2000-step run. This is how to keep the memory
+bounded on a long run: process or write each chunk, then discard it.
 
-## Changing parameters after construction
+## Ensembles
 
-Assigning to a section attribute replaces that section, re-validates it and
-re-initialises the state:
+`seed` is traced, so `jax.vmap` over it produces an ensemble from a single compiled
+program:
 
 ```python
-sim.solver_parameters = {"time_evolution_algorithm": 1}
-sim.domain_parameters = {**sim.domain_parameters, "total_steps": 2000}
+import jax, jax.numpy as jnp
+
+fields = jax.vmap(lambda s: simulation.run(500, seed=s).E[-1, :, 0])(jnp.arange(16))
+print(fields.shape)      # (16, cells)
 ```
 
-The assignment takes the complete new section (missing keys revert to defaults), so
-copy the existing one when only one key should change. Assigning to
-`sim.input_parameters` re-routes a new set of differentiable inputs.
+Scanning a physical parameter works the same way, and needs no recompilation because
+the parameter is a leaf.
 
-## When does JAX recompile?
+## Input files
 
-The compiled program depends on everything that is not a differentiable input:
-particle counts, grid size, number of steps, algorithm switches, boundary conditions,
-filter passes and strides, seeds. `Simulation` hashes each section and passes the
-hashes as static arguments, so any change of those values compiles a new program,
-while changes of differentiable values reuse the existing one. The `Simulation`
-object itself is also a static argument, so a second object compiles its own program
-even when its parameters are identical; reuse one object when running many cases.
-
-## Command line
+A run can be written as TOML and started from the command line:
 
 ```bash
-jaxincell               # defaults
-jaxincell input.toml
+jaxincell examples/input.toml
 ```
 
-The entry point loads the file, runs the simulation, calls {func}`jaxincell.diagnostics`
-and {func}`jaxincell.plot`. It has no further options; use a script for anything else.
+The tables map onto the constructors: `[domain]` to {class}`~jaxincell.Domain`,
+`[solver]` to {class}`~jaxincell.Solver`, each `[[species]]` to a
+{class}`~jaxincell.Species`, `[collisions]` to {class}`~jaxincell.Collisions`, and
+`[run]` carries `steps`, `seed`, `store_every` and `plot`.
+
+```toml
+[domain]
+length = 0.01
+cells = 64
+dt_over_dx_c = 4.5
+
+[solver]
+algorithm = "explicit"
+filter_passes = 2
+
+[[species]]
+name = "electrons"
+n = 20000
+charge = -1
+mass = "electron"          # or "proton", or a number in kilograms
+density = 4.37e17
+vth = [1.5e7, 0.0, 0.0]
+drift = [6e7, 0.0, 0.0]
+plus_minus = true
+perturbation_amplitude = 5e-7
+perturbation_mode = 1
+
+[run]
+steps = 1200
+seed = 0
+```
+
+{func}`~jaxincell.load_toml` returns the simulation and the `[run]` table, so a file
+can also be the starting point of a script:
+
+```python
+from jaxincell import load_toml
+
+simulation, run = load_toml("input.toml")
+output = simulation.run(run["steps"], seed=run.get("seed", 0))
+```
 
 ## Reproducibility
 
-Runs are deterministic for a given seed, parameter set, JAX version and device.
-Results on a GPU differ from those on a CPU at the level of floating-point rounding,
-which is amplified by the instabilities being simulated; growth rates and energies agree,
-individual particle trajectories do not after many e-foldings.
+Two runs with the same seed and the same parameters give bit-identical results on the
+same machine and JAX version. `seed` changes the random velocities of a non-quiet
+start and the collision partners; a fully quiet, collisionless run is deterministic
+regardless of it.

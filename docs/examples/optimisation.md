@@ -1,23 +1,50 @@
-# Optimising a simulation
+# Optimisation through the solver
 
-`examples/optimize_two_stream_saturation.py` searches for the ion temperature that
-minimises the saturated electrostatic energy of the two-stream instability. It shows
-the pattern for any gradient-based or derivative-free optimisation over simulation
-inputs.
+`examples/optimisation.py`
 
-```{literalinclude} ../../examples/optimize_two_stream_saturation.py
-:language: python
+An inverse problem with a known answer, solved by differentiating the entire
+simulation.
+
+```{figure} ../_static/figures/autodiff.png
+:width: 100%
+:alt: Gradient against finite differences, and gradient ascent finding the resonance
+
+(a) The reverse-mode gradient against central differences. (b) Gradient ascent on the
+seeded mode's amplitude.
 ```
 
-The objective is the mean of the field energy over the last 800 steps, a smooth-enough
-function of $T_i/T_e$ for optimisation. Three things happen in the script:
+## What it does
 
-1. one run at the initial guess, to plot the energy history and the value that will
-   be minimised;
-2. a scan over ten values of $T_i/T_e$ on a logarithmic grid, to see the landscape;
-3. an optimisation with `scipy.optimize.least_squares` starting from $T_i/T_e = 3$.
+The objective is $\ln|E_{k=1}|$ at a fixed time, which is $\gamma t$ plus a constant
+while the mode grows exponentially. Ascending it in the beam drift should find the
+fastest-growing two-stream configuration, which for cold beams is
+$kv_0/\omega_{pe} = \sqrt{3/8} = {{ autodiff_cold_optimum_k_v0_over_wpe }}$ and for
+beams this warm is {{ autodiff_kinetic_optimum_k_v0_over_wpe }}.
 
-The objective is wrapped in `jax.jit` and its gradient in `jit(grad(...))`; the
-commented block at the end shows the same optimisation with Optax's Adam optimiser
-using that gradient. All runs reuse one compiled program, because the ion temperature
-is a differentiable input.
+Starting well off resonance, {{ autodiff_ascent_iterations }} steps of plain gradient
+ascent reach {{ autodiff_ascent_k_v0_over_wpe }} —
+{{ autodiff_ascent_deviation_percent }} per cent away. The script also checks the
+gradient against a central difference: {{ autodiff_best_relative_error }}.
+
+## Why the objective is what it is
+
+Two obvious alternatives do not work, and the reasons are worth knowing before
+building an objective of your own.
+
+**The saturated field energy** is chaotic. Its gradient is a large, noisy number that
+is the correct derivative of a function no optimiser can follow. Use a quantity from
+the linear phase, or average over an ensemble with `vmap`.
+
+**A fitted growth rate** uses a window chosen from the data — "from ten times the seed
+to a tenth of saturation" — and those boundaries jump as the parameter changes, so the
+objective is not smooth. Fixing the time instead makes it smooth, at the cost of having
+to know in advance that the mode is still growing then.
+
+More on both in {doc}`../user_guide/differentiation`.
+
+## Things to try
+
+* Optimise something else: the box length, the density, the temperature ratio, the
+  external field profile. They are all pytree leaves.
+* Replace the hand-rolled ascent with `optax`; nothing in the objective cares.
+* Use `jax.vmap` over `seed` inside the objective to optimise an ensemble average.
