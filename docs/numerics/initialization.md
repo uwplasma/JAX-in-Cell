@@ -1,71 +1,112 @@
-# Initialisation
+# Initialising the phase space
+
+{meth}`~jaxincell.Simulation.initial_state` turns the {class}`~jaxincell.Species`
+list into particle arrays and the initial fields. Everything here happens inside the
+compiled program, so the sampling is a function of the traced parameters and can be
+differentiated through.
 
 ## Positions
 
-For each population the $x$ coordinates are either equally spaced over the box
-(`random_positions_x = false`, the default) or uniform random numbers. Then the
-displacement
+By default positions are equally spaced,
+$x_p = -L/2 + (p + \tfrac12)L/N$, which is the lowest-noise choice for a uniform
+plasma: the deposited density is uniform to round-off, whereas random placement leaves
+a $1/\sqrt{N}$ density fluctuation in every mode. Set `random_positions=True` for
+uniform random placement when the noise itself is the object of study.
+
+The perturbation is a displacement rather than a density change,
 
 ```{math}
-x_p \to x_p + a\sin\!\left(\frac{2\pi m}{L}x_p\right)
+x_p \to x_p + a\sin\!\left(\frac{2\pi m x_p}{L}\right),
 ```
 
-is applied with $a$ = `perturbation_amplitude_x` and $m$ = `perturbation_wavenumber_x`.
-To first order in $ak$ this produces the density perturbation
-$\delta n/n = -ak\cos(kx)$ with $k = 2\pi m/L$, which seeds a standing wave of mode
-number $m$. The same is done for $y$ and $z$ with their own parameters; those
-coordinates default to random and have no effect on the fields.
+with `perturbation_amplitude` $=a$ and `perturbation_mode` $=m$. To first order this
+makes a density perturbation $\delta n/n = -a k\cos(kx)$ with $k = 2\pi m/L$, so the
+dimensionless seed usually quoted in the literature is $ak$: to seed a one per cent
+perturbation of mode $m$, set `perturbation_amplitude = 0.01 * L / (2 * pi * m)`.
+Seeding by displacement keeps every pseudo-particle's weight identical, which the
+charge-conserving deposit relies on.
 
 ## Velocities
 
-Each component is drawn from a normal distribution of standard deviation
-$v_{th}/\sqrt2$, where $v_{th}$ = `vth_over_c_*` times $c$, and the drift is added.
-The result is a Maxwellian with $k_B T = m v_{th}^2/2$ in that component. If
-`velocity_plus_minus_*` is set, the component of every second particle is negated,
-which creates two counter-propagating beams from one population without changing its
-density. Finally every component is clipped to $\pm0.99c$ so that the Lorentz factor
-of the relativistic pusher is finite.
-
-Random numbers come from `jax.random` with keys derived from `solver_parameters.seed`
-as described in {doc}`../user_guide/species`; two runs with the same inputs give the
-same particles.
-
-A user-supplied phase space (`initial_positions`, `initial_velocities`) replaces the
-generated one. The quiet start used for the Landau-damping check in
-{doc}`verification` is built this way: equally spaced positions with the displacement
-applied by hand, and velocities placed at the quantiles of the Maxwellian in
-bit-reversed order, which lowers the initial noise by orders of magnitude compared
-with random sampling.
-
-## Weights
-
-The weight of each population is computed from its `grid_points_per_Debye_length` and
-the thermal speed and charge of the first electron population, as derived in
-{doc}`../user_guide/species`:
+Velocities are Maxwellian with the convention
 
 ```{math}
-w_s = \frac{\epsilon_0 m_e c^2}{q_e^2}\,\frac{N_x^2 g_s^2}{2 L N_s}\left(\frac{v_{th,e}}{c}\right)^2 .
+f(v) \propto \exp\!\left(-\frac{(v-u)^2}{v_{th}^2}\right), \qquad
+v_{th} = \sqrt{\frac{2k_BT}{m}},
 ```
 
-Charges and masses of the pseudo-particles are $q_s w_s$ and $m_s w_s$; the
-charge-to-mass ratio used by the pusher is $q_s/m_s$. All populations are concatenated
-into single arrays in input order, and an integer index per particle records the
-population.
+so `vth` is $\sqrt2$ times the standard deviation, and
+$\lambda_D = v_{th}/(\sqrt2\,\omega_p)$. `drift` adds $u$ per component.
 
-## Initial fields
+**Random start** (default). Each component is drawn from a normal distribution of
+standard deviation $v_{th}/\sqrt2$ using the run's PRNG key, so `seed` changes the
+realisation.
 
-The magnetic field starts at zero. The electric field starts from Gauss's law: the
-charge density is deposited on the cell centres from the initial positions, filtered
-with the solver's filter settings, and integrated from the left wall,
-$E_{x,i+1/2} = (\Delta x/\epsilon_0)\sum_{j\le i}\rho_j$. For a neutral box the field is
-periodic; for a box with net charge it grows linearly across the box. The transverse
-components start at zero. External field arrays, if supplied, are stored separately
-and never modified.
+**Quiet start** (`quiet=True`). The velocity of particle $p$ is placed at a quantile
+of the Maxwellian,
 
-## Half-step positions
+```{math}
+v_p = v_{th}\,\mathrm{erf}^{-1}(2u_p - 1),
+```
 
-The explicit leapfrog needs positions at $t^{\pm1/2}$. They are created by
-$x^{\pm1/2} = x^0 \pm \tfrac12\Delta t\,v_x^0$ followed by the particle boundary
-condition, so the first current deposit uses the motion from $t^{-1/2}$ to $t^{1/2}$
-and the first push sees fields at $t^{1/2}$. This is a first-order initialisation of a
-second-order scheme, which is standard practice and affects only the first step.
+where $u_p$ is the $p$-th element of a van der Corput (bit-reversed) sequence, in
+bases 2, 3 and 5 for the three components. The sequence fills $[0,1)$ far more evenly
+than random numbers, so the sampled distribution matches the Maxwellian to much better
+than $1/\sqrt N$ and the noise floor of the run drops by orders of magnitude. That is
+what makes the growth rates of {doc}`verification` measurable at all: with a random
+start the modes emerge from the noise floor and saturate two e-foldings later, which
+is not enough to fit anything.
+
+:::{note}
+A quiet start suppresses the noise so thoroughly that unseeded modes have nothing to
+grow *out of*. When the point of a run is which modes are unstable rather than how
+fast one of them grows, use a random start so that a well-defined noise floor exists;
+see the two panels of {doc}`verification`'s Weibel figure.
+:::
+
+### Counter-streaming beams
+
+`plus_minus=True` negates $v_x$ on every second particle, turning one drifting
+population into two counter-streaming beams of half the density each. Combined with a
+quiet start this needs care, and the code handles it explicitly: the base-2 van der
+Corput value is below one half exactly when the index is even, which is the same
+parity the sign flip uses, so the naive combination would hand one beam the lower half
+of the Maxwellian and the other the upper half. Instead $N/2$ quantiles are drawn and
+each is given to both beams, making them exact mirror images that each sample the whole
+distribution.
+
+### Custom phase space
+
+`Species.replace(x=..., v=...)` substitutes arrays of shape `(n, 3)` for the generated
+phase space, which is how anything the generator does not cover is built: a
+bi-Maxwellian with a coherent seed, a ring distribution, a slab. The helper
+{func}`~jaxincell.quiet_start` returns the equally spaced positions and quantile
+velocities as plain arrays so that a custom condition can be built on top of the quiet
+start rather than instead of it:
+
+```python
+from jaxincell import quiet_start, Species
+
+x, v = quiet_start(n, length, vth=(vx, 0.0, vz))
+v[:, 2] += 1e-3 * vz * np.sin(2 * np.pi * x[:, 0] / length)   # seed a Weibel mode
+electrons = Species.electrons(n=n, density=n_e, vth=(vx, 0.0, vz)).replace(x=x, v=v)
+```
+
+## Fields
+
+$\mathbf B$ starts at zero, and so do the transverse components of $\mathbf E$.
+$E_x$ is taken from the discrete Gauss law applied to the charge density
+({doc}`field_solvers`), so the constraint holds from the first step. Static external
+fields, if given, are added at the gather and never evolve.
+
+The order matters at a wall. In the explicit scheme positions are first displaced by
+$+\tfrac12\Delta t\,\mathbf v$ to set up the leapfrog, and the density the initial
+field is built from is then deposited at
+$\mathrm{wrap}(x^{1/2} - \tfrac12\Delta t\,\mathbf v)$ — the integer-time position
+the *loop* will reconstruct, not the one the particles were placed at. For a periodic
+box the two are the same; at a reflecting or absorbing wall a particle whose half step
+crossed the wall comes back somewhere else, and building the field from the placed
+positions leaves the discrete Gauss law violated from the first step and violated for
+the rest of the run.
+
+Velocities are clipped to $0.99c$ so that the relativistic $\gamma$ is finite.

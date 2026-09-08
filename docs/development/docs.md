@@ -7,8 +7,7 @@ The documentation is written in MyST Markdown and built with Sphinx and the
 ## Local build
 
 ```bash
-pip install -e .
-pip install -r docs/requirements.txt
+pip install -e ".[docs]"
 sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
 
@@ -26,6 +25,7 @@ the condition for merging.
 | `docs/references.bib` | bibliography, cited with `{cite}` roles |
 | `docs/_static/figures/` | figures and `measurements.json` |
 | `docs/scripts/` | scripts that generate the figures |
+| `docs/scripts/dispersion.py` | the linear kinetic dispersion solvers the figures compare against |
 
 The API pages use `autodoc` on the public names, so docstrings in the source are part
 of the documentation. Google-style sections (`Args:`, `Returns:`) are parsed by
@@ -38,8 +38,7 @@ quickly and deterministically on Read the Docs. To regenerate them after a chang
 the code:
 
 ```bash
-pip install scipy
-python docs/scripts/make_all.py            # all figures, about ten minutes on a laptop
+python docs/scripts/make_all.py            # all of them, about seven minutes on a laptop
 python docs/scripts/make_all.py fig_landau_damping.py   # one script
 ```
 

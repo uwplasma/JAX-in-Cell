@@ -1,72 +1,95 @@
 # Diagnostics
 
-{func}`jaxincell.diagnostics` post-processes an output dictionary outside the
-compiled program. The quantities it adds are listed in {doc}`../user_guide/output`;
-this page gives their definitions.
+{func}`~jaxincell.diagnostics` computes everything below from a stored
+{class}`~jaxincell.Output`; the individual functions are also exported so that only
+what is needed has to be computed. They are plain functions of the stored arrays, so
+they can be recomputed at will and applied to a reloaded run.
+
+```python
+from jaxincell import diagnostics
+
+d = diagnostics(output)
+print(float(abs(d["total"][-1] / d["total"][0] - 1)))
+```
 
 ## Energies
 
-With $\Delta x$ the cell size and the sums over the $N_x$ grid values,
+Per unit area, in J/m², at every stored step:
 
 ```{math}
-\mathcal E_E = \frac{\epsilon_0}{2}\sum_i |\mathbf E_i|^2\,\Delta x, \qquad
-\mathcal E_B = \frac{1}{2\mu_0}\sum_i |\mathbf B_i|^2\,\Delta x,
+W_E = \frac{\epsilon_0}{2}\sum_i |\mathbf E_i|^2\Delta x, \qquad
+W_B = \frac{1}{2\mu_0}\sum_i |\mathbf B_i|^2\Delta x, \qquad
+W_P = \sum_p \frac{m_p |\mathbf v_p|^2}{2},
 ```
 
-and the same expressions for the external arrays. The kinetic energy sums over all
-pseudo-particles with their pseudo-masses $m_p = m_s w_s$,
+as `electric`, `magnetic` and `kinetic`, with `kinetic_<name>` per species and `total`
+their sum. With `Solver(relativistic=True)` the kinetic energy becomes
+$\sum_p (\gamma_p - 1)m_pc^2$, which is the quantity the relativistic pusher conserves;
+the diagnostic follows the solver automatically.
+
+The relative change of `total` is the single most informative number about a run. A
+bounded oscillation of a few parts in $10^{4}$ is what the explicit scheme does; a
+steady rise means a resolution problem ({doc}`stability`).
+
+## Momentum
+
+`momentum` is $\sum_p \gamma_p m_p\mathbf v_p$, shape `(steps, 3)`. In a periodic box
+its $x$ component should stay put: over the two-stream run it drifts by
+{{ momentum_error_relative }} of $\sum_p m_p|v_{x,p}|$ ({doc}`deposition`).
+
+## Gauss-law residual
+
+`gauss_residual` is the relative violation of {eq}`discrete-gauss` at every step,
 
 ```{math}
-\mathcal E_K = \sum_p \tfrac12 m_p |\mathbf v_p|^2 ,
+\max_i\left|\frac{E_{x,i+1/2}-E_{x,i-1/2}}{\Delta x} - \frac{\rho_i}{\epsilon_0}\right|
+\Big/ \max_i\left|\frac{\rho_i}{\epsilon_0}\right| .
 ```
 
-split into electrons (negative charge) and ions (non-negative charge). The kinetic
-energy is the non-relativistic one even when the relativistic pusher is used; for
-$v \le 0.3c$ the difference is below 10 %. The total is the sum of all five terms.
-All values are energies per unit area of the $y$-$z$ plane, in J/m².
+with $E_{-1/2}$ taken as the solver takes it: the far end of the box for a periodic
+wall, zero otherwise. Measuring it as periodic regardless reports a violation in the
+first cell that the solver never committed, which at an absorbing wall — where the
+field at the far end is the sheath field and nowhere near zero — can be larger than
+the density itself.
 
-The velocities stored in the output are the integer-time velocities and the fields
-are the integer-time fields, so the energies are synchronous and their sum is the
-right quantity to monitor for conservation.
+It should sit at round-off, {{ gauss_residual_max_explicit }}, for the whole run, at
+every wall type. It will not if the current deposit is bypassed, which makes it a good
+regression check.
+
+## Potential
+
+{func}`~jaxincell.potential` integrates the longitudinal field,
+$\phi_{i+1/2} = -\Delta x\sum_{j\le i} E_{x,j+1/2}$, with the left wall as the gauge,
+so entry $i$ is the potential relative to that wall and the last entry is the potential
+of the right wall. Two absorbing walls are short-circuited conductors, so that last
+entry stays at zero and the bulk floats above both — see {doc}`../examples/sheath`. A
+periodic box has no wall, so the mean is set to zero instead.
+
+## Temperatures
+
+{func}`~jaxincell.temperatures` returns, per species, the temperature per component in
+electronvolts from the velocity variance about the mean,
+$k_BT = m\,\mathrm{var}(v)$. Note the convention of {doc}`initialization`:
+$v_{th} = \sqrt{2k_BT/m}$, so the variance is $v_{th}^2/2$ and a species initialised
+with `vth` reports $T = m v_{th}^2/2k_B$.
 
 ## Dominant frequency
 
-The time series of $E_x$ at the centre cell is centred, normalised and transformed
-with the FFT; `dominant_frequency` is the angular frequency of the largest peak,
-$2\pi f$. The resolution is $2\pi/(S\Delta t)$ with $S$ the number of steps, which is
-0.2 $\omega_{pe}$ for a run of 30 plasma periods; the examples that print the ratio to
-the plasma frequency use it only as a rough check.
+{func}`~jaxincell.dominant_frequency` takes the FFT of $E_x$ at the box centre and
+returns the angular frequency of the strongest peak other than the mean, in rad/s. It
+is a quick check that a Langmuir wave landed where it should; for a careful
+measurement use the mode amplitude directly, as the verification scripts do:
 
-## Species views
+```python
+import numpy as np
+amplitude = np.abs(np.fft.rfft(np.asarray(output.E[:, :, 0]), axis=1)[:, mode])
+```
 
-Particles are grouped by the sign of their charge into `*_electrons` and `*_ions`
-arrays, and by exact (charge, mass) pairs into the `species` list. Absorbed particles
-have zero charge and appear among the ions.
+## What is not stored
 
-## Growth and damping rates
-
-The code does not fit rates. The documentation figures use the following procedure,
-implemented in `docs/scripts/common.py`:
-
-1. Fourier transform $E_x(x, t)$ (or $B_y$) in $x$ at every step and follow the
-   complex amplitude of the mode of interest.
-2. Choose the fitting window with `robust_growth_fit`: among all windows inside the
-   growth phase, keep the **longest** whose straight-line fit to the logarithm of the
-   mode energy reaches $R^2 \ge 0.95$, requiring at least 15 $\omega_{pe}^{-1}$ and
-   1.5 e-foldings. Length is the right thing to maximise: the steepest or
-   best-correlated window tends to be a short one sitting on a noise excursion, and
-   the first inverse plasma times of a seeded run are the perturbation settling onto
-   the growing eigenmode.
-3. The growth rate of the amplitude is half the slope of the log of the energy.
-4. If no window qualifies, report the mode as unmeasured instead of fitting it.
-
-For damped waves the fit goes through the local maxima of the energy. Frequencies are
-measured from the zero crossings of the real part of the mode amplitude. Both are
-compared with the roots of the kinetic dispersion relation computed in
-`docs/scripts/dispersion.py` with the plasma dispersion function {cite}`fried1961`.
-
-Measuring a rate at all requires the mode to grow over a usable range. A mode that
-starts at the particle-noise floor and saturates two e-foldings later does not, which
-is why the verification runs load the plasma quietly (equally spaced positions,
-velocities at quantiles of a bit-reversed sequence) and seed a single mode; see
-{doc}`verification`.
+Only what {meth}`~jaxincell.Simulation.run` was asked to keep. With
+`store_particles=False` the particle history is dropped, so `kinetic`, `total`,
+`momentum` and `temperatures` are absent from the dictionary and only the field
+diagnostics are available — which is usually the right trade when the run is long,
+since the particle history dominates the memory
+({doc}`../user_guide/performance`).

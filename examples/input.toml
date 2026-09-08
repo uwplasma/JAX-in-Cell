@@ -1,50 +1,41 @@
-[domain_parameters]
-length = 0.01
-timestep_over_spatialstep_times_c = 4.5
-number_grid_points = 70
-number_grid_points_y = 3
-number_grid_points_z = 3
-total_steps = 1100
+# Two-stream instability. Run it with:  jaxincell input.toml
+# Every table maps onto a constructor argument of the Python API:
+# [domain] -> Domain, [solver] -> Solver, [[species]] -> Species, [collisions] -> Collisions.
 
-[solver_parameters]
-field_solver = 0                 # Algorithm to solve E and B fields - 0: Curl_EB, 1: FDTD
-time_evolution_algorithm = 0     # Algorithm to evolve particles in time - 0: Boris, 1: implicit Crank-Nicholson
-max_number_of_Picard_iterations_implicit_CN = 20
-number_of_particle_substeps_implicit_CN = 2
-tolerance_Picard_iterations_implicit_CN = 1e-10
-print_info = true
-relativistic = false
-filter_passes = 5
-filter_alpha = 0.5
-filter_strides = [1, 2, 4]
+[domain]
+length = 0.01            # box length in metres, spanning [-L/2, L/2]
+cells = 64               # number of cells
+dt_over_dx_c = 4.5       # c dt / dx; keep it below 1 whenever light waves matter
+particle_bc = "periodic"
+field_bc = "periodic"
 
-[external_field_parameters]
-external_electric_field_amplitude = 0
-external_electric_field_wavenumber = 0
+[solver]
+algorithm = "explicit"   # or "implicit" for the energy-conserving Crank-Nicolson scheme
+field_solver = "ampere"  # or "gauss" to recompute E_x from the charge density each step
+filter_passes = 2        # binomial smoothing passes on the deposited sources
 
-[species_parameters.electrons.electrons0]
-number_pseudoparticles = 3500
-grid_points_per_Debye_length = 0.50265482457
-weight = 0
-charge_over_elementary_charge = -1
-perturbation_amplitude_x = 0.0000005
-perturbation_wavenumber_x = 1
-vth_over_c_x = 0.05
-drift_speed_x = 6e7
-velocity_plus_minus_x = true
+[[species]]
+name = "electrons"
+n = 20000                # pseudo-particles
+charge = -1              # in units of the elementary charge
+mass = "electron"
+density = 4.37e17        # m^-3
+vth = [1.5e7, 0.0, 0.0]  # thermal speed per component, sqrt(2 kT/m)
+drift = [6e7, 0.0, 0.0]
+plus_minus = true        # flip v_x on every second particle: two counter-streaming beams
+perturbation_amplitude = 5e-7
+perturbation_mode = 1
 
-[species_parameters.ions.ions0]
-number_pseudoparticles = 3500
-grid_points_per_Debye_length = 0.50265482457
-weight = 0
-charge_over_elementary_charge = 1
-mass_over_proton_mass = 1
-vth_over_c_x = "_electrons0"
-vth_over_c_y = "_electrons0"
-vth_over_c_z = "_electrons0"
-ion_temperature_over_electron_temperature_x = 1
-ion_temperature_over_electron_temperature_y = 1
-ion_temperature_over_electron_temperature_z = 1
-#ion_temperature_over_electron_temperature_x = 0.01
-#ion_temperature_over_electron_temperature_y = 0.01
-#ion_temperature_over_electron_temperature_z = 0.01
+[[species]]
+name = "ions"
+n = 20000
+charge = 1
+mass = "proton"
+density = 4.37e17
+vth = [3.5e5, 0.0, 0.0]
+
+[run]
+steps = 1200
+seed = 0
+store_every = 1
+plot = true

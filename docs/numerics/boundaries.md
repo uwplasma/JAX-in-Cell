@@ -1,81 +1,127 @@
 # Boundary conditions
 
-The box has two walls at $x = \pm L/2$. Each wall carries one code for particles and
-one for fields (`0` periodic, `1` reflective, `2` absorbing), set in the domain
-parameters. This page gives the formulas; {doc}`../user_guide/boundaries` discusses
-when to use which.
+`Domain(particle_bc=..., field_bc=...)` set the walls, either as one name applied to
+both ends or as a `(left, right)` pair. The three kinds are `"periodic"`,
+`"reflective"` and `"absorbing"`. A periodic wall needs a periodic partner; the other
+two can be mixed.
+
+```{figure} ../_static/figures/boundaries.png
+:width: 100%
+:alt: Electron phase space after 400 steps for periodic, reflective and absorbing walls
+
+The same plasma, drifting to the right, after 400 steps with each wall type. Periodic
+walls recirculate it, reflective walls turn it around, absorbing walls remove
+{{ boundary_kept_percent_absorbing }} per cent of the electrons within the run.
+```
 
 ## Particles
 
-For a particle that has left the box through the left wall ($x < -L/2$) or the right
-wall ($x > L/2$):
+**Periodic.** A particle leaving one end re-enters at the other,
+$x \to ((x + L/2) \bmod L) - L/2$. Nothing else changes.
 
-| code | position | velocity | charge, $q/m$ |
-|---|---|---|---|
-| `0` periodic | $x \to x \pm L$ | unchanged | unchanged |
-| `1` reflective | $x \to -L - x$ (left), $x \to L - x$ (right) | $v_x \to -v_x$ | unchanged |
-| `2` absorbing | $x \to x_0 - 1.5\,\Delta x$ (left), $x \to x_{N_x-1} + 3\,\Delta x$ (right) | $\mathbf v \to 0$ | set to zero |
+**Reflective.** The position is mirrored about the wall, $x \to \pm L - x$, and the
+normal velocity is multiplied by `-restitution`. At the default `restitution=1.0` this
+is a specular bounce, and the total energy is conserved:
+{{ boundary_energy_error_reflective }} over the run above. Values below one model a
+lossy wall and remove energy on purpose.
 
-The $y$ and $z$ coordinates are always wrapped into $[-L_y/2, L_y/2]$ and
-$[-L_z/2, L_z/2]$. The same map, without the velocity and charge changes, is applied
-to the half-step positions used for the current deposit. An absorbed particle stays
-in the arrays at its parking position with zero charge, so its shape function never
-overlaps the grid again and it drops out of every deposit and of the kinetic energy.
+**Absorbing.** The particle keeps its position outside the grid but its charge, its
+charge-to-mass ratio and its velocity are set to zero, so it deposits nothing, feels
+nothing and never returns. The arrays keep their shape, which is what lets the whole
+loop stay a single compiled program with static shapes; the cost is that absorbed
+particles still occupy memory. `Output.charge` is zero for them, which is how the
+diagnostics and the plots tell them apart.
 
-## Charge deposit near a wall
+The transverse coordinates $y$ and $z$ are always periodic with periods `length_y` and
+`length_z`. They do not affect the fields and exist only so that particle positions
+stay bounded.
 
-The quadratic spline of a particle within $1.5\,\Delta x$ of a wall extends beyond
-the last cell centre. The part that falls beyond the wall is handled per wall code:
+## Fields
 
-| code | charge beyond the wall |
-|---|---|
-| `0` periodic | added to the first (respectively last) cell |
-| `1` reflective | added to the last (respectively first) cell, that is folded back onto the boundary cell |
-| `2` absorbing | dropped |
+The field walls enter in three places: the ghost values the two curls need, the way
+the shape function is folded near the wall, and the integration constant of the
+current.
 
-Only the fraction of the cloud within half a cell beyond the last centre is
-redistributed, which is the whole cloud for particles inside the box when the deposit
-is made on cell centres.
+**Periodic.** Ghost values wrap; the part of a particle's cloud that sticks out of one
+end is deposited at the other.
 
-## Field ghost cells
+**Reflective.** The ghost value repeats the boundary cell, a zero-gradient
+extrapolation, and the part of the cloud outside the box is folded back onto the
+boundary cell. Charge is conserved exactly.
 
-The curl operators need one value beyond each end of the grid. With $F$ standing for
-the array being differentiated and the other field available for the absorbing case:
+**Absorbing.** The part of the cloud outside the box is dropped, so charge leaves the
+system, which is what an open boundary means. The field ghosts use the first-order Mur
+radiating condition of {doc}`field_solvers`, so an outgoing electromagnetic wave leaves
+without reflection.
 
-| code | left ghost | right ghost |
-|---|---|---|
-| `0` periodic | $F_{N_x-1}$ | $F_0$ |
-| `1` reflective | $F_0$ | $F_{N_x-1}$ |
-| `2` absorbing | outgoing-wave combination, below | outgoing-wave combination, below |
+## A wall that absorbs charge has to keep it
 
-For the electric field at the left wall the absorbing ghost is
+The longitudinal field is fixed by the charge density only up to a constant, and that
+constant is the boundary condition. Which one is right depends on what the wall is.
+
+A **reflective** wall is a symmetry plane: nothing crosses it, so $E = 0$ there and the
+field is integrated from that wall outwards. An **absorbing** wall is not a symmetry
+plane. It is a conductor, and the particles it absorbs are neutralised on its surface,
+leaving a surface charge that sets the field at the wall. Imposing $E = 0$ at one
+absorbing wall and letting the other float is the same as insisting that all the charge
+collected at both walls sits on one of them; the field there then ramps without bound as
+the plasma drains, which is an artefact and not a sheath.
+
+The standard closure for a bounded plasma is to treat the walls as electrodes carrying
+surface charge, connected by an external circuit {cite}`lawson1989,verboncoeur1993`.
+JAX-in-Cell takes the simplest member of that family: two absorbing walls are conductors
+short-circuited to each other, so they stay at the same potential and
 
 ```{math}
-E^{g}_y = -2c\,B_{z,0} - E_{y,0}, \qquad E^{g}_z = 2c\,B_{y,0} - E_{z,0},
+\int_0^L E_x\,dx = \phi(0) - \phi(L) = 0 .
 ```
 
-so that the average of the ghost and boundary values satisfies
-$\tfrac12(E^{g}_y + E_{y,0}) = -c B_{z,0}$ and $\tfrac12(E^{g}_z + E_{z,0}) = c B_{y,0}$:
-the transverse field at the wall is that of a plane wave travelling in the $-x$
-direction, which leaves the box. At the right wall the ghosts are
-$E^{g}_y = 3E_{y,N_x-1} - 2cB_{z,N_x-1}$ and $E^{g}_z = 3E_{z,N_x-1} + 2cB_{y,N_x-1}$,
-and the magnetic ghosts are the corresponding expressions with $E$ and $B$
-interchanged and $c$ replaced by $1/c$. These are first-order absorbing conditions of
-the Mur type {cite}`mur1981`: exact for normal incidence in the continuum limit, with a
-small reflection at the discrete level.
+That is one line in each of the two places the constant is chosen — the mean is
+subtracted from $E_x$ in the Gauss solve, and from $J_x$ in the continuity current, the
+difference being the current the external circuit carries. The plasma is then free to
+float to whatever potential balances the two fluxes, which is what a sheath is. A
+biased or floating electrode with a series RLC circuit is the same construction with a
+different equation for the constant {cite}`verboncoeur1993`; it is not implemented.
 
-When fields are interpolated to particles, two ghost values are needed on the left
-(because the electric field lives on cell faces) and one on the right. Periodic and
-reflective walls copy the corresponding interior values; absorbing walls use zeros.
+One consequence for the diagnostics: with a wall, the field beyond it is a degree of
+freedom the output does not carry, so {func}`~jaxincell.gauss_residual` checks the
+discrete Gauss law on the cells that do not need it. See {doc}`../examples/sheath` for
+what the closure produces.
 
-## Filter
+## Charge accounting at an absorbing wall
 
-The three-point filter shifts the array by $\pm s$ cells. Periodic walls roll the
-array, reflective walls clamp the index to the boundary cell, absorbing walls use zero
-outside the box.
+Charge leaves an absorbing box by two routes: with the particles that hit the wall, and
+through the tail of the shape function of a particle sitting within $\tfrac32\Delta x$
+of it. The second is a real property of an open boundary rather than a bug, but it is
+worth knowing about, because the *net* charge in a quasi-neutral plasma is a small
+difference of large numbers and a fractional loss of $10^{-4}$ of the gross charge can
+be tens of per cent of the net. The test suite checks the gross budget: the charge
+deposited on the grid matches the charge still carried by the particles to better than
+$10^{-3}$ of the total.
 
-## Implicit scheme
+For a periodic box no charge is lost at all: the two agree to
+{{ charge_error_relative }}, which is round-off.
 
-The implicit scheme's deposit and gather wrap indices with the modulus operator,
-which is the periodic condition, whatever the field codes are. Particle codes are
-applied as above.
+What does hold at every wall is the discrete Gauss law, to round-off, because the
+current is derived from the same density the field is checked against
+({doc}`deposition`). Three things have to line up for that, and the test suite checks
+all three at every wall type, with and without filtering:
+
+* the density at $t^{n+1/2}$ has to be shared between the two half steps, or the
+  charge an absorbing wall removes disappears between them uncounted;
+* the initial field has to be built from the density the loop starts from. The
+  leapfrog carries $x^{n+1/2}$ and reconstructs $x^n$ as
+  $\mathrm{wrap}(x^{n+1/2} - \tfrac12\Delta t\,\mathbf v)$, which at a reflecting
+  wall is not where the particles were placed;
+* the residual has to be measured with the same $E_{-1/2}$ the solver used: zero at a
+  wall, the far end of the box only when the wall is periodic.
+
+## Choosing
+
+Periodic walls are the right default for studying a wave or an instability, because
+they impose exactly the discrete Fourier modes the linear theory is written in.
+Reflective walls model a mirror or a symmetry plane and keep the particle number
+fixed. Absorbing walls model an open system: a sheath, a beam entering a vacuum, a
+pulse leaving the box. Note that the plasma in an absorbing box is not in equilibrium
+and will steadily lose particles and energy, {{ boundary_energy_error_absorbing }} of
+it over the run in the figure above.

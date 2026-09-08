@@ -3,9 +3,8 @@ leapfrog time staggering, the particle shape functions and the response of the
 digital filter. No simulation is run."""
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyArrowPatch
 
-from common import (C_ELECTRONS, C_IONS, C_THEORY, COLORS, SINGLE, WIDE, panel_label, savefig)
+from common import (C_ELECTRONS, C_IONS, COLORS, WIDE, panel_label, savefig)
 
 # --- 1. Staggered grid -----------------------------------------------------
 fig, ax = plt.subplots(figsize=(7.4, 2.4))
@@ -20,8 +19,10 @@ for i in range(6):
     ax.text(i, -0.42, rf"$x_{{{i}}}$" if i < 5 else r"$x_{N_x-1}$", ha="center", va="top", fontsize=9)
     if i < 5:
         ax.plot(i + 0.5, 0, "s", ms=6, color=C_IONS, zorder=3)
-ax.text(2, 0.95, r"cell centres $x_i$: $\mathbf{B}$, $\rho$ (stored output)", color=C_ELECTRONS, ha="center", fontsize=9.5)
-ax.text(2, 0.55, r"cell faces $x_{i+1/2}$: $\mathbf{E}$, $\mathbf{J}$, $\rho$ (for Gauss's law)", color=C_IONS, ha="center", fontsize=9.5)
+ax.text(2, 0.95, r"cell centres $x_i$: $\rho$, $\mathbf{B}$", color=C_ELECTRONS,
+        ha="center", fontsize=9.5)
+ax.text(2, 0.55, r"cell faces $x_{i+1/2}$: $\mathbf{E}$, $\mathbf{J}$", color=C_IONS,
+        ha="center", fontsize=9.5)
 ax.annotate("", xy=(1.0, -0.72), xytext=(0.0, -0.72), arrowprops=dict(arrowstyle="<->", lw=0.9))
 ax.text(0.5, -0.8, r"$\Delta x = L / N_x$", ha="center", va="top", fontsize=9)
 ax.text(-0.42, 1.3, r"$x = -L/2$", ha="left", fontsize=9)
@@ -52,15 +53,17 @@ ax.plot(0.5, rows["E, B"], "s", ms=7, mfc="white", mec=C_IONS)
 ax.annotate("", xy=(0.47, rows["x"]), xytext=(-0.47, rows["x"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_ELECTRONS))
 ax.annotate("", xy=(1.47, rows["x"]), xytext=(0.53, rows["x"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_ELECTRONS))
 ax.annotate("", xy=(0.97, rows["v"]), xytext=(0.03, rows["v"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_ELECTRONS))
-ax.text(0.5, rows["v"] + 0.18, r"Boris push with $\mathbf{E}^{n+1/2}, \mathbf{B}^{n+1/2}$ at $x^{n+1/2}$", ha="center", fontsize=8.5)
+ax.text(0.5, rows["v"] + 0.18, r"Boris push with $\mathbf{E}^{n+1/2}, \mathbf{B}^{n+1/2}$ at $x^{n+1/2}$",
+        ha="center", fontsize=8.5)
 ax.annotate("", xy=(0.47, rows["E, B"]), xytext=(0.03, rows["E, B"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_IONS))
 ax.annotate("", xy=(0.97, rows["E, B"]), xytext=(0.53, rows["E, B"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_IONS))
 ax.text(0.25, rows["E, B"] - 0.38, r"$\Delta t/2$: E, then B", ha="center", fontsize=8)
 ax.text(0.75, rows["E, B"] - 0.38, r"$\Delta t/2$: B, then E", ha="center", fontsize=8)
 ax.text(0.0, rows["J"] - 0.32, r"$\mathbf{J}^{n}$ from $x^{n-1/2}\to x^{n+1/2}$", ha="center", fontsize=8)
 ax.text(1.0, rows["J"] - 0.32, r"$\mathbf{J}^{n+1}$ from $x^{n+1/2}\to x^{n+3/2}$", ha="center", fontsize=8)
-ax.annotate("", xy=(0.03, rows["E, B"] + 0.12), xytext=(0.0, rows["J"] + 0.12), arrowprops=dict(arrowstyle="->", lw=0.8, color=COLORS["green"], ls="--"))
-ax.annotate("", xy=(1.0, rows["E, B"] - 0.12), xytext=(1.0, rows["J"] + 0.12), arrowprops=dict(arrowstyle="->", lw=0.8, color=COLORS["green"], ls="--"))
+feed = dict(arrowstyle="->", lw=0.8, color=COLORS["green"], ls="--")
+ax.annotate("", xy=(0.03, rows["E, B"] + 0.12), xytext=(0.0, rows["J"] + 0.12), arrowprops=feed)
+ax.annotate("", xy=(1.0, rows["E, B"] - 0.12), xytext=(1.0, rows["J"] + 0.12), arrowprops=feed)
 savefig(fig, "time_staggering")
 
 # --- 3. Particle shape functions ------------------------------------------
@@ -83,7 +86,12 @@ ax = axes[1]
 xp = 0.3
 for i in range(-2, 3):
     ax.axvline(i, color="#DDDDDD", lw=0.8, zorder=0)
-w = np.array([0.5 * (1.5 - abs(xp - i))**2 if 0.5 < abs(xp - i) <= 1.5 else (0.75 - (xp - i)**2 if abs(xp - i) <= 0.5 else 0.0) for i in range(-2, 3)])
+def _s2(d):
+    """The quadratic-spline weight at a distance of ``d`` cells."""
+    return 0.75 - d**2 if abs(d) <= 0.5 else (0.5 * (1.5 - abs(d))**2 if abs(d) <= 1.5 else 0.0)
+
+
+w = np.array([_s2(xp - i) for i in range(-2, 3)])
 ax.bar(range(-2, 3), w, width=0.35, color=C_ELECTRONS, alpha=0.85)
 ax.plot([xp], [0], "v", ms=9, color=C_IONS, clip_on=False, zorder=5)
 ax.text(xp, -0.09, "particle", ha="center", va="top", fontsize=8.5, color=C_IONS)

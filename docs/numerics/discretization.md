@@ -6,10 +6,14 @@ The box $[-L/2, L/2]$ is divided into $N_x$ cells of size $\Delta x = L/N_x$ wit
 centres $x_i = -L/2 + (i + \tfrac12)\Delta x$. Quantities live on two interleaved sets
 of points, following the Yee arrangement {cite}`yee1966`:
 
-* cell centres $x_i$: the magnetic field $\mathbf B$, the transverse currents $J_y$,
-  $J_z$, and the charge density stored in the output;
-* cell faces $x_{i+1/2}$: the electric field $\mathbf E$, the longitudinal current
-  $J_x$, and the charge density used by the electrostatic field solver.
+* cell centres $x_i$: the charge density $\rho$ and the magnetic field $\mathbf B$;
+* cell faces $x_{i+1/2}$: the electric field $\mathbf E$ and the whole current
+  density $\mathbf J$.
+
+The transverse currents are deposited at the centres, where the particle shape
+function is defined, and averaged onto the faces, $J_{i+1/2} = (J_i + J_{i+1})/2$,
+so that they sit where $E_y$ and $E_z$ do. Depositing them at the centres and
+adding them to a face-centred field would misplace them by half a cell.
 
 ```{figure} ../_static/figures/staggered_grid.png
 :width: 100%
@@ -95,12 +99,17 @@ The charge density on a given set of points ($x_i$ or $x_{i+1/2}$) is
 with $q_p = q_s w_s$ the charge of the pseudo-particle. The part of a cloud that falls
 outside the box is treated by the boundary condition: wrapped to the other end for
 periodic walls, folded back onto the boundary cell for reflective walls, dropped for
-absorbing walls ({doc}`boundaries`). Since the two orderings of the same computation
-would give the same result, the deposit is written as a `vmap` over particles followed
-by a sum over the particle axis, which is what JAX compiles well.
+absorbing walls ({doc}`boundaries`).
+
+The deposit is a scatter-add: each particle writes into the three cells it touches,
+through `jnp.zeros(n).at[idx].add(...)`, so the cost is $O(N)$ and independent of the
+number of cells. Writing it instead as a dense weight per particle and cell, which is
+the obvious way to keep everything a matrix product, costs $O(N N_x)$ and is what an
+earlier version of the code did; the scatter is about three times faster at
+$N_x = 64$ and the gap widens with the grid.
 
 ## Time step
 
-The time step is set by $\Delta t = (c\,\Delta t/\Delta x)\,\Delta x/c$ with the ratio
-given by `timestep_over_spatialstep_times_c`. Its constraints are collected in
-{doc}`stability`.
+The time step is set by the ratio $c\,\Delta t/\Delta x$, the argument
+`dt_over_dx_c` of {class}`~jaxincell.Domain`, so that $\Delta t$ follows the grid when
+the resolution is changed. Its constraints are collected in {doc}`stability`.

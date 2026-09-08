@@ -1,135 +1,93 @@
-# Differentiable simulations
+# Gradients
 
-The whole time loop is a JAX function of its inputs, so derivatives of any scalar
-computed from the output with respect to the physical inputs are available by
-automatic differentiation. This is what distinguishes JAX-in-Cell from a conventional
-particle-in-cell code and it is the basis of the optimisation and inference examples.
-
-## Which inputs are differentiable
-
-Differentiable inputs are the floating-point parameters that enter the compiled
-program as array arguments rather than as static values. They are marked in the tables
-of the user guide; the complete list is:
-
-Domain
-: `length`, `length_y`, `length_z`, `timestep_over_spatialstep_times_c`
-
-Solver
-: `filter_alpha`
-
-Every population
-: `grid_points_per_Debye_length`, `weight`, `charge_over_elementary_charge`,
-  `perturbation_amplitude_{x,y,z}`, `perturbation_wavenumber_{x,y,z}`,
-  `vth_over_c_{x,y,z}`, `drift_speed_{x,y,z}`, `initial_positions`, `initial_velocities`
-
-Ion populations additionally
-: `mass_over_proton_mass`, `ion_temperature_over_electron_temperature_{x,y,z}`
-
-Integer parameters (counts, mode numbers used as integers, algorithm switches, boundary
-codes, seeds) are static. `perturbation_wavenumber_x` is differentiable because it
-enters as a real multiplier of $2\pi/L$; non-integer values are allowed and simply
-produce a displacement that is not periodic in the box.
-
-## Taking a gradient
-
-Build a `Simulation` once, then write the quantity of interest as a function of a
-dictionary of runtime inputs and differentiate that function:
+A {class}`~jaxincell.Simulation` is a JAX pytree whose physical parameters are leaves,
+so `jax.grad` differentiates through the whole run: the initial sampling, the
+deposition, the field solve, the Boris rotation, the boundary conditions and the time
+loop. There is no adjoint to write and no finite differences anywhere.
 
 ```python
-import jax.numpy as jnp
-from jax import grad, jit
-from jaxincell import Simulation, load_parameters
+import jax, jax.numpy as jnp
 
-sim = Simulation(load_parameters("examples/input.toml"))
-steps = sim.domain_parameters["total_steps"]
+def objective(drift):
+    electrons = base.replace(drift=(drift, 0.0, 0.0))
+    out = simulation.replace(species=(electrons, ions)).run(200, seed=0, store_particles=False)
+    return jnp.mean(out.E[:, :, 0] ** 2)
 
-def mean_field(drift_speed):
-    output = sim.run({"electrons": {"electrons0": {"drift_speed_x": drift_speed}}})
-    E = jnp.mean(output["electric_field"][:, :, 0], axis=1)
-    return jnp.mean(E[steps // 2:])
-
-value = mean_field(6e7)
-derivative = grad(mean_field)(6e7)
+gradient = jax.grad(objective)(6e7)
 ```
 
-`grad` here is reverse-mode differentiation: JAX records the forward run and replays
-it backwards. The gradient of a scalar with respect to any number of inputs costs a
-small multiple of one forward run, independent of how many inputs there are, which is
-what makes optimisation over many parameters feasible. The first evaluation compiles a
-second program (the backward pass) and is slower; later evaluations are not.
+## What can be differentiated
 
-The runtime inputs can be nested dictionaries with several parameters and species, and
-the function can take a JAX array or a dictionary of arrays as its argument, for
-example an array of drift speeds for several populations. `jax.grad` and `jax.jacfwd`
-follow the usual JAX rules for pytrees.
+Every pytree leaf: `length`, `dt_over_dx_c`, `restitution`, the species `charge`,
+`mass`, `density`, `vth`, `drift`, `perturbation_amplitude`, `filter_alpha`, and the
+external field arrays. Differentiating with respect to the whole object works too, and
+returns a matching pytree:
+
+```python
+grads = jax.grad(lambda s: jnp.sum(s.run(100, seed=0).E ** 2))(simulation)
+print(grads.domain.length, grads.species[0].density)
+```
+
+Static fields — particle counts, cell counts, boundary types, `algorithm` — are not
+differentiable, which is what "static" means.
+
+## Both integrators
+
+Reverse-mode works through the implicit scheme as well as the explicit one, because
+the Picard iteration is a `lax.scan` of fixed length rather than a `lax.while_loop`,
+which has no reverse-mode rule. That is the reason `picard_iterations` is a count and
+not a tolerance.
+
+## Accuracy
 
 ```{figure} ../_static/figures/autodiff.png
 :width: 100%
-:alt: JAX gradient compared with finite differences
+:alt: Reverse-mode gradient against central finite differences, and gradient ascent on the growth rate
 
-(a) Time-averaged electric field as a function of the electron drift speed for the
-two-stream configuration of `examples/input.toml` (400 steps, 3000 particles per
-species), with the tangent from the JAX gradient. (b) One-sided finite differences
-$[f(v_d + \epsilon) - f(v_d)]/\epsilon$ against the step $\epsilon$, compared with the
-gradient: they agree for steps below about $10^2$ m/s and depart for larger steps,
-where the difference no longer samples the local slope of this noisy objective.
-Generated by `docs/scripts/fig_autodiff.py`.
+(a) The reverse-mode gradient against central differences over five step sizes. The
+best agreement is {{ autodiff_best_relative_error }} at
+$h = ${{ autodiff_best_step }} m/s; larger steps are limited by truncation, smaller
+ones by round-off. (b) Gradient ascent on the amplitude the seeded two-stream mode
+reaches by a fixed time.
 ```
 
-## Forward mode and the implicit scheme
+The gradient is exact to floating point, so the comparison is really a test of the
+finite difference. The first call costs {{ autodiff_grad_time_first_s }} s including
+compilation and {{ autodiff_grad_time_warm_s }} s afterwards — about twice a forward
+run, the usual reverse-mode ratio.
 
-`jax.jvp` and `jax.jacfwd` (forward mode) work with both integrators. Reverse mode
-(`jax.grad`, `jax.vjp`) works with the explicit scheme only: the implicit scheme uses a
-`lax.while_loop` for the Picard iteration, and JAX cannot differentiate a while loop
-in reverse mode. For a handful of parameters forward mode is just as good, and it does
-not need to store the forward trajectory.
+## An inverse problem with a known answer
 
-## Memory
+Panel (b) is a check that the gradient is not merely self-consistent but points
+somewhere useful. Two cold counter-streaming beams are most unstable at
+$kv_0/\omega_{pe} = \sqrt{3/8} = ${{ autodiff_cold_optimum_k_v0_over_wpe }}, moving to
+{{ autodiff_kinetic_optimum_k_v0_over_wpe }} for beams this warm. Starting well off
+resonance, {{ autodiff_ascent_iterations }} steps of plain gradient ascent reach
+{{ autodiff_ascent_k_v0_over_wpe }}, within
+{{ autodiff_ascent_deviation_percent }} % of the kinetic optimum. The full script is
+`examples/optimisation.py`.
 
-Reverse mode through a `lax.scan` of `total_steps` iterations stores the residuals of
-every step. For the phase-space arrays this is of the same order as the output itself,
-so if the forward run fits comfortably in memory the gradient usually does too; if it
-does not, reduce `total_steps`, the number of particles, or use forward mode.
+## Choosing an objective
 
-## Why the gradients are meaningful
+The one real pitfall is chaos. A quantity measured after the instability has saturated
+— the saturated field energy, a late-time temperature — depends on the parameters
+through a trajectory that has become chaotic, and its gradient is a large, noisy number
+that happens to be the correct derivative of a function no optimiser can follow. Prefer
+an objective from the linear phase, or one averaged over an ensemble.
 
-A particle-in-cell step contains operations that are not smooth: the cell index of a
-particle is an integer, absorbing walls zero out charges, the velocity is clipped at
-$0.99c$, and the Picard iteration count depends on the data. JAX differentiates through
-all of them by treating the piecewise-constant parts as having zero derivative and
-propagating derivatives through the continuous parts: the spline weights, the field
-updates, the Boris rotation and the interpolation are all smooth in the positions and
-velocities, so the derivative of a smooth diagnostic with respect to a smooth input is
-recovered. The test suite checks that gradients with respect to every differentiable
-parameter are finite.
+The second pitfall is a data-dependent window. Fitting a growth rate between "ten times
+the seed" and "a tenth of saturation" is the right way to *measure* a rate, but the
+window boundaries jump as the parameter changes, and the objective is not smooth. The
+objective in the figure above is instead $\ln|E_k|$ at a **fixed** time, which is
+$\gamma t$ plus a constant while the mode grows and is a smooth function of the drift.
 
-Two effects limit what a gradient can tell you:
+## vmap and ensembles
 
-* The output of a simulation with a finite number of particles is a noisy function of
-  its inputs. The derivative of a noisy function is noisier still, so differentiate
-  quantities averaged over time or over many particles (energies, mode amplitudes,
-  growth rates fitted over a window), not instantaneous point values.
-* A derivative is local. Growth rates change smoothly with the drift speed, so the
-  gradient in the example above is informative; the saturated state after a strongly
-  nonlinear phase can depend on the inputs in a way that no finite-difference step
-  captures either.
+`seed` is traced, so an ensemble is one `vmap` and one compilation:
 
-## Reusing compiled programs
+```python
+fields = jax.vmap(lambda s: simulation.run(300, seed=s).E[-1, :, 0])(jnp.arange(32))
+```
 
-The gradient program is compiled for the static configuration of the `Simulation`
-object. Changing a differentiable input, including through the argument of the
-differentiated function, does not recompile; changing anything else does. When
-optimising, keep one `Simulation` object and pass the design variables through the
-runtime inputs.
-
-## Examples
-
-* `examples/auto-differentiability.py`: the gradient check shown above.
-* `examples/optimize_two_stream_saturation.py`: minimise the saturated field energy
-  over the ion temperature with `scipy.optimize.least_squares` (or Optax, commented
-  out).
-* `examples/inference_two_stream.py`: recover the drift speed of a two-stream
-  configuration from the growth rate of its electric-field energy with a damped Newton
-  iteration driven by forward-mode derivatives.
-
-See {doc}`../examples/index`.
+Combining `vmap` with `grad` gives the gradient of an ensemble average, which is the
+practical way to optimise through a noisy simulation.

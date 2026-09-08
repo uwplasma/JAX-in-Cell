@@ -1,32 +1,41 @@
-# Roadmap and branches
+# Roadmap
 
 ## Done
 
-* Explicit electromagnetic and electrostatic field solvers.
-* Relativistic Boris pusher.
-* Implicit Crank-Nicolson integrator with Picard iteration.
-* Multiple electron and ion populations with cross-referenced temperatures.
-* Periodic, reflective and absorbing boundaries for particles and fields.
-* Compensated digital filter.
-* Differentiable inputs and runtime re-execution without recompilation.
+* Explicit leapfrog with the Boris pusher, relativistic or not.
+* Implicit Crank-Nicolson integrator with a fixed-length Picard iteration, energy
+  conserving to round-off and differentiable.
+* Charge-conserving current deposit; the discrete Gauss law holds to round-off with no
+  correction step.
+* Ampere and Gauss field solvers.
+* Any number of species, with cross-referenced temperatures.
+* Periodic, reflective and absorbing walls, chosen separately for particles and fields,
+  with a first-order Mur radiating condition on the fields. Absorbing walls are
+  conductors short-circuited to each other, so a bounded plasma forms a sheath
+  ({doc}`../examples/sheath`).
+* Compensated digital filter with arbitrary strides.
+* Binary Coulomb collisions (Takizuka-Abe), verified against the Fokker-Planck rates.
+* Quiet starts, and {func}`~jaxincell.quiet_start` for building custom conditions.
+* Static external fields as arrays, differentiable like any other parameter.
+* `store_every`, `store_particles` and restarts, so that long runs fit in memory.
+* openPMD output.
+* Differentiable end to end, with `vmap` over seeds for ensembles.
 
 ## Planned
 
-* Binary collisions, so that a plasma can relax to a Maxwellian.
-* Particle sources and sinks (the `source_parameters` section is reserved for this).
-* Time-dependent and user-defined external fields (the `*_function` parameters are
-  reserved for this).
-* Output of selected steps only, to bound the memory of long runs.
-* Output in the openPMD standard.
-* Mixed and velocity-dependent boundary conditions.
-* A two-dimensional version.
+* Particle sources and sinks, which need a pool of inactive particles because array
+  shapes are static. An ionisation source is what a bounded-plasma run needs to reach a
+  true steady state instead of draining ({doc}`../examples/sheath`).
+* A series RLC circuit between the two electrodes, so that a wall can be biased or left
+  genuinely floating rather than short-circuited to its partner {cite}`verboncoeur1993`.
+* Time-dependent external fields.
+* Ionisation and recombination.
+* Velocity-dependent boundary conditions (secondary emission, thermal re-injection).
+* A two-dimensional version. `_core.py` would change thoroughly; the configuration
+  objects, the time loop, the diagnostics and the differentiability would not.
 
-## Open pull requests and branches
+## Contributing
 
-Work in progress lives on branches of the main repository and in open pull requests;
-the following existed at the time of writing and are the place to look before
-starting on the same topic: binary collisions (`collsion`), particle sources
-(`ds/source_particles`), openPMD output (`ds/OpenPMD`), three-dimensional external
-fields (`ds/3D_external_fields`), mixed boundary conditions (`rishi/mixed_BCs`),
-snapshot output (pull request from `zhiping0913`), and improved charge conservation
-in the explicit scheme (`rj/full_EM_2`).
+Pick something from the list, or something not on it, and open an issue first so that
+the design can be discussed before the code is written. {doc}`contributing` has the
+practical details and {doc}`architecture` describes where things go.

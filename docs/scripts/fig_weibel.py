@@ -1,162 +1,118 @@
-"""Weibel instability: growth rate against the transverse dispersion relation.
-
-The electrons carry the temperature anisotropy of examples/Weibel_instability.py
-(T_z/T_x = 100). One simulation is run per wavenumber: it starts quiet (equally
-spaced positions, Maxwellian velocity components at quantiles of bit-reversed
-sequences) and the electrons get a small coherent modulation
-v_z -> v_z + delta sin(k x), whose current seeds B_y at that one wavenumber.
-Started from particle noise instead, the modes rise only about two e-foldings
-above the floor before saturating and no rate can be fitted.
-
-This script runs one simulation per mode and takes a few minutes.
-"""
-import numpy as np
+"""Weibel instability: the marginal wavenumber in a box that holds several
+wavelengths, and the growth rate against the transverse kinetic dispersion
+relation from single-mode runs."""
 import matplotlib.pyplot as plt
-from jax import block_until_ready
-from scipy.special import erfinv
+import numpy as np
+from common import C_ELECTRONS, C_THEORY, WIDE, panel_label, record, savefig
+from dispersion import plasma_frequency, purely_growing_roots, weibel_dispersion
 
-from common import (CMAP_SIGNED, C_ELECTRONS, C_FIT, C_THEORY, COLORS, panel_label, record,
-                    robust_growth_fit, savefig, silence_progress_bars, species_for_linear_theory)
-from dispersion import most_unstable_root, weibel_dispersion
-from jaxincell import (Simulation, diagnostics, mass_electron, mass_proton, speed_of_light)
+from jaxincell import (Domain, Simulation, Solver, Species, diagnostics, mass_electron, quiet_start,
+                       elementary_charge as e_charge, speed_of_light as c)
 
-silence_progress_bars()
-
-L, NX, STEPS, COURANT, N = 3e-1, 150, 1800, 0.5, 8000
-VTH_X, VTH_Z = 0.01, 0.10
-MASS_RATIO = np.sqrt(mass_electron / mass_proton)          # T_i = T_e on every axis
-VTH_IX, VTH_IZ = VTH_X * MASS_RATIO, VTH_Z * MASS_RATIO
-SEED = 1e-3
-MODES = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12]
-SHOWCASE = 4                                               # fastest growing mode
+RATIO, DENSITY, VTH_X = 25.0, 1e15, 0.02 * c
+OMEGA_PE = plasma_frequency(DENSITY, e_charge, mass_electron)
+K_C = np.sqrt(RATIO - 1) * OMEGA_PE / c          # k_c c = omega_pe sqrt(T_z/T_x - 1)
+VTH = (VTH_X, 0.0, VTH_X * np.sqrt(RATIO))
+POPULATIONS = [{"wp": OMEGA_PE, "vthx": VTH_X, "A": RATIO}]
 
 
-def van_der_corput(n, base):
-    q, denominator, i = np.zeros(n), 1.0, np.arange(1, n + 1)
-    while i.any():
-        denominator *= base
-        q += (i % base) / denominator
-        i //= base
-    return q
+def theory(k):
+    roots = purely_growing_roots(lambda w: weibel_dispersion(w, k, POPULATIONS), OMEGA_PE, gamma_max=0.3)
+    return max(roots) / OMEGA_PE if roots else 0.0
 
 
-def quantiles(n, base):
-    return erfinv(2 * van_der_corput(n, base) - 1)
+def simulate(length, cells, steps, n=20000, seed_amplitude=0.0, seed_mode=1, store_every=10,
+             store_particles=False, quiet=True):
+    """A bi-Maxwellian, optionally with a coherent transverse current
+    v_z += d v_thz sin(k x) that seeds one magnetic mode.
+
+    A quiet start suppresses the noise so that a seeded mode can be followed for
+    many e-foldings, but it leaves no noise floor for the unseeded modes to grow
+    out of, so the survey of the cutoff uses random velocities instead.
+    """
+    x, v = quiet_start(n, length, vth=VTH)
+    if not quiet:
+        v = np.random.default_rng(0).standard_normal((n, 3)) * np.asarray(VTH) / np.sqrt(2)
+    v[:, 2] += seed_amplitude * VTH[2] * np.sin(2 * np.pi * seed_mode * x[:, 0] / length)
+    electrons = Species.electrons(n=n, density=DENSITY, vth=VTH).replace(x=x, v=v)
+    ions = Species.ions(n=n // 4, density=DENSITY, mass_ratio=1e6, vth=(0, 0, 0), quiet=True)
+    return Simulation(Domain(length=length, cells=cells, dt_over_dx_c=0.5), [electrons, ions],
+                      Solver(filter_passes=0)).run(steps, seed=0, store_every=store_every,
+                                                   store_particles=store_particles)
 
 
-def phase_space(n, vthx, vthz, bases, k=None, seed=0.0, offset=0.0):
-    x = np.linspace(-L / 2, L / 2, n, endpoint=False) + L / (2 * n) + offset
-    vx = vthx * speed_of_light * quantiles(n, bases[0])
-    vz = vthz * speed_of_light * quantiles(n, bases[1])
-    if seed:
-        vz = vz + seed * vthz * speed_of_light * np.sin(k * x)
-    return (np.stack([x, np.zeros(n), np.zeros(n)], 1),
-            np.stack([vx, np.zeros(n), vz], 1))
+def fit(t, amplitude):
+    """Rate between three times the seed and a fifth of saturation, with the
+    coefficient of determination that decides whether the mode grew cleanly."""
+    peak = int(np.argmax(amplitude))
+    window = ((amplitude > 3 * amplitude[0]) & (amplitude < 0.2 * amplitude[peak])
+              & (np.arange(t.size) < peak))
+    if window.sum() < 8:
+        return np.nan, 0.0
+    slope, intercept = np.polyfit(t[window], np.log(amplitude[window]), 1)
+    residual = np.log(amplitude[window]) - np.polyval((slope, intercept), t[window])
+    return slope, 1 - np.var(residual) / np.var(np.log(amplitude[window]))
 
 
-def run(mode):
-    k = 2 * np.pi * mode / L
-    xe, ve = phase_space(N, VTH_X, VTH_Z, (2, 3), k=k, seed=SEED)
-    xi, vi = phase_space(N, VTH_IX, VTH_IZ, (5, 7), offset=L / (2 * N))
-    parameters = {
-        "domain_parameters": {"length": L, "timestep_over_spatialstep_times_c": COURANT,
-                              "number_grid_points": NX, "total_steps": STEPS},
-        "species_parameters": {
-            "electrons": {"electrons0": {
-                "number_pseudoparticles": N, "grid_points_per_Debye_length": 1.1,
-                "vth_over_c_x": VTH_X, "vth_over_c_z": VTH_Z,
-                "initial_positions": xe, "initial_velocities": ve}},
-            "ions": {"ions0": {
-                "number_pseudoparticles": N, "grid_points_per_Debye_length": 1.1,
-                "mass_over_proton_mass": 1, "vth_over_c_x": VTH_IX, "vth_over_c_z": VTH_IZ,
-                "initial_positions": xi, "initial_velocities": vi}}},
-        "solver_parameters": {"field_solver": 0, "filter_passes": 0, "print_info": False},
-    }
-    output = block_until_ready(Simulation(parameters).run())
-    diagnostics(output)
-    wpe = float(output["plasma_frequency"])
-    t = np.asarray(output["time_array"]) * wpe
-    By = np.asarray(output["magnetic_field"][:, :, 1])
-    amplitude = np.abs(np.fft.rfft(By, axis=1))[:, mode] / By.shape[1]
-    populations = species_for_linear_theory(output)
-    species = [{"wp": s["wp"], "vthx": s["vthx"], "A": (s["vthz"] / s["vthx"]) ** 2}
-               for s in populations]
-    root = most_unstable_root(lambda w: weibel_dispersion(w, k, species),
-                              (-0.02, 0.02), (1e-4, 0.2), n_real=9, n_imag=30, scale=wpe)
-    return {"t": t, "amplitude": amplitude, "wpe": wpe, "By": By,
-            "grid": np.asarray(output["grid"]), "anisotropy": species[0]["A"],
-            "kc": k * speed_of_light / wpe,
-            "theory": root.imag / wpe if root is not None else np.nan,
-            "energy_error": float(np.max(np.abs(
-                output["total_energy"] / output["total_energy"][0] - 1)))}
+# (a) several wavelengths in one box, nothing seeded: the cutoff sorts the modes
+length = 4.0 * 2 * np.pi / K_C
+output = simulate(length, cells=128, steps=4000, n=40000, store_every=40,
+                  store_particles=True, quiet=False)
+t = np.asarray(output.t) * OMEGA_PE
+B_k = np.abs(np.fft.rfft(np.asarray(output.B[:, :, 1]), axis=1))
+modes = np.arange(1, 9)
+# against the median of the first samples: a single sample can land on a zero
+gain = B_k[-1, modes] / np.median(B_k[:5, modes], axis=0)
+unstable = 2 * np.pi * modes / length < K_C
 
+fig, axes = plt.subplots(1, 2, figsize=WIDE)
+for mode in modes:
+    k = 2 * np.pi * mode / length
+    axes[0].semilogy(t, B_k[:, mode], color=plt.cm.viridis(0.1 + 0.8 * mode / 8),
+                     ls="-" if k < K_C else ":", lw=1.2, label=fr"$k/k_c={k / K_C:.2f}$")
+axes[0].set(xlabel=r"$t\,\omega_{pe}$", ylabel=r"$|B_{y,k}|$ (T)",
+            title="unseeded: solid below the cutoff, dotted above")
+axes[0].legend(ncol=2, fontsize=7)
+panel_label(axes[0], "a")
 
-results, showcase = {}, None
-for mode in MODES:
-    r = run(mode)
-    fit = robust_growth_fit(r["t"], r["amplitude"] ** 2)
-    r["fit"] = fit
-    results[mode] = r
-    if mode == SHOWCASE:
-        showcase = r
-    status = (f"measured {fit['gamma']:.4f} (r2 {fit['r2']:.3f})" if fit else "rejected")
-    print(f"  mode {mode:2d}: theory {r['theory']:.4f}  {status}", flush=True)
+# (b) one wavelength per box, one mode seeded: the rate can be measured
+fractions = np.array([0.15, 0.2, 0.3, 0.35, 0.5, 0.65, 0.8])
+measured, quality = [], []
+for fraction in fractions:
+    out = simulate(2 * np.pi / (fraction * K_C), cells=64, steps=6000, seed_amplitude=1e-3)
+    amplitude = np.abs(np.fft.rfft(np.asarray(out.B[:, :, 1]), axis=1)[:, 1])
+    rate, r2 = fit(np.asarray(out.t) * OMEGA_PE, amplitude)
+    measured.append(rate)
+    quality.append(r2)
+    print(f"  k/k_c {fraction:.2f}: measured {rate:.4f}, kinetic {theory(fraction * K_C):.4f}, R2 {r2:.3f}")
+measured, quality = np.array(measured), np.array(quality)
+predicted = np.array([theory(f * K_C) for f in fractions])
+clean = quality > 0.85
 
-kept = [m for m in MODES if results[m]["fit"] is not None]
-deviations = np.array([abs(results[m]["fit"]["gamma"] - results[m]["theory"]) / results[m]["theory"]
-                       for m in kept])
-wpe = showcase["wpe"]
-record(weibel_modes_run=len(MODES), weibel_modes_compared=len(kept),
-       weibel_mean_deviation_percent=float(100 * deviations.mean()),
-       weibel_max_deviation_percent=float(100 * deviations.max()),
-       weibel_anisotropy=float(showcase["anisotropy"]),
-       weibel_particles=N, weibel_steps=STEPS, weibel_courant=COURANT, weibel_seed=SEED,
-       weibel_grid_points=NX, weibel_t_end=float(showcase["t"][-1]),
-       weibel_energy_error=float(max(results[m]["energy_error"] for m in MODES)),
-       weibel_fastest_mode=int(MODES[int(np.nanargmax([results[m]["theory"] for m in MODES]))]),
-       weibel_gamma_theory_max=float(np.nanmax([results[m]["theory"] for m in MODES])),
-       weibel_kc_over_wpe_fastest=float(results[SHOWCASE]["kc"]))
-
-fig = plt.figure(figsize=(7.4, 5.8))
-gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1.0], hspace=0.5, wspace=0.35)
-
-ax = fig.add_subplot(gs[0, :])
-By, grid, t = showcase["By"], showcase["grid"], showcase["t"]
-limit = np.percentile(np.abs(By), 99.5)
-mesh = ax.pcolormesh(grid, t, By, cmap=CMAP_SIGNED, vmin=-limit, vmax=limit,
-                     rasterized=True, shading="nearest")
-ax.grid(False)
-ax.set_xlabel("x (m)")
-ax.set_ylabel(r"$t\,\omega_{pe}$")
-ax.set_title(rf"seeded mode {SHOWCASE},  $kc/\omega_{{pe}} = {showcase['kc']:.2f}$", fontsize=9)
-bar = fig.colorbar(mesh, ax=ax, pad=0.015, fraction=0.04)
-bar.set_label(r"$B_y$ (T)")
-panel_label(ax, "(a)", x=-0.07)
-
-ax = fig.add_subplot(gs[1, 0])
-for mode, colour in zip((2, 4, 8), (COLORS["sky"], C_ELECTRONS, COLORS["purple"])):
-    r = results[mode]
-    ax.semilogy(r["t"], r["amplitude"], color=colour, lw=1.2, label=f"mode {mode}")
-    if r["fit"]:
-        f = r["fit"]
-        tt = np.linspace(f["t0"], f["t1"], 30)
-        ax.semilogy(tt, np.exp(0.5 * (f["intercept"] + f["slope"] * tt)), color=C_FIT,
-                    lw=2.2, alpha=0.8)
-ax.plot([], [], color=C_FIT, lw=2.2, label="fitted window")
-ax.set_xlabel(r"$t\,\omega_{pe}$")
-ax.set_ylabel(r"$|\hat B_y(k)|$  (T)")
-ax.legend(loc="lower right", fontsize=7.5)
-panel_label(ax, "(b)")
-
-ax = fig.add_subplot(gs[1, 1])
-kc_fine = np.array([results[m]["kc"] for m in MODES])
-ax.plot(kc_fine, [results[m]["theory"] for m in MODES], ls="--", color=C_THEORY,
-        label="linear theory")
-ax.plot([results[m]["kc"] for m in kept], [results[m]["fit"]["gamma"] for m in kept],
-        "o", ms=5, color=C_ELECTRONS, label="simulation")
-ax.set_xlabel(r"$k c / \omega_{pe}$")
-ax.set_ylabel(r"$\gamma / \omega_{pe}$")
-ax.set_ylim(bottom=0)
-ax.legend(loc="lower left", fontsize=8)
-panel_label(ax, "(c)")
+fine = np.linspace(0.05, 1.6, 60)
+axes[1].plot(fine, [theory(f * K_C) for f in fine], "-", color=C_THEORY, label="kinetic theory")
+axes[1].plot(fractions[clean], measured[clean], "o", color=C_ELECTRONS, label="JAX-in-Cell")
+axes[1].plot(fractions[~clean], measured[~clean], "o", mfc="none", color=C_ELECTRONS,
+             label=r"$R^2<0.85$, excluded")
+axes[1].axvline(1.0, color="0.7", lw=0.8)
+axes[1].text(1.02, 0.55, r"$k_c c=\omega_{pe}\sqrt{T_z/T_x-1}$", rotation=90, fontsize=7.5,
+             color="0.4", transform=axes[1].get_xaxis_transform())
+axes[1].set(xlabel=r"$k/k_c$", ylabel=r"$\gamma/\omega_{pe}$", title="seeded single-mode runs")
+axes[1].legend()
+panel_label(axes[1], "b")
+fig.tight_layout()
 savefig(fig, "weibel")
+
+deviation = 100 * np.abs(measured[clean] - predicted[clean]) / predicted[clean]
+energy = np.asarray(diagnostics(output)["total"])
+record(weibel_anisotropy=RATIO, weibel_particles=40000, weibel_cells=128, weibel_steps=4000,
+       weibel_courant=0.5, weibel_t_end=round(float(t[-1]), 0),
+       weibel_kc_c_over_wpe=round(float(np.sqrt(RATIO - 1)), 3),
+       weibel_seed_amplitude=1e-3,
+       weibel_modes_compared=int(clean.sum()), weibel_modes_run=len(fractions),
+       weibel_mean_deviation_percent=round(float(np.mean(deviation)), 1),
+       weibel_max_deviation_percent=round(float(np.max(deviation)), 1),
+       weibel_gain_min_unstable=round(float(gain[unstable].min()), 1),
+       weibel_gain_max_stable=round(float(gain[~unstable].max()), 2),
+       weibel_gamma_max_theory=round(float(max(predicted)), 4),
+       weibel_energy_error=f"{float(np.max(np.abs(energy / energy[0] - 1))):.1e}")

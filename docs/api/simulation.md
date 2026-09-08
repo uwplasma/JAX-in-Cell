@@ -1,15 +1,17 @@
-# Simulation
+# Simulation and output
 
 ```{eval-rst}
 .. autoclass:: jaxincell.Simulation
-   :members: run, simulation, input_parameters, domain_parameters, species_parameters, solver_parameters, external_field_parameters, source_parameters, set_parameter_section, reinitialize_simulation_state, current_domain_state
-   :member-order: bysource
+   :members:
 
-.. autofunction:: jaxincell.load_parameters
-```
+.. autoclass:: jaxincell.Output
+   :members:
 
-## Command-line entry point
+.. autofunction:: jaxincell.quiet_start
 
-```{eval-rst}
-.. autofunction:: jaxincell.__main__.main
+.. autofunction:: jaxincell.load_toml
+
+.. autofunction:: jaxincell.plot
+
+.. autofunction:: jaxincell.openpmd.write_openpmd
 ```

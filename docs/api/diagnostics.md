@@ -1,7 +1,7 @@
-# Diagnostics and plotting
+# Diagnostics
 
 ```{eval-rst}
-.. autofunction:: jaxincell.diagnostics
-
-.. autofunction:: jaxincell.plot
+.. automodule:: jaxincell._diagnostics
+   :members:
+   :member-order: bysource
 ```
