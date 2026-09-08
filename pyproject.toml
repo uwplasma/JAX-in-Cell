@@ -3,37 +3,63 @@ requires = ["setuptools>=61.0.0", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["jaxincell", "jaxincell._parameters"]
+packages = ["jaxincell"]
 
 [tool.setuptools_scm]
 write_to = "jaxincell/version.py"
 
 [project]
 name = "jaxincell"
-description = "JAX-in-Cell: Particle-in-Cell code in JAX"
+description = "A differentiable one-dimensional, three-velocity particle-in-cell code in JAX"
 readme = "README.md"
 authors = [{ name = "UWPlasma, UW-Madison group", email = "rogerio.jorge@wisc.edu" }]
 license = { file = "LICENSE" }
 dynamic = ["version"]
+requires-python = ">=3.10"
 
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Physics",
 ]
-keywords = ["Plasma", 
-     "Physics", 
-     "Simulation",
-     "JAX"]
- 
-dependencies = [ "jax", "jax_tqdm", "matplotlib"]
- 
-requires-python = ">=3.9"
+keywords = ["plasma", "physics", "simulation", "particle-in-cell", "kinetic", "JAX",
+            "automatic-differentiation"]
+
+dependencies = [
+    "jax",
+    "matplotlib",
+    "tomli; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+openpmd = ["openpmd-api"]
+dev = ["pytest", "flake8"]
+docs = [
+    "sphinx",
+    "myst-parser",
+    "pydata-sphinx-theme",
+    "sphinx-design",
+    "sphinx-copybutton",
+    "sphinxcontrib-bibtex",
+    "scipy",
+    "pillow",
+]
 
 [project.urls]
 Homepage = "https://github.com/uwplasma/JAX-in-Cell"
+Documentation = "https://jax-in-cell.readthedocs.io"
+Source = "https://github.com/uwplasma/JAX-in-Cell"
+Issues = "https://github.com/uwplasma/JAX-in-Cell/issues"
 
 [project.scripts]
 jaxincell = "jaxincell.__main__:main"
- 
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+
+[tool.flake8]
+max-line-length = 120
