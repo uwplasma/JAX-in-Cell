@@ -10,7 +10,9 @@
 * Ampere and Gauss field solvers.
 * Any number of species, with cross-referenced temperatures.
 * Periodic, reflective and absorbing walls, chosen separately for particles and fields,
-  with a first-order Mur radiating condition on the fields.
+  with a first-order Mur radiating condition on the fields. Absorbing walls are
+  conductors short-circuited to each other, so a bounded plasma forms a sheath
+  ({doc}`../examples/sheath`).
 * Compensated digital filter with arbitrary strides.
 * Binary Coulomb collisions (Takizuka-Abe), verified against the Fokker-Planck rates.
 * Quiet starts, and {func}`~jaxincell.quiet_start` for building custom conditions.

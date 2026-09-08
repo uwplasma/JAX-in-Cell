@@ -5,8 +5,8 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Sixty-three tests in three files, about a minute on one CPU core, covering every
-statement and every branch of the package.
+Sixty-four tests in three files, about a minute and a half on one CPU core, covering
+every statement and every branch of the package.
 
 That number is not the goal in itself, and the suite is not padded to reach it. It is
 worth having because of what chasing it turns up: five of the defects fixed in the
