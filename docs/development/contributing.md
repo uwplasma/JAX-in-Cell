@@ -1,9 +1,18 @@
 # Contributing
 
 Contributions are welcome through pull requests on
-[GitHub](https://github.com/uwplasma/JAX-in-Cell). The repository's
-`CONTRIBUTING.md` describes how to report bugs and propose enhancements and links to
-the code of conduct; this page covers the mechanics of a code change.
+[GitHub](https://github.com/uwplasma/JAX-in-Cell): bug fixes, new physics, examples and
+documentation. By contributing you confirm that the work is yours to give and agree
+that it is released under the project's MIT licence.
+
+## Reporting a bug or asking for a feature
+
+Search the [issue tracker](https://github.com/uwplasma/JAX-in-Cell/issues) first, then
+open an issue with what you expected, what happened, and the smallest script that
+reproduces it, together with the versions of Python, JAX and JAX-in-Cell and the
+platform. Questions are better placed on the
+[discussions](https://github.com/uwplasma/JAX-in-Cell/discussions) page. Do not report
+a security problem in public; send it to rogerio.jorge@wisc.edu.
 
 ## Workflow
 
@@ -11,8 +20,7 @@ the code of conduct; this page covers the mechanics of a code change.
    access.
 2. Install in editable mode with the test dependencies:
    ```bash
-   pip install -e .
-   pip install pytest pytest-cov flake8
+   pip install -e ".[dev]"
    ```
 3. Make the change with a test that exercises it. Keep the static and differentiable
    parameter lists consistent (see {doc}`architecture`).
@@ -23,9 +31,6 @@ the code of conduct; this page covers the mechanics of a code change.
    The continuous-integration workflow runs the tests on four Python versions and
    builds the documentation.
 
-## Questions and discussion
-
-Use the [discussions](https://github.com/uwplasma/JAX-in-Cell/discussions) page for
-questions and the [issue tracker](https://github.com/uwplasma/JAX-in-Cell/issues) for
-bugs and feature requests. Security-related reports should go by email to the
-maintainers listed in `CONTRIBUTING.md`.
+Write commit subjects in the imperative mood and under about seventy characters
+(`Add a thermal wall`), and use the body for why the change was needed and anything a
+reviewer would not guess from the diff.

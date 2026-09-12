@@ -1,8 +1,7 @@
 # Citing JAX-in-Cell
 
-If you use JAX-in-Cell in a publication, please cite the software. The repository
-contains a `CITATION.cff` file that GitHub renders as a citation, and the entry below
-can be pasted into a BibTeX database:
+If you use JAX-in-Cell in a publication, please cite the software with the entry below,
+which can be pasted into a BibTeX database:
 
 ```bibtex
 @software{jaxincell,

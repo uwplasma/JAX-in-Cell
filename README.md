@@ -166,9 +166,18 @@ documentation.
 Bug reports and feature requests go to the
 [issue tracker](https://github.com/uwplasma/JAX-in-Cell/issues), questions to the
 [discussions](https://github.com/uwplasma/JAX-in-Cell/discussions), and code through
-pull requests; see [CONTRIBUTING.md](CONTRIBUTING.md). If you use JAX-in-Cell in
-your work, please cite it using the `CITATION.cff` file (GitHub shows it under
-"Cite this repository").
+pull requests, as the
+[contributing guide](https://jax-in-cell.readthedocs.io/en/latest/development/contributing.html)
+describes. If you use JAX-in-Cell in your work, please cite it:
+
+```bibtex
+@software{jaxincell,
+  author = {Ma, Longyu and Jorge, Rogerio and Lu, Hongke and Tran, Aaron and Woolford, Christopher},
+  title  = {{JAX-in-Cell}: a differentiable particle-in-cell code for plasma physics},
+  year   = {2025},
+  url    = {https://github.com/uwplasma/JAX-in-Cell}
+}
+```
 
 ## Acknowledgements
 
