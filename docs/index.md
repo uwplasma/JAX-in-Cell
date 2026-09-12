@@ -86,8 +86,9 @@ Coulomb collisions are available through the Takizuka-Abe operator.
 Two time integrators are available: an explicit leapfrog scheme with the Boris pusher
 (non-relativistic or relativistic) and an implicit Crank-Nicolson scheme solved by Picard
 iteration, which conserves energy to round-off and has no light-wave time-step limit.
-Boundaries can be periodic, reflective or absorbing, chosen separately for particles
-and fields. Any number of electron and ion populations can be defined, each with its own
+Boundaries can be periodic, reflective, absorbing or thermal, chosen separately for
+particles and fields, and an absorbing wall can return part of each particle by a law in
+its impact speed. Any number of electron and ion populations can be defined, each with its own
 density, drift, temperature anisotropy and seed.
 
 Because the entire simulation is a pure JAX function, it can be differentiated with

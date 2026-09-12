@@ -5,8 +5,8 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Sixty-four tests in three files, about a minute and a half on one CPU core, covering
-every statement and every branch of the package.
+Seventy tests in three files, under two minutes on one CPU core, covering every
+statement and every branch of the package.
 
 That number is not the goal in itself, and the suite is not padded to reach it. It is
 worth having because of what chasing it turns up: five of the defects fixed in the
@@ -38,14 +38,20 @@ Landau root $1.4157 - 0.1533\,i$ at $k\lambda_D = 0.5$; the cold two-stream rate
 $\omega_{pe}/2\sqrt2$ at $kv_0/\omega_{pe} = \sqrt{3/8}$; the Weibel marginal
 wavenumber $k_c c = \omega_{pe}\sqrt{T_z/T_x - 1}$, checked as a threshold — every
 mode below it grows by more than ten, none above it by more than three; the NRL
-relaxation rates for a fast beam; and the relativistic gyrofrequency
+relaxation rates for a fast beam; the relativistic gyrofrequency
 $\Omega = qB/\gamma m$, which the relativistic pusher reproduces after a full orbit
-while the non-relativistic one overshoots by $\gamma$.
+while the non-relativistic one overshoots by $\gamma$; the flux average
+$u^2/(u^2+\sigma^2)$ that a wall with a Gaussian reflection law returns, which is not
+the average over the distribution; the moments of the half-Maxwellian flux a thermal
+wall re-emits; and the sheath drop of Hobbs and Wesson in front of a floating wall,
+with and without electron reflection.
 
 **Conservation laws.** Charge on the grid against charge on the particles, to
 round-off; momentum in a periodic box; total energy, bounded for the explicit scheme
-and at round-off for the implicit one; reflective walls holding every particle inside
-the box and absorbing walls removing some but not all.
+and at round-off for the implicit one; the discrete Gauss law at every kind of wall,
+including one that returns half of each electron and a thermal wall facing a floating
+conductor; reflective walls holding every particle inside the box and absorbing walls
+removing some but not all.
 
 **Documented behaviour that is easy to leave untested.** `store_particles=False`
 dropping exactly the diagnostics that need velocities; the openPMD switches and a run

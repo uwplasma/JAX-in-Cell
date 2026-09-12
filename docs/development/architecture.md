@@ -1,6 +1,6 @@
 # Architecture
 
-The package is nine modules and about 1500 lines. Each one has a single job, and the
+The package is nine modules and about 1600 lines. Each one has a single job, and the
 dependency graph is a straight line with no cycles.
 
 ```
@@ -21,11 +21,13 @@ package works without matplotlib.
 
 ## Everything is a pytree
 
-`pytree_dataclass(static=(...))` in `_config.py` is fifteen lines and does the work: it
+`pytree_dataclass(static=(...))` in `_config.py` is twenty lines and does the work: it
 makes a frozen dataclass, registers it with `jax.tree_util`, and splits the fields into
 leaves and static metadata. Leaves are traced, so they can change without
 recompilation and be differentiated with respect to; static fields become part of the
-treedef and therefore of the cache key.
+treedef and therefore of the cache key. A field that holds a function, such as a
+velocity-dependent reflection law, is moved into the static metadata whatever its
+declaration, since a function is not an array.
 
 The split is the main design decision in the package. A parameter is static if the
 *shape* of the computation depends on it — particle counts, cell counts, boundary
@@ -58,6 +60,8 @@ run.
 **A boundary condition**: a code in `BOUNDARIES`, a branch in `map_indices`,
 `apply_particle_bc`, `_left_ghost_E`, `_right_ghost_B` and `_shift`. The branches are
 resolved at trace time because the codes are static, so they cost nothing at run time.
+A wall that needs random numbers, as the thermal wall does to redraw velocities, is a
+position map in `apply_particle_bc` and a method on `Simulation`, which holds the key.
 
 **A field solver or an integrator**: a branch in `Solver` and a method on
 `Simulation` with the same signature as `_explicit_step`. Keep any iteration a
@@ -71,8 +75,9 @@ can start from the quiet sampling.
 ## What the design gives up
 
 Shapes are static, so particles cannot be created or destroyed. Absorption zeroes a
-particle's charge and parks it outside the grid rather than removing it, which keeps
-the arrays rectangular at the cost of memory for dead particles. Ionisation and
+particle's weight and parks it outside the grid rather than removing it, which keeps
+the arrays rectangular at the cost of memory for dead particles, and partial reflection
+lowers the weight instead of splitting the particle in two. Ionisation and
 injection would need the same treatment, with a pool of inactive particles.
 
 The geometry is one-dimensional. Two and three dimensions would change `_core.py`

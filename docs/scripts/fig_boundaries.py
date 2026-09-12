@@ -23,7 +23,7 @@ fig, axes = plt.subplots(1, 3, figsize=(9.6, 3.2), sharey=True)
 for ax, kind in zip(axes, kinds):
     out = outputs[kind]
     x, v = out.particles("electrons")
-    alive = np.asarray(out.charge)[: out.counts[0]] != 0
+    alive = np.asarray(out.weight)[-1, : out.counts[0]] > 0
     ax.plot(np.asarray(x[-1, alive, 0]) / LENGTH, np.asarray(v[-1, alive, 0]), ".", ms=1.2,
             color=C_ELECTRONS, rasterized=True)
     ax.set(xlabel="$x/L$", title=kind, xlim=(-0.55, 0.55))
@@ -36,7 +36,7 @@ fig.suptitle(r"electron phase space after 400 steps of a plasma drifting to the 
 fig.tight_layout()
 savefig(fig, "boundaries")
 
-kept = {kind: float((np.asarray(outputs[kind].charge) != 0).mean()) for kind in kinds}
+kept = {kind: float((np.asarray(outputs[kind].weight)[-1] > 0).mean()) for kind in kinds}
 energy = {kind: float(np.max(np.abs(np.asarray(diagnostics(outputs[kind])["total"])
                                     / diagnostics(outputs[kind])["total"][0] - 1))) for kind in kinds}
 for kind in kinds:

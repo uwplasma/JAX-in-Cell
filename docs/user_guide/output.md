@@ -11,7 +11,8 @@ dataclass and a pytree. Histories have the stored step as their first axis.
 | `rho` | `(S, cells)` | charge density at the cell centres |
 | `grid` | `(cells,)` | cell centres |
 | `dx`, `dt`, `length` | scalars | grid spacing, time step, box length |
-| `charge`, `mass`, `weight` | `(N,)` | per pseudo-particle; `charge` is zero for absorbed particles |
+| `charge`, `mass` | `(N,)` | of one physical particle, for each pseudo-particle |
+| `weight` | `(S, N)` | physical particles per pseudo-particle and unit area; zero once a wall has collected it; `None` with `x` |
 | `species` | `(N,)` | index of the species each particle belongs to |
 | `names`, `counts` | tuples | species names and particle counts |
 | `field_bc` | tuple | wall codes the fields were solved with, which the Gauss diagnostic needs |

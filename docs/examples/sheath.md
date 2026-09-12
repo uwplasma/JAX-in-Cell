@@ -2,66 +2,73 @@
 
 `examples/sheath.py`
 
-Put a plasma between two absorbing walls and it does not stay neutral for long.
-Electrons are $\sqrt{m_i/m_e}$ times faster than ions, so they reach the walls first
-and charge them negative. The plasma floats positive until the field it sets up holds
-back enough electrons for the two fluxes to match. What is left is the structure every
-bounded plasma has: a quasi-neutral bulk, a pre-sheath that accelerates the ions, and a
-thin positively charged sheath at each wall.
+Where a plasma touches a wall it does not stay neutral. Electrons are $\sqrt{m_i/m_e}$
+times faster than ions, so they reach the wall first and charge it negative, and the
+wall's field then holds back all but as many electrons as ions arrive. What forms is the
+structure at the edge of every bounded plasma: a quasi-neutral plasma, a pre-sheath that
+accelerates the ions, and a thin positively charged sheath against the wall.
+
+The box is that edge. Its right wall is a floating conductor that collects whatever
+reaches it. Its left wall is thermal: what reaches it comes back with a fresh velocity
+from a Maxwellian at the starting temperature, as it would from the plasma behind, which
+is the source boundary of the classic source-collector simulations {cite}`schwager1990`.
+The run is repeated for three conductors: one that collects every electron, one that
+returns half of each electron, and one that returns the slow electrons.
 
 ```{figure} ../_static/figures/sheath.png
 :width: 100%
-:alt: Potential and charge density profile, absorbed particle excess, and ion flow speed
+:alt: Potential above the wall for three reflection laws, ion flow and charge density near the wall, and the sheath drop against Hobbs and Wesson
 
-(a) The potential, averaged over the second half of the run, with the charge density on
-the right axis: flat and neutral in the middle, a spike of net positive charge a few
-Debye lengths thick at each wall. (b) The excess of electrons over ions absorbed, which
-falls as the sheath grows and throttles the electron flux. (c) The ion flow speed where
-the sheath begins, approaching the Bohm speed.
+(a) The potential above the conductor, averaged over the second half of the run, for
+the three walls; the dots mark where the ions reach the Bohm speed. (b) The ion flow and
+the charge density in front of the wall that collects everything: the positive layer
+builds where the ions reach $c_s$. (c) The drop from that point to the wall, against
+Hobbs and Wesson.
 ```
 
 ## What is being tested
 
-Two closed-form results, neither of which has a free parameter.
+**The Bohm criterion.** Ions must enter the sheath at no less than $c_s = \sqrt{T_e/m_i}$
+{cite}`bohm1949sheath,riemann1991`, and the pre-sheath field accelerates them to it. They
+get there {{ sheath_edge_debye }} Debye lengths from the wall, which is where the
+positive layer begins, and where the drop below is measured from.
 
-**The floating potential.** Equating the ion flux entering the sheath at the Bohm speed
-with the electron flux that gets over the barrier gives {cite}`lieberman2005`
+**The sheath drop.** Equating the ion flux at the Bohm speed with the electron flux that
+clears the barrier, of which the wall keeps the fraction $1 - R_{\rm eff}$, gives
+{cite}`hobbs1967`
 
 ```{math}
-\phi_{\rm plasma} - \phi_{\rm wall} = \frac{T_e}{2e}\ln\!\frac{m_i}{2\pi m_e},
+\frac{e\,\Delta\phi}{T_e} = \frac12\ln\frac{m_i}{2\pi m_e} + \ln(1 - R_{\rm eff}),
 ```
 
-which for the mass ratio used here, $m_i/m_e = $ {{ sheath_mass_ratio }}, is
-{{ sheath_drop_theory }} $T_e/e$. The run gives {{ sheath_drop_measured }} $\pm$
-{{ sheath_drop_spread }}.
+{{ sheath_drop_theory }} for a wall that keeps everything at $m_i/m_e = $
+{{ sheath_mass_ratio }}, and {{ sheath_drop_theory_reflecting }} for $R_{\rm eff} = 1/2$.
+The runs give {{ sheath_drop_absorbing }}, {{ sheath_drop_half }} and
+{{ sheath_drop_slow }}, all within {{ sheath_drop_deviation_percent }} per cent.
 
-**The Bohm criterion.** Ions must enter the sheath at no less than
-$c_s = \sqrt{T_e/m_i}$, which the pre-sheath field accelerates them to
-{cite}`bohm1949sheath,riemann1991`. After one ion transit the measured flow at the sheath
-edge is {{ sheath_bohm_ratio }} $c_s$.
-
-And one exact check: the two walls are short-circuited conductors, so the far wall stays
-at the near wall's potential to {{ sheath_wall_potential }} of $T_e/e$
+**The same flux average gives the same sheath.** The two reflecting walls return quite
+different electrons, one half of every electron and the other the slow ones through
+$R(v) = e^{-v^2/2\sigma^2}$, but both have $R_{\rm eff} = 1/2$, the flux average of
+{doc}`wall_reflection`, and they hold the same sheath. For the velocity-dependent law the
+average is taken over the electrons that clear the barrier, at the wall. In a
+collisionless sheath they still form a half-Maxwellian at the plasma temperature, so the
+flux average of a Maxwellian is exactly the one that counts
 ({doc}`../numerics/boundaries`).
 
-## Why the potential comes out low
+## Why a thermal wall
 
-{{ sheath_drop_deviation_percent }} per cent below the formula, and the reason is worth
-knowing before trusting a bounded-plasma run.
+The formula assumes that the electrons arriving at the wall are Maxwellian. Between two
+absorbing walls they soon are not: nothing sustains that plasma, the walls take the
+fast electrons first, and within a few transits the tail the flux balance is derived
+from is gone. A smaller barrier then suffices, the drop comes out low, and reflection no
+longer shifts it by $\ln 2$, since the electrons left to reflect are the slow ones. The
+thermal wall is the simplest remedy. Every electron the sheath turns back is redrawn at
+the other end from the Maxwellian, so the distribution arriving at the conductor stays
+complete. The plasma still drains, and {{ sheath_ions_left_percent }} per cent of the ions
+remain at the end, but its temperature holds.
 
-Nothing sustains this plasma. The walls take the fast electrons preferentially, so the
-bulk cools — from 1 eV to {{ sheath_temperature_final }} eV over the run, which is why
-the comparison uses the temperature measured as it goes rather than the one it started
-with — and, more importantly, the distribution loses the tail the flux balance is
-derived from. By the end there is nothing left beyond about two standard deviations,
-where a Maxwellian would still have 4.5 per cent of its electrons. A truncated tail
-carries less flux, so a smaller barrier suffices.
-
-Closing that gap means sustaining the plasma, which is what the bounded-plasma
-literature does: an ionisation source that replaces the ions lost to the walls
-{cite}`reboul2022`, or collisions frequent enough to refill the tail from the bulk.
-Either turns this into a study of a discharge; neither is needed to show where a sheath
-comes from.
+Two absorbing walls are still the right model for a plasma between two electrodes, which
+are then short-circuited conductors at one potential ({doc}`../numerics/boundaries`).
 
 ## Running it
 
@@ -69,20 +76,20 @@ comes from.
 python examples/sheath.py
 ```
 
-About thirty seconds: {{ sheath_particles }} particles on {{ sheath_cells }} cells over
-{{ sheath_box_debye }} Debye lengths, run for {{ sheath_steps }} steps, roughly one ion
-transit. The mass ratio is reduced to {{ sheath_mass_ratio }} for exactly that reason —
-the ion transit is what sets the cost, and it scales as $\sqrt{m_i/m_e}$.
+About a minute for the three runs, each with fewer particles than the
+{{ sheath_particles }} of the figure, on {{ sheath_cells }} cells over
+{{ sheath_box_debye }} Debye lengths for {{ sheath_steps }} steps, roughly one ion
+transit. The mass ratio is reduced to {{ sheath_mass_ratio }} for exactly that reason:
+the ion transit sets the cost, and it grows as $\sqrt{m_i/m_e}$.
 
 The run is electrostatic, so the time step follows $\omega_{pe}\Delta t = 0.2$ rather
-than the light-wave limit, which is a factor of nearly three hundred in step size here.
-That is safe only while nothing excites the transverse fields; see
-{doc}`../numerics/stability`.
+than the light-wave limit. That is safe only while nothing excites the transverse
+fields; see {doc}`../numerics/stability`.
 
 ## Things to try
 
-* Change the mass ratio and check that the drop follows $\ln(m_i/m_e)$.
-* Make the box longer in Debye lengths: the sheath stays a few $\lambda_D$ wide while
-  the quasi-neutral bulk grows, which is the separation of scales the theory assumes.
-* Set `particle_bc=("reflective", "absorbing")`: one symmetry plane and one electrode,
-  a half-domain problem, and the sheath forms only at the absorbing end.
+* `reflection=(0.0, 0.75)`: the drop falls by $\ln 4$, and it vanishes altogether as
+  $R_{\rm eff}$ approaches $1 - \sqrt{2\pi m_e/m_i}$.
+* `Domain(..., restitution=(1.0, 0.5))`: the reflected electrons come back slower, but
+  the sheath does not change, because the wall keeps as many as before.
+* Change the mass ratio and check that the drop follows $\tfrac12\ln(m_i/m_e)$.

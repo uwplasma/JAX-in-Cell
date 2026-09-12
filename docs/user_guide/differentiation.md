@@ -19,8 +19,8 @@ gradient = jax.grad(objective)(6e7)
 ## What can be differentiated
 
 Every pytree leaf: `length`, `dt_over_dx_c`, `restitution`, the species `charge`,
-`mass`, `density`, `vth`, `drift`, `perturbation_amplitude`, `filter_alpha`, and the
-external field arrays. Differentiating with respect to the whole object works too, and
+`mass`, `density`, `vth`, `drift`, `perturbation_amplitude` and `reflection` (when it
+is a number), `filter_alpha`, and the external field arrays. Differentiating with respect to the whole object works too, and
 returns a matching pytree:
 
 ```python

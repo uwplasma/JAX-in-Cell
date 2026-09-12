@@ -16,7 +16,7 @@ domain = Domain(length=0.01, cells=64, dt_over_dx_c=1.0,
 | `dt_over_dx_c` | the ratio $c\Delta t/\Delta x$ | `1.0` |
 | `particle_bc` | wall type for particles, one name or a `(left, right)` pair (static) | `"periodic"` |
 | `field_bc` | wall type for fields (static) | `"periodic"` |
-| `restitution` | normal velocity is multiplied by `-restitution` at a reflective wall | `1.0` |
+| `restitution` | the normal velocity of whatever a wall sends back is multiplied by `-restitution`; one number or a `(left, right)` pair | `1.0` |
 | `length_y`, `length_z` | periods of the two ignorable coordinates | `1e-2` |
 
 Derived quantities are properties, so they follow the arguments:
@@ -55,28 +55,34 @@ combination; take the warning seriously, or switch to `algorithm="implicit"`.
 
 ## Walls
 
-`"periodic"`, `"reflective"` and `"absorbing"`, either as one name for both ends or as
-a pair:
+`"periodic"`, `"reflective"`, `"absorbing"` and, for particles only, `"thermal"`, either
+as one name for both ends or as a pair:
 
 ```python
-Domain(particle_bc=("reflective", "absorbing"), field_bc=("reflective", "absorbing"))
+Domain(particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing"))
 ```
 
 A periodic wall needs a periodic partner, which is checked at construction. The
 particle and field walls are set separately, which is occasionally useful (particles
-reflected while radiation leaves) but usually they should match.
+reflected while radiation leaves) but usually they should match; a thermal particle wall
+takes a reflective field wall.
 
 Two absorbing walls are treated as conductors that keep the charge they collect,
 short-circuited to one another, so they stay at the same potential and the plasma is
-free to float above them. That is what makes a sheath form ({doc}`../examples/sheath`);
-{doc}`../numerics/boundaries` explains why the alternative, holding one wall's field at
-zero, piles all the collected charge onto the other.
+free to float above them. One absorbing wall opposite a reflective or thermal one is a
+floating electrode on its own. {doc}`../numerics/boundaries` explains why the
+alternative, holding one wall's field at zero, piles all the collected charge onto the
+other.
 
 What each one does to particles, to the fields and to the charge budget is described in
-{doc}`../numerics/boundaries`. In short: periodic recirculates, reflective mirrors the
-position and reverses the normal velocity, absorbing zeroes the particle's charge and
-parks it outside the grid, with a first-order Mur radiating condition on the fields so
-that outgoing waves leave without reflection.
+{doc}`../numerics/boundaries`. In short: periodic recirculates; reflective mirrors the
+position and reverses the normal velocity; absorbing collects the particle, all of it
+unless its species returns a fraction (`Species.reflection`), and parks what it keeps
+outside the grid, with a first-order Mur radiating condition on the fields so that
+outgoing waves leave without reflection; thermal mirrors the position and redraws the
+velocity from the half-Maxwellian of the species, standing for the plasma beyond the
+box. That last pair, a thermal wall facing a floating conductor, is what
+{doc}`../examples/sheath` uses.
 
 ## The ignorable coordinates
 

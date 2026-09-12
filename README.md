@@ -108,14 +108,15 @@ and no finite differences anywhere.
 
 ## Examples
 
-Nine scripts in `examples/`, each reproducing a result from the literature rather
+Ten scripts in `examples/`, each reproducing a result from the literature rather
 than making a picture: the two-stream instability (Buneman 1959), Landau damping
 (Landau 1946), the Bohm-Gross dispersion relation, the bump-on-tail instability and
 its quasilinear plateau, the Weibel instability and its marginal wavenumber
 (Weibel 1959), explicit against implicit energy conservation, the collision operator
-against the Fokker-Planck rates, the plasma sheath with its floating potential and Bohm
-criterion, and an optimisation that recovers the fastest-growing beam by gradient
-ascent through the solver. Each is described in the
+against the Fokker-Planck rates, a partly reflecting wall returning the flux average of
+its reflection law, the plasma sheath with the Bohm criterion and the Hobbs-Wesson drop
+with and without electron reflection, and an optimisation that recovers the
+fastest-growing beam by gradient ascent through the solver. Each is described in the
 [documentation](https://jax-in-cell.readthedocs.io/en/latest/examples/index.html).
 
 <p align="center">
@@ -154,7 +155,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Sixty-four tests, about a minute and a half, covering every statement and branch. They
+Seventy tests, under two minutes, covering every statement and branch. They
 are physics tests rather than regression tests: closed-form rates and frequencies,
 conservation laws, exact results for the kernels, and the behaviour of the interface.
 They run on Python 3.10 to 3.13 on every pull request, together with a build of the

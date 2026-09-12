@@ -24,6 +24,7 @@ SCRIPTS = [
     "fig_weibel.py",
     "fig_conservation.py",
     "fig_boundaries.py",
+    "fig_wall_reflection.py",
     "fig_sheath.py",
     "fig_collisions.py",
     "fig_autodiff.py",

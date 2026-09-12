@@ -1,8 +1,8 @@
 # Examples
 
-Every script in `examples/` runs on its own on a laptop in seconds to about half a
-minute, and each one reproduces a result from the literature rather than making a
-picture for its own sake.
+Every script in `examples/` runs on its own on a laptop in seconds to about a minute,
+and each one reproduces a result from the literature rather than making a picture for
+its own sake.
 
 ```bash
 git clone https://github.com/uwplasma/JAX-in-Cell
@@ -55,10 +55,16 @@ python two_stream.py
 `collisions.py` — the Takizuka-Abe operator against the Fokker-Planck rates.
 :::
 
+:::{grid-item-card} Wall reflection
+:link: wall_reflection
+:link-type: doc
+`wall_reflection.py` — a wall returns the flux average of its reflection law.
+:::
+
 :::{grid-item-card} Plasma sheath
 :link: sheath
 :link-type: doc
-`sheath.py` — a plasma against absorbing walls floats, and the ions leave at the Bohm speed.
+`sheath.py` — the Bohm criterion and the sheath drop of Hobbs and Wesson, with and without reflection.
 :::
 
 :::{grid-item-card} Optimisation
@@ -79,6 +85,7 @@ bump_on_tail
 weibel
 energy_conservation
 collisions
+wall_reflection
 sheath
 optimisation
 ```

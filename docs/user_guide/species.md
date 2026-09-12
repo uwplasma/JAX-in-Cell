@@ -33,6 +33,7 @@ is the usual way to get an immobile neutralising background.
 | `quiet` | quiet start (static) | `False` |
 | `random_positions` | uniformly random rather than equally spaced positions (static) | `False` |
 | `x`, `v` | arrays of shape `(n, 3)` replacing the generated phase space | `None` |
+| `reflection` | fraction of each particle an absorbing wall sends back: a number, a function of the normal impact speed in m/s, or a `(left, right)` pair | `0.0` |
 
 ## Thermal speed and temperature
 
@@ -89,6 +90,29 @@ electrons = Species.electrons(n=n, density=n_e, vth=(vx, 0.0, vz)).replace(x=x, 
 `perturbation_*`, `plus_minus` and `quiet` are then ignored for the sampling — though
 `vth` and `density` are still what the linear-theory helpers and the Debye-length
 property read, so keep them consistent with the arrays.
+
+## Walls that send particles back
+
+An absorbing wall collects everything that reaches it unless the species says
+otherwise. `reflection` is the fraction of each particle the wall returns, bounced as
+a reflective wall would bounce it, while the wall keeps the rest of the weight:
+
+```python
+import jax.numpy as jnp
+
+Species.electrons(..., reflection=0.25)          # a quarter of every electron, at both walls
+Species.electrons(..., reflection=(0.0, 0.5))    # only the right wall reflects
+sigma = vth / np.sqrt(2)                         # slow electrons come back, fast ones stay
+Species.electrons(..., reflection=lambda speed: jnp.exp(-speed ** 2 / (2 * sigma ** 2)))
+```
+
+A number is a pytree leaf, traced and differentiable like any physical parameter. A
+function is compiled into the program: write it with `jax.numpy`, and define it once,
+because a new function object is a new program. A wall sees the flux of particles, not
+their distribution, so a velocity-dependent law returns its flux average from a
+Maxwellian: $u^2/(u^2+\sigma^2)$ for a Gaussian of width $u$, which is one half for the
+law above rather than the 0.71 an average over the distribution would suggest
+({doc}`../numerics/boundaries`).
 
 ## Changing a species
 

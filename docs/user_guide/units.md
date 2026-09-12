@@ -62,9 +62,11 @@ in a box of length `length` gives each pseudo-particle the weight
 w = \frac{n_{\rm phys}\,L}{N},
 ```
 
-the number of physical particles it stands for. `Output.charge` and `Output.mass` are
-the *pseudo-particle* charge and mass, that is $q w$ and $m w$; divide by
-`Output.weight` for the physical ones.
+the number of physical particles it stands for, per unit area of the $y$-$z$ plane.
+`Output.charge` and `Output.mass` are those of one physical particle, and
+`Output.weight` is the weight of every pseudo-particle at every stored step: an
+absorbing wall lowers it as it collects the particle, to zero when it keeps the particle
+whole. The charge a pseudo-particle carries is `charge * weight`.
 
 ## Energies per unit area
 

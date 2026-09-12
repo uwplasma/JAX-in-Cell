@@ -157,16 +157,24 @@ part of the recorded result.
 
 The total energy changes by {{ weibel_energy_error }} over the run.
 
+## Wall reflection
+
+A reflection law returns its flux average from a Maxwellian, not its average over the
+distribution: {{ reflection_returned_sigma }} for a Gaussian law of width $\sigma$, whose
+flux average is one half and whose distribution average is
+{{ reflection_distribution_average_sigma }}, and within {{ reflection_max_error }} of the
+flux average at five widths. See {doc}`../examples/wall_reflection`.
+
 ## Sheath formation
 
-A plasma between two absorbing walls floats positive until the electron and ion fluxes
-to the walls balance, leaving a quasi-neutral bulk joined to each wall by a charged
-layer a few Debye lengths thick. Two closed-form results follow with no free parameter:
-the plasma-wall drop $(T_e/2e)\ln(m_i/2\pi m_e)$ {cite}`lieberman2005` and the Bohm
-criterion, that ions enter the sheath at $c_s=\sqrt{T_e/m_i}$ {cite}`bohm1949sheath`.
-The run reaches {{ sheath_bohm_ratio }} $c_s$ at the sheath edge and a drop of
-{{ sheath_drop_measured }} against {{ sheath_drop_theory }}, low by
-{{ sheath_drop_deviation_percent }} per cent for a reason worth reading:
+The edge of a plasma, between a thermal source wall {cite}`schwager1990` and a floating
+conductor. The ions reach the Bohm speed $c_s=\sqrt{T_e/m_i}$ {cite}`bohm1949sheath`
+{{ sheath_edge_debye }} Debye lengths from the wall, and from there the potential falls
+by $(T_e/e)\left[\tfrac12\ln(m_i/2\pi m_e) + \ln(1-R_{\rm eff})\right]$ {cite}`hobbs1967`:
+{{ sheath_drop_absorbing }} against {{ sheath_drop_theory }} for a wall that collects
+every electron, and {{ sheath_drop_half }} and {{ sheath_drop_slow }} against
+{{ sheath_drop_theory_reflecting }} for a wall that returns half of each electron and one
+that returns the slow electrons with the same flux average. See
 {doc}`../examples/sheath`.
 
 ## Collisions
@@ -185,6 +193,8 @@ theory; see {doc}`collisions` for the figure and the details.
 | Gauss-law residual | {{ gauss_residual_max_explicit }} |
 | Gauss-law residual, reflective walls | {{ gauss_residual_reflective_wall }} |
 | Gauss-law residual, absorbing walls | {{ gauss_residual_absorbing_wall }} |
+| Gauss-law residual, walls returning half of each electron | {{ gauss_residual_reflecting_wall }} |
+| Gauss-law residual, thermal wall and floating conductor | {{ gauss_residual_thermal_wall }} |
 | charge, deposited against carried | {{ charge_error_relative }} |
 | momentum drift | {{ momentum_error_relative }} |
 

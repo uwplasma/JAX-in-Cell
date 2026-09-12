@@ -1,83 +1,87 @@
-"""The sheath that forms between a plasma and two absorbing walls."""
+"""The edge of a plasma against a floating wall, with and without electron reflection."""
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from common import C_ELECTRONS, C_IONS, C_THEORY, panel_label, record, savefig
+from common import COLORS, C_THEORY, panel_label, record, savefig
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron, potential,
                        quiet_start, elementary_charge as e_charge, speed_of_light as c)
 
-T_E, DENSITY, MASS_RATIO, PARTICLES, CELLS, BOX = 1.0, 1e16, 400.0, 60000, 240, 120
-V_TH = np.sqrt(2 * T_E * e_charge / mass_electron)
+T_E, DENSITY, MASS_RATIO, PARTICLES, CELLS, BOX, STEPS = 1.0, 1e16, 400.0, 40000, 120, 60, 6000
+SIGMA = np.sqrt(T_E * e_charge / mass_electron)
 OMEGA_PE = np.sqrt(DENSITY * e_charge ** 2 / (epsilon_0 * mass_electron))
-DEBYE = V_TH / (np.sqrt(2) * OMEGA_PE)
+DEBYE, C_S = SIGMA / OMEGA_PE, SIGMA / np.sqrt(MASS_RATIO)
 LENGTH = BOX * DEBYE
-V_TH_ION = V_TH * np.sqrt(1 / (40 * MASS_RATIO))                  # T_i = T_e / 40
+V_E, V_I = np.sqrt(2) * SIGMA, np.sqrt(2) * SIGMA / np.sqrt(40 * MASS_RATIO)       # T_i = T_e / 40
 
-x, v = quiet_start(PARTICLES, LENGTH, vth=(V_TH, 0, 0))
-electrons = Species.electrons(n=PARTICLES, density=DENSITY, vth=(V_TH, 0, 0)).replace(x=x, v=v)
-x, v = quiet_start(PARTICLES, LENGTH, vth=(V_TH_ION, 0, 0))
-ions = Species("ions", PARTICLES, 1.0, MASS_RATIO * mass_electron, DENSITY,
-               (V_TH_ION, 0, 0)).replace(x=x, v=v)
-domain = Domain(length=LENGTH, cells=CELLS, particle_bc="absorbing", field_bc="absorbing",
-                dt_over_dx_c=(0.2 / OMEGA_PE) * c / (LENGTH / CELLS))
-simulation = Simulation(domain, [electrons, ions], Solver(filter_passes=4))
-STEPS = 6000                                                       # about one ion transit
-output = simulation.run(STEPS, seed=0, store_every=100)
+domain = Domain(length=LENGTH, cells=CELLS, dt_over_dx_c=(0.2 / OMEGA_PE) * c / (LENGTH / CELLS),
+                particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing"))
+WALLS = {"absorbing": (0.0, 0.0, COLORS["blue"]), "returns half": (0.5, 0.5, COLORS["vermillion"]),
+         "returns the slow ones": (lambda s: jnp.exp(-s ** 2 / (2 * SIGMA ** 2)), 0.5, COLORS["green"])}
+x, v = quiet_start(PARTICLES, LENGTH, vth=(V_E, 0, 0))
+x_i, v_i = quiet_start(PARTICLES, LENGTH, vth=(V_I, 0, 0))
+ions = Species("ions", PARTICLES, 1.0, MASS_RATIO * mass_electron, DENSITY, (V_I, 0, 0)).replace(x=x_i, v=v_i)
 
-t = np.asarray(output.t) * OMEGA_PE
-phi = np.asarray(potential(output))
-v_x = np.asarray(output.v[..., 0])
-position = np.asarray(output.x[..., 0])
-inside = np.abs(position) <= LENGTH / 2
-bulk = np.abs(position[:, :PARTICLES]) < LENGTH / 5
-T_bulk = np.array([mass_electron * np.var(v_x[k, :PARTICLES][bulk[k]]) / e_charge
-                   for k in range(t.size)])
-late = t > 0.6 * t[-1]
-drop = (phi[:, 2 * CELLS // 5:3 * CELLS // 5].mean(axis=1) / T_bulk)[late]
+late = slice(STEPS // 200, None)
+distance = (LENGTH / 2 - np.asarray(domain.grid) - domain.dx / 2) / DEBYE
+bins = np.linspace(-LENGTH / 2, LENGTH / 2, CELLS // 4 + 1)
+centres = (LENGTH / 2 - 0.5 * (bins[:-1] + bins[1:])) / DEBYE
 theory = 0.5 * np.log(MASS_RATIO / (2 * np.pi))
-c_s = np.sqrt(T_bulk * e_charge / (MASS_RATIO * mass_electron))
-edge = (position[:, PARTICLES:] > 0.30 * LENGTH) & (position[:, PARTICLES:] < 0.40 * LENGTH)
-flow = np.array([v_x[k, PARTICLES:][edge[k]].mean() for k in range(t.size)]) / c_s
-print(f"  drop {drop.mean():.2f} +- {drop.std():.2f} T_e/e (theory {theory:.2f}); "
-      f"ion flow {flow[-1]:.2f} c_s")
+results = {}
+for name, (reflection, R_eff, color) in WALLS.items():
+    electrons = Species.electrons(n=PARTICLES, density=DENSITY, vth=(V_E, 0, 0),
+                                  reflection=(0.0, reflection)).replace(x=x, v=v)
+    out = Simulation(domain, [electrons, ions], Solver(filter_passes=4)).run(STEPS, store_every=100)
+    phi = np.asarray(potential(out))[late] / T_E
+    profile = phi.mean(axis=0) - phi[:, -1].mean()
+    position, speed, weight = (np.asarray(a)[late, PARTICLES:] for a in (out.x[..., 0], out.v[..., 0], out.weight))
+    flow = (np.histogram(position, bins, weights=weight * speed)[0]
+            / np.maximum(np.histogram(position, bins, weights=weight)[0], 1e-300) / C_S)
+    edge = centres[np.argmax(flow >= 1)]
+    results[name] = dict(profile=profile, flow=flow, edge=edge, color=color, expected=theory + np.log(1 - R_eff),
+                         sheath=float(np.interp(edge, distance[::-1], profile[::-1])),
+                         rho=np.asarray(out.rho)[late].mean(axis=0) / (DENSITY * e_charge),
+                         ions_left=float(np.asarray(out.weight)[-1, PARTICLES:].sum() / weight[0].sum()))
+    print(f"  {name:22s} edge {edge:4.1f} lambda_D, sheath drop {results[name]['sheath']:.2f} "
+          f"(Hobbs-Wesson {results[name]['expected']:.2f})")
 
 fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.4))
-grid = (np.asarray(output.grid) + output.dx / 2) / DEBYE
-axes[0].plot(grid, (phi[late] / T_bulk[late, None]).mean(axis=0), color=C_ELECTRONS,
-             label=r"$\phi/T_e$")
-axes[0].axhline(theory, ls="--", color=C_THEORY, label=r"$\frac{1}{2}\ln(m_i/2\pi m_e)$")
-axes[0].set(xlabel=r"$x/\lambda_D$", ylabel=r"$\phi/T_e$", title="bulk, pre-sheath and sheath")
-axes[0].legend(loc="center left")
-charge = axes[0].twinx()
-charge.plot(np.asarray(output.grid) / DEBYE,
-            np.asarray(output.rho)[late].mean(axis=0) / (DENSITY * e_charge), color=C_IONS, lw=1)
-charge.axhline(0, color="0.8", lw=0.6)
-charge.set_ylabel(r"$\rho/en_0$", color=C_IONS)
-charge.grid(False)
+for name, r in results.items():
+    axes[0].plot(distance, r["profile"], color=r["color"], label=name)
+    axes[0].plot(r["edge"], r["sheath"], "o", color=r["color"], ms=4)
+axes[0].set(xlabel=r"distance from the wall ($\lambda_D$)", ylabel=r"$(\phi-\phi_{wall})/T_e$", xlim=(0, 30),
+            title="the sheath, and where ions reach $c_s$")
+axes[0].legend(loc="lower right")
 panel_label(axes[0], "a")
 
-excess = 100 * (inside[:, PARTICLES:].sum(axis=1) - inside[:, :PARTICLES].sum(axis=1)) / PARTICLES
-axes[1].plot(t, excess, color=C_ELECTRONS)
-axes[1].set(xlabel=r"$t\,\omega_{pe}$", ylabel="excess electrons absorbed (%)",
-            title="the sheath throttles the electron flux")
+r = results["absorbing"]
+axes[1].plot(centres, r["flow"], color=COLORS["orange"], label=r"ion flow $v_i/c_s$")
+axes[1].plot(distance, 10 * r["rho"], color=COLORS["blue"], label=r"$10\,\rho/en_0$")
+axes[1].axhline(1.0, ls="--", color=C_THEORY, lw=0.8)
+axes[1].set(xlabel=r"distance from the wall ($\lambda_D$)", xlim=(0, 30),
+            title="the charge builds where ions reach $c_s$")
+axes[1].legend(loc="upper right")
 panel_label(axes[1], "b")
 
-axes[2].plot(t, flow, color=C_ELECTRONS)
-axes[2].axhline(1.0, ls="--", color=C_THEORY, label="Bohm speed")
-axes[2].set(xlabel=r"$t\,\omega_{pe}$", ylabel=r"$v_i/c_s$ at the sheath edge",
-            title="the pre-sheath accelerates the ions")
-axes[2].legend(loc="lower right")
+names = list(results)
+axes[2].bar(range(3), [results[k]["sheath"] for k in names], color=[results[k]["color"] for k in names],
+            alpha=0.75, label="measured")
+axes[2].plot(range(3), [results[k]["expected"] for k in names], "_", color=C_THEORY, ms=38, mew=2,
+             label="Hobbs and Wesson")
+axes[2].set_xticks(range(3), ["absorbing", "returns\nhalf", "returns the\nslow ones"])
+axes[2].set(ylabel=r"sheath drop ($T_e/e$)", title=r"same $R_{\rm eff}$, same sheath")
+axes[2].legend(loc="upper right")
 panel_label(axes[2], "c")
 fig.tight_layout()
 savefig(fig, "sheath")
 
-record(sheath_mass_ratio=MASS_RATIO, sheath_box_debye=BOX, sheath_cells=CELLS,
-       sheath_particles=2 * PARTICLES, sheath_steps=STEPS,
-       sheath_drop_measured=round(float(drop.mean()), 2),
-       sheath_drop_spread=round(float(drop.std()), 2),
-       sheath_drop_theory=round(float(theory), 2),
-       sheath_drop_deviation_percent=round(float(100 * (drop.mean() / theory - 1)), 0),
-       sheath_bohm_ratio=round(float(flow[-1]), 2),
-       sheath_wall_potential=f"{float(np.abs(phi[:, -1]).max() / T_bulk.max()):.0e}",
-       sheath_electrons_left_percent=round(float(100 * inside[-1, :PARTICLES].mean()), 0),
-       sheath_temperature_final=round(float(T_bulk[-1]), 2))
+deviation = max(abs(r["sheath"] / r["expected"] - 1) for r in results.values())
+record(sheath_mass_ratio=MASS_RATIO, sheath_box_debye=BOX, sheath_cells=CELLS, sheath_particles=2 * PARTICLES,
+       sheath_steps=STEPS, sheath_drop_theory=round(float(theory), 2),
+       sheath_drop_theory_reflecting=round(float(theory - np.log(2)), 2),
+       sheath_drop_absorbing=round(results["absorbing"]["sheath"], 2),
+       sheath_drop_half=round(results["returns half"]["sheath"], 2),
+       sheath_drop_slow=round(results["returns the slow ones"]["sheath"], 2),
+       sheath_drop_deviation_percent=round(float(100 * deviation), 0),
+       sheath_edge_debye=round(float(results["absorbing"]["edge"]), 0),
+       sheath_ions_left_percent=round(100 * results["absorbing"]["ions_left"], 0))

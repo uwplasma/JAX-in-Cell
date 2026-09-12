@@ -1,9 +1,9 @@
 # Boundary conditions
 
 `Domain(particle_bc=..., field_bc=...)` set the walls, either as one name applied to
-both ends or as a `(left, right)` pair. The three kinds are `"periodic"`,
-`"reflective"` and `"absorbing"`. A periodic wall needs a periodic partner; the other
-two can be mixed.
+both ends or as a `(left, right)` pair. The kinds are `"periodic"`, `"reflective"`,
+`"absorbing"` and, for particles only, `"thermal"`. A periodic wall needs a periodic
+partner; the others can be mixed.
 
 ```{figure} ../_static/figures/boundaries.png
 :width: 100%
@@ -20,17 +20,29 @@ walls recirculate it, reflective walls turn it around, absorbing walls remove
 $x \to ((x + L/2) \bmod L) - L/2$. Nothing else changes.
 
 **Reflective.** The position is mirrored about the wall, $x \to \pm L - x$, and the
-normal velocity is multiplied by `-restitution`. At the default `restitution=1.0` this
-is a specular bounce, and the total energy is conserved:
-{{ boundary_energy_error_reflective }} over the run above. Values below one model a
-lossy wall and remove energy on purpose.
+normal velocity is multiplied by `-restitution`, which may differ between the two
+walls. At the default `restitution=1.0` this is a specular bounce, and the total energy
+is conserved: {{ boundary_energy_error_reflective }} over the run above. Values below
+one model a lossy wall and remove energy on purpose.
 
-**Absorbing.** The particle keeps its position outside the grid but its charge, its
+**Absorbing.** The particle keeps its position outside the grid but its weight, its
 charge-to-mass ratio and its velocity are set to zero, so it deposits nothing, feels
 nothing and never returns. The arrays keep their shape, which is what lets the whole
 loop stay a single compiled program with static shapes; the cost is that absorbed
-particles still occupy memory. `Output.charge` is zero for them, which is how the
-diagnostics and the plots tell them apart.
+particles still occupy memory. `Output.weight` is zero for them, which is how the
+diagnostics and the plots tell them apart. A species can have part of each particle
+sent back instead, as {ref}`partial-reflection` describes.
+
+**Thermal.** The position is mirrored as at a reflective wall, but the velocity is
+drawn afresh, as if the particle came from a Maxwellian reservoir behind the wall at the
+temperature of its species. The normal component follows the flux distribution
+$(v/\sigma^2)\,e^{-v^2/2\sigma^2}$, sampled as $\sigma\sqrt{-2\ln U}$ with $U$ uniform,
+and the tangential ones the Maxwellian, with $\sigma = v_{th}/\sqrt2$. This is the
+source boundary of bounded-plasma simulations {cite}`schwager1990` and the `thermal`
+boundary of EPOCH and PIConGPU. Whatever the rest of the box has done to the
+distribution, what leaves the wall is Maxwellian; particles are conserved, energy is not,
+since the wall is a heat bath. The fields need a wall of their own there, normally
+`"reflective"`.
 
 The transverse coordinates $y$ and $z$ are always periodic with periods `length_y` and
 `length_z`. They do not affect the fields and exist only so that particle positions
@@ -83,10 +95,89 @@ float to whatever potential balances the two fluxes, which is what a sheath is. 
 biased or floating electrode with a series RLC circuit is the same construction with a
 different equation for the constant {cite}`verboncoeur1993`; it is not implemented.
 
+A single absorbing wall facing a reflective or thermal one is a floating electrode on
+its own: the symmetry plane fixes $E = 0$ at the far end, the current through it is
+zero, and the electrode sits at whatever potential the charge it has collected gives
+it. That is the setup of {doc}`../examples/sheath`.
+
 One consequence for the diagnostics: with a wall, the field beyond it is a degree of
 freedom the output does not carry, so {func}`~jaxincell.gauss_residual` checks the
 discrete Gauss law on the cells that do not need it. See {doc}`../examples/sheath` for
 what the closure produces.
+
+(partial-reflection)=
+## Walls that send part of a particle back
+
+A real surface does not collect every electron that reaches it. Some are reflected,
+and slow electrons more readily than fast ones {cite}`cimino2004,furman2002`. Each
+species therefore carries a `reflection` law $R$, the fraction of a particle an
+absorbing wall returns: a number, a function of the normal impact speed $|v_x|$, or a
+`(left, right)` pair of either.
+
+```python
+Species.electrons(..., reflection=0.3)                                        # 30 % of every electron
+Species.electrons(..., reflection=lambda s: jnp.exp(-s ** 2 / (2 * u ** 2)))   # the slow ones
+```
+
+A particle of weight $w$ that crosses the wall leaves $(1-R)\,w$ on the conductor and
+returns with $R\,w$, mirrored like a reflective bounce and with its normal velocity
+multiplied by `-restitution`. The split is deterministic. WarpX offers the same law, a
+per-species function of the normal velocity at an absorbing boundary, but draws a
+random number and returns or keeps each macro-particle whole; splitting the weight
+gives the mean of that process without its sampling noise, and keeps the result a
+smooth function of $R$ that `jax.grad` can differentiate. The collected part becomes
+surface charge through the same continuity current as an ordinary absorption, so the
+discrete Gauss law still holds to round-off ({doc}`verification`).
+
+### The wall samples the flux
+
+Which particles reach a wall in a short time is biased towards the fast: from a uniform
+plasma with velocity distribution $f$, those arriving with normal speed near $v$ are in
+proportion to $v f(v)$. A law $R(v)$ therefore returns, from a Maxwellian of variance
+$\sigma^2 = T/m$, its flux average
+
+```{math}
+R_{\rm eff} = \frac{\int_0^\infty R(v)\, v\, e^{-v^2/2\sigma^2}\,dv}{\int_0^\infty v\, e^{-v^2/2\sigma^2}\,dv}
+            = \frac{1}{\sigma^2}\int_0^\infty R(v)\, v\, e^{-v^2/2\sigma^2}\,dv ,
+```
+
+not its average over the distribution. For a Gaussian law $R = e^{-v^2/2u^2}$ the
+integral is elementary, $R_{\rm eff} = u^2/(u^2+\sigma^2)$, where the distribution
+average would be $u/\sqrt{u^2+\sigma^2}$: one half against
+{{ reflection_distribution_average_sigma }} at $u = \sigma$. The simulation returns
+{{ reflection_returned_sigma }} ({doc}`../examples/wall_reflection`). Restitution then
+takes a factor $e^2$ out of the energy that comes back.
+
+This is why a law should be written with a fixed velocity scale. Normalising the speed by
+the fastest particle in the run would give $R_{\rm eff} \approx 1 - \sqrt{\pi/2}\,
+\sigma/v_{\max}$, and since the largest of $N$ Maxwellian samples grows like
+$\sigma\sqrt{2\ln N}$, the wall would reflect more the more particles the run used: a
+property of the sampling, not of the surface.
+
+### What reflection does to a sheath
+
+A floating wall collects the ions at the Bohm flux $n_s c_s$ and the electrons at the
+one-way flux $\tfrac14 n_s \bar v_e\,e^{-e\Delta\phi/T_e}$ that clears the barrier. If it
+returns the fraction $R_{\rm eff}$ of those electrons, only $1-R_{\rm eff}$ of the flux
+counts, and the balance gives {cite}`hobbs1967`
+
+```{math}
+\frac{e\Delta\phi}{T_e} = \ln\!\left[(1-R_{\rm eff})\sqrt{\frac{m_i}{2\pi m_e}}\right]
+= \frac12\ln\frac{m_i}{2\pi m_e} + \ln(1-R_{\rm eff}) .
+```
+
+For a velocity-dependent law the average is taken at the wall, over the electrons that
+cleared the barrier. In a collisionless sheath those still form a half-Maxwellian at the
+plasma temperature, because energy conservation slides the part of the distribution
+above the barrier down onto a whole half-Maxwellian, so the flux average above is
+exactly the one that counts. Hobbs and Wesson derived the formula for secondary
+emission, where the emitted electrons leave cold and pile up in front of the wall,
+which limits the coefficient. Reflected electrons leave as fast as they came, so that
+limit does not arise, and the drop simply vanishes as $R_{\rm eff}$ approaches
+$1-\sqrt{2\pi m_e/m_i}$. Restitution does not enter: however slowly the electrons
+leave, the sheath field returns them to the plasma, and the number the wall keeps is
+unchanged. {doc}`../examples/sheath` measures the drop for a wall that keeps everything
+and for two laws with the same $R_{\rm eff}$.
 
 ## Charge accounting at an absorbing wall
 
@@ -124,4 +215,6 @@ Reflective walls model a mirror or a symmetry plane and keep the particle number
 fixed. Absorbing walls model an open system: a sheath, a beam entering a vacuum, a
 pulse leaving the box. Note that the plasma in an absorbing box is not in equilibrium
 and will steadily lose particles and energy, {{ boundary_energy_error_absorbing }} of
-it over the run in the figure above.
+it over the run in the figure above, and with them the fast tail of its distribution.
+A thermal wall at the other end stands for the plasma beyond the box and keeps that
+tail filled, which is what a comparison with sheath theory needs.

@@ -52,10 +52,11 @@ Watch out for the opposite: changing `steps` in a loop recompiles every iteratio
 The particle history is almost always the binding constraint, not speed:
 
 ```{math}
-\text{bytes} = \frac{\text{steps}}{\text{store\_every}} \times N \times 3 \times 8 \times 2 .
+\text{bytes} = \frac{\text{steps}}{\text{store\_every}} \times N \times 8 \times (3 + 3 + 1) ,
 ```
 
-Six thousand steps of sixty thousand particles is 17 GB. Use `store_every` to thin the
+for the positions, the velocities and the weights. Six thousand steps of sixty thousand
+particles is 20 GB. Use `store_every` to thin the
 history, `store_particles=False` when only the fields are needed, or `state` to run in
 chunks ({doc}`running`). A long field-only run costs almost nothing to store: the same
 six thousand steps of a 128-cell grid is under a hundred megabytes.

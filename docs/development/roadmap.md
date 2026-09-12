@@ -9,10 +9,13 @@
   correction step.
 * Ampere and Gauss field solvers.
 * Any number of species, with cross-referenced temperatures.
-* Periodic, reflective and absorbing walls, chosen separately for particles and fields,
-  with a first-order Mur radiating condition on the fields. Absorbing walls are
-  conductors short-circuited to each other, so a bounded plasma forms a sheath
-  ({doc}`../examples/sheath`).
+* Periodic, reflective, absorbing and thermal walls, chosen separately for particles and
+  fields, with a first-order Mur radiating condition on the fields. Absorbing walls are
+  conductors, short-circuited to each other or floating opposite a symmetry plane.
+* Walls that return part of each particle, as a fixed fraction or a law in the impact
+  speed, with a coefficient of restitution per wall; with a thermal source wall a
+  floating electrode holds the sheath drop of Hobbs and Wesson
+  ({doc}`../examples/sheath`, {doc}`../examples/wall_reflection`).
 * Compensated digital filter with arbitrary strides.
 * Binary Coulomb collisions (Takizuka-Abe), verified against the Fokker-Planck rates.
 * Quiet starts, and {func}`~jaxincell.quiet_start` for building custom conditions.
@@ -25,12 +28,13 @@
 
 * Particle sources and sinks, which need a pool of inactive particles because array
   shapes are static. An ionisation source is what a bounded-plasma run needs to reach a
-  true steady state instead of draining ({doc}`../examples/sheath`).
+  true steady state instead of slowly draining ({doc}`../examples/sheath`).
 * A series RLC circuit between the two electrodes, so that a wall can be biased or left
   genuinely floating rather than short-circuited to its partner {cite}`verboncoeur1993`.
 * Time-dependent external fields.
 * Ionisation and recombination.
-* Velocity-dependent boundary conditions (secondary emission, thermal re-injection).
+* Secondary electron emission with an energy-dependent yield {cite}`furman2002`, which,
+  unlike reflection, creates electrons and needs the same pool of inactive particles.
 * A two-dimensional version. `_core.py` would change thoroughly; the configuration
   objects, the time loop, the diagnostics and the differentiability would not.
 
