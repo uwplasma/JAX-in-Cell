@@ -446,6 +446,20 @@ def test_configuration_objects_normalise_what_they_are_given():
         Domain(field_bc="thermal")
 
 
+def test_single_precision_is_left_to_jax_s_own_switch(monkeypatch):
+    """Double precision is switched on at import unless JAX_ENABLE_X64 is set, which is
+    how a backend without float64, such as Apple's Metal, runs the package."""
+    import jax
+    from jaxincell._simulation import _enable_double_precision
+
+    calls = []
+    monkeypatch.setattr(jax.config, "update", lambda name, value: calls.append((name, value)))
+    _enable_double_precision({"JAX_ENABLE_X64": "0"})
+    assert calls == []
+    _enable_double_precision({})
+    assert calls == [("jax_enable_x64", True)]
+
+
 def test_diagnostics_without_particles_gives_the_field_quantities_only():
     """`store_particles=False` keeps the fields and drops the particle history, so
     the diagnostics that need velocities are absent rather than wrong. That is the

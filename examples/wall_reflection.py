@@ -31,7 +31,6 @@ domain = Domain(length=length, cells=64, dt_over_dx_c=50.0, particle_bc="absorbi
                 restitution=restitution)
 steps = int(round(0.1 * length / sigma / domain.dt))
 x, v = quiet_start(n, length, vth=(np.sqrt(2) * sigma, 0, 0))
-w0 = 1e6 * length / n
 
 widths = np.array([0.25, 0.5, 1.0, 2.0, 4.0])
 returned, energy = [], []
@@ -39,7 +38,8 @@ for u in widths * sigma:
     law = lambda speed, u=u: jnp.exp(-speed ** 2 / (2 * u ** 2))
     electrons = Species.electrons(n=n, density=1e6, vth=(np.sqrt(2) * sigma, 0, 0), reflection=law).replace(x=x, v=v)
     w = np.asarray(Simulation(domain, [electrons], Solver()).run(steps, store_every=steps).weight[-1])
-    hit = ~np.isclose(w, w0, rtol=1e-12, atol=0)
+    w0 = w.max()                                  # the weight of a particle that met no wall
+    hit = w < w0
     returned.append(w[hit].sum() / (w0 * hit.sum()))
     energy.append(restitution ** 2 * (w[hit] * v[hit, 0] ** 2).sum() / (w0 * v[hit, 0] ** 2).sum())
     if u == sigma:

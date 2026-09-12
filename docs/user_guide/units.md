@@ -76,10 +76,14 @@ $y$-$z$ plane, in J/m². Ratios — the relative energy error, the fraction in t
 
 ## Precision
 
-`jax_enable_x64` is switched on when the package is imported. Double precision is what
-makes the Gauss residual sit at $10^{-12}$ rather than $10^{-4}$ and the implicit
-energy error reach round-off; single precision would give up both. Override the flag
-before importing `jaxincell` if a run genuinely does not need them.
+`jax_enable_x64` is switched on when the package is imported, unless JAX's own switch
+says otherwise: start Python with `JAX_ENABLE_X64=0` for single precision. Double
+precision is what makes the Gauss residual sit at $10^{-12}$ rather than about
+$10^{-3}$, and the implicit energy error at round-off rather than $10^{-7}$. The physics
+does not change: every rate, frequency and sheath comparison in the test suite passes in
+single precision too, and only the tests that check conservation to round-off fail.
+Single precision is what a backend without float64, such as Apple's Metal, requires
+({doc}`performance`).
 
 ## Frequencies
 

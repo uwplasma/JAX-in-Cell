@@ -2,6 +2,7 @@
 temperatures and the dominant frequency. Everything is a plain function of the
 stored arrays and can be recomputed at will."""
 import jax.numpy as jnp
+import numpy as np
 
 from ._constants import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
@@ -16,9 +17,9 @@ def energies(out):
     if out.v is not None:
         v2 = jnp.sum(out.v ** 2, axis=-1)
         mass = out.mass[None, :] * out.weight          # of each pseudo-particle, at each stored step
-        if out.relativistic:                       # the quantity the relativistic pusher conserves
-            gamma = 1 / jnp.sqrt(1 - v2 / c ** 2)
-            kinetic_p = (gamma - 1) * mass * c ** 2
+        if out.relativistic:                       # the quantity the relativistic pusher conserves,
+            root = jnp.sqrt(1 - v2 / c ** 2)       # (gamma - 1) m c^2, written to keep its digits at low speed
+            gamma, kinetic_p = 1 / root, v2 / (root * (1 + root)) * mass
         else:                                      # and the one the Boris pusher conserves
             gamma = jnp.ones_like(v2)
             kinetic_p = 0.5 * mass * v2
@@ -81,13 +82,14 @@ def temperatures(out):
 
 
 def dominant_frequency(out):
-    """Angular frequency of the strongest peak of :math:`E_x` at the box centre."""
-    signal = out.E[:, out.E.shape[1] // 2, 0]
-    signal = signal - jnp.mean(signal)
-    spectrum = jnp.abs(jnp.fft.rfft(signal))
-    dt = out.t[1] - out.t[0] if out.t.shape[0] > 1 else out.dt
-    freqs = 2 * jnp.pi * jnp.fft.rfftfreq(signal.shape[0], d=dt)
-    return freqs[jnp.argmax(spectrum[1:]) + 1]
+    """Angular frequency of the strongest peak of :math:`E_x` at the box centre. The
+    spectrum is taken with NumPy, on the host, since not every backend has complex
+    arithmetic."""
+    signal = np.asarray(out.E[:, out.E.shape[1] // 2, 0], dtype=float)
+    spectrum = np.abs(np.fft.rfft(signal - signal.mean()))
+    dt = float(out.t[1] - out.t[0]) if out.t.shape[0] > 1 else float(out.dt)
+    freqs = 2 * np.pi * np.fft.rfftfreq(signal.size, d=dt)
+    return freqs[np.argmax(spectrum[1:]) + 1]
 
 
 def diagnostics(out):

@@ -148,21 +148,18 @@ def half_step_fields(E, B, J, dt2, dx, bc, electric_first):
 
 def E_x_from_rho(rho, dx, bc):
     """Solve the discrete Gauss law :math:`(E_{i+1/2} - E_{i-1/2})/\\Delta x = \\rho_i/\\epsilon_0`
-    for the longitudinal field at the faces. Periodic: by FFT with the
-    finite-difference symbol :math:`(1 - e^{-ik\\Delta x})/\\Delta x` and zero mean.
-    Otherwise: integrated from the left wall. Two absorbing walls are conductors
-    short-circuited to each other, so the potential across the box is zero and the
-    mean of :math:`E` is subtracted; any other wall is a symmetry plane, where
-    :math:`E_{-1/2} = 0`."""
+    for the longitudinal field at the faces by summing from the left wall, which fixes
+    :math:`E` up to a constant that the walls then fix. Periodic: a solution exists
+    only for a neutral box, so the mean charge is removed and the field given zero
+    mean, which is exactly the field the finite-difference symbol
+    :math:`(1 - e^{-ik\\Delta x})/\\Delta x` gives in Fourier space, without the
+    complex arithmetic. Two absorbing walls are conductors short-circuited to each
+    other, so the potential across the box is zero and the mean of :math:`E` is
+    subtracted as well; any other wall is a symmetry plane, where :math:`E_{-1/2} = 0`."""
     if bc[0] == 0:
-        n = rho.shape[0]
-        k = 2 * jnp.pi * jnp.fft.fftfreq(n, d=dx)
-        symbol = (1 - jnp.exp(-1j * k * dx)) / dx
-        symbol = symbol.at[0].set(1.0)
-        E_hat = jnp.fft.fft(rho) / epsilon_0 / symbol
-        return jnp.fft.ifft(E_hat.at[0].set(0.0)).real
+        rho = rho - jnp.mean(rho)
     E = dx / epsilon_0 * jnp.cumsum(rho)
-    return E - jnp.mean(E) if bc == (2, 2) else E
+    return E - jnp.mean(E) if bc in ((0, 0), (2, 2)) else E
 
 
 # --- particles --------------------------------------------------------------------------
@@ -177,17 +174,18 @@ def boris(v, E, B, qm, dt):
     return v + qm * E * (dt / 2)
 
 
-def boris_relativistic(v, E, B, q, m, dt):
-    """The same three sub-steps applied to the momentum :math:`p = \\gamma m v`."""
+def boris_relativistic(v, E, B, qm, dt):
+    """The same three sub-steps applied to the momentum per unit mass
+    :math:`\\mathbf u = \\gamma\\mathbf v`. Working per unit mass keeps every
+    intermediate within single precision, which :math:`(m_e c)^2 \\approx 10^{-43}` is not."""
     gamma = 1 / jnp.sqrt(jnp.maximum(1 - jnp.sum(v * v, axis=1, keepdims=True) / c ** 2, 1e-15))
-    p = gamma * m * v + q * E * (dt / 2)
-    gamma = jnp.sqrt(1 + jnp.sum(p * p, axis=1, keepdims=True) / (m * c) ** 2)
-    t = q * B * (dt / 2) / (m * gamma)
-    p_prime = p + jnp.cross(p, t)
-    p = p + 2 * jnp.cross(p_prime, t) / (1 + jnp.sum(t * t, axis=1, keepdims=True))
-    p = p + q * E * (dt / 2)
-    gamma = jnp.sqrt(1 + jnp.sum(p * p, axis=1, keepdims=True) / (m * c) ** 2)
-    return p / (gamma * m)
+    u = gamma * v + qm * E * (dt / 2)
+    gamma = jnp.sqrt(1 + jnp.sum(u * u, axis=1, keepdims=True) / c ** 2)
+    t = qm * B * (dt / 2) / gamma
+    u_prime = u + jnp.cross(u, t)
+    u = u + 2 * jnp.cross(u_prime, t) / (1 + jnp.sum(t * t, axis=1, keepdims=True))
+    u = u + qm * E * (dt / 2)
+    return u / jnp.sqrt(1 + jnp.sum(u * u, axis=1, keepdims=True) / c ** 2)
 
 
 def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):

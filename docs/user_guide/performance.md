@@ -69,8 +69,8 @@ enough to fill the device — panel (a) shows the cost per particle still fallin
 {{ scaling_particles_max }} particles on a CPU, and an accelerator moves that knee
 much further out. Double precision is enabled at import
 (`jax_enable_x64`), which matters for the conservation properties and costs a factor
-of two on hardware optimised for single precision; a run that does not need it can
-override the flag before importing.
+of two on hardware optimised for single precision; a run that does not need it starts
+Python with `JAX_ENABLE_X64=0` ({doc}`units`).
 
 ## Practical advice
 

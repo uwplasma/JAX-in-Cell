@@ -97,10 +97,10 @@ def test_relativistic_pusher_conserves_energy_in_a_magnetic_field():
     q, m = -elementary_charge, mass_electron
     v = jnp.array([[0.6 * c, 0.3 * c, 0.0]])
     gamma = lambda u: 1 / jnp.sqrt(1 - jnp.sum(u ** 2, 1) / c ** 2)
-    v_new = boris_relativistic(v, jnp.zeros((1, 3)), jnp.array([[0.0, 0.0, 1.0]]), q, m, 1e-12)
+    v_new = boris_relativistic(v, jnp.zeros((1, 3)), jnp.array([[0.0, 0.0, 1.0]]), q / m, 1e-12)
     assert abs(float(gamma(v_new)[0] / gamma(v)[0]) - 1) < 1e-13
     E = jnp.array([[1e8, 0.0, 0.0]])
-    v_new = boris_relativistic(v, E, jnp.zeros((1, 3)), q, m, 1e-12)
+    v_new = boris_relativistic(v, E, jnp.zeros((1, 3)), q / m, 1e-12)
     p_expected = gamma(v)[0] * m * v[0] + q * E[0] * 1e-12
     assert np.allclose(np.asarray(gamma(v_new)[0] * m * v_new[0]), np.asarray(p_expected), rtol=1e-12)
 

@@ -1,5 +1,5 @@
-"""Differentiability: reverse-mode gradients against central finite differences,
-and gradient ascent finding the fastest-growing two-stream drift."""
+"""Differentiability: reverse-mode gradients against forward mode and central finite
+differences, and gradient ascent finding the fastest-growing two-stream drift."""
 import time
 
 import jax
@@ -32,19 +32,30 @@ def amplification(drift):
     constant while the mode grows exponentially. Fixing the time rather than
     fitting a window keeps the objective a smooth function of the drift."""
     out = build(drift).run(STEP, seed=3, store_particles=False)
-    return jnp.log(jnp.abs(jnp.fft.rfft(out.E[:, :, 0], axis=1)[-1, 1]))
+    E, phase = out.E[-1, :, 0], 2 * jnp.pi * jnp.arange(CELLS) / CELLS
+    return 0.5 * jnp.log(jnp.sum(E * jnp.cos(phase)) ** 2 + jnp.sum(E * jnp.sin(phase)) ** 2)
+
+
+def timed(function, argument):
+    """Result of a jitted call, its first (compiling) and its warm wall time."""
+    start = time.perf_counter()
+    result = function(argument)
+    jax.tree_util.tree_map(lambda a: a.block_until_ready(), result)
+    first = time.perf_counter() - start
+    start = time.perf_counter()
+    jax.tree_util.tree_map(lambda a: a.block_until_ready(), function(argument * 1.01))
+    return result, first, time.perf_counter() - start
 
 
 value_and_grad = jax.jit(jax.value_and_grad(amplification))
+value_and_jvp = jax.jit(lambda drift: jax.jvp(amplification, (drift,), (1.0,)))
 evaluate = jax.jit(amplification)
-start = time.perf_counter()
-value, gradient = value_and_grad(REFERENCE)
-gradient.block_until_ready()
-first_call = time.perf_counter() - start
-start = time.perf_counter()
-value_and_grad(REFERENCE * 1.01)[1].block_until_ready()
-warm_call = time.perf_counter() - start
-gradient = float(gradient)
+(value, gradient), first_call, warm_call = timed(value_and_grad, REFERENCE)
+(_, forward), _, forward_warm = timed(value_and_jvp, REFERENCE)
+_, _, run_warm = timed(evaluate, REFERENCE)
+gradient, forward = float(gradient), float(forward)
+print(f"  reverse {gradient:.10e}, forward {forward:.10e}; warm: reverse {warm_call:.3f} s, "
+      f"forward {forward_warm:.3f} s, the run alone {run_warm:.3f} s")
 
 steps = np.array([1e2, 1e3, 1e4, 1e5, 1e6])
 differences = np.array([float((evaluate(REFERENCE + h) - evaluate(REFERENCE - h)) / (2 * h)) for h in steps])
@@ -96,6 +107,8 @@ record(autodiff_gradient=f"{gradient:.4e}",
        autodiff_best_relative_error=f"{float(relative.min()):.1e}",
        autodiff_best_step=f"{float(steps[np.argmin(relative)]):.0e}",
        autodiff_grad_time_first_s=round(first_call, 2), autodiff_grad_time_warm_s=round(warm_call, 3),
+       autodiff_forward_time_warm_s=round(forward_warm, 3), autodiff_run_time_warm_s=round(run_warm, 3),
+       autodiff_forward_reverse_agreement=f"{abs(forward / gradient - 1):.0e}",
        autodiff_ascent_iterations=len(history),
        autodiff_ascent_k_v0_over_wpe=round(float(found), 3),
        autodiff_kinetic_optimum_k_v0_over_wpe=round(float(optimum), 3),

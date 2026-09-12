@@ -36,23 +36,28 @@ started from a charge distribution rather than from a field.
 
 ### Solving it
 
-**Periodic walls.** {eq}`discrete-gauss` is diagonal in Fourier space. The forward
-difference has the exact symbol
+**Reflective or absorbing walls.** The field is integrated from the left wall, where
+$E_{x,-1/2}=0$, by a cumulative sum: $E_{x,i+1/2} = (\Delta x/\epsilon_0)\sum_{j\le i}\rho_j$.
+Two absorbing walls are short-circuited conductors, so the mean of $E_x$ is then
+subtracted ({doc}`boundaries`).
+
+**Periodic walls.** Summing {eq}`discrete-gauss` over the cells leaves
+$\sum_i\rho_i = 0$, so a periodic box has a solution only when it is neutral, and the
+mean charge is removed first. The same cumulative sum then gives the field, less its
+mean, since a periodic box cannot hold a uniform field. That is the only solution of
+the discrete equation, so it is exactly what a Fourier-space solve returns when it
+divides by the symbol of the forward difference,
 
 ```{math}
 \widehat{D}(k) = \frac{1 - e^{-ik\Delta x}}{\Delta x},
 ```
 
-so $\hat E_x(k) = \hat\rho(k)/(\epsilon_0\widehat D(k))$, with the $k=0$ mode set to
-zero because a periodic box cannot support a uniform field. It matters that the
-**finite-difference** symbol is used and not the continuum $ik$: the two differ by
-$\mathcal{O}((k\Delta x)^2)$, and using $ik$ leaves a residual in
-{eq}`discrete-gauss` as large as {{ two_stream_dx_over_debye }} times the field
-itself at the resolutions typical of these runs, so Gauss's law is not actually
-satisfied by the field the solver returns.
-
-**Reflective or absorbing walls.** The field is integrated from the left wall, where
-$E_{x,-1/2}=0$, by a cumulative sum: $E_{x,i+1/2} = (\Delta x/\epsilon_0)\sum_{j\le i}\rho_j$.
+and sets the $k=0$ mode to zero; the sum needs no complex arithmetic, which not every
+backend provides. What matters in either form is that the difference operator is
+inverted exactly. A spectral solve with the continuum $ik$ in place of $\widehat D(k)$
+differs by $\mathcal{O}((k\Delta x)^2)$ and leaves a residual in {eq}`discrete-gauss`
+as large as {{ two_stream_dx_over_debye }} times the field itself at the resolutions
+typical of these runs, so Gauss's law would not be satisfied by the field it returns.
 
 ## Boundary values of the curls
 

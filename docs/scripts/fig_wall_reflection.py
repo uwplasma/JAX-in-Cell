@@ -12,13 +12,13 @@ domain = Domain(length=LENGTH, cells=64, dt_over_dx_c=50.0, particle_bc="absorbi
                 restitution=RESTITUTION)
 steps = int(round(0.1 * LENGTH / SIGMA / domain.dt))             # a tenth of a transit: nothing arrives twice
 x, v = quiet_start(N, LENGTH, vth=(np.sqrt(2) * SIGMA, 0, 0))
-w0 = 1e6 * LENGTH / N
 returned, energy = [], []
 for u in WIDTHS * SIGMA:
     law = lambda speed, u=u: jnp.exp(-speed ** 2 / (2 * u ** 2))
     electrons = Species.electrons(n=N, density=1e6, vth=(np.sqrt(2) * SIGMA, 0, 0), reflection=law).replace(x=x, v=v)
     w = np.asarray(Simulation(domain, [electrons], Solver()).run(steps, store_every=steps).weight[-1])
-    hit = ~np.isclose(w, w0, rtol=1e-12, atol=0)
+    w0 = w.max()                                  # the weight of a particle that met no wall
+    hit = w < w0
     returned.append(w[hit].sum() / (w0 * hit.sum()))
     energy.append(RESTITUTION ** 2 * (w[hit] * v[hit, 0] ** 2).sum() / (w0 * v[hit, 0] ** 2).sum())
     if u == SIGMA:

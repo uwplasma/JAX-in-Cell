@@ -24,7 +24,13 @@ beams this warm is {{ autodiff_kinetic_optimum_k_v0_over_wpe }}.
 Starting well off resonance, {{ autodiff_ascent_iterations }} steps of plain gradient
 ascent reach {{ autodiff_ascent_k_v0_over_wpe }} —
 {{ autodiff_ascent_deviation_percent }} per cent away. The script also checks the
-gradient against a central difference: {{ autodiff_best_relative_error }}.
+derivative against a central difference.
+
+With one parameter the script differentiates in forward mode, `jax.jvp`, which stores
+nothing along the run and is the mode that works on Apple's Metal backend. The figure
+checks the reverse-mode gradient, `jax.grad`, against central differences, to
+{{ autodiff_best_relative_error }} at best, and against forward mode, to
+{{ autodiff_forward_reverse_agreement }} ({doc}`../user_guide/differentiation`).
 
 ## Why the objective is what it is
 

@@ -38,6 +38,25 @@ the Picard iteration is a `lax.scan` of fixed length rather than a `lax.while_lo
 which has no reverse-mode rule. That is the reason `picard_iterations` is a count and
 not a tolerance.
 
+## Forward or reverse
+
+`jax.grad` is reverse mode: one backward pass gives the derivative with respect to every
+parameter at once, at the price of keeping what that pass needs from every step of the
+run. `jax.jvp` and `jax.jacfwd` are forward mode: one pass per parameter, and nothing
+kept.
+
+```python
+value, derivative = jax.jvp(objective, (6e7,), (1.0,))
+```
+
+For the handful of parameters a physics optimisation usually has, forward mode is the
+better tool. On the run in the figure below, a forward pass takes
+{{ autodiff_forward_time_warm_s }} s and a reverse one {{ autodiff_grad_time_warm_s }} s,
+against {{ autodiff_run_time_warm_s }} s for the run alone, and the two derivatives agree
+to {{ autodiff_forward_reverse_agreement }}; but the memory of forward mode does not grow
+with the number of steps. It is also the mode that runs on Apple's Metal backend, whose
+current release crashes on the loops a reverse pass builds ({doc}`performance`).
+
 ## Accuracy
 
 ```{figure} ../_static/figures/autodiff.png
@@ -53,8 +72,7 @@ reaches by a fixed time.
 
 The gradient is exact to floating point, so the comparison is really a test of the
 finite difference. The first call costs {{ autodiff_grad_time_first_s }} s including
-compilation and {{ autodiff_grad_time_warm_s }} s afterwards — about twice a forward
-run, the usual reverse-mode ratio.
+compilation and {{ autodiff_grad_time_warm_s }} s afterwards.
 
 ## An inverse problem with a known answer
 

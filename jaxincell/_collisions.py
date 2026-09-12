@@ -84,11 +84,12 @@ def _scatter(key, v, driver, cell, rank, other, other_key, other_count, drives, 
     paired = drives[cell] & (other_count[cell] > 0) & (other_key[j] == slot)
     m_a, m_b = mass[driver], mass[partner]
     q_a, q_b = charge[driver], charge[partner]
-    m_r = m_a * m_b / (m_a + m_b)
+    # Grouped so that no intermediate leaves the range of single precision: the product of
+    # two particle masses, or of the permittivity and a mass, is far below 1e-38.
+    m_r = m_a / (1 + m_a / m_b)
     u = v[driver] - v[partner]
-    u_mag = jnp.maximum(jnp.linalg.norm(u, axis=1), 1e-30)
-    # grouped so that no intermediate underflows in single precision, where (q_a q_b)^2 alone would
-    variance = (q_a * q_b / (epsilon_0 * m_r)) ** 2 * density[cell] * coulomb_log * dt / (8 * jnp.pi * u_mag ** 3)
+    u_mag = jnp.maximum(jnp.linalg.norm(u, axis=1), 1e-10)
+    variance = (q_a / epsilon_0 * (q_b / m_r)) ** 2 * density[cell] * coulomb_log * dt / (8 * jnp.pi * u_mag ** 3)
     k_rotate, k_a, k_b = random.split(key, 3)
     du = _rotate(k_rotate, u, variance)
     w_a, w_b = weight[driver], weight[partner]
