@@ -51,7 +51,7 @@ def test_current_satisfies_the_discrete_continuity_equation(bc):
     q = jnp.array(rng.choice([-1e-3, 1e-3], n))
     v = jnp.array(rng.normal(0, 0.3, n)) * dx / 1e-9
     dt = 1e-9
-    x_new = wrap_positions(jnp.stack([x + v * dt, 0 * x, 0 * x], 1), (L, L, L), bc, dx)[:, 0]
+    x_new = wrap_positions(jnp.stack([x + v * dt, 0 * x, 0 * x], 1), jnp.ones_like(x), (L, L, L), bc, dx)[:, 0]
     rho_old, rho_new = deposit(x, q, x0, dx, G, bc), deposit(x_new, q, x0, dx, G, bc)
     J = current_from_continuity(rho_old, rho_new, dt, dx, jnp.sum(q * v) / L, bc)
     J_left = jnp.roll(J, 1) if bc == (0, 0) else jnp.concatenate([jnp.zeros(1), J[:-1]])
@@ -147,17 +147,32 @@ def test_vacuum_light_wave(courant):
 
 
 def test_particle_boundaries():
-    """Periodic walls wrap positions exactly; reflective walls mirror the position
-    and multiply the normal velocity by -restitution; absorbing walls remove the
-    charge and stop the particle."""
+    """Periodic walls wrap positions exactly. Reflective walls mirror the position
+    and multiply the normal velocity by -restitution, each wall by its own
+    coefficient. An absorbing wall keeps the reflected fraction of each particle's
+    weight, bouncing it the same way, and stops and parks a particle with nothing
+    reflected -- for good: a parked particle is never brought back."""
     x = jnp.array([[-0.6, 0.0, 0.0], [0.7, 0.0, 0.0], [0.1, 0.0, 0.0]])
     v = jnp.array([[-1.0, 2.0, 0.0], [3.0, 0.0, 1.0], [0.5, 0.0, 0.0]])
-    q, qm = jnp.array([1.0, 1.0, 1.0]), jnp.array([2.0, 2.0, 2.0])
-    xp, vp, qp, _ = apply_particle_bc(x, v, q, qm, (L, L, L), (0, 0), 1.0, dx)
+    w, qm, nothing = jnp.ones(3), jnp.full(3, 2.0), (jnp.zeros(3), jnp.zeros(3))
+    xp, vp, _, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (0, 0), (1.0, 1.0), nothing, dx)
     assert np.allclose(np.asarray(xp[:, 0]), [0.4, -0.3, 0.1]) and np.allclose(np.asarray(vp), np.asarray(v))
-    xr, vr, qr, _ = apply_particle_bc(x, v, q, qm, (L, L, L), (1, 1), 0.5, dx)
-    assert np.allclose(np.asarray(xr[:, 0]), [-0.4, 0.3, 0.1])
-    assert np.allclose(np.asarray(vr[:, 0]), [0.5, -1.5, 0.5]) and np.allclose(np.asarray(vr[:, 1:]), np.asarray(v[:, 1:]))
-    xa, va, qa, qma = apply_particle_bc(x, v, q, qm, (L, L, L), (2, 2), 1.0, dx)
-    assert np.allclose(np.asarray(qa), [0.0, 0.0, 1.0]) and np.allclose(np.asarray(va[:2]), 0.0)
-    assert float(xa[0, 0]) < -L / 2 and float(xa[1, 0]) > L / 2 and float(qma[2]) == 2.0
+    xr, vr, wr, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (1, 1), (0.5, 0.25), nothing, dx)
+    assert np.allclose(np.asarray(xr[:, 0]), [-0.4, 0.3, 0.1]) and np.allclose(np.asarray(wr), 1.0)
+    assert np.allclose(np.asarray(vr[:, 0]), [0.5, -0.75, 0.5])
+    assert np.allclose(np.asarray(vr[:, 1:]), np.asarray(v[:, 1:]))
+    xa, va, wa, qma = apply_particle_bc(x, v, w, qm, (L, L, L), (2, 2), (1.0, 1.0), nothing, dx)
+    assert np.allclose(np.asarray(wa), [0.0, 0.0, 1.0]) and np.allclose(np.asarray(va[:2]), 0.0)
+    assert float(xa[0, 0]) < -L / 2 and float(xa[1, 0]) > L / 2 and np.allclose(np.asarray(qma), [0.0, 0.0, 2.0])
+
+    # 30 % of the left particle and 60 % of the right one come back, bounced
+    reflect = (jnp.full(3, 0.3), jnp.full(3, 0.6))
+    xm, vm, wm, qmm = apply_particle_bc(x, v, w, qm, (L, L, L), (2, 2), (0.5, 1.0), reflect, dx)
+    assert np.allclose(np.asarray(wm), [0.3, 0.6, 1.0]) and np.allclose(np.asarray(xm[:, 0]), [-0.4, 0.3, 0.1])
+    assert np.allclose(np.asarray(vm[:, 0]), [0.5, -3.0, 0.5]) and np.allclose(np.asarray(qmm), 2.0)
+    xs, _, ws, _ = apply_particle_bc(xa, va, wa, qma, (L, L, L), (2, 2), (1.0, 1.0), reflect, dx)
+    assert np.allclose(np.asarray(xs), np.asarray(xa)) and np.allclose(np.asarray(ws), np.asarray(wa))
+
+    # reconstructed positions: what still has weight was reflected and is mirrored
+    xw = wrap_positions(x, jnp.array([1.0, 0.0, 1.0]), (L, L, L), (2, 2), dx)
+    assert float(xw[0, 0]) == pytest.approx(-0.4) and float(xw[1, 0]) > L / 2

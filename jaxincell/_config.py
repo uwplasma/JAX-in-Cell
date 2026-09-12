@@ -2,11 +2,12 @@
 collision model.
 
 Each is a frozen dataclass registered as a JAX pytree. Physical quantities
-(lengths, temperatures, drifts, densities, the filter weight, the coefficient of
-restitution) are pytree leaves and are therefore traced: they can be changed
-without recompiling and differentiated with respect to. Structural settings
-(particle counts, cell counts, boundary types, algorithm switches) are static
-and become part of the compiled program.
+(lengths, temperatures, drifts, densities, the filter weight, the coefficients of
+restitution and reflection) are pytree leaves and are therefore traced: they can
+be changed without recompiling and differentiated with respect to. Structural
+settings (particle counts, cell counts, boundary types, algorithm switches) and
+functions, such as a velocity-dependent reflection law, are static and become
+part of the compiled program.
 """
 from __future__ import annotations
 
@@ -20,12 +21,14 @@ from ._constants import elementary_charge, mass_electron, mass_proton, speed_of_
 
 __all__ = ["Domain", "Species", "Solver", "Collisions", "BOUNDARIES"]
 
-BOUNDARIES = {"periodic": 0, "reflective": 1, "absorbing": 2}
+BOUNDARIES = {"periodic": 0, "reflective": 1, "absorbing": 2, "thermal": 3}
 
 
 def pytree_dataclass(static=()):
     """Turn a class into a frozen dataclass that JAX treats as a pytree, with
-    the named fields kept static (they must be hashable)."""
+    the named fields kept static (they must be hashable). A field holding a
+    function, alone or in a tuple, is kept static too: a function is not an
+    array, so it becomes part of the compiled program instead."""
     static = tuple(static)
 
     def wrap(cls):
@@ -33,10 +36,15 @@ def pytree_dataclass(static=()):
         leaves = tuple(f.name for f in fields(cls) if f.name not in static)
 
         def flatten(obj):
-            return ([getattr(obj, n) for n in leaves], tuple(getattr(obj, n) for n in static))
+            values = [getattr(obj, n) for n in leaves]
+            functions = tuple(v if _has_function(v) else None for v in values)
+            return ([v if f is None else None for f, v in zip(functions, values)],
+                    (functions, tuple(getattr(obj, n) for n in static)))
 
         def unflatten(aux, values):
-            return cls(**dict(zip(leaves, values)), **dict(zip(static, aux)))
+            functions, fixed = aux
+            values = [v if f is None else f for f, v in zip(functions, values)]
+            return cls(**dict(zip(leaves, values)), **dict(zip(static, fixed)))
 
         jax.tree_util.register_pytree_node(cls, flatten, unflatten)
         cls.replace = dataclasses.replace
@@ -59,6 +67,19 @@ def _floats(values):
     return tuple(_float(v) for v in values)
 
 
+def _has_function(value):
+    return callable(value) or (isinstance(value, tuple) and any(callable(v) for v in value))
+
+
+def _walls(value, name):
+    """One value for both walls, or a ``(left, right)`` pair, as a pair of
+    floats (functions pass through); plain numbers must lie in [0, 1]."""
+    pair = _floats(value if isinstance(value, (tuple, list)) else (value, value))
+    assert len(pair) == 2 and all(not isinstance(v, float) or 0 <= v <= 1 for v in pair), \
+        f"{name} takes a number in [0, 1] or a (left, right) pair of them"
+    return pair
+
+
 def _boundary_codes(value):
     """Wall names to codes; already-converted codes pass through, so the
     conversion is safe to repeat when JAX rebuilds the object."""
@@ -75,11 +96,16 @@ class Domain:
         length: Box length :math:`L` in metres; the box spans :math:`[-L/2, L/2]`.
         cells: Number of cells :math:`N_x`.
         dt_over_dx_c: Time step as :math:`c\\,\\Delta t/\\Delta x`.
-        particle_bc: ``"periodic"``, ``"reflective"`` or ``"absorbing"``, or a
-            ``(left, right)`` pair.
-        field_bc: Same choices for the fields.
-        restitution: Coefficient of restitution of reflective walls; the normal
-            velocity is multiplied by ``-restitution`` on reflection.
+        particle_bc: ``"periodic"``, ``"reflective"``, ``"absorbing"`` or
+            ``"thermal"``, or a ``(left, right)`` pair. A thermal wall re-emits
+            every particle that reaches it from the half-Maxwellian flux of its
+            species, at the species' thermal speed.
+        field_bc: The same choices except ``"thermal"``, for the fields.
+        restitution: Coefficient of restitution of the walls, or a
+            ``(left, right)`` pair: whatever a wall sends back has its normal
+            velocity multiplied by ``-restitution``. It applies to everything a
+            reflective wall returns and to the part an absorbing wall reflects
+            (see ``Species.reflection``).
         length_y, length_z: Periods of the ignorable coordinates.
     """
     length: float = 1e-2
@@ -87,18 +113,20 @@ class Domain:
     dt_over_dx_c: float = 1.0
     particle_bc: object = "periodic"
     field_bc: object = "periodic"
-    restitution: float = 1.0
+    restitution: object = 1.0
     length_y: float = 1e-2
     length_z: float = 1e-2
 
     def __post_init__(self):
-        for name in ("length", "dt_over_dx_c", "restitution", "length_y", "length_z"):
+        for name in ("length", "dt_over_dx_c", "length_y", "length_z"):
             object.__setattr__(self, name, _float(getattr(self, name)))
+        object.__setattr__(self, "restitution", _walls(self.restitution, "restitution"))
         object.__setattr__(self, "particle_bc", _boundary_codes(self.particle_bc))
         object.__setattr__(self, "field_bc", _boundary_codes(self.field_bc))
         assert self.cells >= 4, "need at least four cells"
         for bc in (self.particle_bc, self.field_bc):
             assert (0 in bc) == (bc == (0, 0)), "a periodic wall needs a periodic partner"
+        assert 3 not in self.field_bc, "a thermal wall re-emits particles; give the fields a reflective one"
 
     @property
     def dx(self):
@@ -142,6 +170,12 @@ class Species:
         random_positions: Uniformly random positions instead of equally spaced.
         x, v: Optional arrays of shape ``(n, 3)`` that replace the generated
             phase space.
+        reflection: Fraction of each particle that an absorbing wall sends back
+            instead of collecting: a number, a function of the normal impact
+            speed :math:`|v_x|` in m/s that returns the fraction, or a
+            ``(left, right)`` pair of either. The wall keeps the rest of the
+            particle's weight. A number is traced like any physical parameter; a
+            function is compiled into the program.
     """
     name: str
     n: int
@@ -157,11 +191,13 @@ class Species:
     random_positions: bool = False
     x: object = None
     v: object = None
+    reflection: object = 0.0
 
     def __post_init__(self):
         assert self.n > 0, "a species needs at least one particle"
         for name in ("charge", "mass", "density", "perturbation_amplitude", "perturbation_mode"):
             object.__setattr__(self, name, _float(getattr(self, name)))
+        object.__setattr__(self, "reflection", _walls(self.reflection, "reflection"))
         for name in ("vth", "drift"):
             value = getattr(self, name)
             if not isinstance(value, (tuple, list)):

@@ -133,17 +133,17 @@ def test_periodic_box_conserves_charge_exactly_and_momentum_to_the_solver_error(
     interparticle force antisymmetric, so the momentum drift is not the
     interpolation but the residual of the staggered field solve."""
     out = two_stream("explicit", 300, n=4000)
-    charge = np.asarray(out.charge)
+    charge = np.asarray(out.charge * out.weight[-1])
     on_grid = np.asarray(out.rho).sum(axis=1) * out.dx
     assert float(np.abs(on_grid - charge.sum()).max()) < 1e-12 * float(np.abs(charge).sum())
     p = np.asarray(diagnostics(out)["momentum"])[:, 0]
-    momentum_content = float(np.sum(np.asarray(out.mass) * np.abs(np.asarray(out.v[0, :, 0]))))
+    momentum_content = float(np.sum(np.asarray(out.mass * out.weight[0]) * np.abs(np.asarray(out.v[0, :, 0]))))
     assert float(np.max(np.abs(p - p[0]))) < 1e-4 * momentum_content
 
 
 def test_reflective_walls_hold_the_particles_and_absorbing_walls_remove_them():
     """Reflective walls keep every particle inside [-L/2, L/2] and, at unit
-    restitution, conserve the total energy. Absorbing walls zero the charge of
+    restitution, conserve the total energy. Absorbing walls zero the weight of
     the particles that reach them, and the charge left on the grid then follows
     the charge left on the particles to within the part of the shape function
     that sticks out past the wall."""
@@ -155,15 +155,63 @@ def test_reflective_walls_hold_the_particles_and_absorbing_walls_remove_them():
 
     out = walls("reflective")
     assert float(np.abs(np.asarray(out.x[:, :, 0])).max()) <= 5e-3 * (1 + 1e-12)
-    assert int((np.asarray(out.charge) == 0).sum()) == 0
+    assert int((np.asarray(out.weight[-1]) == 0).sum()) == 0
     total = np.asarray(diagnostics(out)["total"])
     assert float(np.max(np.abs(total / total[0] - 1))) < 1e-4
 
     out = walls("absorbing")
-    charge = np.asarray(out.charge)
-    assert 0 < int((charge == 0).sum()) < charge.size
+    weight = np.asarray(out.weight[-1])
+    charge = np.asarray(out.charge) * weight
+    assert 0 < int((weight == 0).sum()) < weight.size
     on_grid = float(np.asarray(out.rho)[-1].sum()) * out.dx
     assert abs(on_grid - charge.sum()) < 1e-3 * np.abs(charge).sum()
+
+
+def test_a_wall_returns_the_flux_average_of_its_reflection_law():
+    """A wall samples the flux, not the distribution: from a Maxwellian of spread
+    sigma the particles reaching it with normal speed v are in proportion to
+    v f(v), so a reflection law R(v) returns its flux average. For the Gaussian
+    R = exp(-v^2/2u^2) that is u^2/(u^2+sigma^2), one half at u = sigma, where the
+    average over the distribution would be 0.71. The ratio of fluxes is the
+    coefficient that sets the floating potential (Hobbs and Wesson, Plasma Phys.
+    9, 85, 1967). What comes back, comes back at restitution times its speed."""
+    from jaxincell import quiet_start
+
+    sigma, length, n = 1e6, 1e-2, 100_000
+    domain = Domain(length=length, cells=64, dt_over_dx_c=50.0, particle_bc="absorbing",
+                    field_bc="absorbing", restitution=0.5)
+    steps = int(round(0.1 * length / sigma / domain.dt))          # a tenth of a transit: nothing hits twice
+    _, v0 = quiet_start(n, length, vth=(np.sqrt(2) * sigma, 0, 0))
+    law = lambda speed: jnp.exp(-speed ** 2 / (2 * sigma ** 2))
+    electrons = Species.electrons(n=n, density=1e6, vth=(np.sqrt(2) * sigma, 0, 0), quiet=True, reflection=law)
+    out = Simulation(domain, [electrons], Solver()).run(steps, seed=0, store_every=steps)
+    w0, w = electrons.density * length / n, np.asarray(out.weight[-1])
+    hit = ~np.isclose(w, w0, rtol=1e-12, atol=0)
+    assert 0.05 < hit.mean() < 0.11                  # 2 sigma t / (sqrt(2 pi) L) of them reach a wall
+    assert abs(w[hit].sum() / (w0 * hit.sum()) - 0.5) < 5e-3
+    back = hit & (w > 0)
+    # to within the ~0.03 m/s the plasma's own field adds over the run
+    assert np.allclose(np.abs(np.asarray(out.v[-1, back, 0])), 0.5 * np.abs(v0[back, 0]), rtol=0, atol=1.0)
+
+
+def test_a_thermal_wall_re_emits_the_half_maxwellian_flux():
+    """What reaches a thermal wall comes back as if from a Maxwellian reservoir
+    behind it at the species' temperature: the normal velocity from the flux
+    distribution (v/sigma^2) exp(-v^2/2 sigma^2), with <v> = sigma sqrt(pi/2) and
+    <v^2> = 2 sigma^2, and the tangential ones from the Maxwellian itself. That is
+    the source boundary of a bounded-plasma simulation (Schwager and Birdsall,
+    Phys. Fluids B 2, 1057, 1990), and what keeps the tail of the plasma filled."""
+    n, length, sigma = 40_000, 1e-2, 0.02 * c
+    x, v = np.zeros((n, 3)), np.zeros((n, 3))
+    x[:, 0], v[:, 0] = np.linspace(-0.45, 0.45, n) * length, -0.5 * c     # everything heads for the left wall
+    vth = np.sqrt(2) * sigma
+    electrons = Species.electrons(n=n, density=1e6, vth=(vth, vth, vth)).replace(x=x, v=v)
+    domain = Domain(length=length, cells=64, particle_bc=("thermal", "reflective"), field_bc="reflective")
+    u = np.asarray(Simulation(domain, [electrons], Solver()).run(300, seed=0, store_every=300).v[-1])
+    assert (u[:, 0] > 0).all()
+    assert abs(u[:, 0].mean() / (sigma * np.sqrt(np.pi / 2)) - 1) < 0.02
+    assert abs((u[:, 0] ** 2).mean() / (2 * sigma ** 2) - 1) < 0.03
+    assert abs((u[:, 1:] ** 2).mean() / sigma ** 2 - 1) < 0.03
 
 
 def test_collisions_reproduce_the_spitzer_relaxation_rates():
@@ -237,7 +285,7 @@ def test_collisions_through_the_simulation_conserve_momentum_and_isotropise():
                             Solver(filter_passes=0), Collisions(coulomb_log=1e4))
     out = simulation.run(300, seed=0)
     momentum = np.asarray(diagnostics(out)["momentum"])[:, 0]
-    content = float(np.sum(np.asarray(out.mass) * np.abs(np.asarray(out.v[0, :, 0]))))
+    content = float(np.sum(np.asarray(out.mass * out.weight[0]) * np.abs(np.asarray(out.v[0, :, 0]))))
     assert float(np.abs(momentum - momentum[0]).max()) < 1e-4 * content
     T = np.asarray(temperatures(out)["electrons"])
     start, end = T[0], T[-1]
@@ -245,11 +293,14 @@ def test_collisions_through_the_simulation_conserve_momentum_and_isotropise():
     assert abs(end[2] / end[0] - 1) < abs(start[2] / start[0] - 1)
 
 
-@pytest.mark.parametrize("wall", ["periodic", "reflective", "absorbing"])
+@pytest.mark.parametrize("particle_bc, field_bc, reflection", [
+    ("periodic", "periodic", 0.0), ("reflective", "reflective", 0.0), ("absorbing", "absorbing", 0.0),
+    ("absorbing", "absorbing", 0.5), (("thermal", "absorbing"), ("reflective", "absorbing"), 0.0)])
 @pytest.mark.parametrize("filter_passes", [0, 2])
-def test_gauss_law_holds_at_every_wall_with_and_without_filtering(wall, filter_passes):
-    """The discrete Gauss law is exact for every wall type, because the current
-    is derived from the same charge density the field is checked against.
+def test_gauss_law_holds_at_every_wall_with_and_without_filtering(particle_bc, field_bc, reflection, filter_passes):
+    """The discrete Gauss law is exact for every wall type -- including a wall that
+    returns part of each electron and a thermal wall that re-emits them -- because
+    the current is derived from the same charge density the field is checked against.
 
     Three things have to line up for that, and each was wrong once. The density
     at the half step has to be the one the first half of the step ended on, or
@@ -257,13 +308,21 @@ def test_gauss_law_holds_at_every_wall_with_and_without_filtering(wall, filter_p
     carry it. The initial field has to be built from the density the loop starts
     from, which at a wall is not where the particles were placed. And the filter
     has to be applied to the density before the current is taken from it.
+
+    Two absorbing walls are conductors short-circuited to each other, so the far one
+    also stays at the potential of the near one.
     """
-    e = Species.electrons(n=2000, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), quiet=True)
+    e = Species.electrons(n=2000, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), quiet=True,
+                          reflection=reflection)
     i = Species.ions(n=2000, density=1e17, electrons=e, quiet=True)
-    domain = Domain(length=1e-2, cells=32, dt_over_dx_c=1.0, particle_bc=wall, field_bc=wall)
+    domain = Domain(length=1e-2, cells=32, dt_over_dx_c=1.0, particle_bc=particle_bc, field_bc=field_bc)
     out = Simulation(domain, [e, i], Solver(filter_passes=filter_passes,
                                             filter_strides=(1, 2))).run(120, seed=0)
-    assert float(np.asarray(diagnostics(out)["gauss_residual"]).max()) < 1e-10
+    d = diagnostics(out)
+    assert float(np.asarray(d["gauss_residual"]).max()) < 1e-10
+    if field_bc == "absorbing":
+        phi = np.abs(np.asarray(d["potential"]))
+        assert float(phi[:, -1].max()) < 1e-9 * float(phi.max())
 
 
 @pytest.mark.parametrize("wall, conserving", [("periodic", True), ("reflective", True),
@@ -320,7 +379,7 @@ def test_relativistic_run_conserves_the_energy_the_pusher_conserves():
     assert float(np.abs(np.asarray(out.v)).max()) > 0.5 * c      # relativity matters here
     assert float(np.max(np.abs(total / total[0] - 1))) < 1e-3
     gamma = 1 / np.sqrt(1 - np.sum(np.asarray(out.v[0]) ** 2, axis=-1) / c ** 2)
-    expected = float(np.sum((gamma - 1) * np.asarray(out.mass) * c ** 2))
+    expected = float(np.sum((gamma - 1) * np.asarray(out.mass * out.weight[0]) * c ** 2))
     assert abs(float(diagnostics(out)["kinetic"][0]) / expected - 1) < 1e-12
     assert float(diagnostics(run(False)[0])["kinetic"][0]) < expected   # Newtonian is lower
 
@@ -353,67 +412,49 @@ def test_an_external_magnetic_field_magnetises_the_plasma():
     assert float(np.abs(np.asarray(plain.v[:, :n, 2])).max()) == 0.0
 
 
-def test_absorbing_walls_build_a_sheath_and_float_the_plasma():
-    """A plasma between two absorbing walls charges them negative until the
-    electron flux is throttled to the ion flux. What is left is a quasi-neutral
-    bulk joined to each wall by a positively charged layer a few Debye lengths
-    thick, with the bulk floating above the walls by about
-    (T_e/2e) ln(m_i/2 pi m_e) and the ions entering the sheath at the Bohm speed
-    c_s = sqrt(T_e/m_i) (Bohm 1949; Lieberman and Lichtenberg, section 6.2).
+def test_a_floating_wall_holds_the_sheath_drop_of_hobbs_and_wesson():
+    """The edge of a plasma, between a thermal wall that re-emits a Maxwellian as the
+    plasma behind it would (Schwager and Birdsall, Phys. Fluids B 2, 1057, 1990) and
+    a floating conductor. The conductor charges until it holds back all but as many
+    electrons as ions arrive. From where the ions reach the Bohm speed
+    c_s = sqrt(T_e/m_i) the potential then falls to the wall by
+    (T_e/e)[(1/2) ln(m_i/2 pi m_e) + ln(1 - R)] when the wall returns the fraction R
+    of the electrons (Hobbs and Wesson, Plasma Phys. 9, 85, 1967). Checked for a wall
+    that keeps everything and one that returns half, together with the structure: a
+    positive layer against the conductor and a neutral plasma away from it.
 
-    Absorbing walls are conductors short-circuited to one another, so both stay
-    at the same potential -- the standard bounded-plasma closure (Verboncoeur,
-    J. Comput. Phys. 104, 321, 1993).
-
-    The band on the drop is deliberately wide. The formula assumes a Maxwellian
-    tail and m_i >> m_e, and this run has neither: nothing sustains the plasma, so
-    the walls take the tail the flux balance is derived from, and the mass ratio is
-    reduced to 100 to bring the ion transit within a test. Each shifts the answer by
-    tens of per cent, in opposite directions -- at 100 it comes out high, at the 400
-    of examples/sheath.py it comes out low. What is checked sharply is the structure
-    that has no free parameters: the two walls sitting at one potential, a charged
-    layer at each of them with a neutral bulk between, and ions leaving at the Bohm
-    speed.
+    The thermal wall keeps the electrons reaching the conductor Maxwellian, which is
+    what the formula needs; between two absorbing walls the tail is stripped within a
+    few transits. The mass ratio is 100 to fit the ion transit into a test.
     """
     from jaxincell import potential, quiet_start
 
-    T_e, density, mass_ratio, n, cells = 1.0, 1e16, 100.0, 20000, 120
-    v_th = np.sqrt(2 * T_e * elementary_charge / mass_electron)
+    T_e, density, mass_ratio, n, cells, steps = 1.0, 1e16, 100.0, 20000, 60, 1500
+    sigma = np.sqrt(T_e * elementary_charge / mass_electron)
     omega_pe = np.sqrt(density * elementary_charge ** 2 / (epsilon_0 * mass_electron))
-    debye = v_th / (np.sqrt(2) * omega_pe)
-    length = 60 * debye
-    v_th_ion = v_th * np.sqrt(1 / (40 * mass_ratio))
-    x, v = quiet_start(n, length, vth=(v_th, 0, 0))
-    electrons = Species.electrons(n=n, density=density, vth=(v_th, 0, 0)).replace(x=x, v=v)
-    x, v = quiet_start(n, length, vth=(v_th_ion, 0, 0))
-    ions = Species("ions", n, 1.0, mass_ratio * mass_electron, density,
-                   (v_th_ion, 0, 0)).replace(x=x, v=v)
-    domain = Domain(length=length, cells=cells, particle_bc="absorbing", field_bc="absorbing",
-                    dt_over_dx_c=(0.2 / omega_pe) * c / (length / cells))
-    out = Simulation(domain, [electrons, ions], Solver(filter_passes=4)).run(1500, seed=0,
-                                                                            store_every=50)
-    phi = np.asarray(potential(out))
-    v_x = np.asarray(out.v[..., 0])
-    bulk = np.abs(np.asarray(out.x[:, :n, 0])) < length / 5
-    T_bulk = np.array([mass_electron * np.var(v_x[k, :n][bulk[k]]) / elementary_charge
-                       for k in range(phi.shape[0])])
-
-    # the two electrodes are short-circuited, so the far wall stays at zero
-    assert float(np.abs(phi[:, -1]).max()) < 1e-9 * T_bulk.max()
-
-    late = slice(phi.shape[0] // 2, None)
-    drop = (phi[late, 2 * cells // 5:3 * cells // 5].mean(axis=1) / T_bulk[late]).mean()
+    debye, c_s = sigma / omega_pe, sigma / np.sqrt(mass_ratio)
+    length = 30 * debye
+    domain = Domain(length=length, cells=cells, dt_over_dx_c=(0.2 / omega_pe) * c / (length / cells),
+                    particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing"))
+    x, v = quiet_start(n, length, vth=(np.sqrt(2) * sigma, 0, 0))
+    v_th_i = np.sqrt(2) * sigma / np.sqrt(40 * mass_ratio)
+    x_i, v_i = quiet_start(n, length, vth=(v_th_i, 0, 0))
+    ions = Species("ions", n, 1.0, mass_ratio * mass_electron, density, (v_th_i, 0, 0)).replace(x=x_i, v=v_i)
+    bins = np.linspace(-length / 2, length / 2, cells // 4 + 1)
+    faces = np.asarray(domain.grid) + domain.dx / 2
     theory = 0.5 * np.log(mass_ratio / (2 * np.pi))
-    assert 0.6 * theory < drop < 1.5 * theory
-
-    # the sheath is where quasi-neutrality fails: net positive charge at the walls,
-    # none in the middle
-    rho = np.asarray(out.rho)[late].mean(axis=0) / (density * elementary_charge)
-    assert rho[:3].mean() > 0.02 and rho[-3:].mean() > 0.02
-    assert abs(rho[2 * cells // 5:3 * cells // 5].mean()) < 0.005
-
-    # and the pre-sheath has accelerated the ions towards the Bohm speed
-    c_s = np.sqrt(T_bulk[-1] * elementary_charge / (mass_ratio * mass_electron))
-    x_i = np.asarray(out.x[-1, n:, 0])
-    edge = (x_i > 0.30 * length) & (x_i < 0.40 * length)
-    assert v_x[-1, n:][edge].mean() > 0.5 * c_s
+    for reflection, expected in ((0.0, theory), (0.5, theory - np.log(2))):
+        electrons = Species.electrons(n=n, density=density, vth=(np.sqrt(2) * sigma, 0, 0),
+                                      reflection=(0.0, reflection)).replace(x=x, v=v)
+        out = Simulation(domain, [electrons, ions], Solver(filter_passes=4)).run(steps, seed=0, store_every=50)
+        late = slice(15, None)
+        phi = np.asarray(potential(out))[late] / T_e
+        position, speed, weight = (np.asarray(a)[late, n:] for a in (out.x[..., 0], out.v[..., 0], out.weight))
+        flow = (np.histogram(position, bins, weights=weight * speed)[0]
+                / np.maximum(np.histogram(position, bins, weights=weight)[0], 1e-300))
+        assert (flow >= c_s).any()
+        edge = 0.5 * (bins[:-1] + bins[1:])[np.argmax(flow >= c_s)]
+        drop = np.interp(edge, faces, phi.mean(axis=0) - phi[:, -1].mean())
+        assert abs(drop / expected - 1) < 0.2, (reflection, drop, expected)
+        rho = np.asarray(out.rho)[late].mean(axis=0) / (density * elementary_charge)
+        assert rho[-3:].mean() > 0.02 and abs(rho[: cells // 2].mean()) < 0.01

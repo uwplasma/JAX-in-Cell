@@ -15,17 +15,18 @@ def energies(out):
     result = {"electric": field_E, "magnetic": field_B}
     if out.v is not None:
         v2 = jnp.sum(out.v ** 2, axis=-1)
+        mass = out.mass[None, :] * out.weight          # of each pseudo-particle, at each stored step
         if out.relativistic:                       # the quantity the relativistic pusher conserves
             gamma = 1 / jnp.sqrt(1 - v2 / c ** 2)
-            kinetic_p = (gamma - 1) * out.mass[None, :] * c ** 2
+            kinetic_p = (gamma - 1) * mass * c ** 2
         else:                                      # and the one the Boris pusher conserves
             gamma = jnp.ones_like(v2)
-            kinetic_p = 0.5 * out.mass[None, :] * v2
+            kinetic_p = 0.5 * mass * v2
         result["kinetic"] = jnp.sum(kinetic_p, axis=1)
         for i, name in enumerate(out.names):
             result[f"kinetic_{name}"] = jnp.sum(jnp.where(out.species[None, :] == i, kinetic_p, 0.0), axis=1)
         result["total"] = field_E + field_B + result["kinetic"]
-        result["momentum"] = jnp.sum(gamma[..., None] * out.mass[None, :, None] * out.v, axis=1)
+        result["momentum"] = jnp.sum((gamma * mass)[..., None] * out.v, axis=1)
     return result
 
 
@@ -47,7 +48,7 @@ def gauss_residual(out):
     else:
         div = (E[:, 1:] - E[:, :-1]) / out.dx
         rhs = out.rho[:, 1:] / epsilon_0
-    return jnp.max(jnp.abs(div - rhs), axis=1) / jnp.maximum(jnp.max(jnp.abs(rhs), axis=1), 1e-300)
+    return jnp.max(jnp.abs(div - rhs), axis=1) / jnp.maximum(jnp.max(jnp.abs(rhs), axis=1), jnp.finfo(rhs.dtype).tiny)
 
 
 def potential(out):
@@ -65,14 +66,17 @@ def potential(out):
 
 def temperatures(out):
     """Temperature per species and component in eV, from the velocity variance
-    about the mean velocity: :math:`k_B T = m\\,\\mathrm{var}(v)`."""
+    about the mean velocity, :math:`k_B T = m\\,\\mathrm{var}(v)`. Both are
+    weighted by the pseudo-particle weights, so what the walls have collected
+    no longer counts."""
     result = {}
     for i, name in enumerate(out.names):
         sel = out.species == i
-        v = out.v[:, sel]
-        m = out.mass[sel] / out.weight[sel]
-        var = jnp.var(v, axis=1)
-        result[name] = m[0] * var / elementary_charge
+        v, w = out.v[:, sel], out.weight[:, sel, None]
+        total = jnp.maximum(jnp.sum(w, axis=1), jnp.finfo(v.dtype).tiny)
+        mean = jnp.sum(w * v, axis=1) / total
+        var = jnp.sum(w * (v - mean[:, None]) ** 2, axis=1) / total
+        result[name] = out.mass[sel][0] * var / elementary_charge
     return result
 
 

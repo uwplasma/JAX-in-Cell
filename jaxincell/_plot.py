@@ -112,10 +112,10 @@ def plot(out, direction="x", omega=None, save=None, fps=25, stride=1, dpi=80, in
                 fields.append((rf"${name}_{c}$", F[:, :, _AXIS[c]], unit))
     fields.append((r"$\rho$", rho, r"C/m$^3$"))
 
-    # Particles: species by out.species, absorbed (charge == 0) ones excluded.
+    # Particles: species by out.species, those a wall has collected (no weight left) excluded.
     have = out.x is not None and out.v is not None
-    species, alive = np.asarray(out.species), np.asarray(out.charge) != 0
-    groups = [(n, (species == k) & alive) for k, n in enumerate(out.names)] if have else []
+    species = np.asarray(out.species)
+    groups = [(n, (species == k) & (np.asarray(out.weight)[-1] > 0)) for k, n in enumerate(out.names)] if have else []
     groups = [(n, m) for n, m in groups if m.any()]
     dirs = dirs if groups else ""
     vbins = max(8, min(int(vbins), int(_MAX_ELEMENTS // max(1, S * G * len(groups) * len(dirs)))))

@@ -9,8 +9,8 @@ Layout:
     ``E`` and ``J`` sit on cell faces (component ``position=[0.5]``), ``B`` and ``rho`` on centres
     (``position=[0.0]``). Particles: one species per ``out.names`` with vector records
     ``position``, ``positionOffset`` (zero) and ``momentum`` (``m * gamma * v``, gamma from ``v``)
-    plus scalar ``weighting`` (pseudo-particle weight), ``charge`` and ``mass`` (physical, i.e.
-    ``out.charge / out.weight`` and ``out.mass / out.weight``); skipped when ``out.x is None``.
+    plus scalar ``weighting`` (the pseudo-particle weight at that step), ``charge`` and ``mass``
+    (of one physical particle); skipped when ``out.x is None``.
 
 Example:
     >>> write_openpmd(sim.run(steps=1000, store_every=10), "run.json", every=5)  # or .h5 / .bp
@@ -63,10 +63,9 @@ def _write_meshes(io, it, out, s, keep):
 
 
 def _write_particles(io, it, out, s, keep):
-    x, v = (np.asarray(a[s], dtype=np.float64) for a in (out.x, out.v))
-    w, species = np.asarray(out.weight, dtype=np.float64), np.asarray(out.species)
-    q, m = (np.divide(np.asarray(a, dtype=np.float64), w, out=np.zeros_like(w), where=w != 0)
-            for a in (out.charge, out.mass))
+    x, v, w = (np.asarray(a[s], dtype=np.float64) for a in (out.x, out.v, out.weight))
+    q, m = (np.asarray(a, dtype=np.float64) for a in (out.charge, out.mass))
+    species = np.asarray(out.species)
     gamma = 1.0 / np.sqrt(np.clip(1.0 - np.sum(v ** 2, axis=1) / speed_of_light ** 2, 1e-15, None))
     p, zero = (m * gamma)[:, None] * v, np.zeros_like(x)
     for i, name in enumerate(out.names):

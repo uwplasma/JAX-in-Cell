@@ -5,9 +5,11 @@ at cell centres :math:`x_i`, the electric field and the current density at cell
 faces :math:`x_{i+1/2}`. Every array has one entry per cell; entry ``i`` of a
 face quantity refers to :math:`x_{i+1/2}`.
 
-Boundary codes: 0 periodic, 1 reflective, 2 absorbing, given per wall as a
-``(left, right)`` pair. They are static, so the branches below are resolved
-when the program is traced and cost nothing at run time.
+Boundary codes: 0 periodic, 1 reflective, 2 absorbing, 3 thermal, given per
+wall as a ``(left, right)`` pair. They are static, so the branches below are
+resolved when the program is traced and cost nothing at run time. An absorbing
+wall may send back part of each particle, as a fraction of its weight. A thermal
+wall is a reflective one here; the simulation then redraws the velocities.
 """
 import jax.numpy as jnp
 
@@ -188,40 +190,47 @@ def boris_relativistic(v, E, B, q, m, dt):
     return p / (gamma * m)
 
 
-def apply_particle_bc(x, v, q, qm, box, bc, restitution, dx):
+def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):
     """Bring particles that left the box back according to the wall codes.
-    Reflective walls mirror the position and multiply the normal velocity by
-    ``-restitution``; absorbing walls zero the charge, the charge-to-mass ratio
-    and the velocity and park the particle outside the grid. The ignorable
-    coordinates are always periodic."""
+
+    A reflective wall mirrors the position and multiplies the normal velocity by
+    ``-restitution``. An absorbing wall sends back the fraction ``reflection`` of
+    the weight ``w`` of each particle that reaches it, mirrored and bounced the
+    same way, and collects the rest. A particle with no weight left is stopped,
+    has its charge-to-mass ratio zeroed and is parked outside the grid, where it
+    stays. ``restitution`` is a ``(left, right)`` pair and ``reflection`` a pair
+    of per-particle arrays. The ignorable coordinates are always periodic."""
     L, Ly, Lz = box
     x = x.at[:, 1].set((x[:, 1] + Ly / 2) % Ly - Ly / 2)
     x = x.at[:, 2].set((x[:, 2] + Lz / 2) % Lz - Lz / 2)
     xx, vx = x[:, 0], v[:, 0]
     out = jnp.zeros_like(xx, dtype=bool)
-    for code, beyond, mirror, park in ((bc[0], xx < -L / 2, -L - xx, -L / 2 - 1.5 * dx),
-                                       (bc[1], xx > L / 2, L - xx, L / 2 + 3.0 * dx)):
+    for code, beyond, mirror, park, e, r in (
+            (bc[0], xx < -L / 2, -L - xx, -L / 2 - 1.5 * dx, restitution[0], reflection[0]),
+            (bc[1], xx > L / 2, L - xx, L / 2 + 3.0 * dx, restitution[1], reflection[1])):
         if code == 0:
             xx = jnp.where(beyond, (xx + L / 2) % L - L / 2, xx)
-        elif code == 1:
-            xx = jnp.where(beyond, mirror, xx)
-            vx = jnp.where(beyond, -restitution * vx, vx)
-        else:
-            xx = jnp.where(beyond, park, xx)
-            out = out | beyond
+            continue
+        if code == 2:
+            w = jnp.where(beyond, w * r, w)
+            lost = beyond & (w <= 0)
+            xx, out, beyond = jnp.where(lost, park, xx), out | lost, beyond & ~lost
+        xx = jnp.where(beyond, mirror, xx)
+        vx = jnp.where(beyond, -e * vx, vx)
     x = x.at[:, 0].set(xx)
     v = v.at[:, 0].set(vx)
     if 2 in bc:
         v = jnp.where(out[:, None], 0.0, v)
-        q = jnp.where(out, 0.0, q)
         qm = jnp.where(out, 0.0, qm)
-    return x, v, q, qm
+    return x, v, w, qm
 
 
-def wrap_positions(x, box, bc, dx):
-    """The position map of :func:`apply_particle_bc` alone, for half-step positions."""
-    x, _, _, _ = apply_particle_bc(x, jnp.zeros_like(x), jnp.zeros(x.shape[0]),
-                                   jnp.zeros(x.shape[0]), box, bc, 1.0, dx)
+def wrap_positions(x, w, box, bc, dx):
+    """The position map of :func:`apply_particle_bc` alone, for the reconstructed
+    integer-time positions: at an absorbing wall a particle that still has weight
+    was reflected and is mirrored, one that has none stays parked."""
+    ones = jnp.ones_like(w)
+    x, _, _, _ = apply_particle_bc(x, jnp.zeros_like(x), w, ones, box, bc, (1.0, 1.0), (ones, ones), dx)
     return x
 
 

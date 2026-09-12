@@ -301,7 +301,7 @@ def test_collisions_default_to_every_pair_and_the_formulary_logarithm():
     assert np.isfinite(np.asarray(collided.v)).all()
     assert not np.allclose(np.asarray(collided.v), np.asarray(quiet.v))
     momentum = np.asarray(diagnostics(collided)["momentum"])[:, 0]
-    content = float(np.sum(np.asarray(collided.mass) * np.abs(np.asarray(collided.v[0, :, 0]))))
+    content = float(np.sum(np.asarray(collided.mass * collided.weight[0]) * np.abs(np.asarray(collided.v[0, :, 0]))))
     assert float(np.abs(momentum - momentum[0]).max()) < 1e-4 * content
 
 
@@ -428,6 +428,22 @@ def test_configuration_objects_normalise_what_they_are_given():
         Domain(cells=2)
     with pytest.raises(AssertionError, match="must have shape"):
         Species.electrons(n=10, density=1e17, vth=(1e6, 0, 0)).replace(x=np.zeros((9, 3)))
+
+    # a wall coefficient is one number or a (left, right) pair; a reflection law is a
+    # function, which cannot be an array and so is kept out of the leaves
+    import jax
+    assert Domain(restitution=0.5).restitution == (0.5, 0.5)
+    assert Domain(restitution=[1, 0.5]).restitution == (1.0, 0.5)
+    law = lambda speed: np.exp(-speed)
+    species = Species.electrons(n=10, density=1e17, reflection=(law, 0.2))
+    assert species.reflection == (law, 0.2)
+    assert not any(callable(leaf) for leaf in jax.tree_util.tree_leaves(species))
+    assert jax.tree_util.tree_map(lambda leaf: leaf, species).reflection == (law, 0.2)
+    with pytest.raises(AssertionError, match="reflection takes a number in"):
+        Species.electrons(n=10, density=1e17, reflection=1.5)
+    assert Domain(particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing")).particle_bc == (3, 2)
+    with pytest.raises(AssertionError, match="thermal wall re-emits particles"):
+        Domain(field_bc="thermal")
 
 
 def test_diagnostics_without_particles_gives_the_field_quantities_only():

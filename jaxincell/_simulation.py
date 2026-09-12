@@ -24,8 +24,11 @@ __all__ = ["Simulation", "Output", "load_toml", "quiet_start"]
 @pytree_dataclass(static=("names", "counts", "relativistic", "field_bc"))
 class Output:
     """Result of :meth:`Simulation.run`. Histories have the stored step as their
-    first axis; ``t`` is the time of each stored state. ``state`` is the final
-    loop state and can be passed back to :meth:`Simulation.run` to continue."""
+    first axis; ``t`` is the time of each stored state. ``charge`` and ``mass``
+    are those of one physical particle, and ``weight`` is the history of the
+    pseudo-particle weights, which fall as absorbing walls collect the particles.
+    ``state`` is the final loop state and can be passed back to
+    :meth:`Simulation.run` to continue."""
     t: object
     x: object
     v: object
@@ -155,6 +158,33 @@ class Simulation:
         s = self.species[0] if name is None else self.species[[t.name for t in self.species].index(name)]
         return jnp.max(jnp.asarray(s.vth)) / (jnp.sqrt(2.0) * self.plasma_frequency(name))
 
+    def _reflection(self, v):
+        """Fraction of each particle's weight that the left and the right wall send
+        back, from the law of its species at its normal speed."""
+        speed = jnp.abs(v[:, 0])
+        law = lambda r, start, n: jnp.broadcast_to(r(speed[start:start + n]) if callable(r) else r, (n,))
+        return tuple(jnp.clip(jnp.concatenate([law(s.reflection[side], *block)
+                                               for s, block in zip(self.species, self.blocks)]), 0.0, 1.0)
+                     for side in (0, 1))
+
+    def _thermalise(self, key, x, v):
+        """Redraw the velocity of every particle that crossed a thermal wall from the
+        half-Maxwellian flux of its species: the normal speed from the Rayleigh
+        distribution :math:`\\sigma\\sqrt{-2\\ln U}`, pointing into the box, and the
+        tangential components from the Maxwellian, with :math:`\\sigma = v_{th}/\\sqrt2`."""
+        d = self.domain
+        if 3 not in d.particle_bc:
+            return v
+        sigma = jnp.concatenate([jnp.broadcast_to(jnp.asarray(s.vth) / jnp.sqrt(2.0), (s.n, 3))
+                                 for s in self.species])
+        k_normal, k_tangential = random.split(random.fold_in(key, 1))
+        u = random.uniform(k_normal, (v.shape[0],), minval=jnp.finfo(v.dtype).tiny)
+        left = x[:, 0] < -d.length / 2
+        new = (sigma * random.normal(k_tangential, v.shape)).at[:, 0].set(
+            jnp.where(left, 1.0, -1.0) * sigma[:, 0] * jnp.sqrt(-2 * jnp.log(u)))
+        hit = (left & (d.particle_bc[0] == 3)) | ((x[:, 0] > d.length / 2) & (d.particle_bc[1] == 3))
+        return jnp.where(hit[:, None], new, v)
+
     # -- initial state ------------------------------------------------------------------
     def initial_state(self, key):
         d = self.domain
@@ -199,22 +229,24 @@ class Simulation:
         w, q, m = jnp.concatenate(ws), jnp.concatenate(qs), jnp.concatenate(ms)
         limit = 0.99 * c
         v = jnp.clip(v, -limit, limit)
-        q_pseudo, qm = q * w, q / m
+        qm = q / m
         box = (L, d.length_y, d.length_z)
         if self.solver.algorithm == "explicit":
             # The leapfrog carries the half-step position and reconstructs the
-            # integer-time one as wrap(x - dt v / 2). At a reflecting or absorbing wall
-            # that is not the position the run started from, so the initial field has to
-            # be built from the density the first step will actually see; otherwise the
-            # discrete Gauss law starts out violated and stays that way for the whole run.
-            x = wrap_positions(x + 0.5 * dt * v, box, d.particle_bc, dx)
-            x_integer = wrap_positions(x - 0.5 * dt * v, box, d.particle_bc, dx)
+            # integer-time one as wrap(x - dt v / 2). A particle that meets a wall in
+            # that first half step has to meet it the way every later step would, and
+            # the initial field has to be built from the density the first step will
+            # actually see; otherwise the discrete Gauss law starts out violated and
+            # stays that way for the whole run.
+            x, v, w, qm = apply_particle_bc(x + 0.5 * dt * v, v, w, qm, box, d.particle_bc, d.restitution,
+                                            self._reflection(v), dx)
+            x_integer = wrap_positions(x - 0.5 * dt * v, w, box, d.particle_bc, dx)
         else:
             x_integer = x
-        rho = self._smooth(deposit(x_integer[:, 0], q_pseudo, d.grid[0], dx, d.cells, d.particle_bc))
+        rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
         E = jnp.zeros((d.cells, 3)).at[:, 0].set(E_x_from_rho(rho, dx, d.field_bc))
         B = jnp.zeros((d.cells, 3))
-        return (E, B, x, v, q_pseudo, qm, key), (w, m, q)
+        return (E, B, x, v, w, qm, key), (m, q)
 
     def _smooth(self, f):
         s = self.solver
@@ -230,15 +262,17 @@ class Simulation:
         J_z = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 2], d.grid[0], d.dx, d.cells, d.particle_bc)), d.field_bc)
         return rho_new, jnp.stack([J_x, J_y, J_z], axis=1)
 
-    def _push(self, x, v, q, qm, m_pseudo, E, B, dt):
+    def _push(self, x, v, qm, m, E, B, dt):
         d = self.domain
-        E_p = gather(E if self.external_E is None else E + self.external_E, x[:, 0], d.grid[0] + d.dx / 2, d.dx, d.field_bc)
-        B_p = gather(B if self.external_B is None else B + self.external_B, x[:, 0], d.grid[0], d.dx, d.field_bc)
-        if self.solver.relativistic:
-            return boris_relativistic(v, E_p, B_p, q[:, None], m_pseudo[:, None], dt)
+        E = E if self.external_E is None else E + self.external_E
+        B = B if self.external_B is None else B + self.external_B
+        E_p = gather(E, x[:, 0], d.grid[0] + d.dx / 2, d.dx, d.field_bc)
+        B_p = gather(B, x[:, 0], d.grid[0], d.dx, d.field_bc)
+        if self.solver.relativistic:     # qm * m is the charge, and zero once a wall has collected the particle
+            return boris_relativistic(v, E_p, B_p, (qm * m)[:, None], m[:, None], dt)
         return boris(v, E_p, B_p, qm[:, None], dt)
 
-    def _collide(self, key, x, v, q, w, m, dt):
+    def _collide(self, key, x, v, w, qm, m, dt):
         if self.collisions is None:
             return v
         d = self.domain
@@ -252,35 +286,37 @@ class Simulation:
             ln_lambda = coulomb_logarithm(e.density, kT_ev)
         else:
             ln_lambda = self.collisions.coulomb_log
-        return collide(key, x, v, w, m, q / w, self.blocks, pairs, ln_lambda, dt, d.dx, d.length, d.cells)
+        return collide(key, x, v, w, m, qm * m, self.blocks, pairs, ln_lambda, dt, d.dx, d.length, d.cells)
 
     def _explicit_step(self, carry, extra):
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
         box = (L, d.length_y, d.length_z)
-        w, m, _ = extra
-        E, B, x_half, v, q, qm, key = carry
+        m, q = extra
+        E, B, x_half, v, w, qm, key = carry
         # first half step: sources from the motion x^n -> x^{n+1/2}
-        x_n = wrap_positions(x_half - 0.5 * dt * v, box, d.particle_bc, dx)
-        rho_n = self._smooth(deposit(x_n[:, 0], q, d.grid[0], dx, d.cells, d.particle_bc))
-        rho_half, J1 = self._sources(x_half, v, q, dt / 2, jnp.sum(q * v[:, 0]) / L, rho_n)
+        x_n = wrap_positions(x_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
+        rho_n = self._smooth(deposit(x_n[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
+        rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, jnp.sum(q * w * v[:, 0]) / L, rho_n)
         E, B = half_step_fields(E, B, J1, dt / 2, dx, d.field_bc, electric_first=True)
         # push with the fields at t^{n+1/2}
-        v = self._push(x_half, v, q, qm, m * w, E, B, dt)
+        v = self._push(x_half, v, qm, m, E, B, dt)
         key, k_c = random.split(key)
-        v = self._collide(k_c, x_half, v, q, w, m, dt)
-        x_next_half = x_half + dt * v
-        x_next_half, v, q, qm = apply_particle_bc(x_next_half, v, q, qm, box, d.particle_bc, d.restitution, dx)
-        x_next = wrap_positions(x_next_half - 0.5 * dt * v, box, d.particle_bc, dx)
+        v = self._collide(k_c, x_half, v, w, qm, m, dt)
+        x_free = x_half + dt * v
+        x_next_half, v, w, qm = apply_particle_bc(x_free, v, w, qm, box, d.particle_bc, d.restitution,
+                                                  self._reflection(v), dx)
+        v = self._thermalise(key, x_free, v)
+        x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
         # Second half step, x^{n+1/2} -> x^{n+1}, starting from the charge density the
-        # first half already ended on. Depositing it again here would use the charges
-        # that apply_particle_bc has just zeroed, so the density at x^{n+1/2} would jump
-        # by the charge absorbed at the wall with no current to account for it, and the
+        # first half already ended on. Depositing it again here would use the weights
+        # that apply_particle_bc has just reduced, so the density at x^{n+1/2} would jump
+        # by the charge collected at the wall with no current to account for it, and the
         # discrete Gauss law would drift by that much every step.
-        rho_next, J2 = self._sources(x_next, v, q, dt / 2, jnp.sum(q * v[:, 0]) / L, rho_half)
+        rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, jnp.sum(q * w * v[:, 0]) / L, rho_half)
         E, B = half_step_fields(E, B, J2, dt / 2, dx, d.field_bc, electric_first=False)
         if self.solver.field_solver == "gauss":
             E = E.at[:, 0].set(E_x_from_rho(rho_next, dx, d.field_bc))
-        return (E, B, x_next_half, v, q, qm, key), (x_next, v, E, B, 0.5 * (J1 + J2), rho_next)
+        return (E, B, x_next_half, v, w, qm, key), (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
     def _implicit_step(self, carry, extra):
         """Crank-Nicolson step solved by a fixed number of Picard iterations.
@@ -292,25 +328,32 @@ class Simulation:
         deposit use the same time-centred orbit (Chen, Chacon and Barnes 2011)."""
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
         box = (L, d.length_y, d.length_z)
-        w, m, _ = extra
-        E, B, x, v, q, qm, key = carry
+        m, q = extra
+        E, B, x, v, w, qm, key = carry
         n_sub = self.solver.substeps
         dtau = dt / n_sub
 
+        # one key per sub-step, the same in every Picard iteration, so that a thermal
+        # wall re-emits a particle identically each time the orbit is recomputed
+        keys = random.split(random.fold_in(key, 1), n_sub)
+
         def substeps(E_half, B_half, x_mid_all):
-            def one(state, x_mid):
-                xs, vs, qs, qms, J_acc, mids = state
-                v_new = self._push(x_mid, vs, qs, qms, m * w, E_half, B_half, dtau)
+            def one(state, inputs):
+                x_mid, k_sub = inputs
+                xs, vs, ws, qms, J_acc, mids = state
+                v_new = self._push(x_mid, vs, qms, m, E_half, B_half, dtau)
                 v_mid = 0.5 * (vs + v_new)
-                x_new, v_new, qs, qms = apply_particle_bc(xs + dtau * v_mid, v_new, qs, qms, box,
-                                                          d.particle_bc, d.restitution, dx)
-                new_mid = wrap_positions(x_new - 0.5 * dtau * v_mid, box, d.particle_bc, dx)
-                J = jnp.stack([deposit(x_mid[:, 0], qs * v_mid[:, i], d.grid[0] + dx / 2, dx, d.cells, d.particle_bc)
-                               for i in range(3)], axis=1)
-                return (x_new, v_new, qs, qms, J_acc + J / n_sub, mids), new_mid
-            init = (x, v, q, qm, jnp.zeros((d.cells, 3)), None)
-            (xs, vs, qs, qms, J_avg, _), new_mids = lax.scan(one, init, x_mid_all)
-            return xs, vs, qs, qms, J_avg, new_mids
+                x_free = xs + dtau * v_mid
+                x_new, v_new, ws, qms = apply_particle_bc(x_free, v_new, ws, qms, box, d.particle_bc,
+                                                          d.restitution, self._reflection(v_mid), dx)
+                v_new = self._thermalise(k_sub, x_free, v_new)
+                new_mid = wrap_positions(x_new - 0.5 * dtau * v_mid, ws, box, d.particle_bc, dx)
+                J = jnp.stack([deposit(x_mid[:, 0], q * ws * v_mid[:, i], d.grid[0] + dx / 2, dx, d.cells,
+                                       d.particle_bc) for i in range(3)], axis=1)
+                return (x_new, v_new, ws, qms, J_acc + J / n_sub, mids), new_mid
+            init = (x, v, w, qm, jnp.zeros((d.cells, 3)), None)
+            (xs, vs, ws, qms, J_avg, _), new_mids = lax.scan(one, init, (x_mid_all, keys))
+            return xs, vs, ws, qms, J_avg, new_mids
 
         def picard(state, _):
             E_new, x_mid_all = state
@@ -321,15 +364,15 @@ class Simulation:
             E_next = E + dt * (c ** 2 * curl_B(B_half, E_half, dx, d.field_bc) - J / epsilon_0)
             return (E_next, x_mid_all), None
 
-        x_mid0 = jnp.broadcast_to(wrap_positions(x + 0.5 * dtau * v, box, d.particle_bc, dx), (n_sub,) + x.shape)
+        x_mid0 = jnp.broadcast_to(wrap_positions(x + 0.5 * dtau * v, w, box, d.particle_bc, dx), (n_sub,) + x.shape)
         (E_new, x_mid_all), _ = lax.scan(picard, (E, x_mid0), None, length=self.solver.picard_iterations)
         E_half = 0.5 * (E + E_new)
         B_new = B - dt * curl_E(E_half, B, dx, d.field_bc)
-        x, v, q, qm, J, _ = substeps(E_half, 0.5 * (B + B_new), x_mid_all)
+        x, v, w, qm, J, _ = substeps(E_half, 0.5 * (B + B_new), x_mid_all)
         key, k_c = random.split(key)
-        v = self._collide(k_c, x, v, q, w, m, dt)
-        rho = deposit(x[:, 0], q, d.grid[0], dx, d.cells, d.particle_bc)
-        return (E_new, B_new, x, v, q, qm, key), (x, v, E_new, B_new, J, rho)
+        v = self._collide(k_c, x, v, w, qm, m, dt)
+        rho = deposit(x[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc)
+        return (E_new, B_new, x, v, w, qm, key), (x, v, w, E_new, B_new, J, rho)
 
     # -- the run ---------------------------------------------------------------------------------
     def run(self, steps, seed=0, store_every=1, store_particles=True, state=None):
@@ -359,17 +402,17 @@ def _run(sim, steps, seed, store_every, store_particles, state):
     def chunk(carry, start):
         carry, _ = lax.scan(lambda c, i: (step(c)[0], None), carry, None, length=store_every - 1)
         carry, out = step(carry)
-        x, v, E, B, J, rho = out
+        x, v, w, E, B, J, rho = out
         if not store_particles:
-            x = v = None
-        return carry, (x, v, E, B, J, rho)
+            x = v = w = None
+        return carry, (x, v, w, E, B, J, rho)
 
-    carry, (x, v, E, B, J, rho) = lax.scan(chunk, carry0, jnp.arange(steps // store_every))
+    carry, (x, v, w, E, B, J, rho) = lax.scan(chunk, carry0, jnp.arange(steps // store_every))
     d = sim.domain
-    w, m, q = extra
+    m, q = extra
     kept = (jnp.arange(steps // store_every) + 1) * store_every
     return Output(t=kept * d.dt, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,
-                  length=d.length, charge=carry[4], mass=m * w, weight=w,
+                  length=d.length, charge=q, mass=m, weight=w,
                   species=jnp.concatenate([jnp.full((s.n,), i) for i, s in enumerate(sim.species)]),
                   state=carry, names=tuple(s.name for s in sim.species), counts=tuple(s.n for s in sim.species),
                   relativistic=sim.solver.relativistic, field_bc=d.field_bc)

@@ -87,7 +87,8 @@ def _scatter(key, v, driver, cell, rank, other, other_key, other_count, drives, 
     m_r = m_a * m_b / (m_a + m_b)
     u = v[driver] - v[partner]
     u_mag = jnp.maximum(jnp.linalg.norm(u, axis=1), 1e-30)
-    variance = (q_a * q_b) ** 2 * density[cell] * coulomb_log * dt / (8 * jnp.pi * epsilon_0 ** 2 * m_r ** 2 * u_mag ** 3)
+    # grouped so that no intermediate underflows in single precision, where (q_a q_b)^2 alone would
+    variance = (q_a * q_b / (epsilon_0 * m_r)) ** 2 * density[cell] * coulomb_log * dt / (8 * jnp.pi * u_mag ** 3)
     k_rotate, k_a, k_b = random.split(key, 3)
     du = _rotate(k_rotate, u, variance)
     w_a, w_b = weight[driver], weight[partner]
@@ -111,7 +112,11 @@ def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx,
         coulomb_log: Coulomb logarithm (scalar).
         dt, dx, length, n_cells: Time step, cell size, box length, cell count.
     """
-    cell_of = lambda i: jnp.clip(((x[i, 0] + length / 2) / dx).astype(jnp.int32), 0, n_cells - 1)
+    # A particle a wall has collected has no weight left. It goes to a cell of its own
+    # past the last one, where it neither collides nor takes a partner from one that can.
+    cell_of = lambda i: jnp.where(weight[i] > 0, jnp.clip(((x[i, 0] + length / 2) / dx).astype(jnp.int32),
+                                                          0, n_cells - 1), n_cells)
+    live = jnp.arange(n_cells + 1) < n_cells
     for a, b in pairs:
         key, k_a, k_b, k_1, k_2 = random.split(key, 5)
         start_a, n_a = blocks[a]
@@ -123,17 +128,17 @@ def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx,
         else:
             ia = start_a + random.permutation(k_a, n_a)
             ib = start_b + random.permutation(k_b, n_b)
-        order_a, cell_a, rank_a, count_a = _by_cell(cell_of(ia), n_cells)
-        order_b, cell_b, rank_b, count_b = _by_cell(cell_of(ib), n_cells)
+        order_a, cell_a, rank_a, count_a = _by_cell(cell_of(ia), n_cells + 1)
+        order_b, cell_b, rank_b, count_b = _by_cell(cell_of(ib), n_cells + 1)
         ia, ib = ia[order_a], ib[order_b]
         stride = max(ia.shape[0], ib.shape[0]) + 1
         key_a, key_b = cell_a * stride + rank_a, cell_b * stride + rank_b
-        density_a = jnp.zeros(n_cells).at[cell_a].add(weight[ia]) / dx
-        density_b = jnp.zeros(n_cells).at[cell_b].add(weight[ib]) / dx
+        density_a = jnp.zeros(n_cells + 1).at[cell_a].add(weight[ia]) / dx
+        density_b = jnp.zeros(n_cells + 1).at[cell_b].add(weight[ib]) / dx
         # a particle of a self-colliding species sees the whole species; otherwise the
         # sparser of the two partners sets the rate (Takizuka and Abe, section 2)
         density = density_a + density_b if a == b else jnp.minimum(density_a, density_b)
         args = (density, weight, mass, charge, coulomb_log, dt, stride)
-        v = _scatter(k_1, v, ia, cell_a, rank_a, ib, key_b, count_b, count_a >= count_b, *args)
-        v = _scatter(k_2, v, ib, cell_b, rank_b, ia, key_a, count_a, count_b > count_a, *args)
+        v = _scatter(k_1, v, ia, cell_a, rank_a, ib, key_b, count_b, live & (count_a >= count_b), *args)
+        v = _scatter(k_2, v, ib, cell_b, rank_b, ia, key_a, count_a, live & (count_b > count_a), *args)
     return v
