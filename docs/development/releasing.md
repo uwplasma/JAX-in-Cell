@@ -1,12 +1,16 @@
 # Releasing
 
 Versions are derived from git tags by `setuptools_scm`; there is no version string to
-edit. The `pypi_publish.yml` workflow builds a source distribution and a wheel and
-uploads them to PyPI whenever a tag is pushed or a GitHub release is created.
+edit. Publishing a GitHub release runs `pypi_publish.yml`. It runs the build-and-test
+workflow on the tagged commit, builds a source distribution and a wheel from a full
+clone (`setuptools_scm` needs the tags, and writes `jaxincell/version.py` during the
+build), and uploads both to PyPI through trusted publishing. Nothing is uploaded if a
+test fails, and pushing a tag without publishing a release uploads nothing.
 
 ```bash
 git tag v0.2
 git push origin v0.2
+gh release create v0.2 --generate-notes
 ```
 
 Read the Docs rebuilds the `stable` documentation from the new tag. Released versions

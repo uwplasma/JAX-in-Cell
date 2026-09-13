@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0.0", "wheel", "setuptools_scm"]
+requires = ["setuptools>=61.0.0", "wheel", "setuptools_scm>=8"]    # version_file needs 8
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
@@ -61,5 +61,14 @@ jaxincell = "jaxincell.__main__:main"
 testpaths = ["tests"]
 pythonpath = ["tests"]
 
-[tool.flake8]
-max-line-length = 120
+# The README promises every statement and branch of the package covered; this is what
+# enforces it. CI installs the dev extra, openpmd-api included, so the exporter counts.
+[tool.coverage.run]
+source = ["jaxincell"]
+branch = true
+omit = ["jaxincell/version.py"]     # written by setuptools_scm at build time
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+skip_covered = true

@@ -24,7 +24,8 @@ a security problem in public; send it to rogerio.jorge@wisc.edu.
    ```
 3. Make the change with a test that exercises it. Keep the static and differentiable
    parameter lists consistent (see {doc}`architecture`).
-4. Run `pytest` and `flake8 . --select=E9,F63,F7,F82`.
+4. Run `pytest` and `flake8`. Continuous integration fails on any lint violation under
+   the configuration in `.flake8` and on coverage below 100 per cent.
 5. If the change affects a numerical method, rerun the relevant figure script under
    `docs/scripts/` and update the documentation page that describes the method.
 6. Open a pull request against `main` with a description of what changed and why.
