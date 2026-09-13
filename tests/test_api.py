@@ -428,11 +428,11 @@ def test_configuration_objects_normalise_what_they_are_given():
     # walls may be one name for both ends or a pair, and are stored as codes
     assert Domain(particle_bc="reflective").particle_bc == (BOUNDARIES["reflective"],) * 2
     assert Domain(particle_bc=("reflective", "absorbing")).particle_bc == (1, 2)
-    with pytest.raises(AssertionError, match="periodic wall needs a periodic partner"):
+    with pytest.raises(ValueError, match="periodic wall needs a periodic partner"):
         Domain(particle_bc=("periodic", "absorbing"))
-    with pytest.raises(AssertionError, match="at least four cells"):
+    with pytest.raises(ValueError, match="at least four cells"):
         Domain(cells=2)
-    with pytest.raises(AssertionError, match="must have shape"):
+    with pytest.raises(ValueError, match="must have shape"):
         Species.electrons(n=10, density=1e17, vth=(1e6, 0, 0)).replace(x=np.zeros((9, 3)))
 
     # a wall coefficient is one number or a (left, right) pair; a reflection law is a
@@ -440,15 +440,17 @@ def test_configuration_objects_normalise_what_they_are_given():
     import jax
     assert Domain(restitution=0.5).restitution == (0.5, 0.5)
     assert Domain(restitution=[1, 0.5]).restitution == (1.0, 0.5)
-    law = lambda speed: np.exp(-speed)
+
+    def law(speed):
+        return np.exp(-speed)
     species = Species.electrons(n=10, density=1e17, reflection=(law, 0.2))
     assert species.reflection == (law, 0.2)
     assert not any(callable(leaf) for leaf in jax.tree_util.tree_leaves(species))
     assert jax.tree_util.tree_map(lambda leaf: leaf, species).reflection == (law, 0.2)
-    with pytest.raises(AssertionError, match="reflection takes a number in"):
+    with pytest.raises(ValueError, match="reflection takes a number in"):
         Species.electrons(n=10, density=1e17, reflection=1.5)
     assert Domain(particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing")).particle_bc == (3, 2)
-    with pytest.raises(AssertionError, match="thermal wall re-emits particles"):
+    with pytest.raises(ValueError, match="thermal wall re-emits particles"):
         Domain(field_bc="thermal")
 
 

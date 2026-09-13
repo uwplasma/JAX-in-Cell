@@ -27,7 +27,8 @@ leaves and static metadata. Leaves are traced, so they can change without
 recompilation and be differentiated with respect to; static fields become part of the
 treedef and therefore of the cache key. A field that holds a function, such as a
 velocity-dependent reflection law, is moved into the static metadata whatever its
-declaration, since a function is not an array.
+declaration, since a function is not an array; in a tuple such as `(law, 0.3)` only the
+function moves, and the number stays a leaf.
 
 The split is the main design decision in the package. A parameter is static if the
 *shape* of the computation depends on it — particle counts, cell counts, boundary
@@ -35,10 +36,14 @@ types, the algorithm name, the number of Picard iterations — and a leaf otherw
 Getting it wrong shows up immediately: a static physical parameter recompiles on every
 change, and a leaf that controls a shape fails to trace.
 
-One consequence is worth knowing: `__post_init__` runs again every time JAX rebuilds an
-object from its leaves, so it must be idempotent and must not force a traced value.
-The boundary-name conversion accepts codes as well as names for exactly that reason,
-and the Courant check skips values that are not plain Python numbers.
+JAX rebuilds an object from its leaves without calling `__init__`, so `__post_init__`
+normalises and validates only what is constructed or passed to `replace`, and tree
+operations can put anything in the leaves: stacked ensembles, tracers, `None`. Since
+`replace` converts the stored values again, the conversions must be idempotent (the
+boundary-name conversion accepts codes as well as names) and must not force a traced
+value (the Courant check skips values that are not plain Python numbers). An object with
+`None` where it always holds a number is a template, such as a `vmap` `in_axes`, and is
+stored as given.
 
 ## The time loop
 

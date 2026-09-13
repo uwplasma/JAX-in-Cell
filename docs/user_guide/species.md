@@ -25,7 +25,7 @@ is the usual way to get an immobile neutralising background.
 | `charge` | charge in units of the elementary charge | — |
 | `mass` | mass in kilograms | — |
 | `density` | number density in m⁻³; the weight is `density * length / n` | — |
-| `vth` | thermal speed per component, $\sqrt{2k_BT/m}$ | `(0, 0, 0)` |
+| `vth` | thermal speed per component, $\sqrt{2k_BT/m}$; see below for a bare number | `(0, 0, 0)` |
 | `drift` | drift velocity per component, m/s | `(0, 0, 0)` |
 | `perturbation_amplitude` | amplitude $a$ of the displacement $x \to x + a\sin(2\pi m x/L)$ | `0.0` |
 | `perturbation_mode` | mode number $m$ of that displacement | `0.0` |
@@ -34,6 +34,16 @@ is the usual way to get an immobile neutralising background.
 | `random_positions` | uniformly random rather than equally spaced positions (static) | `False` |
 | `x`, `v` | arrays of shape `(n, 3)` replacing the generated phase space | `None` |
 | `reflection` | fraction of each particle an absorbing wall sends back: a number, a function of the normal impact speed in m/s, or a `(left, right)` pair | `0.0` |
+
+`vth` and `drift` take three components as a tuple, a list or an array (NumPy or JAX)
+whose last axis holds them. A bare number is the **x component alone**, the direction
+the grid resolves, with the other two zero: `vth=2e6` is a species hot along $x$ and
+cold across it, not an isotropic one, which is written `vth=(2e6, 2e6, 2e6)`.
+
+Invalid input — no particles, a phase-space array of the wrong shape, a coefficient
+outside $[0, 1]$, an unknown wall — raises `ValueError` when the object is built or
+`replace`d, so the checks survive `python -O`. Arrays may carry leading ensemble axes,
+and a tracer is checked only for its shape.
 
 ## Thermal speed and temperature
 
@@ -106,9 +116,10 @@ sigma = vth / np.sqrt(2)                         # slow electrons come back, fas
 Species.electrons(..., reflection=lambda speed: jnp.exp(-speed ** 2 / (2 * sigma ** 2)))
 ```
 
-A number is a pytree leaf, traced and differentiable like any physical parameter. A
-function is compiled into the program: write it with `jax.numpy`, and define it once,
-because a new function object is a new program. A wall sees the flux of particles, not
+A number is a pytree leaf, traced and differentiable like any physical parameter, and
+so is the number in a mixed pair such as `(law, 0.3)`. A function is compiled into the
+program: write it with `jax.numpy`, and define it once, because a new function object
+is a new program. A wall sees the flux of particles, not
 their distribution, so a velocity-dependent law returns its flux average from a
 Maxwellian: $u^2/(u^2+\sigma^2)$ for a Gaussian of width $u$, which is one half for the
 law above rather than the 0.71 an average over the distribution would suggest
@@ -124,3 +135,22 @@ hotter = electrons.replace(vth=(2 * electrons.vth[0], 0, 0))
 
 Because the physical fields are pytree leaves, replacing them does not trigger a
 recompilation, and `jax.grad` differentiates through them ({doc}`differentiation`).
+
+## Ensembles of species
+
+JAX rebuilds a species from its leaves without checking them again, so the tree
+functions work on it directly. Stacking members gives an ensemble to `jax.vmap` over,
+and a template with `None` in every leaf says which leaves carry the ensemble axis:
+
+```python
+import jax, jax.numpy as jnp
+
+ensemble = electrons.replace(density=jnp.array([1e17, 2e17]), x=jnp.stack([x_a, x_b]))
+axes = jax.tree.map(lambda _: None, electrons).replace(density=0, x=0)
+fields = jax.vmap(lambda s: Simulation(domain, [s, ions]).run(500).E[-1, :, 0],
+                  in_axes=(axes,))(ensemble)
+```
+
+A species with `None` where it always holds a number, like `axes`, is a template: it is
+stored as given, so its integer axes stay integers. `jax.tree.map(lambda *m: jnp.stack(m), a, b)`
+stacks every leaf of two species, for a `vmap` with `in_axes=0`.

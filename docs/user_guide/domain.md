@@ -62,7 +62,9 @@ as one name for both ends or as a pair:
 Domain(particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing"))
 ```
 
-A periodic wall needs a periodic partner, which is checked at construction. The
+A periodic wall needs a periodic partner, which is checked at construction; this and
+every other invalid choice (an unknown wall name, fewer than four cells, a thermal field
+wall, a restitution outside $[0, 1]$) raises `ValueError`. The
 particle and field walls are set separately, which is occasionally useful (particles
 reflected while radiation leaves) but usually they should match; a thermal particle wall
 takes a reflective field wall.
