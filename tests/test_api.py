@@ -28,10 +28,15 @@ def small_simulation(n=400, **solver):
 
 
 def test_runs_are_reproducible_and_seeds_matter():
+    """One seed gives one run: bit for bit on the CPU, and to round-off on a GPU, whose
+    scatter kernels do not promise the same order of summation twice."""
     sim = small_simulation()
     a, b, other = sim.run(20, seed=5), sim.run(20, seed=5), sim.run(20, seed=6)
-    assert np.array_equal(np.asarray(a.x), np.asarray(b.x))
-    assert not np.array_equal(np.asarray(a.x), np.asarray(other.x))
+    if jax.default_backend() == "cpu":
+        assert np.array_equal(np.asarray(a.x), np.asarray(b.x))
+    else:
+        assert np.allclose(np.asarray(a.x), np.asarray(b.x), rtol=1e-12, atol=1e-12 * sim.domain.length)
+    assert not np.allclose(np.asarray(a.x), np.asarray(other.x), rtol=1e-6, atol=0)
     assert a.x.shape == (20, 800, 3) and a.E.shape == (20, 16, 3) and float(a.t[0] / a.dt) == 1.0
 
 
@@ -68,12 +73,13 @@ def test_vmap_over_seeds_gives_an_ensemble_from_one_program():
 def test_store_every_store_particles_and_restart():
     sim = small_simulation()
     full = sim.run(40, seed=2)
+    scale = float(np.abs(np.asarray(full.E)).max())   # components that vanish are compared on this scale
     thin = sim.run(40, seed=2, store_every=10)
     assert thin.E.shape[0] == 4 and np.allclose(np.asarray(thin.t), np.asarray(full.t[9::10]))
-    assert np.allclose(np.asarray(thin.E), np.asarray(full.E[9::10]), rtol=1e-12, atol=0)
+    assert np.allclose(np.asarray(thin.E), np.asarray(full.E[9::10]), rtol=1e-12, atol=1e-12 * scale)
     first = sim.run(20, seed=2, store_every=10)
     second = sim.run(20, seed=2, store_every=10, state=first.state)
-    assert np.allclose(np.asarray(second.E[-1]), np.asarray(full.E[-1]), rtol=1e-10, atol=0)
+    assert np.allclose(np.asarray(second.E[-1]), np.asarray(full.E[-1]), rtol=1e-10, atol=1e-10 * scale)
     light = sim.run(10, seed=2, store_particles=False)
     assert light.x is None and light.E.shape == (10, 16, 3)
 

@@ -59,10 +59,12 @@ with no particles to write; the TOML loader's fallback for Python 3.10; `python 
 jaxincell`; and the version fallback for a fresh clone that has not been installed,
 since `jaxincell/version.py` is generated at build time and is not in the repository.
 
-**The interface.** That two runs with one seed agree bit for bit and two seeds do not;
+**The interface.** That two runs with one seed agree bit for bit on the CPU, and to
+round-off on a GPU, whose scatter kernels need not sum in the same order twice, and that
+two seeds do not;
 that `jax.grad` matches a central difference to one part in $10^4$ through both
 integrators; that `vmap` over seeds gives an ensemble; that `store_every` and a restart
-reproduce the full run exactly; that changing a physical parameter does not change the
+reproduce the full run to round-off; that changing a physical parameter does not change the
 treedef, which is what guarantees no recompilation; that the overview figure has one
 panel per non-zero field component and per species; and that an openPMD export reads
 back with the right iterations, staggering and particle records; and that the
