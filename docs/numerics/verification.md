@@ -60,9 +60,9 @@ $ak = $ {{ landau_seed_ak }} and {{ landau_peaks_used }} maxima used for the fit
 Panel (b) is the sharper test. Across $k\lambda_D$ from 0.05 to 0.5 the measured
 frequency stays within {{ landau_dispersion_max_deviation_percent }} % of the exact
 kinetic root, and it follows the kinetic curve rather than the Bohm-Gross
-approximation $\omega^2 = \omega_{pe}^2(1 + 3k^2\lambda_D^2)$ {cite}`bohm1949`, from
-which it departs by eight per cent at $k\lambda_D = 0.5$. The code is reproducing
-kinetic physics, not a fluid limit.
+approximation $\omega^2 = \omega_{pe}^2(1 + 3k^2\lambda_D^2)$ {cite}`bohm1949`, which
+the kinetic root exceeds by 2.9 per cent at $k\lambda_D = 0.3$ and by 7.0 per cent at 0.5.
+The code is reproducing kinetic physics, not a fluid limit.
 
 ## Two-stream instability
 

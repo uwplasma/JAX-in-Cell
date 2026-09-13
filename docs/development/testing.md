@@ -28,16 +28,21 @@ regression test tells you that something changed; it does not tell you whether t
 code was ever right. Each test here compares against something known independently:
 
 **Exact results for the kernels.** The shape-function weights sum to one and reproduce
-the spline; the deposit and the gather are adjoint; the discrete curls annihilate a
+the spline; an absorbing wall keeps exactly the part of a particle's cloud that lies
+inside the box; the deposit and the gather are adjoint; the discrete curls annihilate a
 constant; a vacuum light wave at Courant number one is translated by exactly one cell
 per step; the Boris rotation conserves speed to round-off and turns through the
 analytic angle; the boundary maps do what they claim, position by position.
 
-**Closed-form physics.** Bohm-Gross frequencies at two wavenumbers; the tabulated
-Landau root $1.4157 - 0.1533\,i$ at $k\lambda_D = 0.5$; the cold two-stream rate
+**Closed-form physics.** The kinetic Langmuir frequency at two wavenumbers, one where
+it coincides with Bohm-Gross and one where it is 2.9 per cent above it, with the known
+frequency shift of the grid included, to half a per cent; the tabulated Landau root
+$1.4157 - 0.1533\,i$ at $k\lambda_D = 0.5$; the hard-coded roots themselves, re-derived
+from the Faddeeva function wherever scipy is installed; the cold two-stream rate
 $\omega_{pe}/2\sqrt2$ at $kv_0/\omega_{pe} = \sqrt{3/8}$; the Weibel marginal
-wavenumber $k_c c = \omega_{pe}\sqrt{T_z/T_x - 1}$, checked as a threshold — every
-mode below it grows by more than ten, none above it by more than three; the NRL
+wavenumber $k_c c = \omega_{pe}\sqrt{T_z/T_x - 1}$, checked as a threshold on a quiet
+start with every mode seeded alike — the two modes well below it grow by at least a third
+of $e^{\gamma t}$, and none well above it by more than a factor of two; the NRL
 relaxation rates for a fast beam; the relativistic gyrofrequency
 $\Omega = qB/\gamma m$, which the relativistic pusher reproduces after a full orbit
 while the non-relativistic one overshoots by $\gamma$; the flux average
@@ -56,7 +61,9 @@ removing some but not all.
 **Documented behaviour that is easy to leave untested.** `store_particles=False`
 dropping exactly the diagnostics that need velocities; the openPMD switches and a run
 with no particles to write; the TOML loader's fallback for Python 3.10; `python -m
-jaxincell`; every example setting `JAX_ENABLE_X64` before it imports JAX; and the version fallback for a fresh clone that has not been installed,
+jaxincell`; every example setting `JAX_ENABLE_X64` before it imports JAX; every example
+the documentation names existing under exactly that name; and the version fallback for a
+fresh clone that has not been installed,
 since `jaxincell/version.py` is generated at build time and is not in the repository.
 
 **The interface.** That two runs with one seed agree bit for bit on the CPU, and to
@@ -84,9 +91,16 @@ a hurry, and a tolerance chosen to make today's number pass is not a test.
 
 ## Continuous integration
 
-The workflow in `.github/workflows/` installs the `dev` extra and runs the suite on
-Python 3.10 to 3.13 on every push, and
-`docs.yml` builds the documentation with `-W`, so a broken cross-reference or a
-missing substitution fails the build. The figures are committed rather than rebuilt in
-CI, because the full set takes a few minutes; regenerate them with
-`python docs/scripts/make_all.py` when the numbers they quote would change.
+`build_test.yml` installs the `dev` extra and, on Python 3.10 to 3.13 for every push and
+pull request, runs `flake8` over the whole repository with the configuration in
+`.flake8` (120 columns, McCabe complexity 10) and then the suite under coverage. The
+build fails on any lint violation and on coverage below 100 per cent of statements and
+branches, the threshold set under `[tool.coverage]` in `pyproject.toml`, and it prints
+the ten slowest tests. A second job runs the four quickest examples (collisions, wall
+reflection, energy conservation and the Langmuir scan), so that a change to the
+interface cannot quietly break the scripts people start from; the others take minutes
+each. `docs.yml` builds the documentation with `-W`, so a broken cross-reference or a
+missing substitution fails the build, and the release workflow runs the same tests
+before it builds anything. The figures are committed rather than rebuilt in CI, because
+the full set takes a few minutes; regenerate them with `python docs/scripts/make_all.py`
+when the numbers they quote would change.

@@ -1,30 +1,80 @@
 """Physics tests. Each runs a small simulation and compares a measured rate,
 frequency, threshold or conserved quantity with a closed-form or tabulated
 result from the literature."""
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax import random
 
-from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, epsilon_0,
-                       elementary_charge, mass_electron, temperatures,
-                       elementary_charge as e_charge, speed_of_light as c)
+from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, epsilon_0, mass_electron,
+                       potential, quiet_start, temperatures, elementary_charge as e_charge, speed_of_light as c)
 from jaxincell._collisions import collide
+from jaxincell._core import boris, boris_relativistic, smooth
 from conftest import electron_plasma, growth_rate, mode_amplitude, rate_and_frequency
 
+# Real part of the least-damped root omega/omega_pe of 1 + [1 + zeta Z(zeta)]/(k lambda_D)^2 = 0,
+# zeta = omega/(k v_th), solved with the Faddeeva function (docs/scripts/dispersion.py). Hard-coded
+# because scipy is not a test dependency; test_the_reference_roots_solve_the_dispersion_relation
+# re-derives them wherever scipy is installed.
+LANGMUIR_FREQUENCY = {0.05: 1.0038, 0.10: 1.0152, 0.15: 1.0348, 0.20: 1.0640, 0.25: 1.1057, 0.30: 1.1598}
+LANDAU_ROOT = 1.4157 - 0.1533j          # k lambda_D = 0.5 (Canosa, J. Plasma Phys. 8, 187, 1972)
 
-@pytest.mark.parametrize("k_lambda_d", [0.05, 0.25])
-def test_langmuir_wave_follows_the_bohm_gross_dispersion_relation(k_lambda_d):
-    """A small density perturbation of a Maxwellian plasma oscillates at
-    omega^2 = omega_pe^2 (1 + 3 k^2 lambda_D^2) (Bohm and Gross, Phys. Rev. 75,
-    1851, 1949). With v_th = sqrt(2 k_B T / m), lambda_D = v_th / (sqrt2 omega_pe)."""
+
+def kinetic_langmuir_root(k_lambda_d, guess):
+    """Newton's method on the electrostatic dispersion relation of a Maxwellian, in
+    units where omega_pe = lambda_D = 1, so that v_th = sqrt(2)."""
+    special = pytest.importorskip("scipy.special")
+    kv, omega = np.sqrt(2) * k_lambda_d, complex(guess)
+    for _ in range(50):
+        zeta = omega / kv
+        Z = 1j * np.sqrt(np.pi) * special.wofz(zeta)
+        epsilon = 1 + (1 + zeta * Z) / k_lambda_d ** 2
+        d_epsilon = (Z - 2 * zeta * (1 + zeta * Z)) / (kv * k_lambda_d ** 2)     # Z' = -2 (1 + zeta Z)
+        omega -= epsilon / d_epsilon
+    assert abs(epsilon) < 1e-10
+    return omega
+
+
+def test_the_reference_roots_solve_the_dispersion_relation():
+    """The frequencies the Langmuir and Landau tests compare with, to one unit in the
+    last digit they are quoted to."""
+    for k_lambda_d, frequency in LANGMUIR_FREQUENCY.items():
+        assert abs(kinetic_langmuir_root(k_lambda_d, np.sqrt(1 + 3 * k_lambda_d ** 2)).real - frequency) <= 1e-4
+    root = kinetic_langmuir_root(0.5, LANDAU_ROOT)
+    assert abs(root.real - LANDAU_ROOT.real) <= 1e-4 and abs(root.imag - LANDAU_ROOT.imag) <= 1e-4
+
+
+def discrete_frequency_factor(cells, mode=1):
+    """omega / omega_pe of a cold plasma on this grid: S(k) sqrt(k/K), with
+    S = sinc^3(k dx/2) the quadratic spline and K = (2/dx) sin(k dx/2) the staggered
+    Gauss law (Birdsall and Langdon, Plasma Physics via Computer Simulation, ch. 8)."""
+    theta = np.pi * mode / cells
+    return np.sqrt((np.sin(theta) / theta) ** 6 * theta / np.sin(theta))
+
+
+@pytest.mark.parametrize("k_lambda_d", [0.05, 0.3])
+def test_langmuir_wave_follows_the_kinetic_dispersion_relation(k_lambda_d):
+    """A small density perturbation of a Maxwellian oscillates at the real part of the
+    least-damped kinetic root. At k lambda_D = 0.3 that is 2.9 % above the Bohm-Gross
+    frequency omega_pe sqrt(1 + 3 k^2 lambda_D^2) (Bohm and Gross, Phys. Rev. 75, 1851,
+    1949), so the test tells kinetic from fluid; at 0.05 the two coincide and it checks
+    the plasma frequency. With v_th = sqrt(2 k_B T / m), lambda_D = v_th / (sqrt2 omega_pe).
+
+    The grid lowers the frequency by a known amount: the spline deposit and gather and
+    the staggered Gauss law give omega_pe S(k) sqrt(k/K), 0.40 % low at k dx = 2 pi/32,
+    and the leapfrog raises it by (omega_pe dt)^2/24 = 1e-4. What remains is the grid's
+    correction to the thermal term, a few tenths of a per cent at 0.3, and the timing of
+    the maxima, 0.1 % over 1600 steps; 0.5 % covers both and is a sixth of the gap to
+    Bohm-Gross. The seed a k = 1e-2 keeps the wave above the particle noise: at 1e-3
+    the noise moves the maxima by a per cent or more at k lambda_D >= 0.25."""
     L, cells = 1.0, 32
     k = 2 * np.pi / L
     vth_over_c = k_lambda_d / k * np.sqrt(2) * (0.05 * c * cells / L) / c
-    sim, omega_pe = electron_plasma(20000, L, cells, 0.05, vth_over_c, amplitude_k=1e-3)
-    out = sim.run(800, seed=0, store_particles=False)
+    sim, omega_pe = electron_plasma(20000, L, cells, 0.05, vth_over_c, amplitude_k=1e-2)
+    out = sim.run(1600, seed=0, store_particles=False)
     _, omega = rate_and_frequency(np.asarray(out.t) * omega_pe, np.abs(mode_amplitude(out, 1)))
-    assert abs(omega / np.sqrt(1 + 3 * k_lambda_d ** 2) - 1) < 0.01
+    assert abs(omega / (LANGMUIR_FREQUENCY[k_lambda_d] * discrete_frequency_factor(cells)) - 1) < 5e-3
 
 
 def test_landau_damping_matches_the_kinetic_root():
@@ -41,8 +91,8 @@ def test_landau_damping_matches_the_kinetic_root():
     amplitude = np.abs(mode_amplitude(out, 1))
     floor = amplitude[int(0.8 * amplitude.size):].mean()
     gamma, omega = rate_and_frequency(np.asarray(out.t) * omega_pe, amplitude, above=5 * floor)
-    assert abs(gamma / -0.1533 - 1) < 0.05
-    assert abs(omega / 1.4157 - 1) < 0.02
+    assert abs(gamma / LANDAU_ROOT.imag - 1) < 0.05
+    assert abs(omega / LANDAU_ROOT.real - 1) < 0.02
 
 
 def test_cold_two_stream_grows_at_the_fluid_rate():
@@ -64,45 +114,70 @@ def test_cold_two_stream_grows_at_the_fluid_rate():
     assert abs(growth_rate(t, amplitude, window) / (1 / (2 * np.sqrt(2))) - 1) < 0.05
 
 
+# Growth rates of modes 1 and 2 of the Weibel box below, from the transverse kinetic
+# dispersion relation (docs/scripts/dispersion.py, weibel_dispersion), in units of omega_pe
+WEIBEL_RATES = {1: 0.0473, 2: 0.0428}
+
+
 def test_weibel_growth_is_confined_to_the_unstable_wavenumbers():
     """A bi-Maxwellian with T_z > T_x drives the Weibel instability (Weibel,
     Phys. Rev. Lett. 2, 83, 1959). Setting omega = 0 in the transverse
     dispersion relation gives the marginal wavenumber k_c c = omega_pe
-    sqrt(T_z/T_x - 1): modes well below it grow, modes above it do not. The
-    growth rate vanishes as k approaches k_c, so the two sides are read off at
-    0.7 k_c and 1.2 k_c."""
+    sqrt(T_z/T_x - 1): modes below it grow, modes above it do not. The box holds four
+    marginal wavelengths, so modes 1-3 lie below k_c, mode 4 on it and modes 5-8 above.
+    The growth rate vanishes as k approaches k_c, so the two sides are read off at
+    k < 0.7 k_c (modes 1 and 2) and k > 1.2 k_c (modes 5-8).
+
+    Every mode starts from the same coherent transverse current on a quiet start. From
+    random velocities at this particle count the noise in a stable mode changes by as
+    much between two windows as the slower unstable mode grows, whatever baseline is
+    used. The gain is the median of |B_k| over the last ten stored samples against the
+    median over 2 < t omega_pe < 6, once the field has built up from zero. A seeded
+    current puts part of each unstable mode into its damped root, so an unstable mode
+    has to gain a third of exp(gamma dt), 4.4 and 3.4 here, where it gains 8 and 12; a
+    stable mode has no growing root and has to stay within a factor of two, where it
+    stays within 1.2."""
     ratio, n_e, n = 25.0, 1e15, 12000
     omega_pe = np.sqrt(n_e * e_charge ** 2 / (epsilon_0 * mass_electron))
     k_c = np.sqrt(ratio - 1) * omega_pe / c
-    L = 4.0 * 2 * np.pi / k_c                       # modes 1-3 unstable, 5-8 stable
-    vth_x = 0.02 * c
-    rng = np.random.default_rng(0)
-    x = np.linspace(-L / 2, L / 2, n, endpoint=False) + L / (2 * n)
-    v = np.stack([vth_x / np.sqrt(2) * rng.standard_normal(n), np.zeros(n),
-                  vth_x * np.sqrt(ratio / 2) * rng.standard_normal(n)], axis=1)
-    electrons = Species.electrons(n=n, density=n_e, vth=(vth_x, 0.0, vth_x * np.sqrt(ratio)))
-    electrons = electrons.replace(x=np.stack([x, np.zeros(n), np.zeros(n)], axis=1), v=v)
+    L = 4.0 * 2 * np.pi / k_c
+    vth = (0.02 * c, 0.0, 0.02 * c * np.sqrt(ratio))
+    x, v = quiet_start(n, L, vth=vth)
+    v[:, 2] += 1e-2 * vth[2] * sum(np.sin(2 * np.pi * m * x[:, 0] / L) for m in range(1, 9))
+    electrons = Species.electrons(n=n, density=n_e, vth=vth).replace(x=x, v=v)
     ions = Species.ions(n=n // 4, density=n_e, mass_ratio=1e6, vth=(0.0, 0.0, 0.0), quiet=True)
     sim = Simulation(Domain(length=L, cells=128, dt_over_dx_c=0.5), [electrons, ions], Solver(filter_passes=0))
     out = sim.run(3000, seed=0, store_every=20)
+    t = np.asarray(out.t) * omega_pe
     B_k = np.abs(np.fft.rfft(np.asarray(out.B[:, :, 1]), axis=1))
-    modes = np.arange(1, 9)
-    gain = B_k[-1, modes] / B_k[0, modes]
-    unstable = [i for i, m in enumerate(modes) if 2 * np.pi * m / L < 0.7 * k_c]
-    stable = [i for i, m in enumerate(modes) if 2 * np.pi * m / L > 1.2 * k_c]
-    assert min(gain[unstable]) > 10.0, f"unstable modes only reached {gain[unstable]}"
-    assert max(gain[stable]) < 3.0, f"stable modes reached {gain[stable]}"
+    early, late = (t > 2) & (t < 6), np.arange(t.size) >= t.size - 10
+    gain = np.median(B_k[late], axis=0) / np.median(B_k[early], axis=0)
+    elapsed = np.median(t[late]) - np.median(t[early])
+    k = 2 * np.pi * np.arange(B_k.shape[1]) / L
+    unstable = [m for m in range(1, 9) if k[m] < 0.7 * k_c]
+    stable = [m for m in range(1, 9) if k[m] > 1.2 * k_c]
+    assert unstable == [1, 2] and stable == [5, 6, 7, 8]
+    for m in unstable:
+        assert gain[m] > np.exp(WEIBEL_RATES[m] * elapsed) / 3, f"mode {m} only grew by {gain[m]:.2f}"
+    assert max(gain[stable]) < 2.0, f"stable modes reached {gain[stable]}"
     total = np.asarray(diagnostics(out)["total"])
     assert float(np.max(np.abs(total / total[0] - 1))) < 1e-3
 
 
-def two_stream(algorithm, steps, n=3000, **solver):
+def two_stream(algorithm, steps, n=3000, drift=6e7, quiet=False, **solver):
     """The warm two-stream instability used by the conservation tests."""
-    e = Species.electrons(n=n, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(6e7, 0, 0), plus_minus=True,
-                          perturbation_amplitude=5e-7, perturbation_mode=1)
-    i = Species.ions(n=n, density=4.37e17, electrons=e)
+    e = Species.electrons(n=n, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(drift, 0, 0), plus_minus=True,
+                          quiet=quiet, perturbation_amplitude=5e-7, perturbation_mode=1)
+    i = Species.ions(n=n, density=4.37e17, electrons=e, quiet=quiet)
     sim = Simulation(Domain(length=0.01, cells=64, dt_over_dx_c=4.5), [e, i], Solver(algorithm=algorithm, **solver))
     return sim.run(steps, seed=3)
+
+
+@pytest.fixture(scope="module")
+def quiet_two_stream():
+    """One quiet two-stream run read by two tests: the number of steps is static, so
+    every distinct run is a compilation of its own."""
+    return two_stream("explicit", 300, n=4000, drift=5e7, quiet=True)
 
 
 def test_explicit_scheme_has_bounded_energy_error_and_an_exact_gauss_law():
@@ -127,12 +202,12 @@ def test_implicit_scheme_conserves_energy_to_round_off():
     assert float(np.max(np.abs(total / total[0] - 1))) < 1e-11
 
 
-def test_periodic_box_conserves_charge_exactly_and_momentum_to_the_solver_error():
+def test_periodic_box_conserves_charge_exactly_and_momentum_to_the_solver_error(quiet_two_stream):
     """In a periodic box the deposited charge is exactly the charge carried by
     the particles. Depositing and gathering with the same shape makes the
     interparticle force antisymmetric, so the momentum drift is not the
     interpolation but the residual of the staggered field solve."""
-    out = two_stream("explicit", 300, n=4000)
+    out = quiet_two_stream
     charge = np.asarray(out.charge * out.weight[-1])
     on_grid = np.asarray(out.rho).sum(axis=1) * out.dx
     assert float(np.abs(on_grid - charge.sum()).max()) < 1e-12 * float(np.abs(charge).sum())
@@ -175,14 +250,15 @@ def test_a_wall_returns_the_flux_average_of_its_reflection_law():
     average over the distribution would be 0.71. The ratio of fluxes is the
     coefficient that sets the floating potential (Hobbs and Wesson, Plasma Phys.
     9, 85, 1967). What comes back, comes back at restitution times its speed."""
-    from jaxincell import quiet_start
-
     sigma, length, n = 1e6, 1e-2, 100_000
     domain = Domain(length=length, cells=64, dt_over_dx_c=50.0, particle_bc="absorbing",
                     field_bc="absorbing", restitution=0.5)
     steps = int(round(0.1 * length / sigma / domain.dt))          # a tenth of a transit: nothing hits twice
     _, v0 = quiet_start(n, length, vth=(np.sqrt(2) * sigma, 0, 0))
-    law = lambda speed: jnp.exp(-speed ** 2 / (2 * sigma ** 2))
+
+    def law(speed):
+        return jnp.exp(-speed ** 2 / (2 * sigma ** 2))
+
     electrons = Species.electrons(n=n, density=1e6, vth=(np.sqrt(2) * sigma, 0, 0), quiet=True, reflection=law)
     out = Simulation(domain, [electrons], Solver()).run(steps, seed=0, store_every=steps)
     w = np.asarray(out.weight[-1])
@@ -246,33 +322,29 @@ def test_collisions_reproduce_the_spitzer_relaxation_rates():
 
 def test_relativistic_pusher_gyrates_at_the_relativistic_frequency():
     """A charge in a uniform magnetic field gyrates at Omega = qB/(gamma m), not
-    qB/m. The relativistic Boris rotation reproduces that frequency and keeps
-    gamma fixed to round-off, because a magnetic field does no work."""
-    from jaxincell._core import boris, boris_relativistic
-
+    qB/m. The relativistic Boris rotation reproduces that frequency and, after a
+    whole orbit, still has the speed it started with, because a magnetic field does
+    no work."""
     B0, speed = 0.05, 0.9 * c
     gamma = 1 / np.sqrt(1 - (speed / c) ** 2)
-    omega_c = elementary_charge * B0 / (gamma * mass_electron)
+    omega_c = e_charge * B0 / (gamma * mass_electron)
     steps = 400
     dt = 2 * np.pi / omega_c / steps                       # one relativistic orbit
-    field_E = jnp.zeros((1, 3))
-    field_B = jnp.array([[0.0, 0.0, B0]])
-    charge_to_mass = jnp.array([[elementary_charge / mass_electron]])
+    field_E, field_B = jnp.zeros((1, 3)), jnp.array([[0.0, 0.0, B0]])
+    charge_to_mass = jnp.array([[e_charge / mass_electron]])
 
-    v = jnp.array([[speed, 0.0, 0.0]])
-    speeds, angles = [], []
-    for _ in range(steps):
-        v = boris_relativistic(v, field_E, field_B, charge_to_mass, dt)
-        speeds.append(float(jnp.linalg.norm(v)))
-        angles.append(float(jnp.arctan2(v[0, 1], v[0, 0])))
-    assert max(abs(s / speed - 1) for s in speeds) < 1e-12   # gamma is conserved
+    def orbit(push):
+        def step(v, _):
+            return push(v, field_E, field_B, charge_to_mass, dt), None
+        return jax.lax.scan(step, jnp.array([[speed, 0.0, 0.0]]), None, length=steps)[0]
+
+    v = orbit(boris_relativistic)
+    assert abs(float(jnp.linalg.norm(v)) / speed - 1) < 1e-12
     # after one relativistic period the velocity is back where it started
-    assert abs(angles[-1]) < 2 * np.pi / steps
+    assert abs(float(jnp.arctan2(v[0, 1], v[0, 0]))) < 2 * np.pi / steps
 
     # the non-relativistic pusher turns gamma times too fast and so overshoots
-    v = jnp.array([[speed, 0.0, 0.0]])
-    for _ in range(steps):
-        v = boris(v, field_E, field_B, jnp.full((1, 1), elementary_charge / mass_electron), dt)
+    v = orbit(boris)
     assert abs(float(jnp.arctan2(v[0, 1], v[0, 0]))) > 1.0
 
 
@@ -332,8 +404,6 @@ def test_the_filter_moves_the_sources_around_without_inventing_any(wall, conserv
     """Smoothing redistributes charge; it must not create it. A reflective wall
     mirrors the stencil back into the box, so the total is untouched; only an
     absorbing wall, which is supposed to let charge leave, may lose any."""
-    from jaxincell._core import smooth
-
     rho = np.zeros(24)
     rho[[0, 3, 20, 23]] = 1.0                    # deliberately loaded against both walls
     code = {"periodic": (0, 0), "reflective": (1, 1), "absorbing": (2, 2)}[wall]
@@ -344,20 +414,13 @@ def test_the_filter_moves_the_sources_around_without_inventing_any(wall, conserv
         assert total < 0.95 * rho.sum()
 
 
-def test_electrostatic_solvers_agree_and_both_satisfy_gauss():
+def test_electrostatic_solvers_agree_and_both_satisfy_gauss(quiet_two_stream):
     """`field_solver="gauss"` recomputes E_x from the charge density instead of
     advancing it with the current. On an electrostatic problem the two must
     agree to the discretisation error, and both must satisfy the discrete Gauss
     law: one by construction, the other because the current conserves charge."""
-    def run(field_solver):
-        e = Species.electrons(n=4000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(5e7, 0, 0),
-                              plus_minus=True, quiet=True, perturbation_amplitude=5e-7,
-                              perturbation_mode=1)
-        i = Species.ions(n=4000, density=4.37e17, electrons=e, quiet=True)
-        return Simulation(Domain(length=0.01, cells=64, dt_over_dx_c=4.5), [e, i],
-                          Solver(field_solver=field_solver)).run(300, seed=3)
-
-    ampere, gauss = run("ampere"), run("gauss")
+    ampere = quiet_two_stream
+    gauss = two_stream("explicit", 300, n=4000, drift=5e7, quiet=True, field_solver="gauss")
     for out in (ampere, gauss):
         assert float(np.asarray(diagnostics(out)["gauss_residual"]).max()) < 1e-10
     field = np.asarray(ampere.E[:, :, 0])
@@ -368,21 +431,28 @@ def test_relativistic_run_conserves_the_energy_the_pusher_conserves():
     """With `relativistic=True` the kinetic energy is sum (gamma - 1) m c^2, and
     the diagnostic has to follow the solver: reporting the Newtonian energy for a
     relativistic run would show a spurious drift where there is none."""
-    def run(relativistic):
+    def run(relativistic, steps):
         e = Species.electrons(n=2000, density=1e17, vth=(0.3 * c, 0, 0), quiet=True,
                               perturbation_amplitude=1e-5, perturbation_mode=1)
         i = Species.ions(n=2000, density=1e17, electrons=e, quiet=True)
-        out = Simulation(Domain(length=0.05, cells=32, dt_over_dx_c=1.0), [e, i],
-                         Solver(relativistic=relativistic)).run(200, seed=0)
-        return out, np.asarray(diagnostics(out)["total"])
+        return Simulation(Domain(length=0.05, cells=32, dt_over_dx_c=1.0), [e, i],
+                          Solver(relativistic=relativistic)).run(steps, seed=0)
 
-    out, total = run(True)
+    out = run(True, 200)
+    total = np.asarray(diagnostics(out)["total"])
     assert float(np.abs(np.asarray(out.v)).max()) > 0.5 * c      # relativity matters here
     assert float(np.max(np.abs(total / total[0] - 1))) < 1e-3
     gamma = 1 / np.sqrt(1 - np.sum(np.asarray(out.v[0]) ** 2, axis=-1) / c ** 2)
     expected = float(np.sum((gamma - 1) * np.asarray(out.mass * out.weight[0]) * c ** 2))
     assert abs(float(diagnostics(out)["kinetic"][0]) / expected - 1) < 1e-12
-    assert float(diagnostics(run(False)[0])["kinetic"][0]) < expected   # Newtonian is lower
+
+    # a Newtonian run reports (1/2) m v^2, which is lower; two steps are enough to read it
+    # (the frequency diagnostic needs more than one stored sample)
+    newtonian = run(False, 2)
+    half_mv2 = float(np.sum(0.5 * np.asarray(newtonian.mass * newtonian.weight[0])
+                            * np.sum(np.asarray(newtonian.v[0]) ** 2, axis=-1)))
+    assert abs(float(diagnostics(newtonian)["kinetic"][0]) / half_mv2 - 1) < 1e-12
+    assert half_mv2 < expected
 
 
 def test_an_external_magnetic_field_magnetises_the_plasma():
@@ -391,7 +461,7 @@ def test_an_external_magnetic_field_magnetises_the_plasma():
     at Omega_c = qB/m in the y-z plane at constant speed, since a magnetic field
     does no work."""
     B0, cells, length, n = 5e-4, 32, 1.0, 2000
-    omega_c = elementary_charge * B0 / mass_electron
+    omega_c = e_charge * B0 / mass_electron
     # tenuous and cold, so that the self-consistent fields do not compete
     e = Species.electrons(n=n, density=1e6, vth=(0, 0, 0), drift=(0, 1e5, 0), quiet=True)
     i = Species.ions(n=n, density=1e6, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
@@ -428,11 +498,9 @@ def test_a_floating_wall_holds_the_sheath_drop_of_hobbs_and_wesson():
     what the formula needs; between two absorbing walls the tail is stripped within a
     few transits. The mass ratio is 100 to fit the ion transit into a test.
     """
-    from jaxincell import potential, quiet_start
-
     T_e, density, mass_ratio, n, cells, steps = 1.0, 1e16, 100.0, 20000, 60, 1500
-    sigma = np.sqrt(T_e * elementary_charge / mass_electron)
-    omega_pe = np.sqrt(density * elementary_charge ** 2 / (epsilon_0 * mass_electron))
+    sigma = np.sqrt(T_e * e_charge / mass_electron)
+    omega_pe = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
     debye, c_s = sigma / omega_pe, sigma / np.sqrt(mass_ratio)
     length = 30 * debye
     domain = Domain(length=length, cells=cells, dt_over_dx_c=(0.2 / omega_pe) * c / (length / cells),
@@ -457,5 +525,5 @@ def test_a_floating_wall_holds_the_sheath_drop_of_hobbs_and_wesson():
         edge = 0.5 * (bins[:-1] + bins[1:])[np.argmax(flow >= c_s)]
         drop = np.interp(edge, faces, phi.mean(axis=0) - phi[:, -1].mean())
         assert abs(drop / expected - 1) < 0.2, (reflection, drop, expected)
-        rho = np.asarray(out.rho)[late].mean(axis=0) / (density * elementary_charge)
+        rho = np.asarray(out.rho)[late].mean(axis=0) / (density * e_charge)
         assert rho[-3:].mean() > 0.02 and abs(rho[: cells // 2].mean()) < 0.01
