@@ -68,6 +68,7 @@ fig.tight_layout()
 savefig(fig, "landau_damping")
 
 kinetic = np.array([landau_root(k).real for k in scan])
+dispersion_deviation = 100 * np.abs(np.array(measured) - kinetic) / kinetic
 record(landau_k_lambda_D=0.5,
        landau_gamma_measured=round(float(gamma), 4), landau_gamma_theory=round(float(root.imag), 4),
        landau_gamma_deviation_percent=round(float(100 * abs(gamma - root.imag) / abs(root.imag)), 1),
@@ -75,4 +76,4 @@ record(landau_k_lambda_D=0.5,
        landau_omega_deviation_percent=round(float(100 * abs(omega - root.real) / root.real), 1),
        landau_particles=PARTICLES, landau_seed_ak=SEED_AK, landau_cells=CELLS,
        landau_peaks_used=int(peaks.size), landau_omega_pe_dt=0.05,
-       landau_dispersion_max_deviation_percent=round(float(np.max(100 * np.abs(np.array(measured) - kinetic) / kinetic)), 1))
+       landau_dispersion_max_deviation_percent=round(float(np.max(dispersion_deviation)), 1))

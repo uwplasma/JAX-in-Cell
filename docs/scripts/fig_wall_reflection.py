@@ -14,7 +14,9 @@ steps = int(round(0.1 * LENGTH / SIGMA / domain.dt))             # a tenth of a 
 x, v = quiet_start(N, LENGTH, vth=(np.sqrt(2) * SIGMA, 0, 0))
 returned, energy = [], []
 for u in WIDTHS * SIGMA:
-    law = lambda speed, u=u: jnp.exp(-speed ** 2 / (2 * u ** 2))
+    def law(speed, u=u):
+        return jnp.exp(-speed ** 2 / (2 * u ** 2))
+
     electrons = Species.electrons(n=N, density=1e6, vth=(np.sqrt(2) * SIGMA, 0, 0), reflection=law).replace(x=x, v=v)
     w = np.asarray(Simulation(domain, [electrons], Solver()).run(steps, store_every=steps).weight[-1])
     w0 = w.max()                                  # the weight of a particle that met no wall

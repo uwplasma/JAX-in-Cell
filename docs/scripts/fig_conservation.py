@@ -19,7 +19,11 @@ def run(**solver):
     return simulation, simulation.run(STEPS, seed=3)
 
 
-error = lambda out: np.abs(np.asarray(diagnostics(out)["total"]) / diagnostics(out)["total"][0] - 1)
+def error(out):
+    total = np.asarray(diagnostics(out)["total"])
+    return np.abs(total / total[0] - 1)
+
+
 simulation, explicit = run(algorithm="explicit")
 implicit = {n: run(algorithm="implicit", picard_iterations=n)[1] for n in (1, 2, 4, 8)}
 

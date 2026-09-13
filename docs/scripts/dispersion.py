@@ -105,8 +105,7 @@ def landau_root(k_lambda_D, wp=1.0):
     vth = np.sqrt(2.0)  # lambda_D = vth / (sqrt(2) wp) = 1 with wp = 1
     k = k_lambda_D
     species = [{"wp": wp, "u": 0.0, "vth": vth}]
-    func = lambda w: electrostatic_epsilon(w, k, species)
-    return most_unstable_root(func, (0.5, 3.0), (-1.5, 0.05))
+    return most_unstable_root(lambda w: electrostatic_epsilon(w, k, species), (0.5, 3.0), (-1.5, 0.05))
 
 
 def purely_growing_roots(func, scale, gamma_max=1.0, samples=2000):
@@ -129,7 +128,9 @@ def purely_growing_roots(func, scale, gamma_max=1.0, samples=2000):
     Returns:
         list: The growth rates found, ascending; empty when the mode is stable.
     """
-    real = lambda g: func(1j * g)[0].real
+    def real(g):
+        return func(1j * g)[0].real
+
     grid = np.linspace(1e-4, gamma_max, samples) * scale
     values = np.array([real(g) for g in grid])
     roots = []

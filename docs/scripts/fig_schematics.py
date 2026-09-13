@@ -50,13 +50,15 @@ for tt in (0, 1.0):
     ax.plot(tt, rows["E, B"], "s", ms=7, color=C_IONS)
     ax.plot(tt, rows["J"], "D", ms=6, color=COLORS["green"])
 ax.plot(0.5, rows["E, B"], "s", ms=7, mfc="white", mec=C_IONS)
-ax.annotate("", xy=(0.47, rows["x"]), xytext=(-0.47, rows["x"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_ELECTRONS))
-ax.annotate("", xy=(1.47, rows["x"]), xytext=(0.53, rows["x"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_ELECTRONS))
-ax.annotate("", xy=(0.97, rows["v"]), xytext=(0.03, rows["v"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_ELECTRONS))
+push = dict(arrowstyle="->", lw=1.1, color=C_ELECTRONS)
+ax.annotate("", xy=(0.47, rows["x"]), xytext=(-0.47, rows["x"]), arrowprops=push)
+ax.annotate("", xy=(1.47, rows["x"]), xytext=(0.53, rows["x"]), arrowprops=push)
+ax.annotate("", xy=(0.97, rows["v"]), xytext=(0.03, rows["v"]), arrowprops=push)
 ax.text(0.5, rows["v"] + 0.18, r"Boris push with $\mathbf{E}^{n+1/2}, \mathbf{B}^{n+1/2}$ at $x^{n+1/2}$",
         ha="center", fontsize=8.5)
-ax.annotate("", xy=(0.47, rows["E, B"]), xytext=(0.03, rows["E, B"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_IONS))
-ax.annotate("", xy=(0.97, rows["E, B"]), xytext=(0.53, rows["E, B"]), arrowprops=dict(arrowstyle="->", lw=1.1, color=C_IONS))
+advance = dict(arrowstyle="->", lw=1.1, color=C_IONS)
+ax.annotate("", xy=(0.47, rows["E, B"]), xytext=(0.03, rows["E, B"]), arrowprops=advance)
+ax.annotate("", xy=(0.97, rows["E, B"]), xytext=(0.53, rows["E, B"]), arrowprops=advance)
 ax.text(0.25, rows["E, B"] - 0.38, r"$\Delta t/2$: E, then B", ha="center", fontsize=8)
 ax.text(0.75, rows["E, B"] - 0.38, r"$\Delta t/2$: B, then E", ha="center", fontsize=8)
 ax.text(0.0, rows["J"] - 0.32, r"$\mathbf{J}^{n}$ from $x^{n-1/2}\to x^{n+1/2}$", ha="center", fontsize=8)
@@ -86,6 +88,8 @@ ax = axes[1]
 xp = 0.3
 for i in range(-2, 3):
     ax.axvline(i, color="#DDDDDD", lw=0.8, zorder=0)
+
+
 def _s2(d):
     """The quadratic-spline weight at a distance of ``d`` cells."""
     return 0.75 - d**2 if abs(d) <= 0.5 else (0.5 * (1.5 - abs(d))**2 if abs(d) <= 1.5 else 0.0)

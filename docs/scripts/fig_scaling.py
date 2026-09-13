@@ -20,8 +20,11 @@ def timed(particles, cells, algorithm="explicit", repeats=3):
     ions = Species.ions(n=particles, density=4.37e17, electrons=electrons, quiet=True)
     simulation = Simulation(Domain(length=0.01, cells=cells, dt_over_dx_c=4.5), [electrons, ions],
                             Solver(algorithm=algorithm, filter_passes=2))
-    run = lambda: simulation.run(STEPS, seed=0, store_particles=False).E.block_until_ready()
-    run()                                              # compile
+
+    def run():
+        simulation.run(STEPS, seed=0, store_particles=False).E.block_until_ready()
+
+    run()                                            # compile
     times = []
     for _ in range(repeats):
         start = time.perf_counter()
