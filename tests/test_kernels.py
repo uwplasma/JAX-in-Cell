@@ -136,19 +136,20 @@ def test_boris_pusher_rotation_and_kicks():
 
 
 def test_relativistic_pusher_conserves_energy_in_a_magnetic_field():
-    """The relativistic Boris step conserves the Lorentz factor in a pure
-    magnetic field, and in a pure electric field reproduces p = p0 + q E t. The
-    momenta are of order 1e-22 kg m/s, so they are compared relative to their own
-    magnitude; the kick is 8 % of p0, and 1e-12 of p is what converting between v
-    and p four times costs in round-off."""
+    """The relativistic Boris step, which advances u = gamma v, conserves the Lorentz
+    factor in a pure magnetic field, and in a pure electric field reproduces
+    p = p0 + q E t. The momenta are of order 1e-22 kg m/s, so they are compared relative
+    to their own magnitude; the kick is 8 % of p0, and 1e-12 of p is far above the
+    round-off of one step, which no longer converts between v and u."""
     q, m = -elementary_charge, mass_electron
     v = jnp.array([[0.6 * c, 0.3 * c, 0.0]])
-    v_new = boris_relativistic(v, jnp.zeros((1, 3)), jnp.array([[0.0, 0.0, 1.0]]), q / m, 1e-12)
-    assert abs(float(lorentz_factor(v_new)[0] / lorentz_factor(v)[0]) - 1) < 1e-13
+    u = lorentz_factor(v)[:, None] * v
+    u_new = boris_relativistic(u, jnp.zeros((1, 3)), jnp.array([[0.0, 0.0, 1.0]]), q / m, 1e-12)
+    assert abs(float(jnp.linalg.norm(u_new) / jnp.linalg.norm(u)) - 1) < 1e-13
     E = jnp.array([[1e8, 0.0, 0.0]])
-    v_new = boris_relativistic(v, E, jnp.zeros((1, 3)), q / m, 1e-12)
-    p_expected = np.asarray(lorentz_factor(v)[0] * m * v[0] + q * E[0] * 1e-12)
-    p_new = np.asarray(lorentz_factor(v_new)[0] * m * v_new[0])
+    u_new = boris_relativistic(u, E, jnp.zeros((1, 3)), q / m, 1e-12)
+    p_expected = np.asarray(m * u[0] + q * E[0] * 1e-12)
+    p_new = np.asarray(m * u_new[0])
     assert np.all(np.abs(p_new - p_expected) <= 1e-12 * np.abs(p_expected).max())
 
 

@@ -28,6 +28,8 @@ def _enable_double_precision(environ):
 
 _enable_double_precision(os.environ)
 
+_BETA2_MAX = 1 - 1e-5     # largest v^2/c^2 of a velocity entering a relativistic run; see Simulation._momentum
+
 __all__ = ["Simulation", "Output", "load_toml", "quiet_start"]
 
 
@@ -38,7 +40,8 @@ class Output:
     are those of one physical particle, and ``weight`` is the history of the
     pseudo-particle weights, which fall as absorbing walls collect the particles.
     ``state`` is the final loop state and can be passed back to
-    :meth:`Simulation.run` to continue."""
+    :meth:`Simulation.run` to continue; in a relativistic run it carries the momentum
+    per unit mass :math:`\\gamma\\mathbf v` where ``v`` has the velocity."""
     t: object
     x: object
     v: object
@@ -219,23 +222,24 @@ class Simulation:
                                                for s, block in zip(self.species, self.blocks)]), 0.0, 1.0)
                      for side in (0, 1))
 
-    def _thermalise(self, key, x, v):
+    def _thermalise(self, key, x, u):
         """Redraw the velocity of every particle that crossed a thermal wall from the
         half-Maxwellian flux of its species: the normal speed from the Rayleigh
         distribution :math:`\\sigma\\sqrt{-2\\ln U}`, pointing into the box, and the
-        tangential components from the Maxwellian, with :math:`\\sigma = v_{th}/\\sqrt2`."""
+        tangential components from the Maxwellian, with :math:`\\sigma = v_{th}/\\sqrt2`.
+        Takes and returns the carried ``u`` (:meth:`_momentum`)."""
         d = self.domain
         if 3 not in d.particle_bc:
-            return v
+            return u
         sigma = jnp.concatenate([jnp.broadcast_to(jnp.asarray(s.vth) / jnp.sqrt(2.0), (s.n, 3))
                                  for s in self.species])
         k_normal, k_tangential = random.split(key)
-        u = random.uniform(k_normal, (v.shape[0],), minval=jnp.finfo(v.dtype).tiny)
+        uniform = random.uniform(k_normal, (u.shape[0],), minval=jnp.finfo(u.dtype).tiny)
         left = x[:, 0] < -d.length / 2
-        new = (sigma * random.normal(k_tangential, v.shape)).at[:, 0].set(
-            jnp.where(left, 1.0, -1.0) * sigma[:, 0] * jnp.sqrt(-2 * jnp.log(u)))
+        new = (sigma * random.normal(k_tangential, u.shape)).at[:, 0].set(
+            jnp.where(left, 1.0, -1.0) * sigma[:, 0] * jnp.sqrt(-2 * jnp.log(uniform)))
         hit = (left & (d.particle_bc[0] == 3)) | ((x[:, 0] > d.length / 2) & (d.particle_bc[1] == 3))
-        return jnp.where(hit[:, None], new, v)
+        return jnp.where(hit[:, None], self._momentum(new), u)
 
     @staticmethod
     def _split_step_key(key):
@@ -246,6 +250,36 @@ class Simulation:
         so keys derived from one parent in two ways coincide and two consumers draw
         the same numbers."""
         return random.split(key, 3)
+
+    def _velocity(self, u):
+        """The velocity of the carried ``u``, which is :math:`\\gamma\\mathbf v` in a
+        relativistic run and the velocity itself otherwise."""
+        if not self.solver.relativistic:
+            return u
+        return u / jnp.sqrt(1 + jnp.sum(u * u, axis=1, keepdims=True) / c ** 2)
+
+    def _momentum(self, v):
+        """The carried ``u`` of a velocity: :math:`\\gamma\\mathbf v` in a relativistic run,
+        the velocity itself otherwise.
+
+        A drawn velocity can reach or pass :math:`c` -- the tail of a Maxwellian sampled as
+        if Newtonian, or a drift given too close to it -- and is then not a velocity. In a
+        relativistic run a speed with :math:`v^2/c^2 > 1 - 10^{-5}` is brought back to that
+        speed along its own direction, which caps :math:`\\gamma` at 316. The margin
+        :math:`10^{-5}` is about a hundred times the resolution of single precision, where
+        :math:`\\gamma` is then still known to 1 %. A Newtonian run has no speed limit and
+        leaves velocities, and their derivatives, alone."""
+        if not self.solver.relativistic:
+            return v
+        beta2 = jnp.sum(v * v, axis=1, keepdims=True) / c ** 2
+        v = v * jnp.sqrt(_BETA2_MAX / jnp.maximum(beta2, _BETA2_MAX))
+        return v / jnp.sqrt(1 - jnp.sum(v * v, axis=1, keepdims=True) / c ** 2)
+
+    def _collide_momenta(self, key, x, u, w, qm, m, dt):
+        """The collision operator acts on velocities; a relativistic run converts to it and back."""
+        if self.collisions is None:
+            return u
+        return self._momentum(self._collide(key, x, self._velocity(u), w, qm, m, dt))
 
     # -- initial state ------------------------------------------------------------------
     def initial_state(self, key):
@@ -291,8 +325,8 @@ class Simulation:
             ms.append(jnp.full((s.n,), s.mass))
         x, v = jnp.concatenate(xs), jnp.concatenate(vs)
         w, q, m = jnp.concatenate(ws), jnp.concatenate(qs), jnp.concatenate(ms)
-        limit = 0.99 * c
-        v = jnp.clip(v, -limit, limit)
+        u = self._momentum(v)
+        v = self._velocity(u)
         qm = q / m
         box = (L, d.length_y, d.length_z)
         if self.solver.algorithm == "explicit":
@@ -302,15 +336,15 @@ class Simulation:
             # the initial field has to be built from the density the first step will
             # actually see; otherwise the discrete Gauss law starts out violated and
             # stays that way for the whole run.
-            x, v, w, qm = apply_particle_bc(x + 0.5 * dt * v, v, w, qm, box, d.particle_bc, d.restitution,
+            x, u, w, qm = apply_particle_bc(x + 0.5 * dt * v, u, w, qm, box, d.particle_bc, d.restitution,
                                             self._reflection(v), dx)
-            x_integer = wrap_positions(x - 0.5 * dt * v, w, box, d.particle_bc, dx)
+            x_integer = wrap_positions(x - 0.5 * dt * self._velocity(u), w, box, d.particle_bc, dx)
         else:
             x_integer = x
         rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
         E = jnp.zeros((d.cells, 3)).at[:, 0].set(E_x_from_rho(rho, dx, d.field_bc))
         B = jnp.zeros((d.cells, 3))
-        return (E, B, x, v, w, qm, rho, key), (m, q)
+        return (E, B, x, u, w, qm, rho, key), (m, q)
 
     def _smooth(self, f):
         s = self.solver
@@ -381,7 +415,8 @@ class Simulation:
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
         box = (L, d.length_y, d.length_z)
         m, q = extra
-        E, B, x_half, v, w, qm, rho_n, key = carry
+        E, B, x_half, u, w, qm, rho_n, key = carry
+        v = self._velocity(u)
         # First half step: sources from the motion x^n -> x^{n+1/2}. The density at x^n
         # is the one the previous step ended on (or the initial one), carried in the
         # state rather than deposited again from wrap(x^{n+1/2} - dt v/2), which is
@@ -389,13 +424,15 @@ class Simulation:
         rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, jnp.sum(q * w * v[:, 0]) / L, rho_n)
         E, B = half_step_fields(E, B, J1, dt / 2, dx, d.field_bc, electric_first=True)
         # push with the fields at t^{n+1/2}
-        v = self._accelerate(v, self._fields_at(x_half, E, B, rho_half), qm, dt)
+        u = self._accelerate(u, self._fields_at(x_half, E, B, rho_half), qm, dt)
         key, k_collide, k_wall = self._split_step_key(key)
-        v = self._collide(k_collide, x_half, v, w, qm, m, dt)
+        u = self._collide_momenta(k_collide, x_half, u, w, qm, m, dt)
+        v = self._velocity(u)
         x_free = x_half + dt * v
-        x_next_half, v, w, qm = apply_particle_bc(x_free, v, w, qm, box, d.particle_bc, d.restitution,
+        x_next_half, u, w, qm = apply_particle_bc(x_free, u, w, qm, box, d.particle_bc, d.restitution,
                                                   self._reflection(v), dx)
-        v = self._thermalise(k_wall, x_free, v)
+        u = self._thermalise(k_wall, x_free, u)
+        v = self._velocity(u)
         x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
         # Second half step, x^{n+1/2} -> x^{n+1}, starting from the charge density the
         # first half already ended on. Depositing it again here would use the weights
@@ -406,7 +443,7 @@ class Simulation:
         E, B = half_step_fields(E, B, J2, dt / 2, dx, d.field_bc, electric_first=False)
         if self.solver.field_solver == "gauss":
             E = E.at[:, 0].set(E_x_from_rho(rho_next, dx, d.field_bc))
-        return (E, B, x_next_half, v, w, qm, rho_next, key), (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
+        return (E, B, x_next_half, u, w, qm, rho_next, key), (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
     def _implicit_step(self, carry, extra):
         """Crank-Nicolson step solved by a fixed number of Picard iterations.
@@ -419,7 +456,7 @@ class Simulation:
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
         box = (L, d.length_y, d.length_z)
         m, q = extra
-        E, B, x, v, w, qm, rho, key = carry
+        E, B, x, u, w, qm, rho, key = carry
         n_sub = self.solver.substeps
         dtau = dt / n_sub
 
@@ -431,22 +468,22 @@ class Simulation:
         def substeps(E_half, B_half, x_mid_all):
             def one(state, inputs):
                 x_mid, k_sub = inputs
-                xs, vs, ws, qms, J_acc = state
+                xs, us, ws, qms, J_acc = state
                 # the current is the transpose of the gather of E, the condition for energy conservation
                 fields, transpose = jax.vjp(lambda E: self._fields_at(x_mid, E, B_half, rho), E_half)
-                v_new = self._accelerate(vs, fields, qms, dtau)
-                v_mid = 0.5 * (vs + v_new)
+                u_new = self._accelerate(us, fields, qms, dtau)
+                v_mid = 0.5 * (self._velocity(us) + self._velocity(u_new))
                 x_free = xs + dtau * v_mid
-                x_new, v_new, ws, qms = apply_particle_bc(x_free, v_new, ws, qms, box, d.particle_bc,
+                x_new, u_new, ws, qms = apply_particle_bc(x_free, u_new, ws, qms, box, d.particle_bc,
                                                           d.restitution, self._reflection(v_mid), dx)
-                v_new = self._thermalise(k_sub, x_free, v_new)
+                u_new = self._thermalise(k_sub, x_free, u_new)
                 new_mid = wrap_positions(x_new - 0.5 * dtau * v_mid, ws, box, d.particle_bc, dx)
                 carried = jnp.concatenate([(q * ws)[:, None] * v_mid, jnp.zeros_like(v_mid)], axis=1)
                 J = transpose(carried)[0] / dx
-                return (x_new, v_new, ws, qms, J_acc + J / n_sub), new_mid
-            init = (x, v, w, qm, jnp.zeros((d.cells, 3)))
-            (xs, vs, ws, qms, J_avg), new_mids = lax.scan(one, init, (x_mid_all, keys))
-            return xs, vs, ws, qms, J_avg, new_mids
+                return (x_new, u_new, ws, qms, J_acc + J / n_sub), new_mid
+            init = (x, u, w, qm, jnp.zeros((d.cells, 3)))
+            (xs, us, ws, qms, J_avg), new_mids = lax.scan(one, init, (x_mid_all, keys))
+            return xs, us, ws, qms, J_avg, new_mids
 
         def picard(state, _):
             E_new, x_mid_all = state
@@ -457,14 +494,15 @@ class Simulation:
             E_next = E + dt * (c ** 2 * curl_B(B_half, E_half, dx, d.field_bc) - J / epsilon_0)
             return (E_next, x_mid_all), None
 
-        x_mid0 = jnp.broadcast_to(wrap_positions(x + 0.5 * dtau * v, w, box, d.particle_bc, dx), (n_sub,) + x.shape)
+        x_mid0 = jnp.broadcast_to(wrap_positions(x + 0.5 * dtau * self._velocity(u), w, box, d.particle_bc, dx),
+                                  (n_sub,) + x.shape)
         (E_new, x_mid_all), _ = lax.scan(picard, (E, x_mid0), None, length=self.solver.picard_iterations)
         E_half = 0.5 * (E + E_new)
         B_new = B - dt * curl_E(E_half, B, dx, d.field_bc)
-        x, v, w, qm, J, _ = substeps(E_half, 0.5 * (B + B_new), x_mid_all)
-        v = self._collide(k_collide, x, v, w, qm, m, dt)
+        x, u, w, qm, J, _ = substeps(E_half, 0.5 * (B + B_new), x_mid_all)
+        u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
         rho_next = deposit(x[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc)
-        return (E_new, B_new, x, v, w, qm, rho_next, key), (x, v, w, E_new, B_new, J, rho_next)
+        return (E_new, B_new, x, u, w, qm, rho_next, key), (x, self._velocity(u), w, E_new, B_new, J, rho_next)
 
     # -- the run ---------------------------------------------------------------------------------
     def run(self, steps, seed=0, store_every=1, store_particles=True, state=None):

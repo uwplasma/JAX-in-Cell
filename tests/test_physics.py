@@ -333,18 +333,18 @@ def test_relativistic_pusher_gyrates_at_the_relativistic_frequency():
     field_E, field_B = jnp.zeros((1, 3)), jnp.array([[0.0, 0.0, B0]])
     charge_to_mass = jnp.array([[e_charge / mass_electron]])
 
-    def orbit(push):
-        def step(v, _):
-            return push(v, field_E, field_B, charge_to_mass, dt), None
-        return jax.lax.scan(step, jnp.array([[speed, 0.0, 0.0]]), None, length=steps)[0]
+    def orbit(push, start):
+        def step(w, _):
+            return push(w, field_E, field_B, charge_to_mass, dt), None
+        return jax.lax.scan(step, jnp.array([[start, 0.0, 0.0]]), None, length=steps)[0]
 
-    v = orbit(boris_relativistic)
-    assert abs(float(jnp.linalg.norm(v)) / speed - 1) < 1e-12
+    u = orbit(boris_relativistic, gamma * speed)           # the relativistic pusher advances u = gamma v
+    assert abs(float(jnp.linalg.norm(u)) / (gamma * speed) - 1) < 1e-12
     # after one relativistic period the velocity is back where it started
-    assert abs(float(jnp.arctan2(v[0, 1], v[0, 0]))) < 2 * np.pi / steps
+    assert abs(float(jnp.arctan2(u[0, 1], u[0, 0]))) < 2 * np.pi / steps
 
     # the non-relativistic pusher turns gamma times too fast and so overshoots
-    v = orbit(boris)
+    v = orbit(boris, speed)
     assert abs(float(jnp.arctan2(v[0, 1], v[0, 0]))) > 1.0
 
 

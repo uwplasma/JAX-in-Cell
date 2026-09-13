@@ -79,7 +79,21 @@ transfer function.
 ## Relativity
 
 `relativistic=True` switches the pusher to act on $\mathbf p = \gamma m\mathbf v$ and
-makes the kinetic-energy diagnostic use $(\gamma-1)mc^2$ automatically. Initial
-velocities are clipped to $0.99c$ so that $\gamma$ is finite. Everything else — the
-deposit, the field solve, the boundaries — is unchanged, since they act on positions
-and velocities.
+makes the kinetic-energy diagnostic use $(\gamma-1)mc^2$ automatically. The loop then
+carries the momentum per unit mass $\mathbf u = \gamma\mathbf v$ rather than the velocity,
+so that $\gamma = \sqrt{1 + u^2/c^2}$ never has to be recovered from $1 - v^2/c^2$, which
+loses a fraction $\gamma^2\epsilon$ of it at every conversion: converting each step, a
+single-precision particle at $\gamma = 1000$ drifted to 1423 in a thousand field-free
+steps. `Output.v` still holds velocities; `Output.state` holds $\mathbf u$, and passing it
+back to a relativistic run continues it.
+
+Velocities enter as velocities, from `drift`, `vth` or `Species.v`, and are converted once.
+A drawn velocity can reach or pass $c$ — the tail of a Maxwellian sampled as if Newtonian,
+or a drift too close to light — and a speed with $v^2/c^2 > 1 - 10^{-5}$ is then brought
+back to that speed along its own direction, which caps the initial $\gamma$ at 316. The
+margin is about a hundred times the resolution of single precision, where $\gamma$ is then
+still known to 1 %. Keep the thermal spread well below $c$ for the Maxwellian sampling to
+mean anything. A Newtonian run has no speed limit and leaves velocities alone. At a wall,
+restitution scales the normal component of $\mathbf u$. Everything else — the deposit,
+the field solve, the boundaries — is unchanged, since they act on positions and
+velocities.

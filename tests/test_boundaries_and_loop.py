@@ -8,7 +8,7 @@ import pytest
 from jax import random
 
 import jaxincell._simulation as simulation_module
-from jaxincell import Collisions, Domain, Simulation, Solver, Species, epsilon_0
+from jaxincell import Collisions, Domain, Simulation, Solver, Species, epsilon_0, speed_of_light as c
 from jaxincell._core import E_x_from_rho, apply_particle_bc, current_from_continuity, deposit, wrap_positions
 
 L, CELLS = 1.0, 32
@@ -253,6 +253,66 @@ def test_a_reflective_box_gathers_like_the_periodic_box_twice_as_long_with_the_i
     field, _ = field_on_sheets([-L / 2 + distance], (1, 1))
     doubled, sigma = field_on_sheets([distance, -distance], (0, 0), length=2 * L, cells=2 * CELLS)
     assert abs(field[0] - doubled[0]) < 1e-11 * abs(sigma) / epsilon_0
+
+
+def lone_electron(drift, relativistic, length=1e-2):
+    """One electron in a periodic box, so tenuous that its own field changes nothing."""
+    electrons = Species.electrons(n=1, density=1.0, drift=drift, quiet=True)
+    return Simulation(Domain(length=length, cells=8), [electrons], Solver(relativistic=relativistic))
+
+
+def test_speeds_past_light_are_brought_back_only_in_a_relativistic_run():
+    """A relativistic run cannot represent a speed at or above c, so a drawn velocity
+    past sqrt(1 - 1e-5) c is scaled back to that speed along its own direction, and not
+    per component, which once let (0.9c, 0.9c) through as 1.27c. A Newtonian run has no
+    such limit: its velocities, and the derivatives with respect to them, are left alone."""
+    out = lone_electron((0.9 * c, 0.9 * c, 0.0), relativistic=True).run(1, seed=0)
+    v = np.asarray(out.v[0, 0])
+    assert np.sum(v ** 2) / c ** 2 == pytest.approx(1 - 1e-5, rel=1e-12)
+    assert v[0] == pytest.approx(v[1], rel=1e-12) and v[2] == 0.0
+
+    sim = lone_electron((1.5 * c, 0.0, 0.0), relativistic=False)
+    assert float(sim.run(1, seed=0).v[0, 0, 0]) == pytest.approx(1.5 * c, rel=1e-12)
+    electrons = sim.species[0]
+    slope = jax.grad(lambda d: sim.replace(species=(electrons.replace(drift=(d, 0.0, 0.0)),)).run(1, seed=0).v[0, 0, 0])
+    assert float(slope(1.5 * c)) == pytest.approx(1.0, rel=1e-9)
+
+
+F32_RUN = """
+import json, sys
+import numpy as np
+from jaxincell import Domain, Simulation, Solver, Species, speed_of_light as c
+gammas = {}
+for gamma in (100.0, 300.0):
+    speed = c * np.sqrt(1 - 1 / gamma ** 2)
+    electrons = Species.electrons(n=1, density=1.0, drift=(speed, 0.0, 0.0), quiet=True)
+    sim = Simulation(Domain(length=1e-2, cells=8, dt_over_dx_c=0.5), [electrons], Solver(relativistic=True))
+    v = np.asarray(sim.run(1000, seed=0, store_every=100).v[:, 0, 0], dtype=np.float64)
+    gammas[gamma] = list(1 / np.sqrt(1 - (v / c) ** 2))
+print(json.dumps({"dtype": str(sim.run(1, seed=0).v.dtype), "gammas": gammas}))
+"""
+
+
+def test_a_relativistic_particle_keeps_its_lorentz_factor_in_single_precision():
+    """A relativistic run carries u = gamma v, not v. Converting v to u and back every
+    step loses a fraction gamma^2 epsilon of gamma each time, which in single precision
+    walked a particle at gamma = 1000 to 1423 in a thousand steps with no field. Carried,
+    u does not change at all when there is no force, so the stored velocities are
+    identical from step to step and gamma is as exact as the start allows: to
+    gamma^2 epsilon/2, 0.5 % at gamma = 300 in single precision."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ, JAX_ENABLE_X64="0")
+    result = subprocess.run([sys.executable, "-c", F32_RUN], env=env, capture_output=True, text=True, check=True)
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    assert report["dtype"] == "float32"
+    for gamma, history in report["gammas"].items():
+        history = np.array(history)
+        assert np.ptp(history) == 0.0, (gamma, history)
+        assert history[0] == pytest.approx(float(gamma), rel=6e-3)
 
 
 def test_collisions_without_a_coulomb_logarithm_need_a_negative_species():
