@@ -33,7 +33,9 @@ render per frame.
 ## Writing a movie
 
 `save="run.mp4"` needs `ffmpeg` on the PATH; if it is missing the call warns and
-carries on rather than failing. A thousand-frame movie takes about six seconds,
+carries on rather than failing. If ffmpeg is there but fails — an unwritable path, an
+encoder it was built without — `plot` raises `RuntimeError` with ffmpeg's own message,
+so a movie that was not written never passes for one that was. A thousand-frame movie takes about six seconds,
 because the writer caches the static background once, redraws only the artists that
 actually move, and pipes raw frames to ffmpeg rather than re-rendering the whole
 canvas through `savefig` for every frame. Rendering everything each time, which is

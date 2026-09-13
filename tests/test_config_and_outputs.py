@@ -1,6 +1,7 @@
 """The configuration objects as pytrees and as user input, the input file, and
 what leaves the package: diagnostics, openPMD, the movie writer, the version."""
 import pathlib
+import sys
 
 import jax
 import jax.numpy as jnp
@@ -227,3 +228,35 @@ def test_openpmd_particles_carry_the_pushers_momentum_counts_and_constant_record
             assert not records["position"].constant
             start += count
         series.close()
+
+
+@pytest.mark.parametrize("script, fails", [
+    ("import sys; sys.stdin.buffer.read()", False),
+    ("import sys; sys.stdin.buffer.read(); sys.stderr.write('encoder refused'); sys.exit(1)", True),
+    ("import sys; sys.stderr.write('encoder refused'); sys.exit(1)", True),       # exits before reading
+])
+def test_a_failed_encode_raises_with_ffmpegs_message(monkeypatch, tmp_path, script, fails):
+    """ffmpeg is replaced by a script that reads the frames and exits cleanly, reads
+    them and fails, or fails before reading, which breaks the pipe under the writer."""
+    import subprocess
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from jaxincell import plot
+
+    popen = subprocess.Popen
+    monkeypatch.setattr("jaxincell._plot.subprocess.Popen",
+                        lambda command, **kwargs: popen([sys.executable, "-c", script], **kwargs))
+    out = _two_species_run(4)
+    if fails:
+        with pytest.raises(RuntimeError, match="status 1, so .* was not written: encoder refused"):
+            plot(out, save=tmp_path / "run.mp4", show=False)
+    else:
+        figure = plot(out, save=tmp_path / "run.mp4", show=False)
+        assert all(not artist.get_animated() for artist in figure.findobj() if hasattr(artist, "get_animated"))
+        # a run stored without particles has field panels only, here on a time axis in 1/omega
+        fields = plot(out.replace(x=None, v=None, weight=None), omega=1e10, save=tmp_path / "fields.mp4", show=False)
+        assert not any("(x, v" in ax.get_title() for ax in fields.axes)
+        assert fields.axes[0].get_ylabel() == r"$t\,\omega_{pe}$"
+    plt.close("all")
