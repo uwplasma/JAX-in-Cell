@@ -1,9 +1,12 @@
 """Behaviour of the public interface: reproducibility, differentiation,
 storage options, restarts, input files and the command line."""
+import ast
 import builtins
 import gc
 import os
 import pathlib
+import re
+import runpy
 import shutil
 import sys
 import tempfile
@@ -15,9 +18,11 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from jaxincell import Domain, Simulation, Solver, Species, diagnostics, load_toml
-from jaxincell import speed_of_light as c
+from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, elementary_charge, epsilon_0,
+                       load_toml, mass_electron, quiet_start, speed_of_light as c)
 from jaxincell.__main__ import main
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def small_simulation(n=400, **solver):
@@ -25,6 +30,41 @@ def small_simulation(n=400, **solver):
                           perturbation_amplitude=5e-7, perturbation_mode=1)
     i = Species.ions(n=n, density=4e17, electrons=e)
     return Simulation(Domain(length=0.01, cells=16, dt_over_dx_c=2.0), [e, i], Solver(**solver))
+
+
+def input_file(path, n=200, steps=4, plot=False):
+    """Write the small two-stream input file the command-line tests read, and return
+    its path as a string. The tests differ only in the particle count, the number of
+    steps and whether the run plots."""
+    path.write_text(f"""
+[domain]
+length = 0.01
+cells = 16
+dt_over_dx_c = 2.0
+[solver]
+filter_passes = 1
+[[species]]
+name = "electrons"
+n = {n}
+charge = -1
+mass = "electron"
+density = 4e17
+vth = [1.5e7, 0.0, 0.0]
+drift = [6e7, 0.0, 0.0]
+plus_minus = true
+[[species]]
+name = "ions"
+n = {n}
+charge = 1
+mass = "proton"
+density = 4e17
+vth = [3.5e5, 0.0, 0.0]
+[run]
+steps = {steps}
+seed = 4
+plot = {str(plot).lower()}
+""")
+    return str(path)
 
 
 def test_runs_are_reproducible_and_seeds_matter():
@@ -94,47 +134,19 @@ def test_changing_a_physical_parameter_does_not_recompile():
     assert first(varied).shape == (5, 16, 3)
 
 
-def test_toml_input_and_command_line():
-    text = """
-[domain]
-length = 0.01
-cells = 16
-dt_over_dx_c = 2.0
-[solver]
-filter_passes = 1
-[[species]]
-name = "electrons"
-n = 300
-charge = -1
-mass = "electron"
-density = 4e17
-vth = [1.5e7, 0.0, 0.0]
-drift = [6e7, 0.0, 0.0]
-plus_minus = true
-[[species]]
-name = "ions"
-n = 300
-charge = 1
-mass = "proton"
-density = 4e17
-vth = [3.5e5, 0.0, 0.0]
-[run]
-steps = 10
-seed = 4
-plot = false
-"""
-    with tempfile.TemporaryDirectory() as folder:
-        path = os.path.join(folder, "input.toml")
-        with open(path, "w") as f:
-            f.write(text)
-        sim, run = load_toml(path)
-        assert sim.species[1].mass > 1e-27 and run["steps"] == 10
-        out = sim.run(run["steps"], seed=run["seed"])
-        assert out.E.shape == (10, 16, 3)
-        assert main([path]) == 0
+def test_toml_input_and_command_line(tmp_path):
+    path = input_file(tmp_path / "input.toml", n=300, steps=10)
+    sim, run = load_toml(path)
+    assert sim.species[1].mass > 1e-27 and run["steps"] == 10 and sim.solver.filter_passes == 1
+    out = sim.run(run["steps"], seed=run["seed"])
+    assert out.E.shape == (10, 16, 3)
+    assert main([path]) == 0
 
 
 def test_diagnostics_keys_and_species_views():
+    """The per-species energies and the species views select the same particles: the
+    electron energy recomputed from the view is the one the diagnostics report, and
+    the species energies add up to the total kinetic energy."""
     sim = small_simulation()
     out = sim.run(10, seed=0)
     d = diagnostics(out)
@@ -143,7 +155,11 @@ def test_diagnostics_keys_and_species_views():
         assert key in d
     x_e, v_e = out.particles("electrons")
     assert x_e.shape == (10, 400, 3) and v_e.shape == (10, 400, 3)
-    assert np.allclose(np.asarray(d["total"]), np.asarray(d["electric"] + d["magnetic"] + d["kinetic"]))
+    from_view = 0.5 * mass_electron * np.sum(np.asarray(out.weight[:, :400]) * np.sum(np.asarray(v_e) ** 2, axis=-1),
+                                             axis=1)
+    assert np.allclose(np.asarray(d["kinetic_electrons"]), from_view, rtol=1e-12, atol=0)
+    assert np.allclose(np.asarray(d["kinetic_electrons"] + d["kinetic_ions"]), np.asarray(d["kinetic"]),
+                       rtol=1e-12, atol=0)
 
 
 def test_plot_builds_every_panel_and_writes_a_movie(tmp_path):
@@ -203,8 +219,6 @@ def test_courant_warning_fires_only_when_a_light_wave_can_be_seeded():
     """Stepping above c dt = dx is safe for an electrostatic run and diverges as
     soon as the particles carry transverse velocity, so the warning has to
     distinguish the two rather than firing on the time step alone."""
-    from jaxincell import Domain, Solver, Species
-
     longitudinal = Species.electrons(n=100, density=1e17, vth=(1e6, 0, 0))
     isotropic = Species.electrons(n=100, density=1e17, vth=(1e6, 1e6, 1e6))
     above = Domain(length=0.01, cells=16, dt_over_dx_c=4.5)
@@ -228,8 +242,6 @@ def test_quiet_start_samples_the_maxwellian_and_fills_the_box():
     """The public helper that custom initial conditions build on: equally spaced
     positions inside the box and velocities at the quantiles of the Maxwellian,
     with vth the sqrt(2) kT/m convention, so the standard deviation is vth/sqrt2."""
-    from jaxincell import quiet_start
-
     n, length, vth, drift = 20000, 0.5, (1e6, 0.0, 5e6), (2e6, 0.0, 0.0)
     x, v = quiet_start(n, length, vth=vth, drift=drift)
     assert x.shape == v.shape == (n, 3)
@@ -242,8 +254,6 @@ def test_quiet_start_samples_the_maxwellian_and_fills_the_box():
 
 def test_plasma_frequency_and_debye_length_by_species_name():
     """Both accept a species name and default to the first species."""
-    from jaxincell import Domain, Solver, Species, elementary_charge, epsilon_0, mass_electron
-
     density = 4e17
     electrons = Species.electrons(n=100, density=density, vth=(1e6, 0, 0), name="electrons")
     ions = Species.ions(n=100, density=density, electrons=electrons, name="ions")
@@ -264,8 +274,6 @@ def test_plasma_frequency_and_debye_length_by_species_name():
 def test_random_positions_and_a_scalar_thermal_speed():
     """`random_positions` places particles uniformly instead of on a lattice, and
     a bare number for vth or drift is taken as the x component."""
-    from jaxincell import Domain, Solver, Species
-
     assert Species.electrons(n=10, density=1e17, vth=2e6).vth == (2e6, 0.0, 0.0)
     assert Species.electrons(n=10, density=1e17, drift=3e6).drift == (3e6, 0.0, 0.0)
 
@@ -295,9 +303,8 @@ def test_coulomb_logarithm_follows_the_formulary_in_both_regimes():
 
 def test_collisions_default_to_every_pair_and_the_formulary_logarithm():
     """`Collisions()` with no arguments collides every combination and takes the
-    Coulomb logarithm from the first species, rather than needing either spelled out."""
-    from jaxincell import Collisions, Domain, Solver, Species
-
+    Coulomb logarithm from the lightest negatively charged species, rather than needing
+    either spelled out."""
     electrons = Species.electrons(n=800, density=1e20, vth=(2e6, 2e6, 2e6), quiet=True)
     ions = Species.ions(n=800, density=1e20, electrons=electrons, quiet=True)
     domain = Domain(length=1e-4, cells=8, dt_over_dx_c=1.0)
@@ -348,31 +355,7 @@ def test_command_line_plots_when_the_input_asks_for_it(tmp_path, monkeypatch):
     import matplotlib.pyplot as plt
     monkeypatch.setattr(plt, "show", lambda *a, **k: None)
 
-    path = tmp_path / "run.toml"
-    path.write_text("""
-[domain]
-length = 0.01
-cells = 16
-dt_over_dx_c = 2.0
-[[species]]
-name = "electrons"
-n = 200
-charge = -1
-mass = "electron"
-density = 4e17
-vth = [1.5e7, 0.0, 0.0]
-[[species]]
-name = "ions"
-n = 200
-charge = 1
-mass = "proton"
-density = 4e17
-vth = [3.5e5, 0.0, 0.0]
-[run]
-steps = 6
-plot = true
-""")
-    assert main([str(path)]) == 0
+    assert main([input_file(tmp_path / "run.toml", steps=6, plot=True)]) == 0
     with warnings.catch_warnings():                  # the animation is never rendered here
         warnings.simplefilter("ignore", UserWarning)
         plt.close("all")
@@ -434,9 +417,9 @@ def test_configuration_objects_normalise_what_they_are_given():
 
 
 def test_single_precision_is_left_to_jax_s_own_switch(monkeypatch):
-    """Double precision is switched on at import unless JAX_ENABLE_X64 is set, which is
-    how a backend without float64, such as Apple's Metal, runs the package."""
-    import jax
+    """Double precision is switched on at import unless JAX_ENABLE_X64 is set, so a
+    user who wants single precision chooses it with JAX's own switch rather than
+    with one the package would have to invent."""
     from jaxincell._simulation import _enable_double_precision
 
     calls = []
@@ -450,9 +433,7 @@ def test_single_precision_is_left_to_jax_s_own_switch(monkeypatch):
 def test_every_example_states_its_precision():
     """Each example sets JAX_ENABLE_X64 before anything imports JAX, so the precision of
     a run is written in the script and can be changed from the shell."""
-    import ast
-
-    examples = sorted(pathlib.Path(__file__).resolve().parent.parent.glob("examples/*.py"))
+    examples = sorted(ROOT.glob("examples/*.py"))
     assert len(examples) >= 10
     for path in examples:
         body = ast.parse(path.read_text()).body
@@ -461,6 +442,18 @@ def test_every_example_states_its_precision():
         imports = [i for i, node in enumerate(body) if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
             (getattr(node, "module", None) or alias.name).startswith(("jax", "jaxincell")) for alias in node.names)]
         assert sets and imports and sets[0] < imports[0], path.name
+
+
+def test_every_example_the_documentation_names_exists():
+    """The README and the docs name examples by file name, and on a case-sensitive file
+    system a name that differs only in case does not run. The names are compared with
+    the directory listing, because Path.exists ignores case on macOS and Windows."""
+    scripts = {path.name for path in (ROOT / "examples").iterdir()}
+    pages = [ROOT / "README.md", *sorted((ROOT / "docs").rglob("*.md"))]
+    named = {name for page in pages for name in re.findall(r"examples/(\w+\.(?:py|toml))", page.read_text())}
+    for page in ("docs/examples/index.md", "docs/getting_started/quickstart.md"):
+        named |= set(re.findall(r"`(\w+\.py)`", (ROOT / page).read_text()))
+    assert len(named) >= 10 and named <= scripts, sorted(named - scripts)
 
 
 def test_diagnostics_without_particles_gives_the_field_quantities_only():
@@ -503,62 +496,24 @@ def test_openpmd_export_can_leave_out_the_meshes_or_the_particles():
     assert fields_only.endswith(".json")          # the extension is supplied when omitted
 
 
-def test_toml_loading_falls_back_to_tomli_before_python_311():
+def test_toml_loading_falls_back_to_tomli_before_python_311(tmp_path):
     """`tomllib` arrived in 3.11; below that the loader uses the tomli backport, which
     is declared as a conditional dependency. Hiding tomllib takes that path on a newer
     interpreter, and on 3.10 it is the only path there is."""
-    from jaxincell import load_toml
-
     try:
         import tomllib as parser
     except ModuleNotFoundError:                  # Python 3.10, where tomli is the real one
         import tomli as parser
 
-    text = """
-[domain]
-length = 0.01
-cells = 16
-[[species]]
-name = "electrons"
-n = 100
-charge = -1
-mass = "electron"
-density = 1e17
-vth = [1e6, 0.0, 0.0]
-[run]
-steps = 3
-"""
-    with tempfile.TemporaryDirectory() as folder:
-        path = os.path.join(folder, "in.toml")
-        with open(path, "w") as f:
-            f.write(text)
-        with mock.patch.dict(sys.modules, {"tomllib": None, "tomli": parser}):
-            sim, run = load_toml(path)
+    path = input_file(tmp_path / "in.toml", n=100, steps=3)
+    with mock.patch.dict(sys.modules, {"tomllib": None, "tomli": parser}):
+        sim, run = load_toml(path)
     assert run["steps"] == 3 and sim.species[0].n == 100
 
 
 def test_the_module_runs_as_a_script(tmp_path, monkeypatch):
     """`python -m jaxincell input.toml`, the entry point the documentation gives."""
-    import runpy
-
-    path = tmp_path / "run.toml"
-    path.write_text("""
-[domain]
-length = 0.01
-cells = 16
-dt_over_dx_c = 2.0
-[[species]]
-name = "electrons"
-n = 200
-charge = -1
-mass = "electron"
-density = 4e17
-vth = [1.5e7, 0.0, 0.0]
-[run]
-steps = 4
-plot = false
-""")
-    monkeypatch.setattr(sys, "argv", ["jaxincell", str(path)])
+    monkeypatch.setattr(sys, "argv", ["jaxincell", input_file(tmp_path / "run.toml")])
     with pytest.raises(SystemExit) as exit_code, warnings.catch_warnings():
         # runpy notes that jaxincell.__main__ is already imported, which is expected
         warnings.simplefilter("ignore", RuntimeWarning)
