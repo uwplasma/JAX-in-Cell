@@ -17,6 +17,60 @@ CENTRE0 = -L / 2 + DX / 2
 WALLS = [(0, 0), (1, 1), (1, 2), (2, 1), (2, 2)]           # every pair Domain accepts
 
 
+class KeyLedger:
+    """Stands in for ``jax.random`` in the simulation module and records every concrete
+    key that is split, folded or drawn from. Inside a scan the keys are tracers and are
+    not recorded; the keys handed into a scan are."""
+
+    def __init__(self):
+        self.consumed = []
+
+    def note(self, key):
+        if not isinstance(key, jax.core.Tracer):
+            self.consumed.append(tuple(np.asarray(key).ravel().tolist()))
+
+    def split(self, key, num=2):
+        self.note(key)
+        return random.split(key, num)
+
+    def fold_in(self, key, data):
+        self.note(key)
+        return random.fold_in(key, data)
+
+    def uniform(self, key, *args, **kwargs):
+        self.note(key)
+        return random.uniform(key, *args, **kwargs)
+
+    def normal(self, key, *args, **kwargs):
+        self.note(key)
+        return random.normal(key, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(random, name)
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_every_random_key_is_used_once(monkeypatch, algorithm):
+    """Each key a step derives goes to one consumer -- the next step, the collisions,
+    the thermal wall, the sub-steps of the implicit scheme -- and is either split or
+    drawn from, once. A key used twice hands two consumers the same random numbers:
+    in JAX's threefry keys ``fold_in(k, 1)`` equals ``split(k)[1]``, which is how the
+    thermal wall once drew the numbers the next step's collisions drew."""
+    ledger = KeyLedger()
+    monkeypatch.setattr(simulation_module, "random", ledger)
+    monkeypatch.setattr(Simulation, "_collide", lambda self, key, x, v, *rest: (ledger.note(key), v)[1])
+    electrons = Species.electrons(n=40, density=1e6, vth=(1e6, 1e6, 1e6), drift=(-2e6, 0, 0))
+    domain = Domain(length=1e-3, cells=8, particle_bc=("thermal", "reflective"), field_bc="reflective")
+    sim = Simulation(domain, [electrons], Solver(algorithm=algorithm, picard_iterations=1),
+                     Collisions(coulomb_log=10.0))
+    carry, extra = sim.initial_state(random.PRNGKey(0))
+    step = sim._explicit_step if algorithm == "explicit" else sim._implicit_step
+    for _ in range(3):
+        carry, _ = step(carry, extra)
+    assert len(ledger.consumed) > 6
+    assert len(set(ledger.consumed)) == len(ledger.consumed)
+
+
 def test_absorbed_particles_are_parked_symmetrically_off_both_grids():
     """A particle with no weight left is parked the same distance beyond either wall,
     one and a half cells, the half-width of the spline, so that neither the centred nor

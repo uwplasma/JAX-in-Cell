@@ -191,13 +191,23 @@ class Simulation:
             return v
         sigma = jnp.concatenate([jnp.broadcast_to(jnp.asarray(s.vth) / jnp.sqrt(2.0), (s.n, 3))
                                  for s in self.species])
-        k_normal, k_tangential = random.split(random.fold_in(key, 1))
+        k_normal, k_tangential = random.split(key)
         u = random.uniform(k_normal, (v.shape[0],), minval=jnp.finfo(v.dtype).tiny)
         left = x[:, 0] < -d.length / 2
         new = (sigma * random.normal(k_tangential, v.shape)).at[:, 0].set(
             jnp.where(left, 1.0, -1.0) * sigma[:, 0] * jnp.sqrt(-2 * jnp.log(u)))
         hit = (left & (d.particle_bc[0] == 3)) | ((x[:, 0] > d.length / 2) & (d.particle_bc[1] == 3))
         return jnp.where(hit[:, None], new, v)
+
+    @staticmethod
+    def _split_step_key(key):
+        """The keys of one step: the key carried to the next step, the collisions', and
+        the thermal wall's. Every key is split once and then either split again or drawn
+        from, never both, and there is no ``fold_in``: in JAX's threefry keys
+        ``fold_in(k, 1)`` is ``split(k)[1]``, and ``split(k, 2)[i]`` is ``split(k, 5)[i]``,
+        so keys derived from one parent in two ways coincide and two consumers draw
+        the same numbers."""
+        return random.split(key, 3)
 
     # -- initial state ------------------------------------------------------------------
     def initial_state(self, key):
@@ -327,12 +337,12 @@ class Simulation:
         E, B = half_step_fields(E, B, J1, dt / 2, dx, d.field_bc, electric_first=True)
         # push with the fields at t^{n+1/2}
         v = self._push(x_half, v, qm, E, B, dt)
-        key, k_c = random.split(key)
-        v = self._collide(k_c, x_half, v, w, qm, m, dt)
+        key, k_collide, k_wall = self._split_step_key(key)
+        v = self._collide(k_collide, x_half, v, w, qm, m, dt)
         x_free = x_half + dt * v
         x_next_half, v, w, qm = apply_particle_bc(x_free, v, w, qm, box, d.particle_bc, d.restitution,
                                                   self._reflection(v), dx)
-        v = self._thermalise(key, x_free, v)
+        v = self._thermalise(k_wall, x_free, v)
         x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
         # Second half step, x^{n+1/2} -> x^{n+1}, starting from the charge density the
         # first half already ended on. Depositing it again here would use the weights
@@ -360,9 +370,10 @@ class Simulation:
         n_sub = self.solver.substeps
         dtau = dt / n_sub
 
-        # one key per sub-step, the same in every Picard iteration, so that a thermal
-        # wall re-emits a particle identically each time the orbit is recomputed
-        keys = random.split(random.fold_in(key, 1), n_sub)
+        # one thermal-wall key per sub-step, the same in every Picard iteration, so that
+        # the wall re-emits a particle identically each time the orbit is recomputed
+        key, k_collide, k_wall = self._split_step_key(key)
+        keys = random.split(k_wall, n_sub)
 
         def substeps(E_half, B_half, x_mid_all):
             def one(state, inputs):
@@ -396,8 +407,7 @@ class Simulation:
         E_half = 0.5 * (E + E_new)
         B_new = B - dt * curl_E(E_half, B, dx, d.field_bc)
         x, v, w, qm, J, _ = substeps(E_half, 0.5 * (B + B_new), x_mid_all)
-        key, k_c = random.split(key)
-        v = self._collide(k_c, x, v, w, qm, m, dt)
+        v = self._collide(k_collide, x, v, w, qm, m, dt)
         rho = deposit(x[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc)
         return (E_new, B_new, x, v, w, qm, rho, key), (x, v, w, E_new, B_new, J, rho)
 
