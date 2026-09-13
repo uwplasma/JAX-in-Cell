@@ -11,6 +11,13 @@ the beam drift towards the fastest-growing wavenumber, which for cold beams is
 k v_0 / omega_pe = sqrt(3/8) (Buneman, Phys. Rev. 115, 503, 1959) and moves to
 about 0.70 for beams this warm.
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -41,7 +48,7 @@ value_and_grad = jax.jit(jax.value_and_grad(amplification))
 
 # the gradient is one reverse-mode pass through the whole run; check it once
 gradient = float(value_and_grad(4.0e7)[1])
-h = 100.0
+h = 100.0 if jax.config.read("jax_enable_x64") else 1e4    # a step round-off does not swamp
 difference = float((jax.jit(amplification)(4.0e7 + h) - jax.jit(amplification)(4.0e7 - h)) / (2 * h))
 print(f"reverse mode {gradient:.6e}   central difference {difference:.6e}   "
       f"relative error {abs(difference / gradient - 1):.1e}\n")

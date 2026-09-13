@@ -9,6 +9,13 @@ dispersion relation gives the marginal wavenumber
 so in a box holding several wavelengths the modes below k_c grow and those above
 it do not. This run seeds nothing: every mode starts from the particle noise.
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import matplotlib.pyplot as plt
 import numpy as np
 

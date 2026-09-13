@@ -6,6 +6,13 @@ rolls up into the vortex that closes the growth. Run it and watch the animation:
 
     python two_stream.py
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 from jaxincell import Domain, Simulation, Solver, Species, diagnostics, plot, speed_of_light as c
 
 electrons = Species.electrons(n=8000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(6e7, 0, 0),

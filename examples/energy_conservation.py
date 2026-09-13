@@ -3,8 +3,16 @@
 The explicit scheme is fast and its energy error stays bounded but does not
 vanish. The implicit scheme of Chen, Chacon and Barnes (J. Comput. Phys. 230,
 7018, 2011) conserves the discrete total energy exactly once the Picard
-iteration has converged, which this shows by sweeping the iteration count.
+iteration has converged, which this shows by sweeping the iteration count. Round-off
+sets the floor: about 1e-16 in double precision, and about 1e-7 in single precision.
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import time
 
 import matplotlib.pyplot as plt

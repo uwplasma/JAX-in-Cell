@@ -9,6 +9,13 @@ A quiet start (equally spaced particles, velocities at the quantiles of the
 Maxwellian) is what makes the discrete-particle noise low enough to follow the
 decay over three e-foldings with 150 000 particles.
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import matplotlib.pyplot as plt
 import numpy as np
 

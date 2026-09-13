@@ -11,6 +11,13 @@ chosen to put the fastest-growing mode at MODE, comfortably inside the box and w
 resolved by the grid. Picking it any other way risks seeding a mode that is not
 unstable at all.
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import matplotlib.pyplot as plt
 import numpy as np
 

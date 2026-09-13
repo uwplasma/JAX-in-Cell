@@ -12,6 +12,13 @@ Rev. Plasma Phys. 1, 105, 1965; NRL Plasma Formulary):
 which is what this measures. The operator carries no free parameter: the
 variance of the scattering angle is fixed by matching nu_perp.
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import matplotlib.pyplot as plt
 import numpy as np
 import jax.numpy as jnp

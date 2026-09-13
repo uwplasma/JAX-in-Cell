@@ -4,6 +4,13 @@ A warm plasma oscillates at omega^2 = omega_pe^2 (1 + 3 k^2 lambda_D^2). The
 frequency is measured from the spacing of the maxima of |E_k(t)|, which are half
 a period apart, for a handful of k lambda_D.
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import matplotlib.pyplot as plt
 import numpy as np
 

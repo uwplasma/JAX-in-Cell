@@ -20,6 +20,13 @@ Here the electrons are too tenuous for any field to act. They run into two absor
 walls for a tenth of a thermal transit, so nothing arrives twice, and the weight and
 energy that come back are compared with the two formulas for several widths u.
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np

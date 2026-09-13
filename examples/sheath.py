@@ -24,6 +24,13 @@ The thermal wall is what makes the comparison sharp: it keeps the electrons that
 reach the conductor Maxwellian. Between two absorbing walls nothing would, and the
 walls would strip the tail of the distribution the formula is derived from.
 """
+
+import os
+
+# Double precision is the default, and what the conservation checks rely on. Run with
+# JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np

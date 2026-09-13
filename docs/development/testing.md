@@ -5,7 +5,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Seventy-one tests in three files, under two minutes on one CPU core, covering every
+Seventy-two tests in three files, about two minutes on one CPU core, covering every
 statement and every branch of the package.
 
 That number is not the goal in itself, and the suite is not padded to reach it. It is
@@ -56,7 +56,7 @@ removing some but not all.
 **Documented behaviour that is easy to leave untested.** `store_particles=False`
 dropping exactly the diagnostics that need velocities; the openPMD switches and a run
 with no particles to write; the TOML loader's fallback for Python 3.10; `python -m
-jaxincell`; and the version fallback for a fresh clone that has not been installed,
+jaxincell`; every example setting `JAX_ENABLE_X64` before it imports JAX; and the version fallback for a fresh clone that has not been installed,
 since `jaxincell/version.py` is generated at build time and is not in the repository.
 
 **The interface.** That two runs with one seed agree bit for bit on the CPU, and to

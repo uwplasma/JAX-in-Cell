@@ -84,6 +84,10 @@ does not change: every rate, frequency and sheath comparison in the test suite p
 single precision too, and only the tests that check conservation to round-off fail.
 See {doc}`performance` for what it costs on a GPU.
 
+Every script in `examples/` sets `JAX_ENABLE_X64` at its top, before anything imports
+JAX, so the precision of a run is written in the script, and
+`JAX_ENABLE_X64=0 python examples/two_stream.py` switches it from the shell.
+
 ## Frequencies
 
 Angular, in rad/s, throughout: `plasma_frequency()`, `dominant_frequency()` and every

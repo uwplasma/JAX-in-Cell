@@ -466,6 +466,22 @@ def test_single_precision_is_left_to_jax_s_own_switch(monkeypatch):
     assert calls == [("jax_enable_x64", True)]
 
 
+def test_every_example_states_its_precision():
+    """Each example sets JAX_ENABLE_X64 before anything imports JAX, so the precision of
+    a run is written in the script and can be changed from the shell."""
+    import ast
+
+    examples = sorted(pathlib.Path(__file__).resolve().parent.parent.glob("examples/*.py"))
+    assert len(examples) >= 10
+    for path in examples:
+        body = ast.parse(path.read_text()).body
+        sets = [i for i, node in enumerate(body)
+                if isinstance(node, ast.Expr) and "JAX_ENABLE_X64" in ast.unparse(node)]
+        imports = [i for i, node in enumerate(body) if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+            (getattr(node, "module", None) or alias.name).startswith(("jax", "jaxincell")) for alias in node.names)]
+        assert sets and imports and sets[0] < imports[0], path.name
+
+
 def test_diagnostics_without_particles_gives_the_field_quantities_only():
     """`store_particles=False` keeps the fields and drops the particle history, so
     the diagnostics that need velocities are absent rather than wrong. That is the

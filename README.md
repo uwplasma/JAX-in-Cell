@@ -63,7 +63,22 @@ pip install -e .
 ```
 
 For a GPU, install the matching JAX wheel first (for example `pip install -U "jax[cuda12]"`).
-The package enables 64-bit floating point in JAX when imported.
+
+### Precision
+
+Runs are in double precision unless `JAX_ENABLE_X64=0` is set before JAX is imported.
+Every script in `examples/` sets the variable at its top, so its precision is written in
+the script and can be switched from the shell:
+
+```bash
+JAX_ENABLE_X64=0 python examples/two_stream.py
+```
+
+Single precision reproduces the growth rates, frequencies and sheath of the examples;
+what it gives up is conservation to round-off. It is not automatically faster: on a CPU
+the two cost about the same, and on the RTX A4000 we tested a single-precision run was
+many times slower, because of how CUDA scatters in float32
+([performance](https://jax-in-cell.readthedocs.io/en/latest/user_guide/performance.html)).
 
 ## Run
 
@@ -155,7 +170,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Seventy-one tests, under two minutes, covering every statement and branch. They
+Seventy-two tests, about two minutes, covering every statement and branch. They
 are physics tests rather than regression tests: closed-form rates and frequencies,
 conservation laws, exact results for the kernels, and the behaviour of the interface.
 They run on Python 3.10 to 3.13 on every pull request, together with a build of the
