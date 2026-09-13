@@ -5,7 +5,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Seventy tests in three files, under two minutes on one CPU core, covering every
+Seventy-one tests in three files, under two minutes on one CPU core, covering every
 statement and every branch of the package.
 
 That number is not the goal in itself, and the suite is not padded to reach it. It is
