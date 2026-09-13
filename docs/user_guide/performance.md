@@ -72,6 +72,15 @@ much further out. Double precision is enabled at import
 of two on hardware optimised for single precision; a run that does not need it starts
 Python with `JAX_ENABLE_X64=0` ({doc}`units`).
 
+## Apple silicon
+
+Apple's plugin for its GPUs, `jax-metal`, is not supported. Its latest release, 0.1.1,
+requires `jax==0.4.34` and has no double precision. On an M3 Max it returns NaN from the
+second step of any run past about sixteen thousand particles with the history stored,
+never returns from larger ones, and crashes the process on reverse-mode derivatives and
+on the loop the implicit integrator runs over its sub-steps; where it does compute
+correctly it is little faster than the CPU. Run on the CPU, or on a CUDA GPU.
+
 ## Practical advice
 
 * Measure with `block_until_ready()`; JAX is asynchronous and a timing without it

@@ -53,9 +53,8 @@ For the handful of parameters a physics optimisation usually has, forward mode i
 better tool. On the run in the figure below, a forward pass takes
 {{ autodiff_forward_time_warm_s }} s and a reverse one {{ autodiff_grad_time_warm_s }} s,
 against {{ autodiff_run_time_warm_s }} s for the run alone, and the two derivatives agree
-to {{ autodiff_forward_reverse_agreement }}; but the memory of forward mode does not grow
-with the number of steps. It is also the mode that runs on Apple's Metal backend, whose
-current release crashes on the loops a reverse pass builds ({doc}`performance`).
+to {{ autodiff_forward_reverse_agreement }}. Forward mode's memory also stays flat as the
+number of steps grows.
 
 ## Accuracy
 

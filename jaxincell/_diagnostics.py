@@ -2,7 +2,6 @@
 temperatures and the dominant frequency. Everything is a plain function of the
 stored arrays and can be recomputed at will."""
 import jax.numpy as jnp
-import numpy as np
 
 from ._constants import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
@@ -82,14 +81,13 @@ def temperatures(out):
 
 
 def dominant_frequency(out):
-    """Angular frequency of the strongest peak of :math:`E_x` at the box centre. The
-    spectrum is taken with NumPy, on the host, since not every backend has complex
-    arithmetic."""
-    signal = np.asarray(out.E[:, out.E.shape[1] // 2, 0], dtype=float)
-    spectrum = np.abs(np.fft.rfft(signal - signal.mean()))
-    dt = float(out.t[1] - out.t[0]) if out.t.shape[0] > 1 else float(out.dt)
-    freqs = 2 * np.pi * np.fft.rfftfreq(signal.size, d=dt)
-    return freqs[np.argmax(spectrum[1:]) + 1]
+    """Angular frequency of the strongest peak of :math:`E_x` at the box centre."""
+    signal = out.E[:, out.E.shape[1] // 2, 0]
+    signal = signal - jnp.mean(signal)
+    spectrum = jnp.abs(jnp.fft.rfft(signal))
+    dt = out.t[1] - out.t[0] if out.t.shape[0] > 1 else out.dt
+    freqs = 2 * jnp.pi * jnp.fft.rfftfreq(signal.shape[0], d=dt)
+    return freqs[jnp.argmax(spectrum[1:]) + 1]
 
 
 def diagnostics(out):

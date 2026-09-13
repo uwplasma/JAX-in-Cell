@@ -20,7 +20,7 @@ from ._core import (E_x_from_rho, apply_particle_bc, boris, boris_relativistic, 
 
 def _enable_double_precision(environ):
     """Double precision unless the environment asks otherwise through JAX's own switch,
-    ``JAX_ENABLE_X64=0``, which a single-precision backend such as Apple's Metal needs."""
+    ``JAX_ENABLE_X64=0``."""
     if "JAX_ENABLE_X64" not in environ:
         jax.config.update("jax_enable_x64", True)
 
@@ -342,28 +342,26 @@ class Simulation:
         n_sub = self.solver.substeps
         dtau = dt / n_sub
 
-        # the same sub-step keys in every Picard iteration, so that a thermal wall
-        # re-emits a particle identically each time the orbit is recomputed
-        base = random.fold_in(key, 1)
+        # one key per sub-step, the same in every Picard iteration, so that a thermal
+        # wall re-emits a particle identically each time the orbit is recomputed
+        keys = random.split(random.fold_in(key, 1), n_sub)
 
         def substeps(E_half, B_half, x_mid_all):
-            def one(state, _):
-                xs, vs, ws, qms, J_acc, i = state
-                # The sub-step's midpoint is selected by arithmetic, not by scanning over or
-                # indexing into x_mid_all: jax-metal 0.1.1 crashes on both, and this is exact.
-                x_mid = jnp.tensordot((jnp.arange(n_sub) == i).astype(x_mid_all.dtype), x_mid_all, axes=1)
+            def one(state, inputs):
+                x_mid, k_sub = inputs
+                xs, vs, ws, qms, J_acc = state
                 v_new = self._push(x_mid, vs, qms, E_half, B_half, dtau)
                 v_mid = 0.5 * (vs + v_new)
                 x_free = xs + dtau * v_mid
                 x_new, v_new, ws, qms = apply_particle_bc(x_free, v_new, ws, qms, box, d.particle_bc,
                                                           d.restitution, self._reflection(v_mid), dx)
-                v_new = self._thermalise(random.fold_in(base, i), x_free, v_new)
+                v_new = self._thermalise(k_sub, x_free, v_new)
                 new_mid = wrap_positions(x_new - 0.5 * dtau * v_mid, ws, box, d.particle_bc, dx)
-                J = jnp.stack([deposit(x_mid[:, 0], q * ws * v_mid[:, c], d.grid[0] + dx / 2, dx, d.cells,
-                                       d.particle_bc) for c in range(3)], axis=1)
-                return (x_new, v_new, ws, qms, J_acc + J / n_sub, i + 1), new_mid
-            init = (x, v, w, qm, jnp.zeros((d.cells, 3)), 0)
-            (xs, vs, ws, qms, J_avg, _), new_mids = lax.scan(one, init, None, length=n_sub)
+                J = jnp.stack([deposit(x_mid[:, 0], q * ws * v_mid[:, i], d.grid[0] + dx / 2, dx, d.cells,
+                                       d.particle_bc) for i in range(3)], axis=1)
+                return (x_new, v_new, ws, qms, J_acc + J / n_sub), new_mid
+            init = (x, v, w, qm, jnp.zeros((d.cells, 3)))
+            (xs, vs, ws, qms, J_avg), new_mids = lax.scan(one, init, (x_mid_all, keys))
             return xs, vs, ws, qms, J_avg, new_mids
 
         def picard(state, _):

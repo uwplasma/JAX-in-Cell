@@ -52,8 +52,8 @@ divides by the symbol of the forward difference,
 \widehat{D}(k) = \frac{1 - e^{-ik\Delta x}}{\Delta x},
 ```
 
-and sets the $k=0$ mode to zero; the sum needs no complex arithmetic, which not every
-backend provides. What matters in either form is that the difference operator is
+and sets the $k=0$ mode to zero; the sum gets there in $\mathcal{O}(N_x)$ operations
+with no transform at all. What matters in either form is that the difference operator is
 inverted exactly. A spectral solve with the continuum $ik$ in place of $\widehat D(k)$
 differs by $\mathcal{O}((k\Delta x)^2)$ and leaves a residual in {eq}`discrete-gauss`
 as large as {{ two_stream_dx_over_debye }} times the field itself at the resolutions

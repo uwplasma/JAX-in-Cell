@@ -82,8 +82,7 @@ precision is what makes the Gauss residual sit at $10^{-12}$ rather than about
 $10^{-3}$, and the implicit energy error at round-off rather than $10^{-7}$. The physics
 does not change: every rate, frequency and sheath comparison in the test suite passes in
 single precision too, and only the tests that check conservation to round-off fail.
-Single precision is what a backend without float64, such as Apple's Metal, requires
-({doc}`performance`).
+See {doc}`performance` for what it costs on a GPU.
 
 ## Frequencies
 

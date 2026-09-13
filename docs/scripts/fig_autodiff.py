@@ -32,8 +32,7 @@ def amplification(drift):
     constant while the mode grows exponentially. Fixing the time rather than
     fitting a window keeps the objective a smooth function of the drift."""
     out = build(drift).run(STEP, seed=3, store_particles=False)
-    E, phase = out.E[-1, :, 0], 2 * jnp.pi * jnp.arange(CELLS) / CELLS
-    return 0.5 * jnp.log(jnp.sum(E * jnp.cos(phase)) ** 2 + jnp.sum(E * jnp.sin(phase)) ** 2)
+    return jnp.log(jnp.abs(jnp.fft.rfft(out.E[:, :, 0], axis=1)[-1, 1]))
 
 
 def timed(function, argument):
