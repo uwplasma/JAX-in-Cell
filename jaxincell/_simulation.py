@@ -289,12 +289,22 @@ class Simulation:
         pairs = (self.collisions.pairs if self.collisions.pairs is not None
                  else tuple((a, b) for a in names for b in names if names.index(a) <= names.index(b)))
         pairs = tuple((names.index(a), names.index(b)) for a, b in pairs)
-        if self.collisions.coulomb_log is None:
-            e = self.species[0]
-            kT_ev = e.mass * jnp.max(jnp.asarray(e.vth)) ** 2 / 2 / elementary_charge
-            ln_lambda = coulomb_logarithm(e.density, kT_ev)
-        else:
-            ln_lambda = self.collisions.coulomb_log
+        ln_lambda = self.collisions.coulomb_log
+        if ln_lambda is None:
+            # The NRL logarithm is the electrons': the lightest negatively charged species, at its
+            # density and at the temperature m v_th^2 / 2 of its largest thermal-speed component.
+            charges = [s.charge for s in self.species]
+            if not any(isinstance(q, jax.core.Tracer) for q in charges) and not any(q < 0 for q in charges):
+                raise ValueError("Collisions(coulomb_log=None) takes the Coulomb logarithm from the electrons, "
+                                 "but no species has a negative charge: give coulomb_log explicitly.")
+            # traced inside the run, where the choice has to be made with array operations
+            charge = jnp.stack([jnp.asarray(q, float) for q in charges])
+            mass = jnp.stack([jnp.asarray(s.mass, float) for s in self.species])
+            e = jnp.argmin(jnp.where(charge < 0, mass, jnp.inf))
+            density = jnp.stack([jnp.asarray(s.density, float) for s in self.species])[e]
+            vth = jnp.stack([jnp.max(jnp.asarray(s.vth, float)) for s in self.species])[e]
+            kT_ev = mass[e] * vth ** 2 / 2 / elementary_charge
+            ln_lambda = jnp.where(jnp.any(charge < 0), coulomb_logarithm(density, kT_ev), jnp.nan)
         return collide(key, x, v, w, m, qm * m, self.blocks, pairs, ln_lambda, dt, d.dx, d.length, d.cells)
 
     def _explicit_step(self, carry, extra):

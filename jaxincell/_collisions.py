@@ -30,13 +30,21 @@ from ._constants import epsilon_0
 __all__ = ["coulomb_logarithm", "collide"]
 
 
-def coulomb_logarithm(density, temperature_ev, charge_number=1.0):
+def coulomb_logarithm(density, temperature_ev, charge_number=1.0, floor=2.0):
     """Electron-ion Coulomb logarithm of the NRL formulary, from the electron
-    density (:math:`\\mathrm{m^{-3}}`) and temperature (eV)."""
-    n_cm3 = density * 1e-6
-    cold = 23.0 - jnp.log(jnp.sqrt(n_cm3) * charge_number * temperature_ev ** -1.5)
-    hot = 24.0 - jnp.log(jnp.sqrt(n_cm3) / temperature_ev)
-    return jnp.where(temperature_ev < 10 * charge_number ** 2, cold, hot)
+    density (:math:`\\mathrm{m^{-3}}`) and temperature (eV).
+
+    The formulary's expressions turn negative in cold, dense plasma, where the
+    weak-coupling picture behind them fails. The result is kept above ``floor``,
+    the minimum of Lee and More (Phys. Fluids 27, 1273, 1984) that particle codes
+    commonly adopt, and density and temperature are floored at the smallest
+    positive float, so that zero gives the floor instead of an error or NaN."""
+    tiny = jnp.finfo(jnp.result_type(float)).tiny
+    log_n_cm3 = jnp.log(jnp.maximum(density * 1e-6, tiny))
+    log_t = jnp.log(jnp.maximum(temperature_ev, tiny))
+    cold = 23.0 - 0.5 * log_n_cm3 - jnp.log(charge_number) + 1.5 * log_t
+    hot = 24.0 - 0.5 * log_n_cm3 + log_t
+    return jnp.maximum(jnp.where(temperature_ev < 10 * charge_number ** 2, cold, hot), floor)
 
 
 def _by_cell(cell, n_cells):

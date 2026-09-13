@@ -14,7 +14,7 @@ simulation = Simulation(domain, [electrons, ions], solver,
 | argument | meaning | default |
 |---|---|---|
 | `pairs` | tuple of `(name_a, name_b)` species pairs to collide, including a species with itself; `None` collides every pair (static) | `None` |
-| `coulomb_log` | the Coulomb logarithm; `None` takes the NRL formulary value from the first species | `None` |
+| `coulomb_log` | the Coulomb logarithm; `None` takes the NRL formulary value from the electrons, the lightest negatively charged species | `None` |
 
 Names refer to `Species.name`, so give the species meaningful names when collisions
 are used.
@@ -46,11 +46,17 @@ timescale is the only one that matters.
 
 ## Setting the Coulomb logarithm
 
-Left at `None`, $\ln\Lambda$ comes from the NRL formulary evaluated at the density and
-temperature of the first species, which is convenient but takes no account of how the
-plasma evolves. Set it explicitly when a specific value is wanted, when the plasma is
-far from the first species' conditions, or when running a controlled numerical
-experiment on the operator itself:
+Left at `None`, $\ln\Lambda$ comes from the NRL electron-ion formula evaluated at the
+start of the run for the electrons, taken to be the lightest negatively charged
+species: its `density`, and the temperature $T = m v_{th}^2/2$ of the largest of its
+three `vth` components. A simulation with no negatively charged species needs
+`coulomb_log` given. The value is kept above 2, the customary floor (Lee and More
+1984) where the formula would turn small or negative in a cold, dense plasma, so a
+cold species with `vth = 0` gives 2.
+
+This is convenient but takes no account of how the plasma evolves. Set it explicitly
+when a specific value is wanted, when the plasma drifts far from its initial
+conditions, or when running a controlled numerical experiment on the operator itself:
 
 ```python
 Collisions(pairs=(("electrons", "ions"),), coulomb_log=15.0)
