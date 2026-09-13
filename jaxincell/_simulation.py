@@ -442,9 +442,12 @@ def load_toml(path):
 
     The file has ``[domain]``, ``[solver]`` and ``[[species]]`` tables whose keys
     are the constructor arguments, an optional ``[collisions]`` table, and a
-    ``[run]`` table with ``steps``, ``seed`` and ``store_every``. A species may
-    give ``mass`` as a number in kilograms or as ``"electron"``/``"proton"``,
+    ``[run]`` table with ``steps``, ``seed`` and ``store_every``. Every species
+    gives ``mass``, as a number in kilograms or as ``"electron"`` or ``"proton"``,
     optionally multiplied by ``mass_ratio``, and ``charge`` in units of e.
+
+    Raises:
+        ValueError: If a species has no ``mass`` or names an unknown one.
     """
     try:
         import tomllib
@@ -452,12 +455,14 @@ def load_toml(path):
         import tomli as tomllib
     with open(path, "rb") as f:
         raw = tomllib.load(f)
-    species = []
+    species, named = [], {"electron": mass_electron, "proton": mass_proton}
     for s in raw.get("species", []):
         s = dict(s)
-        mass = s.pop("mass", "proton")
-        mass = {"electron": mass_electron, "proton": mass_proton}.get(mass, mass) * s.pop("mass_ratio", 1.0)
-        species.append(Species(mass=mass, **s))
+        mass = s.pop("mass", None)
+        if mass is None or (isinstance(mass, str) and mass not in named):
+            raise ValueError(f"species {s.get('name')!r} needs a mass: a number in kilograms, "
+                             f"or \"electron\" or \"proton\", not {mass!r}")
+        species.append(Species(mass=named.get(mass, mass) * s.pop("mass_ratio", 1.0), **s))
     collisions = Collisions(**raw["collisions"]) if "collisions" in raw else None
     sim = Simulation(Domain(**raw.get("domain", {})), species, Solver(**raw.get("solver", {})), collisions)
     return sim, raw.get("run", {})

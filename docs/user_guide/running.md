@@ -91,7 +91,10 @@ jaxincell examples/input.toml
 The tables map onto the constructors: `[domain]` to {class}`~jaxincell.Domain`,
 `[solver]` to {class}`~jaxincell.Solver`, each `[[species]]` to a
 {class}`~jaxincell.Species`, `[collisions]` to {class}`~jaxincell.Collisions`, and
-`[run]` carries `steps`, `seed`, `store_every` and `plot`.
+`[run]` carries `steps`, `seed`, `store_every` and `plot`. Every species states its
+`mass`, by name or in kilograms, optionally times `mass_ratio`; a species without one,
+or with a name other than `"electron"` or `"proton"`, is a `ValueError` rather than a
+silent proton.
 
 ```toml
 [domain]
@@ -107,7 +110,7 @@ filter_passes = 2
 name = "electrons"
 n = 20000
 charge = -1
-mass = "electron"          # or "proton", or a number in kilograms
+mass = "electron"          # required: "electron", "proton", or a number in kilograms
 density = 4.37e17
 vth = [1.5e7, 0.0, 0.0]
 drift = [6e7, 0.0, 0.0]

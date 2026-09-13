@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from jaxincell import Domain, Simulation, Solver, Species
+from jaxincell import Domain, Simulation, Solver, Species, load_toml
 from jaxincell import mass_electron, mass_proton
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -138,3 +138,18 @@ def test_tree_operations_stack_ensembles_and_build_in_axes():
 
     gradient = jax.grad(lambda x: jnp.sum(field(members[0].replace(x=x)) ** 2))(jnp.asarray(members[0].x))
     assert gradient.shape == (n, 3) and np.isfinite(np.asarray(gradient)).all() and float(jnp.abs(gradient).max()) > 0
+
+
+def _write_input(tmp_path, species):
+    path = tmp_path / "input.toml"
+    path.write_text(f"[domain]\nlength = 0.01\ncells = 16\n[[species]]\n{species}\n[run]\nsteps = 2\n")
+    return path
+
+
+@pytest.mark.parametrize("mass, message", [("", "needs a mass"), ('mass = "muon"', "not 'muon'")])
+def test_an_input_file_species_states_its_mass(tmp_path, mass, message):
+    """A species without a mass used to become a proton without a word."""
+    with pytest.raises(ValueError, match=message):
+        load_toml(_write_input(tmp_path, f'name = "electrons"\nn = 10\ncharge = -1\ndensity = 1e17\n{mass}'))
+    helium = 'name = "alpha"\nn = 10\ncharge = 2\ndensity = 1e17\nmass = "proton"\nmass_ratio = 4'
+    assert load_toml(_write_input(tmp_path, helium))[0].species[0].mass == pytest.approx(4 * mass_proton)
