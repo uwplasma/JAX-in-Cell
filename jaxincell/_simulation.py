@@ -126,10 +126,13 @@ class Simulation:
 
     def __post_init__(self):
         object.__setattr__(self, "species", tuple(self.species))
-        assert len(self.species) > 0, "at least one species is needed"
+        if not self.species:
+            raise ValueError("a Simulation needs at least one species")
         names = [s.name for s in self.species]
-        assert len(set(names)) == len(names), "species names must be distinct"
+        if len(set(names)) != len(names):
+            raise ValueError(f"species names must be distinct, got {names}")
         self._check_implicit()
+        self._check_collisions()
         self._check_courant()
 
     def _check_implicit(self):
@@ -151,6 +154,19 @@ class Simulation:
         if s.field_solver == "gauss":
             raise ValueError("field_solver='gauss' would replace E_x after the energy-conserving update of the "
                              "implicit scheme; it is available with algorithm='explicit' only.")
+
+    def _check_collisions(self):
+        """The default Coulomb logarithm is taken from the lightest negatively charged species,
+        so collisions without a given ``coulomb_log`` need one. Traced charges are skipped, as
+        in :meth:`_check_courant`, since their sign is not known until the program runs."""
+        if self.collisions is None or self.collisions.coulomb_log is not None:
+            return
+        charges = [s.charge for s in self.species]
+        if any(isinstance(q, jax.core.Tracer) for q in charges):
+            return
+        if not any(q < 0 for q in charges):
+            raise ValueError("Collisions() takes its default Coulomb logarithm from the negatively charged species, "
+                             "and there is none: give Collisions(coulomb_log=...).")
 
     def _check_courant(self):
         """The explicit field update is unstable for ``c dt > dx``. Electrostatic
@@ -462,7 +478,9 @@ class Simulation:
             store_particles: Keep the particle histories (the bulk of the memory).
             state: A previous ``Output.state`` to continue from.
         """
-        assert steps % store_every == 0, "steps must be a multiple of store_every"
+        if store_every < 1 or steps % store_every:
+            raise ValueError(f"steps ({steps}) must be a multiple of store_every ({store_every}), "
+                             "which must be at least one")
         return _run(self, steps, seed, store_every, store_particles, state)
 
 

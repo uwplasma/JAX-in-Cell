@@ -253,3 +253,27 @@ def test_a_reflective_box_gathers_like_the_periodic_box_twice_as_long_with_the_i
     field, _ = field_on_sheets([-L / 2 + distance], (1, 1))
     doubled, sigma = field_on_sheets([distance, -distance], (0, 0), length=2 * L, cells=2 * CELLS)
     assert abs(field[0] - doubled[0]) < 1e-11 * abs(sigma) / epsilon_0
+
+
+def test_collisions_without_a_coulomb_logarithm_need_a_negative_species():
+    """The default Coulomb logarithm is the one of the lightest negatively charged
+    species; without one, Collisions() has to be given coulomb_log, and says so when the
+    simulation is built rather than failing inside the loop."""
+    ions = Species.ions(n=10, density=1e20, vth=(1e4, 0, 0))
+    with pytest.raises(ValueError, match="coulomb_log"):
+        Simulation(Domain(), [ions], Solver(), Collisions())
+    Simulation(Domain(), [ions], Solver(), Collisions(coulomb_log=10.0))
+    Simulation(Domain(), [ions, Species.electrons(n=10, density=1e20)], Solver(), Collisions())
+
+
+def test_simulation_and_run_refuse_bad_arguments_with_value_errors():
+    """Argument checks raise ValueError, which ``python -O`` keeps, where assert would vanish."""
+    electrons = Species.electrons(n=10, density=1e10)
+    with pytest.raises(ValueError, match="species"):
+        Simulation(Domain(), [], Solver())
+    with pytest.raises(ValueError, match="distinct"):
+        Simulation(Domain(), [electrons, electrons], Solver())
+    sim = Simulation(Domain(), [electrons], Solver())
+    for steps, store_every in ((10, 3), (10, 0)):
+        with pytest.raises(ValueError, match="store_every"):
+            sim.run(steps, store_every=store_every)
