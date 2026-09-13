@@ -98,13 +98,19 @@ perturbation amplitudes, external field profiles or the full initial phase space
 {doc}`examples/optimisation` solves an inverse problem whose answer is known from
 linear theory.
 
-Every rate and frequency quoted in this documentation is measured against the linear
-kinetic dispersion relation, not against another simulation: Landau damping to
-{{ landau_gamma_deviation_percent }} per cent, the two-stream growth rate to
-{{ two_stream_scan_mean_deviation_percent }} per cent across the unstable range, the
-Weibel rate to {{ weibel_mean_deviation_percent }} per cent, and the collision
-operator to {{ collisions_max_deviation_percent }} per cent of the Fokker-Planck
-rates. {doc}`numerics/verification` collects them.
+Every rate and frequency quoted in this documentation is measured against a
+closed-form or linear kinetic result, not against another simulation. At
+$k\lambda_D = 0.5$ the Landau damping rate is within
+{{ landau_gamma_deviation_percent }} per cent of the kinetic root and the frequency
+within {{ landau_omega_deviation_percent }} per cent. The two-stream growth rate is
+within {{ two_stream_scan_mean_deviation_percent }} per cent on average and
+{{ two_stream_scan_max_deviation_percent }} per cent at worst across the unstable range.
+The Weibel rate is within {{ weibel_mean_deviation_percent }} per cent on average and
+{{ weibel_max_deviation_percent }} per cent at worst over the
+{{ weibel_modes_compared }} of {{ weibel_modes_run }} seeded runs that grow cleanly.
+The worst of the four collisional relaxation rates is within
+{{ collisions_max_deviation_percent }} per cent of Fokker-Planck theory.
+{doc}`numerics/verification` collects them.
 
 ## Quick look
 

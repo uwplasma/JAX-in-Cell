@@ -42,10 +42,14 @@ fields on a staggered (Yee) grid with Maxwell's equations. It provides
 
 Everything runs as one XLA program on whatever device JAX finds.
 
-Every rate quoted in the documentation is checked against the linear kinetic
-dispersion relation rather than against another simulation: Landau damping to 0.4 %,
-the two-stream growth rate to 2.7 % across the unstable range, the Weibel rate to
-6.1 %, and the collision operator to 2.5 % of the Fokker-Planck rates. See
+Every rate quoted in the documentation is checked against a closed-form or linear
+kinetic result rather than against another simulation. At kλ<sub>D</sub> = 0.5 the
+Landau damping rate is within 0.4 % of the kinetic root and the frequency within
+0.8 %. The two-stream growth rate is within 2.7 % on average and 6.0 % at worst over
+seven drifts spanning the unstable range. The Weibel growth rate is within 6.1 % on
+average and 9.3 % at worst over the five of seven seeded wavenumbers that grow cleanly
+enough to fit. The worst of the four collisional relaxation rates is within 2.5 % of
+Fokker-Planck theory. See
 [verification](https://jax-in-cell.readthedocs.io/en/latest/numerics/verification.html).
 
 ## Install
