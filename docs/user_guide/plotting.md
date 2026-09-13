@@ -65,8 +65,7 @@ The scripts in `docs/scripts/` that produce every figure in this documentation a
 written that way and are worth reading as templates; `docs/scripts/common.py` holds
 the shared style and the fitting helpers.
 
-## Without matplotlib
+## Matplotlib
 
-Matplotlib is a dependency, so `plot` is normally there. The import is nevertheless
-guarded: in an environment where matplotlib has been removed, `jaxincell` still
-imports and everything except the plotting works.
+Matplotlib is a required dependency, installed with the package, and `jaxincell`
+imports `plot` unconditionally: there is no build without it to keep working.

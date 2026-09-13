@@ -16,8 +16,9 @@ openpmd.py       optional openPMD export
 __main__.py      the command line
 ```
 
-`__init__.py` re-exports the public names and imports `_plot` inside a `try`, so the
-package works without matplotlib.
+`__init__.py` re-exports the public names, `plot` among them (matplotlib is a required
+dependency), and `__version__`, which is `"unknown"` in a source tree that was never
+installed, since setuptools_scm writes `jaxincell/version.py` at build time.
 
 ## Everything is a pytree
 

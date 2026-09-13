@@ -260,3 +260,20 @@ def test_a_failed_encode_raises_with_ffmpegs_message(monkeypatch, tmp_path, scri
         assert not any("(x, v" in ax.get_title() for ax in fields.axes)
         assert fields.axes[0].get_ylabel() == r"$t\,\omega_{pe}$"
     plt.close("all")
+
+
+def test_the_version_and_the_packaging_metadata():
+    """``__version__`` is exported; setuptools_scm writes it through ``version_file``
+    (``write_to`` is deprecated), and pyproject.toml is the one source of metadata."""
+    import jaxincell
+
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
+    assert isinstance(jaxincell.__version__, str) and jaxincell.__version__
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert config["tool"]["setuptools_scm"] == {"version_file": "jaxincell/version.py"}
+    assert any(requirement.startswith("matplotlib") for requirement in config["project"]["dependencies"])
+    assert "plot" in jaxincell.__all__
+    assert not any((ROOT / name).exists() for name in ("setup.py", "setup.cfg", "requirements.txt"))

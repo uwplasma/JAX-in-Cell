@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 packages = ["jaxincell"]
 
 [tool.setuptools_scm]
-write_to = "jaxincell/version.py"
+version_file = "jaxincell/version.py"
 
 [project]
 name = "jaxincell"

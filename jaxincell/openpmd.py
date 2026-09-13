@@ -29,12 +29,8 @@ import os
 
 import numpy as np
 
+from . import __version__
 from ._constants import speed_of_light
-
-try:
-    from .version import __version__
-except ImportError:  # source tree without the generated version file
-    __version__ = "unknown"
 
 __all__ = ["write_openpmd"]
 _DIMS = {"E": dict(L=1, M=1, T=-3, I=-1), "B": dict(M=1, T=-2, I=-1), "J": dict(L=-2, I=1),

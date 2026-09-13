@@ -379,27 +379,6 @@ plot = true
         gc.collect()
 
 
-def test_the_package_imports_without_matplotlib_but_without_plot():
-    """`plot` is the only part that needs matplotlib, and its import is guarded so
-    that the package still works where matplotlib is not installed."""
-    import importlib
-    import jaxincell
-
-    source = pathlib.Path(jaxincell.__file__).read_text()
-    namespace = {"__name__": "jaxincell_no_matplotlib", "__package__": "jaxincell"}
-    real_import = builtins.__import__
-
-    def refuse_plot(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "_plot" or name.endswith("._plot"):
-            raise ImportError("no matplotlib")
-        return real_import(name, globals, locals, fromlist, level)
-
-    with mock.patch.object(builtins, "__import__", refuse_plot):
-        exec(compile(source, jaxincell.__file__, "exec"), namespace)
-    assert "Simulation" in namespace["__all__"] and "plot" not in namespace["__all__"]
-    importlib.reload(jaxincell)                      # leave the real module intact
-
-
 def test_openpmd_says_what_to_install_when_the_dependency_is_missing():
     from jaxincell.openpmd import write_openpmd
 
@@ -587,14 +566,15 @@ plot = false
     assert exit_code.value.code == 0
 
 
-def test_openpmd_reports_an_unknown_version_from_a_bare_source_tree():
+def test_the_package_reports_an_unknown_version_from_a_bare_source_tree():
     """`jaxincell/version.py` is generated at build time and is not in the
     repository, so a fresh clone that has not been installed does not have one.
-    The exporter still has to write a series, with the version left unknown."""
-    import jaxincell.openpmd
+    The package, and the openPMD exporter that records it, still import, with the
+    version left unknown."""
+    import jaxincell
 
-    source = pathlib.Path(jaxincell.openpmd.__file__).read_text()
-    namespace = {"__name__": "jaxincell.openpmd_bare", "__package__": "jaxincell"}
+    source = pathlib.Path(jaxincell.__file__).read_text()
+    namespace = {"__name__": "jaxincell_bare", "__package__": "jaxincell"}
     real_import = builtins.__import__
 
     def refuse_version(name, globals=None, locals=None, fromlist=(), level=0):
@@ -603,5 +583,5 @@ def test_openpmd_reports_an_unknown_version_from_a_bare_source_tree():
         return real_import(name, globals, locals, fromlist, level)
 
     with mock.patch.object(builtins, "__import__", refuse_version):
-        exec(compile(source, jaxincell.openpmd.__file__, "exec"), namespace)
+        exec(compile(source, jaxincell.__file__, "exec"), namespace)
     assert namespace["__version__"] == "unknown"
