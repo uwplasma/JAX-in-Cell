@@ -7,9 +7,12 @@ Run from the repository root with the package installed::
 The scripts need scipy and matplotlib in addition to the package dependencies;
 Pillow and optipng, if present, shrink the figures. Simulations run
 on whatever JAX backend is available; the measurements they record (growth
-rates, energy errors, timings) are written to docs/_static/figures/measurements.json
-and quoted by the documentation through MyST substitutions.
+rates, energy errors, timings) are written to docs/_static/figures/measurements.json,
+together with the commit and library versions that produced them, and quoted by the
+documentation through MyST substitutions. The documentation quotes double-precision
+results, so a single-precision run (JAX_ENABLE_X64=0) is refused.
 """
+import os
 import runpy
 import sys
 import time
@@ -32,6 +35,9 @@ SCRIPTS = [
 ]
 
 if __name__ == "__main__":
+    if os.environ.get("JAX_ENABLE_X64", "1").strip().lower() in ("0", "false", "f", "no", "n", "off"):
+        sys.exit("make_all.py records the numbers the documentation quotes, which are double-precision "
+                 "results; unset JAX_ENABLE_X64 or set it to 1.")
     selected = sys.argv[1:] or SCRIPTS
     # the repository root first, so that the figures come from the checked-out code
     # rather than from whatever copy of jaxincell happens to be installed

@@ -4,16 +4,22 @@ Every figure script here imports this module. Figures go to
 ``docs/_static/figures``; the numbers the prose quotes are recorded in
 ``docs/_static/figures/measurements.json`` and pulled into the text as MyST
 substitutions, so the text and the committed figures always come from one run.
+Each script's entry under ``_provenance`` in that file says which commit and which
+library versions produced its numbers.
 """
+import inspect
 import json
+import platform
 import shutil
 import subprocess
+from importlib import metadata
 from pathlib import Path
 
 import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+matplotlib.use("Agg")
 
 HERE = Path(__file__).resolve().parent
 FIGURE_DIR = HERE.parent / "_static" / "figures"
@@ -30,7 +36,7 @@ C_IMPLICIT = COLORS["vermillion"]
 C_THEORY = COLORS["black"]
 C_FIT = COLORS["green"]
 CMAP_SIGNED, CMAP_DENSITY = "RdBu_r", "viridis"
-SINGLE, WIDE, TALL = (6.0, 3.6), (7.4, 3.4), (6.0, 6.0)
+SINGLE, WIDE = (6.0, 3.6), (7.4, 3.4)
 
 plt.rcParams.update({
     "font.size": 9.5, "axes.titlesize": 10, "axes.labelsize": 9.5, "legend.fontsize": 8.5,
@@ -69,24 +75,72 @@ def savefig(fig, name, colors=256):
     return path
 
 
+def _git_revision():
+    """The checked-out commit, marked ``-dirty`` when tracked files differ from it."""
+    try:
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=HERE, capture_output=True, text=True,
+                             check=True).stdout.strip()
+        changed = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=HERE,
+                                 capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return f"{sha}-dirty" if changed else sha
+
+
+def _version(module, distribution):
+    version = getattr(module, "__version__", None)
+    if version:
+        return str(version)
+    try:
+        return metadata.version(distribution)
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def provenance():
+    """What produced a set of numbers: the commit, the library versions, the
+    precision and the device."""
+    import jax
+    import jaxincell
+    try:
+        from jaxincell.version import __version__ as jaxincell_version
+    except ImportError:                              # a source tree that was never built
+        jaxincell_version = _version(jaxincell, "jaxincell")
+    try:
+        import scipy
+        scipy_version = scipy.__version__
+    except ImportError:
+        scipy_version = "not installed"
+    return {"git": _git_revision(), "jaxincell": jaxincell_version, "jax": jax.__version__,
+            "numpy": np.__version__, "scipy": scipy_version,
+            "jax_enable_x64": bool(jax.config.read("jax_enable_x64")),
+            "backend": jax.default_backend(), "platform": f"{platform.system()} {platform.machine()}"}
+
+
 def record(**values):
-    """Merge scalar results into measurements.json, which the docs text quotes."""
+    """Merge scalar results into measurements.json, which the docs text quotes, and
+    note under ``_provenance`` which script, commit and versions produced them.
+
+    The documentation quotes double-precision results, so a run in single precision
+    (``JAX_ENABLE_X64=0``) is refused rather than recorded over them.
+    """
+    info = provenance()
+    if not info["jax_enable_x64"]:
+        raise RuntimeError("refusing to record single-precision measurements: the documentation quotes "
+                           "double-precision results. Run without JAX_ENABLE_X64=0.")
+    script = Path(inspect.currentframe().f_back.f_code.co_filename).name
     FIGURE_DIR.mkdir(parents=True, exist_ok=True)
     data = json.loads(MEASUREMENTS.read_text()) if MEASUREMENTS.exists() else {}
     for key, value in values.items():
         data[key] = value.item() if isinstance(value, (np.floating, np.integer)) else value
         print(f"  {key} = {data[key]}")
-    MEASUREMENTS.write_text(json.dumps(dict(sorted(data.items())), indent=2) + "\n")
+    data.setdefault("_provenance", {})[script] = info
+    MEASUREMENTS.write_text(json.dumps(dict(sorted(data.items())), indent=2, sort_keys=True) + "\n")
 
 
 def panel_label(ax, text, x=-0.14, y=1.04):
     ax.text(x, y, text, transform=ax.transAxes, fontsize=10.5, fontweight="bold",
             va="bottom", ha="left")
-
-
-def mode_amplitude(out, mode):
-    """Complex Fourier amplitude of one mode of E_x at every stored step."""
-    return np.fft.rfft(np.asarray(out.E[:, :, 0]), axis=1)[:, mode] / out.E.shape[1]
 
 
 def maxima(amplitude, above=0.0):
@@ -101,53 +155,6 @@ def rate_and_frequency(t, amplitude, above=0.0):
     of a modulus are half a period apart."""
     i = maxima(amplitude, above)
     return np.polyfit(t[i], np.log(amplitude[i]), 1)[0], np.pi / np.mean(np.diff(t[i])), i
-
-
-def robust_growth_fit(time, energy, min_r2=0.95, min_duration=15.0, min_efolds=1.5, min_points=12):
-    """Fit an exponential to a mode energy, choosing the window by a stated rule.
-
-    Scans windows inside the growth phase (everything before the peak) and keeps
-    the **longest** one whose straight-line fit to ``ln(energy)`` reaches
-    ``min_r2``. Requiring length rather than the steepest or best-correlated
-    window avoids two failure modes: a short window sitting on a noise excursion,
-    which can return an arbitrarily large rate, and the seed transient at the
-    start, during which the perturbation has not yet settled onto the growing
-    eigenmode.
-
-    Returns ``None`` when no window qualifies, which is the honest outcome for a
-    mode that never grew cleanly; such modes are left out of the comparison with
-    theory instead of being fitted anyway.
-
-    Returns:
-        dict or None: ``gamma`` (the amplitude rate, half the slope of the
-        energy), ``intercept``, ``slope``, ``r2``, ``t0``, ``t1``, ``efolds``,
-        ``duration``.
-    """
-    time, energy = np.asarray(time), np.asarray(energy)
-    if (energy > 0).sum() < min_points:
-        return None
-    i_peak = int(np.argmax(energy))
-    if i_peak < min_points:
-        return None
-    best = None
-    edges = np.unique(np.linspace(0, i_peak, 60).astype(int))
-    for index, a in enumerate(edges[:-1]):
-        for b in edges[index + 1:]:
-            t_seg, y = time[a:b + 1], energy[a:b + 1]
-            duration = t_seg[-1] - t_seg[0]
-            if len(t_seg) < min_points or duration < min_duration or np.any(y <= 0):
-                continue
-            slope, intercept = np.polyfit(t_seg, np.log(y), 1)
-            if slope <= 0 or 0.5 * slope * duration < min_efolds:
-                continue
-            residual = np.log(y) - (intercept + slope * t_seg)
-            spread = np.log(y) - np.log(y).mean()
-            r2 = 1.0 - residual.dot(residual) / max(spread.dot(spread), 1e-300)
-            if r2 >= min_r2 and (best is None or duration > best["duration"]):
-                best = {"gamma": 0.5 * slope, "intercept": float(intercept), "slope": float(slope),
-                        "r2": float(r2), "t0": float(t_seg[0]), "t1": float(t_seg[-1]),
-                        "efolds": float(0.5 * slope * duration), "duration": float(duration)}
-    return best
 
 
 def phase_space_hist(ax, x, v, box_length, v_max, weights=None, bins=(70, 90), cmap=CMAP_DENSITY):

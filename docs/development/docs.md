@@ -43,7 +43,10 @@ python docs/scripts/make_all.py fig_landau_damping.py   # one script
 ```
 
 Each script writes its PNG files and records the numbers it measured (growth rates,
-frequencies, energy errors, timings) in `docs/_static/figures/measurements.json`.
+frequencies, energy errors, timings) in `docs/_static/figures/measurements.json`,
+with the commit, the library versions, the precision and the device that produced them
+under `_provenance`. The documentation quotes double-precision results, so a run with
+`JAX_ENABLE_X64=0` refuses to record.
 `conf.py` exposes those numbers as substitutions, so that a page can write
 `{{ landau_gamma_measured }}` and always quote the value of the committed figure.
 `fig_scaling.py` measures wall-clock time and should be run on an otherwise idle
