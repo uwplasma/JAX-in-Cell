@@ -14,7 +14,7 @@ from jaxincell import (Domain, Simulation, Solver, Species, diagnostics,
                        epsilon_0, mass_electron, elementary_charge as e)
 
 length, cells = 1.0, 32
-density = 1e12
+density = 1e15
 omega_pe = np.sqrt(density * e ** 2 / (epsilon_0 * mass_electron))
 
 electrons = Species.electrons(n=20000, density=density, vth=(1e5, 0, 0), quiet=True,
@@ -24,15 +24,19 @@ ions = Species.ions(n=5000, density=density, mass_ratio=1e9, vth=(0, 0, 0), quie
 
 simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0),
                         [electrons, ions], Solver())
-output = simulation.run(600, seed=0, store_particles=False)
+output = simulation.run(2000, seed=0, store_particles=False)
 
 d = diagnostics(output)
 print(f"omega measured / omega_pe = {float(d['dominant_frequency']) / omega_pe:.3f}")
 ```
 
-It should print a number close to one. The wave is slightly faster than $\omega_{pe}$
-because of the thermal correction $\omega^2 = \omega_{pe}^2(1 + 3k^2\lambda_D^2)$; the
-`langmuir_wave.py` example measures the whole dispersion relation.
+It should print a number within a couple of per cent of one (0.997 on our machine). The
+run covers about sixty plasma periods, so the Fourier transform behind
+`dominant_frequency` resolves the frequency to 1.7 per cent; a run of only a few periods
+cannot tell $\omega_{pe}$ apart from its neighbouring frequency bins. At this temperature
+the thermal correction $\omega^2 = \omega_{pe}^2(1 + 3k^2\lambda_D^2)$ is negligible,
+$k\lambda_D \approx 3\times10^{-4}$; the `langmuir_wave.py` example measures the
+dispersion relation where it is not.
 
 ## The two-stream instability
 

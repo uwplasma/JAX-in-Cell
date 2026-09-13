@@ -2,14 +2,15 @@
 
 ## Requirements
 
-JAX-in-Cell is a pure Python package. It depends on `jax`, `jax_tqdm` (a progress bar
-inside compiled loops) and `matplotlib`. Python 3.9 or newer is required; the
-continuous-integration matrix tests 3.9 through 3.12 on Linux, and the documentation
-is built with 3.12.
+JAX-in-Cell is a pure Python package. It depends on `jax` and `matplotlib`, and on
+`tomli` for reading input files on Python 3.10, where the standard library has no
+`tomllib`. Python 3.10 or newer is required; the continuous-integration matrix tests
+3.10 through 3.13 on Linux, and the documentation is built with 3.12.
 
 The package enables 64-bit floating point in JAX when it is imported
-(`jax.config.update("jax_enable_x64", True)`). This applies to the whole Python process,
-including any other JAX code you run afterwards.
+(`jax.config.update("jax_enable_x64", True)`) unless the environment variable
+`JAX_ENABLE_X64` is already set, which is how a run chooses single precision. This
+applies to the whole Python process, including any other JAX code you run afterwards.
 
 ## From PyPI
 
@@ -49,17 +50,21 @@ device JAX selects; `jax.devices()` shows which one that is.
 
 ```bash
 python -c "import jaxincell, jax; print(jaxincell.__file__); print(jax.devices())"
-jaxincell
+jaxincell examples/input.toml
 ```
 
-The second command runs the built-in default configuration (a two-stream instability
-with 500 pseudo-particles per species) and opens an animation window. It prints a
-summary of the derived plasma parameters before the run starts.
+The second command, run from a clone of the repository, runs the two-stream instability
+described in `examples/input.toml`, prints the energy drift and the Gauss-law residual,
+and opens an animation window. Without a file, `jaxincell` prints its usage.
 
 ## Optional dependencies
 
-* `scipy` is used by some example scripts (least-squares optimisation) and by the
-  scripts that generate the figures in this documentation (plasma dispersion function).
+* `openpmd-api` (the `openpmd` extra, `pip install "jaxincell[openpmd]"`) writes runs in
+  the openPMD format.
+* `scipy` is used by the scripts that generate the figures in this documentation, for
+  the plasma dispersion function; it is part of the `docs` extra.
 * `ffmpeg` on the `PATH` is needed to save animations to MP4 with
   {func}`jaxincell.plot`.
-* `pytest` and `pytest-cov` run the test suite, see {doc}`../development/testing`.
+* The `dev` extra, `pip install -e ".[dev]"`, installs `pytest`, `pytest-cov`, `flake8`
+  and `openpmd-api`, everything the test suite and the lint step need; see
+  {doc}`../development/testing`.
