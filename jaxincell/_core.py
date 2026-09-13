@@ -261,6 +261,9 @@ def boris_relativistic(u, E, B, qm, dt):
     return u + qm * E * (dt / 2)
 
 
+PARK = 1.5      # cells beyond a wall where an absorbed particle is parked; see apply_particle_bc
+
+
 def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):
     """Bring particles that left the box back according to the wall codes.
 
@@ -280,8 +283,8 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):
     xx, vx = x[:, 0], v[:, 0]
     out = jnp.zeros_like(xx, dtype=bool)
     for code, beyond, mirror, park, e, r in (
-            (bc[0], xx < -L / 2, -L - xx, -L / 2 - 1.5 * dx, restitution[0], reflection[0]),
-            (bc[1], xx > L / 2, L - xx, L / 2 + 1.5 * dx, restitution[1], reflection[1])):
+            (bc[0], xx < -L / 2, -L - xx, -L / 2 - PARK * dx, restitution[0], reflection[0]),
+            (bc[1], xx > L / 2, L - xx, L / 2 + PARK * dx, restitution[1], reflection[1])):
         if code == 0:
             xx = jnp.where(beyond, (xx + L / 2) % L - L / 2, xx)
             continue
@@ -301,11 +304,27 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):
 
 def wrap_positions(x, w, box, bc, dx):
     """The position map of :func:`apply_particle_bc` alone, for the reconstructed
-    integer-time positions: at an absorbing wall a particle that still has weight
-    was reflected and is mirrored, one that has none stays parked."""
-    ones = jnp.ones_like(w)
-    x, _, _, _ = apply_particle_bc(x, jnp.zeros_like(x), w, ones, box, bc, (1.0, 1.0), (ones, ones), dx)
-    return x
+    integer-time positions: wrapped at a periodic wall, mirrored at a reflective one, and
+    at an absorbing one mirrored if the particle still has weight and parked if it has none.
+
+    It repeats the position rules rather than calling :func:`apply_particle_bc` with dummy
+    velocities, because XLA does not remove that dummy work: the full map cost 9-15 ns per
+    particle and this one 4-5 (N = 1e5, CPU). A test holds the two to identical positions
+    for every pair of walls."""
+    L, Ly, Lz = box
+    periods = jnp.array([Ly, Lz])
+    yz = (x[:, 1:] + periods / 2) % periods - periods / 2
+    xx = x[:, 0]
+    for code, beyond, mirror, park in ((bc[0], xx < -L / 2, -L - xx, -L / 2 - PARK * dx),
+                                       (bc[1], xx > L / 2, L - xx, L / 2 + PARK * dx)):
+        if code == 0:
+            xx = jnp.where(beyond, (xx + L / 2) % L - L / 2, xx)
+            continue
+        if code == 2:
+            xx = jnp.where(beyond & (w <= 0), park, xx)
+            beyond = beyond & (w > 0)
+        xx = jnp.where(beyond, mirror, xx)
+    return jnp.concatenate([xx[:, None], yz], axis=1)
 
 
 # --- digital filter --------------------------------------------------------------------

@@ -145,6 +145,21 @@ def slow_ones(speed):
     return jnp.exp(-speed ** 2 / (2 * 1e12))
 
 
+@pytest.mark.parametrize("bc", [(0, 0), (1, 1), (1, 2), (2, 1), (2, 2), (3, 2), (2, 3)])
+def test_wrap_positions_is_the_position_map_of_the_particle_walls(bc):
+    """wrap_positions repeats the position rules of apply_particle_bc to be cheaper. On
+    particles beyond either wall and in all three coordinates, with and without weight,
+    the two give identical positions."""
+    rng = np.random.default_rng(3)
+    n = 400
+    x = jnp.asarray(rng.uniform(-0.6 * L, 0.6 * L, (n, 3)))
+    w = jnp.asarray(np.where(rng.uniform(size=n) < 0.3, 0.0, 1.0))
+    unchanged = (jnp.ones(n), jnp.ones(n))
+    box = (L, 0.7, 0.9)
+    full, _, _, _ = apply_particle_bc(x, jnp.zeros_like(x), w, jnp.ones(n), box, bc, (1.0, 1.0), unchanged, DX)
+    assert np.array_equal(np.asarray(wrap_positions(x, w, box, bc, DX)), np.asarray(full))
+
+
 def walled_simulation(**solver):
     """Electrostatic (no transverse velocity), so that a step far above the light-wave limit is stable."""
     e = Species.electrons(n=600, density=1e15, vth=(2e6, 0, 0), drift=(1e6, 0, 0), reflection=(0.0, slow_ones))
