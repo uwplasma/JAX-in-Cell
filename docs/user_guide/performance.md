@@ -29,7 +29,10 @@ nearly flat until the grid becomes comparable to the particle count.
 The deposit is a scatter-add rather than a dense particle-by-cell weight matrix. The
 dense form keeps everything a matrix product, which looks appealing on a GPU, but it
 costs $O(N N_x)$ instead of $O(N)$; replacing it was worth about a factor of three at
-64 cells and more as the grid grows.
+64 cells and more as the grid grows. The indices are always inside the grid, so the
+deposit and the gather could skip JAX's bounds handling with
+`mode="promise_in_bounds"`; timed over whole steps on an idle RTX A4000, that changed
+nothing by more than 1 %, so they keep the default.
 
 ## Compilation
 
