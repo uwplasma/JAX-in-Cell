@@ -36,10 +36,25 @@ started from a charge distribution rather than from a field.
 
 ### Solving it
 
-**Reflective or absorbing walls.** The field is integrated from the left wall, where
-$E_{x,-1/2}=0$, by a cumulative sum: $E_{x,i+1/2} = (\Delta x/\epsilon_0)\sum_{j\le i}\rho_j$.
-Two absorbing walls are short-circuited conductors, so the mean of $E_x$ is then
-subtracted ({doc}`boundaries`).
+**Walls.** A cumulative sum gives the field up to one constant,
+$E_{x,i+1/2} = E_{x,-1/2} + (\Delta x/\epsilon_0)\sum_{j\le i}\rho_j$, where $E_{x,-1/2}$ is
+the field at the left wall face, which the grid does not store. The walls fix the
+constant, and every rule below is its own mirror image, so a charge distribution and its
+reflection give reflected fields ({doc}`boundaries`):
+
+| walls | closure |
+|---|---|
+| reflective, absorbing | $E_x = 0$ at the reflective wall, the symmetry plane, and the sum runs from it |
+| absorbing, reflective | the same from the right: $E_{x,N_x-1/2} = 0$ |
+| reflective, reflective | the mean charge is removed and $E_x = 0$ at both walls |
+| absorbing, absorbing | no potential drop from wall to wall: $\tfrac12 E_{x,-1/2} + \sum_{i=0}^{N_x-2}E_{x,i+1/2} + \tfrac12 E_{x,N_x-1/2} = 0$ |
+
+A box between two symmetry planes is half of a periodic box twice as long, which is why
+it needs a neutral charge, as a periodic box does. The sum for two absorbing walls is
+the trapezoidal rule over the $N_x+1$ faces from wall to wall: with the potential at the
+centres and each conductor half a cell beyond the last one, it is exactly
+$\phi_{\rm left} - \phi_{\rm right}$. The continuity current of {doc}`deposition` uses the
+same closures, so Ampere's law keeps whichever the initial Gauss solve imposed.
 
 **Periodic walls.** Summing {eq}`discrete-gauss` over the cells leaves
 $\sum_i\rho_i = 0$, so a periodic box has a solution only when it is neutral, and the

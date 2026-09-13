@@ -65,27 +65,52 @@ def gather(field, x, x0, dx, bc):
 
 # --- sources -----------------------------------------------------------------------
 
+def _integrate_from_walls(s, dx, bc):
+    """The face quantity :math:`F` with :math:`(F_{i+1/2} - F_{i-1/2})/\\Delta x = s_i` for a
+    centred source :math:`s`. That fixes :math:`F` up to one constant, the value
+    :math:`F_{-1/2}` at the left wall face (which the grid does not store), and the walls
+    fix the constant. The Gauss solve (:math:`F = E_x`, :math:`s = \\rho/\\epsilon_0`) and
+    the continuity current (:math:`F = J_x`, :math:`s = -\\partial_t\\rho`) share this
+    function, so that the field Ampere's law advances keeps the closure the initial
+    Gauss solve imposed. Every rule is its own mirror image, so a charge distribution
+    and its reflection give reflected fields.
+
+    * **Periodic**: a solution exists only for a source with zero sum, so the mean
+      source is removed (a uniform neutralising background) and :math:`F` is given
+      zero mean.
+    * **Reflective at both walls**: a box between two symmetry planes is half of a
+      periodic box twice as long, holding the charge and its mirror image. The mean
+      source is removed as in a periodic box, and :math:`F` then vanishes at both
+      walls, as :math:`E_x` must at a symmetry plane.
+    * **Reflective at one wall**: :math:`F` vanishes at that wall and the sum runs from
+      it; the absorbing wall opposite floats.
+    * **Absorbing at both walls**: conductors short-circuited to each other, so the
+      potential difference across the box vanishes. With the potential at the centres
+      and each conductor half a cell beyond the last centre, that difference is the
+      trapezoidal sum over the :math:`N_x + 1` faces from wall to wall,
+      :math:`\\tfrac12 F_{-1/2} + \\sum_{i=0}^{N_x-2} F_{i+1/2} + \\tfrac12 F_{N_x-1/2} = 0`.
+    """
+    if bc[0] == bc[1] != 2:
+        s = s - jnp.mean(s)
+    F = dx * jnp.cumsum(s)                                      # F_{i+1/2} - F_{-1/2}
+    if bc == (0, 0):
+        return F - jnp.mean(F)
+    if bc == (2, 1):
+        return F - F[-1]
+    if bc == (2, 2):
+        return F - (jnp.sum(F) - 0.5 * F[-1]) / F.shape[0]
+    return F
+
+
 def current_from_continuity(rho_old, rho_new, dt, dx, mean_current, bc):
     """Longitudinal current at the faces that satisfies the discrete continuity
     equation :math:`(\\rho_i^{new} - \\rho_i^{old})/\\Delta t + (J_{i+1/2} - J_{i-1/2})/\\Delta x = 0`
-    exactly. What is left free is the integration constant, the current through the
-    left wall, and that is where the boundary condition enters:
-
-    * **Periodic**: there is no wall, so the constant is fixed instead by making the
-      mean of :math:`J` the mean current the particles carry.
-    * **Absorbing on both sides**: the walls are conductors that collect the charge
-      they absorb, short-circuited to each other, so they stay at one potential and
-      :math:`\\sum_i E_{i+1/2} = 0` holds for all time. That requires the mean of
-      :math:`J` to vanish; the difference is the current in the external circuit.
-    * **Otherwise**: a reflecting wall is a symmetry plane, nothing crosses it, and
-      the current through it is zero.
-    """
-    J = -dx * jnp.cumsum((rho_new - rho_old) / dt)
-    if bc[0] == 0:
-        J = J - jnp.mean(J) + mean_current
-    elif bc == (2, 2):
-        J = J - jnp.mean(J)
-    return J
+    exactly, with the wall closures of :func:`_integrate_from_walls`. A periodic box has
+    no wall to fix the constant, which is instead the mean current the particles carry,
+    :math:`\\langle J\\rangle = L^{-1}\\sum_p q_p v_{x,p}`; between two absorbing walls the
+    current the closure removes is the one in the external circuit."""
+    J = _integrate_from_walls(-(rho_new - rho_old) / dt, dx, bc)
+    return J + mean_current if bc[0] == 0 else J
 
 
 def to_faces(f, bc):
@@ -148,18 +173,11 @@ def half_step_fields(E, B, J, dt2, dx, bc, electric_first):
 
 def E_x_from_rho(rho, dx, bc):
     """Solve the discrete Gauss law :math:`(E_{i+1/2} - E_{i-1/2})/\\Delta x = \\rho_i/\\epsilon_0`
-    for the longitudinal field at the faces by summing from the left wall, which fixes
-    :math:`E` up to a constant that the walls then fix. Periodic: a solution exists
-    only for a neutral box, so the mean charge is removed and the field given zero
-    mean, which is exactly the field the finite-difference symbol
-    :math:`(1 - e^{-ik\\Delta x})/\\Delta x` gives in Fourier space, without the
-    complex arithmetic. Two absorbing walls are conductors short-circuited to each
-    other, so the potential across the box is zero and the mean of :math:`E` is
-    subtracted as well; any other wall is a symmetry plane, where :math:`E_{-1/2} = 0`."""
-    if bc[0] == 0:
-        rho = rho - jnp.mean(rho)
-    E = dx / epsilon_0 * jnp.cumsum(rho)
-    return E - jnp.mean(E) if bc in ((0, 0), (2, 2)) else E
+    for the longitudinal field at the faces, with the wall closures of
+    :func:`_integrate_from_walls`. In a periodic box this is exactly the field the
+    finite-difference symbol :math:`(1 - e^{-ik\\Delta x})/\\Delta x` gives in Fourier
+    space, without the complex arithmetic."""
+    return _integrate_from_walls(rho / epsilon_0, dx, bc)
 
 
 # --- particles --------------------------------------------------------------------------

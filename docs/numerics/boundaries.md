@@ -88,17 +88,25 @@ short-circuited to each other, so they stay at the same potential and
 \int_0^L E_x\,dx = \phi(0) - \phi(L) = 0 .
 ```
 
-That is one line in each of the two places the constant is chosen — the mean is
-subtracted from $E_x$ in the Gauss solve, and from $J_x$ in the continuity current, the
-difference being the current the external circuit carries. The plasma is then free to
-float to whatever potential balances the two fluxes, which is what a sheath is. A
-biased or floating electrode with a series RLC circuit is the same construction with a
-different equation for the constant {cite}`verboncoeur1993`; it is not implemented.
+On the grid the potential lives at the centres, with the charge, and each conductor sits
+half a cell beyond the last centre, so the integral is the trapezoidal sum over the
+$N_x+1$ faces from wall to wall, the two wall faces with half weight. One function
+imposes it in both places the constant is chosen, the Gauss solve for $E_x$ and the
+continuity current for $J_x$, the current the closure removes being the one the
+external circuit carries. The plasma is then free to float to whatever potential
+balances the two fluxes, which is what a sheath is. A biased or floating electrode with
+a series RLC circuit is the same construction with a different equation for the
+constant {cite}`verboncoeur1993`; it is not implemented.
 
-A single absorbing wall facing a reflective or thermal one is a floating electrode on
-its own: the symmetry plane fixes $E = 0$ at the far end, the current through it is
-zero, and the electrode sits at whatever potential the charge it has collected gives
-it. That is the setup of {doc}`../examples/sheath`.
+A single absorbing wall facing a reflective or thermal one, on either side, is a
+floating electrode on its own: the symmetry plane fixes $E = 0$ at its end, the current
+through it is zero, the field is integrated from it, and the electrode sits at whatever
+potential the charge it has collected gives it. That is the setup of
+{doc}`../examples/sheath`. Two reflective walls are two symmetry planes, and the box
+between them is half of a periodic box twice as long, holding the charge and its mirror
+image; as in a periodic box the charge must then be neutral, the mean is removed, and
+$E = 0$ at both walls. Each of these rules is its own mirror image, so a plasma and its
+reflection, with the walls swapped, give reflected fields to round-off.
 
 One consequence for the diagnostics: with a wall, the field beyond it is a degree of
 freedom the output does not carry, so {func}`~jaxincell.gauss_residual` checks the

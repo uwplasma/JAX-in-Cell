@@ -60,8 +60,12 @@ The integration constant $J_{x,-1/2}$ is the current through the left wall:
   $\langle J_x\rangle = L^{-1}\sum_p q_p v_{x,p}$. Without this the uniform part of the
   current, which a cumulative sum cannot see, would be lost and a net beam would not
   drive the field it should.
-* **Reflective or absorbing walls.** Nothing crosses the wall, so $J_{x,-1/2} = 0$ and
-  the cumulative sum is taken as it stands.
+* **Walls.** The constant follows the same closure as the Gauss solve of
+  {doc}`field_solvers`, applied to $-\partial_t\rho$ in place of $\rho/\epsilon_0$: no
+  current through a reflective wall, the sum run from that wall, and between two
+  absorbing walls no change in the potential drop, the rest being the current in the
+  external circuit ({doc}`boundaries`). Sharing the closure is what keeps the field
+  Ampere's law advances on the one the initial Gauss solve chose.
 
 Because the shape functions are compact, $\rho^{n+1/2} - \rho^{n-1/2}$ has zero sum
 over the grid in a periodic box, so the cumulative sum returns to its starting value

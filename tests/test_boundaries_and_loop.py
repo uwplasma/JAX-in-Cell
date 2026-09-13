@@ -17,6 +17,51 @@ CENTRE0 = -L / 2 + DX / 2
 WALLS = [(0, 0), (1, 1), (1, 2), (2, 1), (2, 2)]           # every pair Domain accepts
 
 
+def left_wall_value(F, s, bc):
+    """F_{-1/2}, which the grid does not store, from the first cell of the difference equation."""
+    return F[-1] if bc == (0, 0) else F[0] - DX * s[0]
+
+
+def reflect_faces(F, F_left):
+    """Faces mirrored about the box centre: face i+1/2 goes to face (N-2-i)+1/2, and the
+    left wall face, which is not stored, becomes the stored right wall face."""
+    return jnp.concatenate([F[:-1][::-1], F_left[None]])
+
+
+@pytest.mark.parametrize("bc", WALLS)
+def test_wall_closures_are_mirror_images_and_satisfy_gauss(bc):
+    """For every pair of field walls, the Gauss solve and the continuity current of a
+    charge distribution and of its mirror image, with the walls swapped, are mirror
+    images: E_x and J_x change sign under the reflection. Both satisfy their difference
+    equation in every cell, E_x vanishes at a reflective wall, two absorbing walls hold
+    no potential difference across the box, and the periodic current carries the mean
+    current it is given."""
+    rng = np.random.default_rng(7)
+    rho = jnp.asarray(rng.normal(size=CELLS) + 0.3)        # not neutral, so the closures matter
+    drho = jnp.asarray(rng.normal(size=CELLS))
+    solves = ((lambda r, b, sign: E_x_from_rho(r, DX, b), rho, rho / epsilon_0, 0.0),
+              (lambda r, b, sign: current_from_continuity(0 * r, r, 1.0, DX, sign * 0.25, b), drho, -drho, 0.25))
+    for field, data, source, mean in solves:
+        F = field(data, bc, 1.0)
+        s = source - jnp.mean(source) if bc in ((0, 0), (1, 1)) else source
+        F_left = left_wall_value(F, s, bc)
+        F_before = jnp.concatenate([F_left[None], F[:-1]])
+        assert np.allclose(np.asarray((F - F_before) / DX), np.asarray(s), rtol=1e-12,
+                           atol=1e-12 * float(jnp.abs(s).max()))
+        G = field(data[::-1], bc[::-1], -1.0)             # the mean current reverses with the charges
+        assert np.allclose(np.asarray(G), -np.asarray(reflect_faces(F, F_left)), rtol=1e-12,
+                           atol=1e-12 * float(jnp.abs(F).max()))
+        scale = float(jnp.abs(F).max())
+        if bc[0] == 1:
+            assert abs(float(F_left)) < 1e-12 * scale
+        if bc[1] == 1:
+            assert abs(float(F[-1])) < 1e-12 * scale
+        if bc == (2, 2):
+            assert abs(float(0.5 * F_left + jnp.sum(F[:-1]) + 0.5 * F[-1])) < 1e-12 * CELLS * scale
+        if bc == (0, 0):
+            assert abs(float(jnp.mean(F)) - mean) < 1e-12 * scale
+
+
 class KeyLedger:
     """Stands in for ``jax.random`` in the simulation module and records every concrete
     key that is split, folded or drawn from. Inside a scan the keys are tracers and are
