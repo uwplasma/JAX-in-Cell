@@ -17,6 +17,20 @@ CENTRE0 = -L / 2 + DX / 2
 WALLS = [(0, 0), (1, 1), (1, 2), (2, 1), (2, 2)]           # every pair Domain accepts
 
 
+def test_absorbed_particles_are_parked_symmetrically_off_both_grids():
+    """A particle with no weight left is parked the same distance beyond either wall,
+    one and a half cells, the half-width of the spline, so that neither the centred nor
+    the staggered stencil reaches back into the box from there."""
+    x = jnp.array([[-0.6, 0.0, 0.0], [0.6, 0.0, 0.0]])
+    v = jnp.array([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    nothing = (jnp.zeros(2), jnp.zeros(2))
+    parked, _, w, _ = apply_particle_bc(x, v, jnp.ones(2), jnp.ones(2), (L, L, L), (2, 2), (1.0, 1.0), nothing, DX)
+    assert float(parked[0, 0]) == pytest.approx(-L / 2 - 1.5 * DX)
+    assert float(parked[1, 0]) == pytest.approx(L / 2 + 1.5 * DX)
+    for origin in (CENTRE0, CENTRE0 + DX / 2):
+        assert float(jnp.abs(deposit(parked[:, 0], jnp.ones(2), origin, DX, CELLS, (2, 2))).max()) == 0.0
+
+
 def slow_ones(speed):
     """A reflection law that returns the electrons slower than about 1e6 m/s."""
     return jnp.exp(-speed ** 2 / (2 * 1e12))

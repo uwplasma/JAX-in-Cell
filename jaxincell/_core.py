@@ -196,8 +196,11 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):
     the weight ``w`` of each particle that reaches it, mirrored and bounced the
     same way, and collects the rest. A particle with no weight left is stopped,
     has its charge-to-mass ratio zeroed and is parked outside the grid, where it
-    stays. ``restitution`` is a ``(left, right)`` pair and ``reflection`` a pair
-    of per-particle arrays. The ignorable coordinates are always periodic."""
+    stays: one and a half cells beyond the wall, the half-width of the quadratic
+    spline, so that its cloud lies wholly beyond the wall on the centred grid and on
+    the staggered one alike. ``restitution`` is a ``(left, right)`` pair and
+    ``reflection`` a pair of per-particle arrays. The ignorable coordinates are
+    always periodic."""
     L, Ly, Lz = box
     x = x.at[:, 1].set((x[:, 1] + Ly / 2) % Ly - Ly / 2)
     x = x.at[:, 2].set((x[:, 2] + Lz / 2) % Lz - Lz / 2)
@@ -205,7 +208,7 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):
     out = jnp.zeros_like(xx, dtype=bool)
     for code, beyond, mirror, park, e, r in (
             (bc[0], xx < -L / 2, -L - xx, -L / 2 - 1.5 * dx, restitution[0], reflection[0]),
-            (bc[1], xx > L / 2, L - xx, L / 2 + 3.0 * dx, restitution[1], reflection[1])):
+            (bc[1], xx > L / 2, L - xx, L / 2 + 1.5 * dx, restitution[1], reflection[1])):
         if code == 0:
             xx = jnp.where(beyond, (xx + L / 2) % L - L / 2, xx)
             continue
