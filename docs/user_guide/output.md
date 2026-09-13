@@ -46,7 +46,8 @@ d["potential"]        # electrostatic potential at the faces, zero at the left w
 d["temperatures"]     # per species, per component, in eV
 ```
 
-The full list and what each one means is in {doc}`../numerics/diagnostics`. The
+`d["dominant_frequency"]` needs at least two stored steps and is NaN for a run that
+stored one. The full list and what each one means is in {doc}`../numerics/diagnostics`. The
 individual functions — {func}`~jaxincell.energies`,
 {func}`~jaxincell.gauss_residual`, {func}`~jaxincell.temperatures`,
 {func}`~jaxincell.dominant_frequency` — are exported too, so only what is needed has

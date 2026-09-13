@@ -7,8 +7,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from jaxincell import Domain, Simulation, Solver, Species, load_toml
-from jaxincell import mass_electron, mass_proton
+from jaxincell import Domain, Simulation, Solver, Species, diagnostics, load_toml
+from jaxincell import mass_electron, mass_proton, speed_of_light as c
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -153,3 +153,44 @@ def test_an_input_file_species_states_its_mass(tmp_path, mass, message):
         load_toml(_write_input(tmp_path, f'name = "electrons"\nn = 10\ncharge = -1\ndensity = 1e17\n{mass}'))
     helium = 'name = "alpha"\nn = 10\ncharge = 2\ndensity = 1e17\nmass = "proton"\nmass_ratio = 4'
     assert load_toml(_write_input(tmp_path, helium))[0].species[0].mass == pytest.approx(4 * mass_proton)
+
+
+def _two_species_run(steps, store_every=1):
+    """Unequal species blocks, so that a slice in the wrong place shows."""
+    electrons = Species.electrons(n=300, density=4e17, vth=(0.05 * c, 0.0, 0.0), drift=(6e7, 0.0, 0.0),
+                                  plus_minus=True, perturbation_amplitude=5e-7, perturbation_mode=1)
+    ions = Species.ions(n=100, density=4e17, electrons=electrons)
+    domain = Domain(length=0.01, cells=16, dt_over_dx_c=2.0)
+    return Simulation(domain, [electrons, ions]).run(steps, seed=0, store_every=store_every)
+
+
+def test_diagnostics_of_a_run_that_stored_one_step():
+    """One stored sample has no frequency: NaN, and every other diagnostic still works."""
+    import jaxincell._diagnostics
+
+    out = _two_species_run(4, store_every=4)
+    d = diagnostics(out)
+    assert out.t.shape == (1,) and np.isnan(float(d["dominant_frequency"]))
+    assert np.isfinite(float(d["total"][0])) and d["temperatures"]["ions"].shape == (1, 3)
+    assert "dominant_frequency" in jaxincell._diagnostics.__all__
+
+
+def test_per_species_diagnostics_are_the_masked_sums():
+    """Energies and temperatures slice each species' block of particles; they
+    agree to round-off with sums masked by ``out.species``."""
+    from jaxincell import elementary_charge, energies, temperatures
+
+    out = _two_species_run(6)
+    v, w, m = np.asarray(out.v), np.asarray(out.weight), np.asarray(out.mass)
+    kinetic = 0.5 * m[None, :, None] * w[..., None] * v ** 2
+    kinetic = kinetic.sum(axis=-1)
+    E, T = energies(out), temperatures(out)
+    for i, name in enumerate(out.names):
+        mask = np.asarray(out.species) == i
+        expected = np.where(mask[None, :], kinetic, 0.0).sum(axis=1)
+        assert np.allclose(np.asarray(E[f"kinetic_{name}"]), expected, rtol=1e-12, atol=0)
+        ws, vs = w[:, mask, None], v[:, mask]
+        mean = (ws * vs).sum(axis=1) / ws.sum(axis=1)
+        variance = (ws * (vs - mean[:, None]) ** 2).sum(axis=1) / ws.sum(axis=1)
+        expected = m[mask][0] * variance / elementary_charge
+        assert np.allclose(np.asarray(T[name]), expected, rtol=1e-12, atol=1e-12 * expected.max())

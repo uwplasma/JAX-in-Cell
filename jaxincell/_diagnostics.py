@@ -5,7 +5,16 @@ import jax.numpy as jnp
 
 from ._constants import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
-__all__ = ["diagnostics", "energies", "gauss_residual", "potential", "temperatures"]
+__all__ = ["diagnostics", "dominant_frequency", "energies", "gauss_residual", "potential", "temperatures"]
+
+
+def _blocks(out):
+    """Name and index slice of each species; the particles of a species are one
+    contiguous block, in the order of ``out.names``."""
+    start = 0
+    for name, count in zip(out.names, out.counts):
+        yield name, slice(start, start + count)
+        start += count
 
 
 def energies(out):
@@ -23,8 +32,8 @@ def energies(out):
             gamma = jnp.ones_like(v2)
             kinetic_p = 0.5 * mass * v2
         result["kinetic"] = jnp.sum(kinetic_p, axis=1)
-        for i, name in enumerate(out.names):
-            result[f"kinetic_{name}"] = jnp.sum(jnp.where(out.species[None, :] == i, kinetic_p, 0.0), axis=1)
+        for name, block in _blocks(out):
+            result[f"kinetic_{name}"] = jnp.sum(kinetic_p[:, block], axis=1)
         result["total"] = field_E + field_B + result["kinetic"]
         result["momentum"] = jnp.sum((gamma * mass)[..., None] * out.v, axis=1)
     return result
@@ -70,23 +79,24 @@ def temperatures(out):
     weighted by the pseudo-particle weights, so what the walls have collected
     no longer counts."""
     result = {}
-    for i, name in enumerate(out.names):
-        sel = out.species == i
-        v, w = out.v[:, sel], out.weight[:, sel, None]
+    for name, block in _blocks(out):
+        v, w = out.v[:, block], out.weight[:, block, None]
         total = jnp.maximum(jnp.sum(w, axis=1), jnp.finfo(v.dtype).tiny)
         mean = jnp.sum(w * v, axis=1) / total
         var = jnp.sum(w * (v - mean[:, None]) ** 2, axis=1) / total
-        result[name] = out.mass[sel][0] * var / elementary_charge
+        result[name] = out.mass[block.start] * var / elementary_charge
     return result
 
 
 def dominant_frequency(out):
-    """Angular frequency of the strongest peak of :math:`E_x` at the box centre."""
+    """Angular frequency of the strongest peak of :math:`E_x` at the box centre,
+    other than the mean, sampled at the stored steps. NaN when fewer than two
+    steps were stored, since one sample has no frequency."""
+    if out.t.shape[0] < 2:
+        return jnp.asarray(jnp.nan)
     signal = out.E[:, out.E.shape[1] // 2, 0]
-    signal = signal - jnp.mean(signal)
-    spectrum = jnp.abs(jnp.fft.rfft(signal))
-    dt = out.t[1] - out.t[0] if out.t.shape[0] > 1 else out.dt
-    freqs = 2 * jnp.pi * jnp.fft.rfftfreq(signal.shape[0], d=dt)
+    spectrum = jnp.abs(jnp.fft.rfft(signal - jnp.mean(signal)))
+    freqs = 2 * jnp.pi * jnp.fft.rfftfreq(signal.shape[0], d=out.t[1] - out.t[0])
     return freqs[jnp.argmax(spectrum[1:]) + 1]
 
 

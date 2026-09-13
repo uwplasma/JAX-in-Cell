@@ -76,7 +76,8 @@ with `vth` reports $T = m v_{th}^2/2k_B$.
 ## Dominant frequency
 
 {func}`~jaxincell.dominant_frequency` takes the FFT of $E_x$ at the box centre and
-returns the angular frequency of the strongest peak other than the mean, in rad/s. It
+returns the angular frequency of the strongest peak other than the mean, in rad/s, and
+NaN for a run that stored fewer than two steps, which have no frequency. It
 is a quick check that a Langmuir wave landed where it should; for a careful
 measurement use the mode amplitude directly, as the verification scripts do:
 
