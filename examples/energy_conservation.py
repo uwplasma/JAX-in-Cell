@@ -5,6 +5,9 @@ vanish. The implicit scheme of Chen, Chacon and Barnes (J. Comput. Phys. 230,
 7018, 2011) conserves the discrete total energy exactly once the Picard
 iteration has converged, which this shows by sweeping the iteration count. Round-off
 sets the floor: about 1e-16 in double precision, and about 1e-7 in single precision.
+
+This is the setup of docs/scripts/fig_conservation.py, whose numbers the documentation
+quotes: a quiet two-stream run of 400 steps.
 """
 
 import os
@@ -22,9 +25,9 @@ from jaxincell import Domain, Simulation, Solver, Species, diagnostics, speed_of
 
 
 def run(steps, **solver):
-    electrons = Species.electrons(n=4000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(6e7, 0, 0),
-                                  plus_minus=True, perturbation_amplitude=5e-7, perturbation_mode=1)
-    ions = Species.ions(n=4000, density=4.37e17, electrons=electrons)
+    electrons = Species.electrons(n=4000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(5e7, 0, 0),
+                                  plus_minus=True, quiet=True, perturbation_amplitude=5e-7, perturbation_mode=1)
+    ions = Species.ions(n=4000, density=4.37e17, electrons=electrons, quiet=True)
     simulation = Simulation(Domain(length=0.01, cells=64, dt_over_dx_c=4.5), [electrons, ions],
                             Solver(**solver))
     start = time.perf_counter()
@@ -33,19 +36,26 @@ def run(steps, **solver):
     return output, time.perf_counter() - start
 
 
-steps = 300
-drift = lambda out: float(np.max(np.abs(np.asarray(diagnostics(out)["total"]) / diagnostics(out)["total"][0] - 1)))
+def energy_error(out):
+    total = np.asarray(diagnostics(out)["total"])
+    return np.abs(total / total[0] - 1)
+
+
+steps = 400
 explicit, wall = run(steps, algorithm="explicit")
-print(f"explicit                        energy drift {drift(explicit):.2e}   {wall:.2f} s")
+print(f"explicit                        largest energy error {energy_error(explicit).max():.1e}   {wall:.2f} s")
 implicit = {}
 for iterations in (1, 2, 4, 8):
     implicit[iterations], wall = run(steps, algorithm="implicit", picard_iterations=iterations)
-    print(f"implicit, {iterations} Picard iterations    energy drift {drift(implicit[iterations]):.2e}   {wall:.2f} s")
+    print(f"implicit, {iterations} Picard iterations    largest energy error "
+          f"{energy_error(implicit[iterations]).max():.1e}   {wall:.2f} s")
 
 plt.figure(figsize=(6, 4))
-error = lambda out: np.abs(np.asarray(diagnostics(out)["total"]) / diagnostics(out)["total"][0] - 1)
-plt.semilogy(np.asarray(explicit.t) * 1e9, error(explicit) + 1e-17, "k", label="explicit")
+plt.semilogy(np.asarray(explicit.t) * 1e9, energy_error(explicit) + 1e-17, "k", label="explicit")
 for iterations, out in implicit.items():
-    plt.semilogy(np.asarray(out.t) * 1e9, error(out) + 1e-17, label=f"implicit, {iterations} iterations")
-plt.xlabel("t (ns)"); plt.ylabel(r"$|W(t)/W(0)-1|$"); plt.legend(frameon=False)
-plt.tight_layout(); plt.show()
+    plt.semilogy(np.asarray(out.t) * 1e9, energy_error(out) + 1e-17, label=f"implicit, {iterations} iterations")
+plt.xlabel("t (ns)")
+plt.ylabel(r"$|W(t)/W(0)-1|$")
+plt.legend(frameon=False)
+plt.tight_layout()
+plt.show()

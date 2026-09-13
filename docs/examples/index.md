@@ -96,6 +96,9 @@ There is also `input.toml`, which runs the two-stream case from the command line
 jaxincell examples/input.toml
 ```
 
-The scripts that produce the figures in this documentation live in `docs/scripts/`.
-They do the same physics at higher resolution and record their results in
-`measurements.json`; see {doc}`../numerics/verification`.
+The scripts that produce the figures in this documentation live in `docs/scripts/` and
+record the numbers the pages quote in `measurements.json`; see
+{doc}`../numerics/verification`. Each example page names the script its figure and
+numbers come from. Most of those scripts run exactly the example's setup, some adding a
+scan around it. Two do not: the two-stream figure uses a quiet start at another drift, so
+that its growth rate can be fitted, and the sheath figure uses more particles.

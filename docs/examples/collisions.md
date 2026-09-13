@@ -1,6 +1,8 @@
 # Collisions
 
-`examples/collisions.py`
+`examples/collisions.py` — the figure and the numbers on this page come from
+`docs/scripts/fig_collisions.py`, which runs this setup and repeats it against a
+background a hundred times heavier.
 
 The Takizuka-Abe collision operator checked against the Fokker-Planck relaxation
 rates, in the limit where they are closed-form and contain no adjustable constant.

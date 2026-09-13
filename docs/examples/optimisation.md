@@ -1,6 +1,8 @@
 # Optimisation through the solver
 
-`examples/optimisation.py`
+`examples/optimisation.py` — the figure and the numbers on this page come from
+`docs/scripts/fig_autodiff.py`, which runs this setup and adds a forward-mode check and a
+scan of the finite-difference step.
 
 An inverse problem with a known answer, solved by differentiating the entire
 simulation.

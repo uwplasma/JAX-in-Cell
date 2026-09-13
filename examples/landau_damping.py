@@ -30,7 +30,7 @@ v_th = k_lambda_d / k * np.sqrt(2) * omega_pe
 
 electrons = Species.electrons(n=150000, density=density, vth=(v_th, 0, 0), quiet=True,
                               perturbation_amplitude=0.01 / k, perturbation_mode=1)
-ions = Species.ions(n=20000, density=density, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
+ions = Species.ions(n=150000 // 8, density=density, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
 simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [electrons, ions],
                         Solver(filter_passes=0))
 output = simulation.run(500, seed=0, store_particles=False)
@@ -50,6 +50,9 @@ plt.semilogy(t, amplitude, lw=1, label=r"$|E_k(t)|$")
 plt.semilogy(t[peaks], np.exp(np.polyval(np.polyfit(t[peaks], np.log(amplitude[peaks]), 1), t[peaks])),
              "k--", label=fr"fit $\gamma={gamma:.4f}\,\omega_{{pe}}$")
 plt.axhline(floor, color="0.6", lw=0.8, label="noise floor")
-plt.xlabel(r"$t\,\omega_{pe}$"); plt.ylabel("mode amplitude (V/m)")
-plt.title(r"Landau damping at $k\lambda_D=0.5$"); plt.legend(frameon=False); plt.tight_layout()
+plt.xlabel(r"$t\,\omega_{pe}$")
+plt.ylabel("mode amplitude (V/m)")
+plt.title(r"Landau damping at $k\lambda_D=0.5$")
+plt.legend(frameon=False)
+plt.tight_layout()
 plt.show()

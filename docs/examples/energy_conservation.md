@@ -3,7 +3,9 @@
 `examples/energy_conservation.py`
 
 The same two-stream problem run with the explicit leapfrog and with the implicit
-Crank-Nicolson scheme at one, two, four and eight Picard iterations.
+Crank-Nicolson scheme at one, two, four and eight Picard iterations. The figure and the
+table come from `docs/scripts/fig_conservation.py`, which runs this setup: a quiet start,
+a drift of $5\times10^7$ m/s and 400 steps.
 
 ```{figure} ../_static/figures/conservation.png
 :width: 100%
@@ -14,7 +16,7 @@ Crank-Nicolson scheme at one, two, four and eight Picard iterations.
 
 ## What it shows
 
-| scheme | energy error |
+| scheme | largest energy error over the run |
 |---|---|
 | explicit | {{ energy_error_max_explicit }} |
 | implicit, 1 Picard iteration | {{ energy_error_max_implicit_1 }} |

@@ -25,7 +25,9 @@ k_c c = \omega_{pe}\sqrt{\frac{T_z}{T_x} - 1},
 
 which is a sharp prediction needing no fitting: put several wavelengths in one box and
 every mode below $k_c$ grows while none above it does. The example prints the gain of
-each mode and marks the cutoff.
+each mode and marks the cutoff. It is the setup of panel (a), which
+`docs/scripts/fig_weibel.py` draws; panel (b) comes from the seeded single-mode runs of
+the same script.
 
 ## Two things this example needs
 

@@ -1,6 +1,8 @@
 # Landau damping
 
-`examples/landau_damping.py`
+`examples/landau_damping.py` — the figure and the numbers on this page come from
+`docs/scripts/fig_landau_damping.py`, which runs this setup and adds the scan in $k$ of
+panel (b).
 
 A small-amplitude Langmuir wave decays without any collisions, because the electrons
 travelling at the phase velocity absorb it {cite}`landau1946`.

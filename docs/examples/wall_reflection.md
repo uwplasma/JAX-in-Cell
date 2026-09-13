@@ -1,6 +1,7 @@
 # Wall reflection
 
-`examples/wall_reflection.py`
+`examples/wall_reflection.py` — the figure and the numbers on this page come from
+`docs/scripts/fig_wall_reflection.py`, which runs this setup.
 
 A real surface does not collect every electron that reaches it. Some are reflected, and
 slow electrons more readily than fast ones {cite}`cimino2004,furman2002`. A species can

@@ -76,11 +76,15 @@ are then short-circuited conductors at one potential ({doc}`../numerics/boundari
 python examples/sheath.py
 ```
 
-About a minute for the three runs, each with fewer particles than the
-{{ sheath_particles }} of the figure, on {{ sheath_cells }} cells over
+About a minute for the three runs, each with 30 000 particles per species, on
+{{ sheath_cells }} cells over
 {{ sheath_box_debye }} Debye lengths for {{ sheath_steps }} steps, roughly one ion
 transit. The mass ratio is reduced to {{ sheath_mass_ratio }} for exactly that reason:
 the ion transit sets the cost, and it grows as $\sqrt{m_i/m_e}$.
+
+The figure and the numbers on this page come from `docs/scripts/fig_sheath.py`, which runs
+the same three walls with 40 000 particles per species, {{ sheath_particles }} in all, to
+lower the noise in the averaged potential.
 
 The run is electrostatic, so the time step follows $\omega_{pe}\Delta t = 0.2$ rather
 than the light-wave limit. That is safe only while nothing excites the transverse

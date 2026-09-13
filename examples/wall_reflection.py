@@ -33,7 +33,7 @@ import numpy as np
 
 from jaxincell import Domain, Simulation, Solver, Species, quiet_start
 
-sigma, length, n, restitution = 1e6, 1e-2, 100_000, 0.8          # m/s, m, particles, e
+sigma, length, n, restitution = 1e6, 1e-2, 200_000, 0.8          # m/s, m, particles, e
 domain = Domain(length=length, cells=64, dt_over_dx_c=50.0, particle_bc="absorbing", field_bc="absorbing",
                 restitution=restitution)
 steps = int(round(0.1 * length / sigma / domain.dt))
@@ -42,7 +42,9 @@ x, v = quiet_start(n, length, vth=(np.sqrt(2) * sigma, 0, 0))
 widths = np.array([0.25, 0.5, 1.0, 2.0, 4.0])
 returned, energy = [], []
 for u in widths * sigma:
-    law = lambda speed, u=u: jnp.exp(-speed ** 2 / (2 * u ** 2))
+    def law(speed, u=u):
+        return jnp.exp(-speed ** 2 / (2 * u ** 2))
+
     electrons = Species.electrons(n=n, density=1e6, vth=(np.sqrt(2) * sigma, 0, 0), reflection=law).replace(x=x, v=v)
     w = np.asarray(Simulation(domain, [electrons], Solver()).run(steps, store_every=steps).weight[-1])
     w0 = w.max()                                  # the weight of a particle that met no wall

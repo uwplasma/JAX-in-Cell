@@ -13,6 +13,13 @@ that ends the growth.
 (a) The seeded mode. (b) The electron phase space after saturation.
 ```
 
+The figure comes from `docs/scripts/fig_two_stream.py`, which runs a quieter version of
+this problem so that the growth rate can be fitted: a quiet start, a drift of
+$5\times10^7$ m/s, 20 000 electrons, a seed of $ak = 10^{-4}$ and no filter. It measures
+{{ two_stream_gamma_measured }} $\omega_{pe}$ against {{ two_stream_gamma_theory }} from
+the kinetic root. The example keeps the noisier setup that
+{doc}`../getting_started/first_simulation` takes apart parameter by parameter.
+
 ## Theory
 
 For two cold beams of density $n/2$ drifting at $\pm v_0$, the dispersion relation is
@@ -24,8 +31,9 @@ For two cold beams of density $n/2$ drifting at $\pm v_0$, the dispersion relati
 which has a purely growing root for $kv_0 < \omega_{pe}$, fastest at
 $kv_0/\omega_{pe} = \sqrt{3/8}$ where $\gamma = \omega_{pe}/2\sqrt2$
 {cite}`buneman1959`. Warm beams are less unstable and the comparison in
-{doc}`../numerics/verification` uses the full kinetic root, which the measured rates
-match to {{ two_stream_scan_mean_deviation_percent }} per cent on average.
+{doc}`../numerics/verification` uses the full kinetic root, which the rates measured over
+seven drifts match to {{ two_stream_scan_mean_deviation_percent }} per cent on average
+and {{ two_stream_scan_max_deviation_percent }} per cent at worst.
 
 ## Running it
 
