@@ -136,7 +136,9 @@ class Simulation:
         limit on purpose, so warn only when the particles carry the transverse
         velocity that would seed a light wave. Traced values are skipped, so the
         check happens when the object is first built and not on every rebuild."""
-        plain = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+        def plain(v):
+            return isinstance(v, (int, float)) and not isinstance(v, bool)
+
         courant = self.domain.dt_over_dx_c
         if self.solver.algorithm != "explicit" or not plain(courant) or courant <= 1:
             return
@@ -171,7 +173,10 @@ class Simulation:
         """Fraction of each particle's weight that the left and the right wall send
         back, from the law of its species at its normal speed."""
         speed = jnp.abs(v[:, 0])
-        law = lambda r, start, n: jnp.broadcast_to(r(speed[start:start + n]) if callable(r) else r, (n,))
+
+        def law(r, start, n):
+            return jnp.broadcast_to(r(speed[start:start + n]) if callable(r) else r, (n,))
+
         return tuple(jnp.clip(jnp.concatenate([law(s.reflection[side], *block)
                                                for s, block in zip(self.species, self.blocks)]), 0.0, 1.0)
                      for side in (0, 1))
@@ -231,9 +236,11 @@ class Simulation:
                 v = v + jnp.asarray(s.drift)
                 if s.plus_minus:
                     v = v.at[:, 0].multiply(jnp.where(jnp.arange(s.n) % 2 == 0, 1.0, -1.0))
-            w = s.density * L / s.n
-            xs.append(x); vs.append(v); ws.append(jnp.full((s.n,), w))
-            qs.append(jnp.full((s.n,), s.charge_si)); ms.append(jnp.full((s.n,), s.mass))
+            xs.append(x)
+            vs.append(v)
+            ws.append(jnp.full((s.n,), s.density * L / s.n))
+            qs.append(jnp.full((s.n,), s.charge_si))
+            ms.append(jnp.full((s.n,), s.mass))
         x, v = jnp.concatenate(xs), jnp.concatenate(vs)
         w, q, m = jnp.concatenate(ws), jnp.concatenate(qs), jnp.concatenate(ms)
         limit = 0.99 * c
@@ -255,7 +262,7 @@ class Simulation:
         rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
         E = jnp.zeros((d.cells, 3)).at[:, 0].set(E_x_from_rho(rho, dx, d.field_bc))
         B = jnp.zeros((d.cells, 3))
-        return (E, B, x, v, w, qm, key), (m, q)
+        return (E, B, x, v, w, qm, rho, key), (m, q)
 
     def _smooth(self, f):
         s = self.solver
@@ -311,10 +318,11 @@ class Simulation:
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
         box = (L, d.length_y, d.length_z)
         m, q = extra
-        E, B, x_half, v, w, qm, key = carry
-        # first half step: sources from the motion x^n -> x^{n+1/2}
-        x_n = wrap_positions(x_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
-        rho_n = self._smooth(deposit(x_n[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
+        E, B, x_half, v, w, qm, rho_n, key = carry
+        # First half step: sources from the motion x^n -> x^{n+1/2}. The density at x^n
+        # is the one the previous step ended on (or the initial one), carried in the
+        # state rather than deposited again from wrap(x^{n+1/2} - dt v/2), which is
+        # the same positions, velocities and weights and so the same density.
         rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, jnp.sum(q * w * v[:, 0]) / L, rho_n)
         E, B = half_step_fields(E, B, J1, dt / 2, dx, d.field_bc, electric_first=True)
         # push with the fields at t^{n+1/2}
@@ -335,7 +343,7 @@ class Simulation:
         E, B = half_step_fields(E, B, J2, dt / 2, dx, d.field_bc, electric_first=False)
         if self.solver.field_solver == "gauss":
             E = E.at[:, 0].set(E_x_from_rho(rho_next, dx, d.field_bc))
-        return (E, B, x_next_half, v, w, qm, key), (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
+        return (E, B, x_next_half, v, w, qm, rho_next, key), (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
     def _implicit_step(self, carry, extra):
         """Crank-Nicolson step solved by a fixed number of Picard iterations.
@@ -348,7 +356,7 @@ class Simulation:
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
         box = (L, d.length_y, d.length_z)
         m, q = extra
-        E, B, x, v, w, qm, key = carry
+        E, B, x, v, w, qm, _, key = carry
         n_sub = self.solver.substeps
         dtau = dt / n_sub
 
@@ -391,7 +399,7 @@ class Simulation:
         key, k_c = random.split(key)
         v = self._collide(k_c, x, v, w, qm, m, dt)
         rho = deposit(x[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc)
-        return (E_new, B_new, x, v, w, qm, key), (x, v, w, E_new, B_new, J, rho)
+        return (E_new, B_new, x, v, w, qm, rho, key), (x, v, w, E_new, B_new, J, rho)
 
     # -- the run ---------------------------------------------------------------------------------
     def run(self, steps, seed=0, store_every=1, store_particles=True, state=None):
@@ -417,11 +425,16 @@ def _run(sim, steps, seed, store_every, store_particles, state):
         carry0 = state
     step = sim._explicit_step if sim.solver.algorithm == "explicit" else sim._implicit_step
     step = partial(step, extra=extra)
+    E, B, x, v, w, _, rho, _ = carry0
+    placeholder = (x, v, w, E, B, jnp.zeros_like(E), rho)     # an output, overwritten before it is read
+
+    def advance(pair, _):
+        return step(pair[0]), None
 
     def chunk(carry, _):
-        carry, _ = lax.scan(lambda c, i: (step(c)[0], None), carry, None, length=store_every - 1)
-        carry, out = step(carry)
-        x, v, w, E, B, J, rho = out
+        # The output of the last step rides along with the state, so that the step is
+        # traced once, not once for the first store_every - 1 steps and again for the last.
+        (carry, (x, v, w, E, B, J, rho)), _ = lax.scan(advance, (carry, placeholder), None, length=store_every)
         if not store_particles:
             x = v = w = None
         return carry, (x, v, w, E, B, J, rho)
