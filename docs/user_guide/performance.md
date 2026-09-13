@@ -67,10 +67,11 @@ Nothing in the package is CPU-specific; install a JAX build for the accelerator 
 the same program runs on it. The gain is largest where the particle count is large
 enough to fill the device — panel (a) shows the cost per particle still falling at
 {{ scaling_particles_max }} particles on a CPU, and an accelerator moves that knee
-much further out. Double precision is enabled at import
-(`jax_enable_x64`), which matters for the conservation properties and costs a factor
-of two on hardware optimised for single precision; a run that does not need it starts
-Python with `JAX_ENABLE_X64=0` ({doc}`units`).
+much further out. Double precision is enabled at import (`jax_enable_x64`), which is
+what the conservation properties need; a run that does not need it can start Python
+with `JAX_ENABLE_X64=0` ({doc}`units`). Measure before choosing single precision for
+speed. On a CPU the two cost about the same, and on the NVIDIA RTX A4000 we tested, with
+JAX 0.10.2, a single-precision run was many times slower than a double-precision one.
 
 ## Apple silicon
 
