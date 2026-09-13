@@ -71,6 +71,16 @@ def test_every_random_key_is_used_once(monkeypatch, algorithm):
     assert len(set(ledger.consumed)) == len(ledger.consumed)
 
 
+@pytest.mark.parametrize("switch", [{"filter_passes": 2}, {"field_solver": "gauss"}])
+def test_the_implicit_scheme_refuses_the_switches_it_would_ignore(switch):
+    """A filter and the Gauss solve both belong to the explicit scheme. The implicit one
+    used to accept and silently skip them; it now says so when it is built."""
+    electrons = Species.electrons(n=10, density=1e10)
+    with pytest.raises(ValueError, match="implicit"):
+        Simulation(Domain(), [electrons], Solver(algorithm="implicit", **switch))
+    Simulation(Domain(), [electrons], Solver(algorithm="explicit", **switch))
+
+
 def test_absorbed_particles_are_parked_symmetrically_off_both_grids():
     """A particle with no weight left is parked the same distance beyond either wall,
     one and a half cells, the half-width of the spline, so that neither the centred nor

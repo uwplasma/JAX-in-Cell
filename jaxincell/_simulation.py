@@ -128,7 +128,28 @@ class Simulation:
         assert len(self.species) > 0, "at least one species is needed"
         names = [s.name for s in self.species]
         assert len(set(names)) == len(names), "species names must be distinct"
+        self._check_implicit()
         self._check_courant()
+
+    def _check_implicit(self):
+        """Refuse the two solver switches the Crank-Nicolson scheme would otherwise ignore.
+
+        A filter keeps its energy conservation only if the same filter acts on the current
+        and on the field gathered at the particles, as a transpose pair that respects the
+        parity of each component at the walls; that pair is not implemented. The Gauss
+        solve would overwrite E_x after the update that conserves energy, which is the
+        property the scheme is there for. Silently skipping either switch, as the scheme
+        once did, makes a run look filtered or electrostatic when it is neither."""
+        s = self.solver
+        if s.algorithm != "implicit":
+            return
+        if s.filter_passes:
+            raise ValueError("the implicit scheme has no filter: conserving energy needs the same filter on the "
+                             "current and on the gathered field, which is not implemented. Use filter_passes=0, "
+                             "or algorithm='explicit'.")
+        if s.field_solver == "gauss":
+            raise ValueError("field_solver='gauss' would replace E_x after the energy-conserving update of the "
+                             "implicit scheme; it is available with algorithm='explicit' only.")
 
     def _check_courant(self):
         """The explicit field update is unstable for ``c dt > dx``. Electrostatic
