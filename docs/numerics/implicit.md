@@ -29,12 +29,17 @@ $\mathbf B$ and for the particle quantities,
 ```
 
 with the current deposited from the same mid-point orbit that the fields are gathered
-at,
+at. The fields are gathered from the centres, $\mathbf E$ after averaging it from the faces
+({doc}`boundaries`), so the current is the transpose of that gather,
 
 ```{math}
 :label: orbit-current
-\mathbf J^{n+1/2}_{i+1/2} = \sum_p q_p \mathbf v_p^{n+1/2}\, S_2\!\left(\frac{x_p^{n+1/2} - x_{i+1/2}}{\Delta x}\right).
+\mathbf J^{n+1/2}_{i+1/2} = \frac{1}{2\Delta x}\sum_p q_p \mathbf v_p^{n+1/2}\left[S_2\!\left(\frac{x_p^{n+1/2} - x_i}{\Delta x}\right) + S_2\!\left(\frac{x_p^{n+1/2} - x_{i+1}}{\Delta x}\right)\right],
 ```
+
+with the walls entering exactly as they do in the gather. The code does not write this
+out: it obtains the current from `jax.vjp` of the gather with respect to $\mathbf E$, which
+is the transpose by construction, whatever the walls.
 
 ## Why this conserves energy
 
@@ -95,7 +100,9 @@ round-off:
 
 (a) Total energy error against time. The implicit curves are one Picard iteration
 apart; at eight the error is at the round-off of double precision.
-(b) The Gauss residual, at round-off for both schemes.
+(b) The Gauss residual. It is at round-off for the explicit scheme only: the orbit current
+{eq}`orbit-current` conserves energy, not charge, so the implicit scheme does not hold the
+discrete Gauss law (a relative residual of order one over the two-stream run).
 ```
 
 The default is eight, which reaches round-off for the problems in {doc}`verification`

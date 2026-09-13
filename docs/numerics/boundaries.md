@@ -66,6 +66,51 @@ system, which is what an open boundary means. The field ghosts use the first-ord
 radiating condition of {doc}`field_solvers`, so an outgoing electromagnetic wave leaves
 without reflection.
 
+## What a particle feels next to a wall
+
+The field is gathered to a particle with the spline its charge was deposited with, from
+the grid it was deposited on: $\mathbf E$ is first averaged from the faces to the centres,
+where $\mathbf B$ and $\rho$ live, and the unstored left wall face enters that average with
+the value the walls give it ({func}`~jaxincell._core.wall_faces_E`). Within a cell of a wall
+the spline of a particle reaches the centre beyond it, and the value there is the wall's:
+
+* **Periodic.** The far end of the box.
+* **Reflective.** The mirror image of the first centre, with the sign each component takes
+  under the reflection: $E_x$, $B_y$ and $B_z$ change sign, $E_y$, $E_z$ and $B_x$ keep it.
+  This is the method of images. The box then gathers exactly as the periodic box twice as
+  long, holding every particle and its mirror image, would, and a particle feels its image
+  and not itself.
+* **Absorbing.** Zero. There is nothing beyond a conductor, and the deposit drops the same
+  part of the cloud, so a particle that reaches past the wall is missing there both as a
+  source and as a receiver of the field.
+
+External fields are prescribed rather than solved for, and simply continue beyond a wall.
+
+For a sheet of charge $\sigma$ at a distance $a \ge \Delta x$ from the left wall of a box
+of length $L$, this gives the one-dimensional image forces exactly, $F = \sigma E$ with
+
+| walls | $E$ at the sheet |
+|---|---|
+| periodic | $0$ |
+| reflective, reflective | $(\sigma/\epsilon_0)(\tfrac12 - a/L)$, pushed from the nearer plane |
+| reflective, absorbing | $+\sigma/2\epsilon_0$, towards the conductor, whatever $a$ |
+| absorbing, reflective | $-\sigma/2\epsilon_0$ |
+| absorbing, absorbing | $(\sigma/\epsilon_0)(a/L - \tfrac12)$, pulled to the nearer conductor |
+
+and the test suite checks each to $10^{-10}$, the mirror image of each at every distance,
+including inside the last cell, and the reflective box against the doubled periodic one.
+
+Gathering from the centres is what makes the gather the transpose of the deposit
+{cite}`birdsall1991`. Gathering $E_x$ straight from the faces with the same spline, as the
+code once did, is not: a lone particle in a periodic box pushed itself with up to 8 % of
+its own field, and near a wall the unstored left face read as zero or as its neighbour
+while the stored right face read as itself. The implicit scheme takes its current as the
+exact transpose of this gather, so the energy balance of {doc}`implicit` holds whatever the
+walls. What stays one-sided is the transverse Yee update at the walls ({doc}`field_solvers`):
+the right wall face is stored and advanced, the left one is only a ghost value, so an
+electromagnetic wave meets the two walls of a reflective or absorbing box slightly
+differently.
+
 ## A wall that absorbs charge has to keep it
 
 The longitudinal field is fixed by the charge density only up to a constant, and that

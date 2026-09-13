@@ -22,7 +22,9 @@ iterations about {{ scaling_implicit_over_explicit }} times that. At
 ## Where the time goes
 
 Each particle touches three cells, so a deposit is $3N$ scatter-adds and a gather $3N$
-reads, both independent of the grid. A step does four deposits and two gathers. The
+reads, both independent of the grid. An explicit step does six deposits, the charge and
+the two transverse currents for each half step, and one gather of $\mathbf E$ and
+$\mathbf B$ together. The
 field update and the filter are a few operations per cell, which is why panel (b) is
 nearly flat until the grid becomes comparable to the particle count.
 

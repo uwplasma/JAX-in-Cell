@@ -94,22 +94,30 @@ Poisson solve inside the loop.
 :width: 100%
 :alt: Energy error and Gauss-law residual for the explicit and implicit schemes
 
-(a) Total energy error. (b) The Gauss-law residual stays at round-off for both
-schemes because both deposit the charge-conserving current.
+(a) Total energy error. (b) The Gauss-law residual, at round-off for the explicit scheme,
+which deposits the charge-conserving current. The implicit scheme deposits the orbit
+current its energy balance needs instead, and does not hold the discrete Gauss law.
 ```
 
 ## Momentum conservation
 
-Using the same $S_2$ for the deposit and the gather makes the force between two
-pseudo-particles antisymmetric, so the interpolation contributes nothing to the total
-momentum {cite}`birdsall1991`. What is left is the residual of the staggered field
-solve, which is small but not zero: over the same run the total particle momentum
-drifts by {{ momentum_error_relative }} of $\sum_p m_p|v_{x,p}|$.
+The field is gathered with the same $S_2$ the charge was deposited with, and from the same
+grid: $E_x$ is first averaged from the faces to the centres,
+$E_i = \tfrac12(E_{i-1/2} + E_{i+1/2}) = -(\phi_{i+1} - \phi_{i-1})/2\Delta x$, a centred
+difference. The gather is then the transpose of the deposit composed with an antisymmetric
+operator, so the force between two pseudo-particles is antisymmetric and a particle exerts
+none on itself {cite}`birdsall1991`: in a periodic electrostatic run the total momentum is
+conserved to round-off. Over the same run it drifts by {{ momentum_error_relative }} of
+$\sum_p m_p|v_{x,p}|$.
 
 A code that gathers with a different shape than it deposits, or that interpolates the
 field to the particle from a different grid than the one the charge was written to,
 loses this property and develops a self-force: a single particle in an empty periodic
-box accelerates itself. The test suite checks the momentum budget directly.
+box accelerates itself. Gathering $E_x$ directly from the faces with $S_2$ is such a
+case, and this code did it until the self-force was measured: up to 8 % of the particle's
+own field, depending on where in its cell it sat, and a momentum drift of $2\times10^{-5}$
+over the run above. The test suite checks the self-force, the image forces at every wall
+({doc}`boundaries`) and the momentum budget directly.
 
 ## Cost
 

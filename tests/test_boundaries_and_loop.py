@@ -188,3 +188,68 @@ def test_store_every_traces_the_step_once(monkeypatch, algorithm):
     sim = Simulation(Domain(cells=11), [electrons], Solver(algorithm=algorithm, picard_iterations=1))
     out = sim.run(6, seed=0, store_every=3)
     assert len(traces) == 1 and out.E.shape == (2, 11, 3)
+
+
+CODES = {0: "periodic", 1: "reflective", 2: "absorbing"}
+
+
+def field_on_sheets(positions, bc, length=L, cells=CELLS):
+    """E_x that sheets of electrons at rest, one pseudo-particle each, feel from their own
+    fields and those of their images, read off the first explicit step: from rest nothing
+    moves before the push, so the velocity after one step is (q/m) E dt exactly. Returns
+    the fields at the sheets and the surface charge sigma of one sheet."""
+    n = len(positions)
+    x = np.zeros((n, 3))
+    x[:, 0] = positions
+    density = 1e12
+    electrons = Species.electrons(n=n, density=density).replace(x=x, v=np.zeros((n, 3)))
+    walls = tuple(CODES[code] for code in bc)
+    sim = Simulation(Domain(length=length, cells=cells, particle_bc=walls, field_bc=walls), [electrons], Solver())
+    out = sim.run(1, seed=0)
+    qm = electrons.charge_si / electrons.mass
+    sigma = electrons.charge_si * density * length / n
+    return np.asarray(out.v[0, :, 0]) / (qm * sim.domain.dt), sigma
+
+
+@pytest.mark.parametrize("fraction", [0.0, 0.2, 0.5, 0.77])
+def test_a_charge_sheet_feels_no_force_of_its_own_in_a_periodic_box(fraction):
+    """Gathering with the transpose of the deposit leaves a lone particle in a periodic
+    box without a self-force, wherever it sits in its cell. Gathering E_x straight from
+    the faces pushed it with up to 8 % of its own field."""
+    field, sigma = field_on_sheets([CENTRE0 + (5 + fraction) * DX], (0, 0))
+    assert abs(field[0]) < 1e-12 * abs(sigma) / epsilon_0
+
+
+@pytest.mark.parametrize("bc", WALLS[1:])
+@pytest.mark.parametrize("distance", [1.3 * DX, 5.4 * DX])
+def test_a_charge_sheet_feels_its_images_as_the_one_dimensional_theory_says(bc, distance):
+    """A sheet of charge sigma a distance a from the left wall, with its cloud inside the
+    box, feels the field of its images (the 1D electrostatics of a sheet between two
+    walls): between two symmetry planes, sigma/eps0 (1/2 - a/L), pushed from the nearer;
+    from a symmetry plane towards a floating conductor, +-sigma/2 eps0 whatever a; between
+    two short-circuited conductors, sigma/eps0 (a/L - 1/2), pulled to the nearer."""
+    field, sigma = field_on_sheets([-L / 2 + distance], bc)
+    expected = {(1, 1): 0.5 - distance / L, (1, 2): 0.5, (2, 1): -0.5, (2, 2): distance / L - 0.5}[bc]
+    assert field[0] == pytest.approx(expected * sigma / epsilon_0, rel=1e-10)
+
+
+@pytest.mark.parametrize("bc", WALLS)
+@pytest.mark.parametrize("distance", [0.0, 0.4 * DX, 0.9 * DX, 1.6 * DX])
+def test_the_force_near_a_wall_is_the_mirror_image_of_the_force_near_the_opposite_wall(bc, distance):
+    """A sheet a distance a from the left wall and one a from the right wall, with the
+    walls swapped, feel opposite fields -- also inside the last cell, where the cloud
+    reaches beyond the wall and the value the gather assumes there matters."""
+    left, _ = field_on_sheets([-L / 2 + distance], bc)
+    right, sigma = field_on_sheets([L / 2 - distance], bc[::-1])
+    assert abs(left[0] + right[0]) < 1e-11 * abs(sigma) / epsilon_0
+
+
+@pytest.mark.parametrize("distance", [0.1 * DX, 0.7 * DX, 2.2 * DX])
+def test_a_reflective_box_gathers_like_the_periodic_box_twice_as_long_with_the_images(distance):
+    """Two reflective walls are two symmetry planes: the box is half of a periodic box
+    twice as long holding each particle and its mirror image. The field on a sheet is the
+    same in both, including within a cell of the wall, where the gather reads the mirror
+    image of the first centre with the parity of E_x."""
+    field, _ = field_on_sheets([-L / 2 + distance], (1, 1))
+    doubled, sigma = field_on_sheets([distance, -distance], (0, 0), length=2 * L, cells=2 * CELLS)
+    assert abs(field[0] - doubled[0]) < 1e-11 * abs(sigma) / epsilon_0

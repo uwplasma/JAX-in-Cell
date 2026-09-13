@@ -14,8 +14,9 @@ from jax.scipy.special import erfinv
 from ._collisions import collide, coulomb_logarithm
 from ._config import Collisions, Domain, Solver, Species, pytree_dataclass
 from ._constants import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
-from ._core import (E_x_from_rho, apply_particle_bc, boris, boris_relativistic, current_from_continuity,
-                    curl_B, curl_E, deposit, gather, half_step_fields, smooth, to_faces, wrap_positions)
+from ._core import (PARITY, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, current_from_continuity,
+                    curl_B, curl_E, deposit, gather, half_step_fields, smooth, to_centres, to_faces, wall_faces_E,
+                    with_ghosts, wrap_positions)
 
 
 def _enable_double_precision(environ):
@@ -309,15 +310,30 @@ class Simulation:
         J_z = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 2], d.grid[0], d.dx, d.cells, d.particle_bc)), d.field_bc)
         return rho_new, jnp.stack([J_x, J_y, J_z], axis=1)
 
-    def _push(self, x, v, qm, E, B, dt):
-        d = self.domain
-        E = E if self.external_E is None else E + self.external_E
-        B = B if self.external_B is None else B + self.external_B
-        E_p = gather(E, x[:, 0], d.grid[0] + d.dx / 2, d.dx, d.field_bc)
-        B_p = gather(B, x[:, 0], d.grid[0], d.dx, d.field_bc)
-        if self.solver.relativistic:
-            return boris_relativistic(v, E_p, B_p, qm[:, None], dt)
-        return boris(v, E_p, B_p, qm[:, None], dt)
+    def _fields_at(self, x, E, B, rho):
+        """E and B at the particles, as ``(N, 6)``.
+
+        E is averaged from the faces to the centres, where B and the charge live, and both
+        are gathered from there with the deposit's own spline, which makes the gather the
+        transpose of the deposit: a particle exerts no force on itself, two exert equal and
+        opposite forces on each other, and near a wall a particle feels the image the wall
+        implies (:func:`~jaxincell._core.with_ghosts`). Gathering E straight from the faces
+        does neither; in a periodic box a lone particle pushed itself with up to 8 % of its
+        own field. ``rho`` gives the field at an absorbing left wall. External fields are
+        added as given, continued unchanged beyond a wall."""
+        d, bc = self.domain, self.domain.field_bc
+        F = with_ghosts(jnp.concatenate([to_centres(E, *wall_faces_E(E, B, rho, d.dx, bc)), B], axis=1), bc,
+                        jnp.asarray(PARITY))
+        if self.external_E is not None or self.external_B is not None:
+            E_ext = jnp.zeros_like(E) if self.external_E is None else jnp.asarray(self.external_E)
+            B_ext = jnp.zeros_like(B) if self.external_B is None else jnp.asarray(self.external_B)
+            F = F + with_ghosts(jnp.concatenate([to_centres(E_ext, E_ext[0], E_ext[-1]), B_ext], axis=1), bc)
+        return gather(F, x[:, 0], d.grid[0], d.dx)
+
+    def _accelerate(self, v, fields, qm, dt):
+        """The Boris step in the fields ``(N, 6)`` gathered at the particles."""
+        push = boris_relativistic if self.solver.relativistic else boris
+        return push(v, fields[:, :3], fields[:, 3:], qm[:, None], dt)
 
     def _collide(self, key, x, v, w, qm, m, dt):
         if self.collisions is None:
@@ -357,7 +373,7 @@ class Simulation:
         rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, jnp.sum(q * w * v[:, 0]) / L, rho_n)
         E, B = half_step_fields(E, B, J1, dt / 2, dx, d.field_bc, electric_first=True)
         # push with the fields at t^{n+1/2}
-        v = self._push(x_half, v, qm, E, B, dt)
+        v = self._accelerate(v, self._fields_at(x_half, E, B, rho_half), qm, dt)
         key, k_collide, k_wall = self._split_step_key(key)
         v = self._collide(k_collide, x_half, v, w, qm, m, dt)
         x_free = x_half + dt * v
@@ -387,7 +403,7 @@ class Simulation:
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
         box = (L, d.length_y, d.length_z)
         m, q = extra
-        E, B, x, v, w, qm, _, key = carry
+        E, B, x, v, w, qm, rho, key = carry
         n_sub = self.solver.substeps
         dtau = dt / n_sub
 
@@ -400,15 +416,17 @@ class Simulation:
             def one(state, inputs):
                 x_mid, k_sub = inputs
                 xs, vs, ws, qms, J_acc = state
-                v_new = self._push(x_mid, vs, qms, E_half, B_half, dtau)
+                # the current is the transpose of the gather of E, the condition for energy conservation
+                fields, transpose = jax.vjp(lambda E: self._fields_at(x_mid, E, B_half, rho), E_half)
+                v_new = self._accelerate(vs, fields, qms, dtau)
                 v_mid = 0.5 * (vs + v_new)
                 x_free = xs + dtau * v_mid
                 x_new, v_new, ws, qms = apply_particle_bc(x_free, v_new, ws, qms, box, d.particle_bc,
                                                           d.restitution, self._reflection(v_mid), dx)
                 v_new = self._thermalise(k_sub, x_free, v_new)
                 new_mid = wrap_positions(x_new - 0.5 * dtau * v_mid, ws, box, d.particle_bc, dx)
-                J = jnp.stack([deposit(x_mid[:, 0], q * ws * v_mid[:, i], d.grid[0] + dx / 2, dx, d.cells,
-                                       d.particle_bc) for i in range(3)], axis=1)
+                carried = jnp.concatenate([(q * ws)[:, None] * v_mid, jnp.zeros_like(v_mid)], axis=1)
+                J = transpose(carried)[0] / dx
                 return (x_new, v_new, ws, qms, J_acc + J / n_sub), new_mid
             init = (x, v, w, qm, jnp.zeros((d.cells, 3)))
             (xs, vs, ws, qms, J_avg), new_mids = lax.scan(one, init, (x_mid_all, keys))
@@ -429,8 +447,8 @@ class Simulation:
         B_new = B - dt * curl_E(E_half, B, dx, d.field_bc)
         x, v, w, qm, J, _ = substeps(E_half, 0.5 * (B + B_new), x_mid_all)
         v = self._collide(k_collide, x, v, w, qm, m, dt)
-        rho = deposit(x[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc)
-        return (E_new, B_new, x, v, w, qm, rho, key), (x, v, w, E_new, B_new, J, rho)
+        rho_next = deposit(x[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc)
+        return (E_new, B_new, x, v, w, qm, rho_next, key), (x, v, w, E_new, B_new, J, rho_next)
 
     # -- the run ---------------------------------------------------------------------------------
     def run(self, steps, seed=0, store_every=1, store_particles=True, state=None):

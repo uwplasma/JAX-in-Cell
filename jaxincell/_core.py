@@ -15,9 +15,9 @@ import jax.numpy as jnp
 
 from ._constants import epsilon_0, speed_of_light as c
 
-__all__ = ["s2_weights", "map_indices", "deposit", "gather", "current_from_continuity",
-           "to_faces", "curl_E", "curl_B", "half_step_fields", "E_x_from_rho", "boris",
-           "boris_relativistic", "apply_particle_bc", "wrap_positions", "smooth"]
+__all__ = ["s2_weights", "map_indices", "deposit", "PARITY", "to_centres", "with_ghosts", "gather",
+           "current_from_continuity", "to_faces", "wall_faces_E", "curl_E", "curl_B", "half_step_fields",
+           "E_x_from_rho", "boris", "boris_relativistic", "apply_particle_bc", "wrap_positions", "smooth"]
 
 
 # --- shape function and boundary mapping ---------------------------------------
@@ -55,12 +55,46 @@ def deposit(x, q, x0, dx, n, bc):
     return jnp.zeros(n).at[idx].add(jnp.where(keep, w, 0.0) * (q / dx)[:, None])
 
 
-def gather(field, x, x0, dx, bc):
-    """Interpolate a grid field of shape ``(n, C)`` to positions ``x`` with the
-    same spline, giving ``(N, C)``."""
-    idx, w = s2_weights(x, x0, dx)
-    idx, keep = map_indices(idx, field.shape[0], bc)
-    return jnp.einsum("nk,nkc->nc", jnp.where(keep, w, 0.0), field[idx])
+# Sign of (E_x, E_y, E_z, B_x, B_y, B_z) under the reflection x -> -x: E is a vector, B a pseudovector.
+PARITY = (-1.0, 1.0, 1.0, 1.0, -1.0, -1.0)
+
+
+def to_centres(E, left, right):
+    """Face values averaged to the centres, :math:`(E_{i-1/2} + E_{i+1/2})/2`. ``left`` is
+    the value at the left wall face :math:`E_{-1/2}`, which the grid does not store, and
+    ``right`` stands in for the stored value at the last face."""
+    faces = jnp.concatenate([left[None], E[:-1], right[None]])
+    return 0.5 * (faces[:-1] + faces[1:])
+
+
+def with_ghosts(F, bc, parity=None):
+    """A centred field ``(n, C)`` with one centre added beyond each wall, ``(n + 2, C)``,
+    which is as far as the cloud of a particle inside the box reaches.
+
+    Beyond a periodic wall is the far end of the box. A reflective wall is a symmetry
+    plane, so the centre beyond it is the mirror image of the centre inside, with each
+    component's sign under the reflection, ``parity``: the box then gathers exactly as
+    the doubled box of the image method would, and a particle feels its image and not
+    itself. An absorbing wall is a conductor with nothing beyond it, so the value there is
+    zero, which is also what the deposit does with the part of a cloud outside the box.
+    Without ``parity`` the field is a prescribed one and simply continues beyond a wall."""
+    def ghost(code, edge, far):
+        if code == 0:
+            return far
+        if parity is None:
+            return edge
+        return parity * edge if code == 1 else jnp.zeros_like(edge)
+
+    return jnp.concatenate([ghost(bc[0], F[0], F[-1])[None], F, ghost(bc[1], F[-1], F[0])[None]])
+
+
+def gather(F, x, x0, dx):
+    """Interpolate a centred field with its ghost centres, ``(n + 2, C)`` from
+    :func:`with_ghosts`, to positions ``x`` with the spline of the deposit, giving
+    ``(N, C)``; ``x0`` is the first centre inside the box. Indices are clipped only for
+    particles parked beyond a wall, whose force is zero anyway."""
+    idx, w = s2_weights(x, x0 - dx, dx)
+    return jnp.einsum("nk,nkc->nc", w, F[jnp.clip(idx, 0, F.shape[0] - 1)])
 
 
 # --- sources -----------------------------------------------------------------------
@@ -143,6 +177,24 @@ def _right_ghost_B(B, E, bc):
     if bc[1] == 1:
         return B[-1]
     return jnp.array([0.0, -(2 / c) * E[-1, 2] - B[-1, 1], (2 / c) * E[-1, 1] - B[-1, 2]])
+
+
+def wall_faces_E(E, B, rho, dx, bc):
+    """E at the two wall faces, as :func:`to_centres` takes them.
+
+    The grid does not store the left wall face. There :math:`E_x` is the field at the
+    far end of a periodic box; zero at a reflective wall, the symmetry plane; and at an
+    absorbing wall the field of the charge the conductor has collected, which the Gauss
+    law of the first cell gives, :math:`E_{1/2} - \\Delta x\\,\\rho_0/\\epsilon_0`. The
+    transverse components are the ghost values the curl uses. On the right the last
+    stored face is the wall face, with :math:`E_x` held at zero at a reflective wall,
+    where the closure of :func:`E_x_from_rho` already puts it."""
+    left = _left_ghost_E(E, B, bc)
+    if bc[0] == 1:
+        left = left.at[0].set(0.0)
+    elif bc[0] == 2:
+        left = left.at[0].set(E[0, 0] - dx * rho[0] / epsilon_0)
+    return left, (E[-1].at[0].set(0.0) if bc[1] == 1 else E[-1])
 
 
 def curl_E(E, B, dx, bc):

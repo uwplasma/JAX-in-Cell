@@ -16,7 +16,7 @@ from jaxincell import epsilon_0, mu_0, elementary_charge, mass_electron
 from jaxincell import speed_of_light as c
 from jaxincell._core import (E_x_from_rho, apply_particle_bc, boris, boris_relativistic,
                              current_from_continuity, deposit, gather, half_step_fields,
-                             s2_weights, smooth, wrap_positions)
+                             s2_weights, smooth, with_ghosts, wrap_positions)
 
 L, G = 1.0, 32
 dx = L / G
@@ -77,9 +77,9 @@ def test_gather_reproduces_a_constant_and_a_linear_field():
     fields to round-off away from the walls: three weighted terms of order one."""
     rng = np.random.default_rng(12)
     x = jnp.array(rng.uniform(-L / 2 + 2 * dx, L / 2 - 2 * dx, 500))
-    faces = x0 + dx / 2 + jnp.arange(G) * dx
-    F = jnp.stack([jnp.full(G, 3.0), 2.0 * faces, jnp.zeros(G)], axis=1)
-    got = gather(F, x, x0 + dx / 2, dx, (1, 1))
+    centres = x0 + jnp.arange(G) * dx
+    F = jnp.stack([jnp.full(G, 3.0), 2.0 * centres, jnp.zeros(G)], axis=1)
+    got = gather(with_ghosts(F, (1, 1)), x, x0, dx)
     assert np.allclose(np.asarray(got[:, 0]), 3.0, rtol=0, atol=4e-15)
     assert np.allclose(np.asarray(got[:, 1]), 2.0 * np.asarray(x), rtol=0, atol=4e-15)
 
