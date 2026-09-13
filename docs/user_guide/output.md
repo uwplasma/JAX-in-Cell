@@ -74,7 +74,21 @@ write_openpmd(output, "run.h5")       # needs `pip install jaxincell[openpmd]`
 
 One iteration per stored step, meshes for `E`, `B`, `J` and `rho` with the right
 staggering recorded in the file, and one particle species per `Output.names` carrying
-position, momentum, weighting, charge and mass.
+position, momentum and weighting per particle, and charge, mass and a zero
+`positionOffset` as constant records. The momentum is the one the pusher advances:
+$\gamma m\mathbf v$ for a relativistic run, $m\mathbf v$ otherwise.
+
+openPMD's `weighting` counts physical particles, while `Output.weight` counts them per
+unit area of the $y$-$z$ plane ({doc}`units`). The export multiplies by the transverse
+area the run stands for, `area` in m², recorded on the `weighting` record as
+`transverseArea`:
+
+```python
+write_openpmd(output, "run.h5", area=domain.length_y * domain.length_z)
+```
+
+The default, 1 m², writes the per-unit-area weights unchanged. The meshes are volume
+densities and do not depend on it.
 
 ## Reading a run back
 

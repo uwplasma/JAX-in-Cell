@@ -194,3 +194,36 @@ def test_per_species_diagnostics_are_the_masked_sums():
         variance = (ws * (vs - mean[:, None]) ** 2).sum(axis=1) / ws.sum(axis=1)
         expected = m[mask][0] * variance / elementary_charge
         assert np.allclose(np.asarray(T[name]), expected, rtol=1e-12, atol=1e-12 * expected.max())
+
+
+def test_openpmd_particles_carry_the_pushers_momentum_counts_and_constant_records(tmp_path):
+    """The momentum is the one the pusher advances, m v without the relativistic
+    pusher and gamma m v with it; ``weighting`` is a number of particles in the
+    given transverse area; charge, mass and positionOffset are constant records."""
+    io = pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+
+    out, area, step = _two_species_run(4), 3e-4, 2
+    SCALAR = io.Record_Component.SCALAR
+    for relativistic in (False, True):
+        run = out.replace(relativistic=relativistic)
+        series = io.Series(write_openpmd(run, tmp_path / f"run_{relativistic}.json", area=area), io.Access.read_only)
+        start = 0
+        for name, count in zip(run.names, run.counts):
+            particles = series.iterations[step].particles[name]
+            records = {"momentum": particles["momentum"]["x"], "weighting": particles["weighting"][SCALAR],
+                       "charge": particles["charge"][SCALAR], "mass": particles["mass"][SCALAR],
+                       "positionOffset": particles["positionOffset"]["x"], "position": particles["position"]["x"]}
+            data = {key: record.load_chunk() for key, record in records.items()}
+            series.flush()
+            v, mass = np.asarray(run.v[step, start:start + count]), float(run.mass[start])
+            gamma = 1 / np.sqrt(1 - np.sum(v ** 2, axis=1) / c ** 2) if relativistic else 1.0
+            assert np.allclose(data["momentum"], mass * gamma * v[:, 0], rtol=1e-12, atol=0)
+            assert np.allclose(data["weighting"], area * np.asarray(run.weight[step, start:start + count]), rtol=1e-12)
+            assert particles["weighting"].get_attribute("transverseArea") == area
+            assert np.all(data["charge"] == float(run.charge[start])) and np.all(data["mass"] == mass)
+            assert data["positionOffset"].shape == (count,) and not np.any(data["positionOffset"])
+            assert all(records[key].constant for key in ("charge", "mass", "positionOffset"))
+            assert not records["position"].constant
+            start += count
+        series.close()

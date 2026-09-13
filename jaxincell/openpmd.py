@@ -7,10 +7,20 @@ Layout:
     Meshes ``E``, ``B``, ``J`` (components ``x``/``y``/``z``) and the scalar ``rho`` on the 1D
     Cartesian grid: ``axis_labels=["x"]``, ``grid_spacing=[dx]``, ``grid_global_offset=[-length/2]``;
     ``E`` and ``J`` sit on cell faces (component ``position=[0.5]``), ``B`` and ``rho`` on centres
-    (``position=[0.0]``). Particles: one species per ``out.names`` with vector records
-    ``position``, ``positionOffset`` (zero) and ``momentum`` (``m * gamma * v``, gamma from ``v``)
-    plus scalar ``weighting`` (the pseudo-particle weight at that step), ``charge`` and ``mass``
-    (of one physical particle); skipped when ``out.x is None``.
+    (``position=[0.0]``). Particles: one species per ``out.names`` with the vector records
+    ``position`` and ``momentum`` and the scalar ``weighting`` per particle, and ``positionOffset``
+    (zero), ``charge`` and ``mass`` (of one physical particle) as constant records; skipped when
+    ``out.x is None``. The momentum is the one the pusher advances: ``m * gamma * v`` for a
+    relativistic run and ``m * v`` otherwise.
+
+Weighting:
+    A one-dimensional run has no transverse extent: its pseudo-particle weight ``out.weight`` is a
+    number of physical particles per unit area of the y-z plane. openPMD's ``weighting`` is a number
+    of physical particles, so the export multiplies by the transverse ``area`` the run is taken to
+    stand for, which the record carries as the attribute ``transverseArea`` (m^2). The default of
+    1 m^2 writes the per-unit-area weights unchanged; ``area=domain.length_y * domain.length_z``
+    matches the periods of the exported y and z positions. The meshes are volume densities and do not
+    depend on it.
 
 Example:
     >>> write_openpmd(sim.run(steps=1000, store_every=10), "run.json", every=5)  # or .h5 / .bp
@@ -48,7 +58,14 @@ def _store(io, component, data, keep):
     component.reset_dataset(io.Dataset(data.dtype, data.shape))
     component.store_chunk(data)
     component.unit_SI = 1.0
-    keep.append(data)  # the buffer must outlive store_chunk until the series is flushed
+    keep.append(data)
+
+
+def _constant(io, component, value, count):
+    """A record component with the same value for all ``count`` particles."""
+    component.reset_dataset(io.Dataset(np.dtype(np.float64), [count]))
+    component.make_constant(float(value))
+    component.unit_SI = 1.0
 
 
 def _write_meshes(io, it, out, s, keep):
@@ -62,24 +79,36 @@ def _write_meshes(io, it, out, s, keep):
             _store(io, mesh[label], column, keep)
 
 
-def _write_particles(io, it, out, s, keep):
-    x, v, w = (np.asarray(a[s], dtype=np.float64) for a in (out.x, out.v, out.weight))
-    q, m = (np.asarray(a, dtype=np.float64) for a in (out.charge, out.mass))
-    species = np.asarray(out.species)
-    gamma = 1.0 / np.sqrt(np.clip(1.0 - np.sum(v ** 2, axis=1) / speed_of_light ** 2, 1e-15, None))
-    p, zero = (m * gamma)[:, None] * v, np.zeros_like(x)
-    for i, name in enumerate(out.names):
-        sel, sp = species == i, it.particles[name]
-        for rec, data in (("position", x[sel]), ("positionOffset", zero[sel]), ("momentum", p[sel])):
+def _momentum(out, s):
+    """Momentum of one physical particle, as the pusher defines it."""
+    v, m = np.asarray(out.v[s], dtype=np.float64), np.asarray(out.mass, dtype=np.float64)
+    gamma = 1.0 / np.sqrt(1.0 - np.sum(v ** 2, axis=1) / speed_of_light ** 2) if out.relativistic else 1.0
+    return (m * gamma)[:, None] * v
+
+
+def _write_particles(io, it, out, s, area, keep):
+    x, p = np.asarray(out.x[s], dtype=np.float64), _momentum(out, s)
+    w = np.asarray(out.weight[s], dtype=np.float64) * area
+    start = 0
+    for name, count in zip(out.names, out.counts):
+        block, first, start = slice(start, start + count), start, start + count
+        sp = it.particles[name]
+        for rec, data in (("position", x[block]), ("momentum", p[block])):
             _describe(io, sp[rec], rec, particle=True)
             for label, column in zip("xyz", data.T):
                 _store(io, sp[rec][label], column, keep)
-        for rec, data in (("weighting", w[sel]), ("charge", q[sel]), ("mass", m[sel])):
+        _describe(io, sp["positionOffset"], "positionOffset", particle=True)
+        for label in "xyz":
+            _constant(io, sp["positionOffset"][label], 0.0, count)
+        _describe(io, sp["weighting"], "weighting", particle=True)
+        sp["weighting"].set_attribute("transverseArea", float(area))
+        _store(io, sp["weighting"][io.Record_Component.SCALAR], w[block], keep)
+        for rec, values in (("charge", out.charge), ("mass", out.mass)):
             _describe(io, sp[rec], rec, particle=True)
-            _store(io, sp[rec][io.Record_Component.SCALAR], data, keep)
+            _constant(io, sp[rec][io.Record_Component.SCALAR], values[first], count)
 
 
-def write_openpmd(out, path, every=1, meshes=True, particles=True):
+def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0):
     """Write ``out`` to the openPMD series ``path`` and return the path.
 
     Args:
@@ -88,6 +117,8 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True):
         every: Export every ``every``-th stored step (the iteration index is the stored-step index).
         meshes: Write the ``E``, ``B``, ``J`` and ``rho`` meshes.
         particles: Write the per-species particle records (skipped when ``out.x is None``).
+        area: Transverse area in m^2 that the one-dimensional run stands for; ``weighting`` is
+            ``out.weight * area``, a number of physical particles (see the module docstring).
 
     Raises:
         ImportError: If the optional dependency ``openpmd-api`` is missing.
@@ -106,7 +137,7 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True):
         if meshes:
             _write_meshes(io, it, out, s, keep)
         if particles and out.x is not None:
-            _write_particles(io, it, out, s, keep)
+            _write_particles(io, it, out, s, area, keep)
         series.flush()
     series.close()
     return path
