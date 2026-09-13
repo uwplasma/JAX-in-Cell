@@ -1,29 +1,43 @@
 """Binary Coulomb collisions, after Takizuka and Abe (J. Comput. Phys. 25, 205, 1977).
 
-Inside every cell the particles of the two species of a pair are matched at
-random and each pair is scattered through an angle whose variance carries the
-collision frequency. Only the relative velocity is rotated and the resulting
-change is shared in inverse proportion to the masses, so each pair conserves
-momentum and energy exactly, whatever the time step.
+Inside every cell the particles are paired at random and each pair is scattered
+through an angle whose variance carries the collision frequency. Only the
+relative velocity is rotated and the change is shared in inverse proportion to
+the masses, so a pair conserves momentum and energy exactly, whatever the time
+step.
 
-Two details make the scheme work away from the ideal case of two equally
-numerous, equally weighted species:
+Pairing, cell by cell, with one random order per species per pair of species:
 
-* When a cell holds unequal numbers of the two species, the shorter list is
-  cycled so that every particle of the longer one still collides once; the
-  longer list drives the pairing, cell by cell.
-* The change is applied to each partner with the probability of the ratio of
-  the partner's weight to the larger of the two, which gives the right exchange
-  on average for unequal pseudo-particle weights and exactly compensates the
-  cycling above (Nanbu and Yonemura, J. Comput. Phys. 145, 639, 1998).
+* **A species with itself** (Takizuka and Abe): particles 0-1, 2-3, ... collide.
+  When the cell holds an odd number, the last three collide 1-2, 2-3 and 3-1,
+  one after the other, each with half the variance, so that every particle still
+  receives one collision's worth of scattering. A lone particle does not collide.
+* **Two species**: the longer of the two lists drives. Each of its particles
+  collides once, with the partner of the same rank in the other list, which is
+  cycled when shorter; a particle of the shorter list then collides several
+  times in the step. Those collisions are computed from the velocities at the
+  start of the step, which keeps momentum exact but leaves energy exact only in
+  cells with as many particles of both species.
 
-The variance of one step follows from matching the perpendicular velocity
+Unequal pseudo-particle weights follow Nanbu and Yonemura (J. Comput. Phys. 145,
+639, 1998): the change is applied to each partner with probability
+:math:`w_{\\rm other}/\\max(w_a, w_b)`, which conserves momentum and energy on
+average rather than per pair. The density in the variance is then
+:math:`n = n_a n_b / n_{ab}` (Perez et al., Phys. Plasmas 19, 083104, 2012),
+with :math:`n_{ab}` the sum of :math:`\\min(w_a, w_b)` over the pairs of the cell,
+per unit length, counted twice for a species with itself. This is what makes
+the mean exchange rate right for every particle: for equal weights it reduces to
+:math:`\\min(n_a, n_b)` between species and to :math:`n_a` within one, and a
+particle of the shorter list sees the density of the longer one through the
+number of its collisions, not through the acceptance.
+
+The variance of one collision follows from matching the perpendicular velocity
 diffusion of the Fokker-Planck operator,
 :math:`\\langle\\delta^2\\rangle = q_a^2 q_b^2 n \\ln\\Lambda\\,\\Delta t
 / (8\\pi\\epsilon_0^2 m_{ab}^2 u^3)`, with :math:`\\tan(\\Theta/2)=\\delta`.
 """
 import jax.numpy as jnp
-from jax import random
+from jax import lax, random
 
 from ._constants import epsilon_0
 
@@ -47,65 +61,128 @@ def coulomb_logarithm(density, temperature_ev, charge_number=1.0, floor=2.0):
     return jnp.maximum(jnp.where(temperature_ev < 10 * charge_number ** 2, cold, hot), floor)
 
 
-def _by_cell(cell, n_cells):
-    """Sort particles by cell. Returns the permutation, the sorted cells, the
-    rank of each particle inside its cell and the population of each cell."""
-    order = jnp.argsort(cell)
-    sorted_cell = cell[order]
-    count = jnp.zeros(n_cells, jnp.int32).at[sorted_cell].add(1)
-    first = jnp.concatenate([jnp.zeros(1, jnp.int32), jnp.cumsum(count)[:-1]])
-    return order, sorted_cell, jnp.arange(cell.shape[0]) - first[sorted_cell], count
+def _shuffle_by_cell(key, cell, n_cells):
+    """Sort particles by cell, in random order inside each cell, with one sort.
+
+    ``cell`` runs from 0 to ``n_cells``, the last value marking removed particles.
+    Returns the order, the sorted cells, the first sorted index of every cell and
+    the population of every cell, with the removed ones counted as none."""
+    bits = random.bits(key, cell.shape)
+    sorted_cell, _, order = lax.sort((cell, bits, jnp.arange(cell.shape[0])), num_keys=2)
+    first = jnp.searchsorted(sorted_cell, jnp.arange(n_cells + 1, dtype=cell.dtype))
+    count = jnp.diff(first, append=cell.shape[0]).at[n_cells].set(0)
+    return order, sorted_cell, first, count
 
 
-def _rotate(key, u, variance):
-    """Rotate the relative velocities ``u`` through the Takizuka-Abe angle."""
+def _rotate(key, u, u_mag, variance):
+    """Change of the relative velocities ``u`` when rotated through the
+    Takizuka-Abe angle. ``u_mag`` is the floored magnitude used for the variance."""
     k_delta, k_phi = random.split(key)
-    delta = random.normal(k_delta, (u.shape[0],)) * jnp.sqrt(variance)
+    delta = random.normal(k_delta, u_mag.shape, u.dtype) * jnp.sqrt(variance)
     sin_t = 2 * delta / (1 + delta ** 2)
-    cos_t = (1 - delta ** 2) / (1 + delta ** 2)
-    phi = random.uniform(k_phi, (u.shape[0],), maxval=2 * jnp.pi)
+    one_minus_cos = 2 * delta ** 2 / (1 + delta ** 2)
+    phi = random.uniform(k_phi, u_mag.shape, u.dtype, maxval=2 * jnp.pi)
+    cos_p, sin_p = jnp.cos(phi), jnp.sin(phi)
     ux, uy, uz = u[:, 0], u[:, 1], u[:, 2]
-    u_perp = jnp.sqrt(ux ** 2 + uy ** 2)
-    u_mag = jnp.sqrt(u_perp ** 2 + uz ** 2)
-    safe = jnp.maximum(u_perp, 1e-30)
-    du_x = (ux / safe) * uz * sin_t * jnp.cos(phi) - (uy / safe) * u_mag * sin_t * jnp.sin(phi) - ux * (1 - cos_t)
-    du_y = (uy / safe) * uz * sin_t * jnp.cos(phi) + (ux / safe) * u_mag * sin_t * jnp.sin(phi) - uy * (1 - cos_t)
-    du_z = -u_perp * sin_t * jnp.cos(phi) - uz * (1 - cos_t)
-    # a relative velocity along z leaves the transverse frame undefined; rotate in x-z instead
-    along_z = u_perp < 1e-12 * u_mag
-    du_x = jnp.where(along_z, u_mag * sin_t * jnp.cos(phi), du_x)
-    du_y = jnp.where(along_z, u_mag * sin_t * jnp.sin(phi), du_y)
+    perp2 = ux ** 2 + uy ** 2
+    # a relative velocity along z leaves the transverse frame undefined; rotate in x-z instead.
+    # The square roots only see positive arguments, so the gradient stays finite at u = 0.
+    along_z = perp2 <= 1e-24 * (perp2 + uz ** 2)
+    u_perp = jnp.sqrt(jnp.where(along_z, 1.0, perp2))
+    u_abs = jnp.sqrt(jnp.where(along_z, 1.0, perp2 + uz ** 2))
+    du_x = jnp.where(along_z, jnp.abs(uz) * sin_t * cos_p,
+                     (ux * uz * cos_p - uy * u_abs * sin_p) / u_perp * sin_t) - ux * one_minus_cos
+    du_y = jnp.where(along_z, jnp.abs(uz) * sin_t * sin_p,
+                     (uy * uz * cos_p + ux * u_abs * sin_p) / u_perp * sin_t) - uy * one_minus_cos
+    du_z = -jnp.where(along_z, 0.0, u_perp) * sin_t * cos_p - uz * one_minus_cos
     return jnp.stack([du_x, du_y, du_z], axis=1)
 
 
-def _scatter(key, v, driver, cell, rank, other, other_key, other_count, drives, density,
-             weight, mass, charge, coulomb_log, dt, stride):
-    """Scatter every particle of ``driver`` against its partner in ``other``.
-
-    The partner is the one of the same rank inside the cell, cycling through the
-    partners when there are fewer of them. Cells where ``drives`` is false are
-    left to the call that runs the other way round.
-    """
-    slot = cell * stride + rank % jnp.maximum(other_count[cell], 1)
-    j = jnp.clip(jnp.searchsorted(other_key, slot), 0, other_key.shape[0] - 1)
-    partner = other[j]
-    paired = drives[cell] & (other_count[cell] > 0) & (other_key[j] == slot)
-    m_a, m_b = mass[driver], mass[partner]
-    q_a, q_b = charge[driver], charge[partner]
+def _scatter(key, v, i, j, active, density, fraction, weight, mass, charge, coulomb_log, dt):
+    """Scatter particle ``i[k]`` against ``j[k]`` wherever ``active[k]``, with
+    ``fraction[k]`` of the variance of a full collision at ``density[k]``."""
+    m_i, m_j = mass[i], mass[j]
+    q_i, q_j = charge[i], charge[j]
     # Grouped so that no intermediate leaves the range of single precision: the product of
     # two particle masses, or of the permittivity and a mass, is far below 1e-38.
-    m_r = m_a / (1 + m_a / m_b)
-    u = v[driver] - v[partner]
-    u_mag = jnp.maximum(jnp.linalg.norm(u, axis=1), 1e-10)
-    variance = (q_a / epsilon_0 * (q_b / m_r)) ** 2 * density[cell] * coulomb_log * dt / (8 * jnp.pi * u_mag ** 3)
-    k_rotate, k_a, k_b = random.split(key, 3)
-    du = _rotate(k_rotate, u, variance)
-    w_a, w_b = weight[driver], weight[partner]
-    w_max = jnp.maximum(w_a, w_b)
-    take_a = paired & (random.uniform(k_a, paired.shape) < w_b / w_max)
-    take_b = paired & (random.uniform(k_b, paired.shape) < w_a / w_max)
-    v = v.at[driver].add(jnp.where(take_a[:, None], (m_b / (m_a + m_b))[:, None] * du, 0.0))
-    return v.at[partner].add(jnp.where(take_b[:, None], -(m_a / (m_a + m_b))[:, None] * du, 0.0))
+    m_r = m_i / (1 + m_i / m_j)
+    u = v[i] - v[j]
+    u_mag = jnp.sqrt(jnp.maximum(jnp.sum(u ** 2, axis=1), 1e-20))
+    variance = (q_i / epsilon_0 * (q_j / m_r)) ** 2 * fraction * density * coulomb_log * dt / (8 * jnp.pi * u_mag ** 3)
+    # Past 1e30 the angle is within 1e-15 of pi anyway; the cap keeps single precision finite. The
+    # floor keeps the derivative of the square root finite where the variance vanishes, as it does
+    # in the slots that hold no collision.
+    variance = jnp.clip(variance, jnp.finfo(u.dtype).tiny, 1e30)
+    k_rotate, k_accept = random.split(key)
+    du = _rotate(k_rotate, u, u_mag, variance)
+    w_i, w_j = weight[i], weight[j]
+    accept = random.uniform(k_accept, active.shape, u.dtype) * jnp.maximum(w_i, w_j)
+    take_i, take_j = active & (accept < w_j), active & (accept < w_i)
+    v = v.at[i].add(jnp.where(take_i[:, None], (m_j / (m_i + m_j))[:, None] * du, 0.0))
+    return v.at[j].add(jnp.where(take_j[:, None], -(m_i / (m_i + m_j))[:, None] * du, 0.0))
+
+
+def _within(key, v, start, n, cell, n_cells, dx, *args):
+    """Takizuka-Abe collisions of one species with itself."""
+    k_sort, k_pairs, k_second, k_third = random.split(key, 4)
+    weight = args[0]
+    order, sorted_cell, first, count = _shuffle_by_cell(k_sort, cell, n_cells)
+    s = start + order
+    half = count // 2
+    triplet = (count % 2 == 1) & (count > 1)
+    # pairs (0, 1), (2, 3), ... of every cell, packed into n // 2 slots
+    slot = jnp.arange(n // 2)
+    pair_cell = jnp.repeat(jnp.arange(n_cells + 1), half, total_repeat_length=n // 2)
+    rank = slot - (jnp.cumsum(half) - half)[pair_cell]
+    p = jnp.clip(first[pair_cell] + 2 * rank, 0, n - 2)
+    pairs_i, pairs_j, pairs_active = s[p], s[p + 1], slot < half.sum()
+    # in a cell with an odd number the last pair opens the triplet
+    pairs_fraction = jnp.where(triplet[pair_cell] & (rank == half[pair_cell] - 1), 0.5, 1.0)
+    last = jnp.clip(first + count - 1, 0, n - 1)
+    t_1, t_2, t_3 = s[jnp.clip(last - 2, 0, n - 1)], s[jnp.clip(last - 1, 0, n - 1)], s[last]
+    # densities of the cell: n_a, and n_aa = 2 sum over its collisions of fraction * min(w_i, w_j)
+    w_pairs = jnp.where(pairs_active, pairs_fraction * jnp.minimum(weight[pairs_i], weight[pairs_j]), 0.0)
+    w_1, w_2, w_3 = weight[t_1], weight[t_2], weight[t_3]
+    w_triplets = jnp.where(triplet, 0.5 * (jnp.minimum(w_2, w_3) + jnp.minimum(w_3, w_1)), 0.0)
+    cells = jnp.concatenate([sorted_cell, pair_cell, jnp.arange(n_cells + 1)])
+    columns = jnp.zeros((n_cells + 1, 2)).at[cells].add(jnp.stack([
+        jnp.concatenate([weight[s], jnp.zeros(n // 2 + n_cells + 1)]),
+        2 * jnp.concatenate([jnp.zeros(n), w_pairs, w_triplets])], axis=1)) / dx
+    has_pairs = columns[:, 1] > 0
+    density = columns[:, 0] * (columns[:, 0] / jnp.where(has_pairs, columns[:, 1], 1.0))
+    v = _scatter(k_pairs, v, pairs_i, pairs_j, pairs_active, density[pair_cell], pairs_fraction, *args)
+    if n > 2:                   # the triplet's second and third collisions see the velocities left by the first
+        v = _scatter(k_second, v, t_2, t_3, triplet, density, 0.5, *args)
+        v = _scatter(k_third, v, t_3, t_1, triplet, density, 0.5, *args)
+    return v
+
+
+def _between(key, v, block_a, block_b, cell_a, cell_b, n_cells, dx, *args):
+    """Collisions between two species, the longer list driving cell by cell."""
+    (start_a, n_a), (start_b, n_b) = block_a, block_b
+    weight = args[0]
+    k_a, k_b, k_scatter = random.split(key, 3)
+    order_a, sorted_a, first_a, count_a = _shuffle_by_cell(k_a, cell_a, n_cells)
+    order_b, sorted_b, first_b, count_b = _shuffle_by_cell(k_b, cell_b, n_cells)
+    ia, ib = start_a + order_a, start_b + order_b
+    rank_a, rank_b = jnp.arange(n_a) - first_a[sorted_a], jnp.arange(n_b) - first_b[sorted_b]
+    # every particle of a takes the partner of its rank in b, cycled; the particles of b left
+    # over in cells where b is the longer list take theirs from a
+    on_b = count_b[sorted_a]
+    partner_a = ib[jnp.minimum(first_b[sorted_a] + rank_a % jnp.maximum(on_b, 1), n_b - 1)]
+    on_a = count_a[sorted_b]
+    partner_b = ia[jnp.minimum(first_a[sorted_b] + rank_b % jnp.maximum(on_a, 1), n_a - 1)]
+    i, j = jnp.concatenate([ia, ib]), jnp.concatenate([partner_a, partner_b])
+    active = jnp.concatenate([on_b > 0, (on_a > 0) & (rank_b >= on_a)])
+    cells = jnp.concatenate([sorted_a, sorted_b])
+    # densities of the cell: n_a, n_b and n_ab = sum over its pairs of min(w_i, w_j)
+    zeros_a, zeros_b = jnp.zeros(n_a), jnp.zeros(n_b)
+    columns = jnp.zeros((n_cells + 1, 3)).at[cells].add(jnp.stack([
+        jnp.concatenate([weight[ia], zeros_b]), jnp.concatenate([zeros_a, weight[ib]]),
+        jnp.where(active, jnp.minimum(weight[i], weight[j]), 0.0)], axis=1)) / dx
+    has_pairs = columns[:, 2] > 0
+    density = columns[:, 0] * (columns[:, 1] / jnp.where(has_pairs, columns[:, 2], 1.0))
+    return _scatter(k_scatter, v, i, j, active, density[cells], 1.0, *args)
 
 
 def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx, length, n_cells):
@@ -123,31 +200,16 @@ def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx,
     """
     # A particle a wall has collected has no weight left. It goes to a cell of its own
     # past the last one, where it neither collides nor takes a partner from one that can.
-    cell_of = lambda i: jnp.where(weight[i] > 0, jnp.clip(((x[i, 0] + length / 2) / dx).astype(jnp.int32),
-                                                          0, n_cells - 1), n_cells)
-    live = jnp.arange(n_cells + 1) < n_cells
+    inside = jnp.clip(((x[:, 0] + length / 2) / dx).astype(jnp.int32), 0, n_cells - 1)
+    cell = jnp.where(weight > 0, inside, n_cells)
+    args = (weight, mass, charge, coulomb_log, dt)
     for a, b in pairs:
-        key, k_a, k_b, k_1, k_2 = random.split(key, 5)
-        start_a, n_a = blocks[a]
-        start_b, n_b = blocks[b]
+        key, sub = random.split(key)
+        (start_a, n_a), (start_b, n_b) = blocks[a], blocks[b]
         if a == b:
-            # a species collides with itself: split it in two and pair the halves
-            perm = start_a + random.permutation(k_a, n_a)
-            ia, ib = perm[: n_a // 2], perm[n_a // 2: 2 * (n_a // 2)]
+            if n_a > 1:
+                v = _within(sub, v, start_a, n_a, cell[start_a:start_a + n_a], n_cells, dx, *args)
         else:
-            ia = start_a + random.permutation(k_a, n_a)
-            ib = start_b + random.permutation(k_b, n_b)
-        order_a, cell_a, rank_a, count_a = _by_cell(cell_of(ia), n_cells + 1)
-        order_b, cell_b, rank_b, count_b = _by_cell(cell_of(ib), n_cells + 1)
-        ia, ib = ia[order_a], ib[order_b]
-        stride = max(ia.shape[0], ib.shape[0]) + 1
-        key_a, key_b = cell_a * stride + rank_a, cell_b * stride + rank_b
-        density_a = jnp.zeros(n_cells + 1).at[cell_a].add(weight[ia]) / dx
-        density_b = jnp.zeros(n_cells + 1).at[cell_b].add(weight[ib]) / dx
-        # a particle of a self-colliding species sees the whole species; otherwise the
-        # sparser of the two partners sets the rate (Takizuka and Abe, section 2)
-        density = density_a + density_b if a == b else jnp.minimum(density_a, density_b)
-        args = (density, weight, mass, charge, coulomb_log, dt, stride)
-        v = _scatter(k_1, v, ia, cell_a, rank_a, ib, key_b, count_b, live & (count_a >= count_b), *args)
-        v = _scatter(k_2, v, ib, cell_b, rank_b, ia, key_a, count_a, live & (count_b > count_a), *args)
+            v = _between(sub, v, blocks[a], blocks[b], cell[start_a:start_a + n_a],
+                         cell[start_b:start_b + n_b], n_cells, dx, *args)
     return v
