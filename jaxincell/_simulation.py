@@ -264,11 +264,8 @@ class Simulation:
 
     def _mean_velocity(self, u, u_new):
         """The velocity that carries a particle through a push from ``u`` to ``u_new``,
-        :math:`(\\mathbf u + \\mathbf u')/(\\gamma + \\gamma')`, the mean of the two velocities in
-        a Newtonian run. The Boris step changes :math:`|\\mathbf u|^2` by exactly
-        :math:`2(q/m)\\Delta t\\,\\mathbf E\\cdot(\\mathbf u + \\mathbf u')/2`, so the kinetic energy,
-        :math:`m|\\mathbf v|^2/2` or :math:`(\\gamma - 1)mc^2`, changes by the work of E along this
-        velocity to round-off, relativistic or not."""
+        :math:`(\\mathbf u + \\mathbf u')/(\\gamma + \\gamma')`, along which the Boris step changes the
+        kinetic energy by exactly the work of E, Newtonian (the mean velocity) or relativistic."""
         return (u + u_new) / (self._gamma(u) + self._gamma(u_new))
 
     def _momentum(self, v):
@@ -455,28 +452,22 @@ class Simulation:
         return (E, B, x_next_half, u, w, qm, rho_next, key), (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
     def _implicit_step(self, carry, extra):
-        """Crank-Nicolson step solved by a fixed number of Picard iterations.
+        """Crank-Nicolson step solved by a fixed number of Picard iterations (docs/numerics/implicit.md).
 
-        Fields are advanced with their time-centred averages and the particles are
-        sub-stepped in them, each sub-step along the straight line from its start to its
-        end at :meth:`_mean_velocity`. The longitudinal current of a sub-step is the
-        continuity current of the deposits at the two ends, so the discrete Gauss law holds
-        at every wall. E_x at a particle is the discrete gradient that makes its work equal
-        to the energy that current takes from the field (Kormann and Sonnendruecker, J.
-        Comput. Phys. 425, 109890, 2021): the transpose of the current, then of the deposit,
-        turns E_x into a potential at the particles, and E_x is its difference between the
-        two ends over the displacement. The transverse fields are gathered at the mid-point,
-        and their current is the transpose of that gather (Chen, Chacon and Barnes 2011).
-        The end and velocity of every sub-step are carried from one Picard iteration to the
-        next; the state is the last iteration's, whose field and charge come from one orbit."""
+        Each sub-step moves a particle on a straight line at :meth:`_mean_velocity`. Its current is the
+        continuity current of the deposits at the two ends, which keeps the discrete Gauss law, and E_x at
+        the particle is the discrete gradient of the potential the transposes of that current and of the
+        deposit make of E_x, so the work equals the energy the current takes from the field (Kormann and
+        Sonnendruecker 2021). E_y, E_z and B are gathered at the mid-point, with the transpose of that
+        gather as their current (Chen, Chacon and Barnes 2011). The end and velocity of each sub-step are
+        carried from one Picard iteration to the next; the step returns the last iteration's state."""
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
         box, bc = (L, d.length_y, d.length_z), d.field_bc
         m, q = extra
         E, B, x, u, w, qm, rho, key = carry
         n_sub = self.solver.substeps
         dtau = dt / n_sub
-        # Below this displacement E_x is the slope of the potential at the mid-point, which differs from the
-        # difference quotient by the displacement squared in cells, the round-off the quotient then has.
+        # below this shift E_x is the potential's slope at the mid-point, off the quotient by (shift/dx)^2 = eps
         tiny = jnp.sqrt(jnp.finfo(x.dtype).eps) * dx
 
         # one thermal-wall key per sub-step, the same in every Picard iteration, so that
