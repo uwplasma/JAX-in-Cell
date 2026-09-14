@@ -386,8 +386,6 @@ class Simulation:
         return push(v, fields[:, :3], fields[:, 3:], qm[:, None], dt)
 
     def _collide(self, key, x, v, w, qm, m, dt):
-        if self.collisions is None:
-            return v
         d = self.domain
         names = [s.name for s in self.species]
         pairs = (self.collisions.pairs if self.collisions.pairs is not None

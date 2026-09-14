@@ -19,7 +19,7 @@ def timed(particles, cells, algorithm="explicit", repeats=3):
                                   perturbation_mode=1)
     ions = Species.ions(n=particles, density=4.37e17, electrons=electrons, quiet=True)
     simulation = Simulation(Domain(length=0.01, cells=cells, dt_over_dx_c=4.5), [electrons, ions],
-                            Solver(algorithm=algorithm, filter_passes=2))
+                            Solver(algorithm=algorithm, filter_passes=2 if algorithm == "explicit" else 0))
 
     def run():
         simulation.run(STEPS, seed=0, store_particles=False).E.block_until_ready()
@@ -43,7 +43,7 @@ for n, value in zip(counts, per_particle):
 
 fig, axes = plt.subplots(1, 2, figsize=WIDE)
 axes[0].loglog(2 * counts, 1e9 * per_particle, "o-", color=C_ELECTRONS, label="explicit")
-axes[0].loglog(2 * counts, 1e9 * implicit, "s-", color=C_IONS, label="implicit, 8 Picard")
+axes[0].loglog(2 * counts, 1e9 * implicit, "s-", color=C_IONS, label="implicit, 8 Picard, unfiltered")
 axes[0].set(xlabel="pseudo-particles", ylabel="ns per particle per step",
             title="cost per particle is flat once the device is busy")
 axes[0].legend()
