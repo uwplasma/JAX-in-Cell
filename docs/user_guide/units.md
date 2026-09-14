@@ -1,76 +1,89 @@
-# Units and normalisations
+# Units and conventions
 
-JAX-in-Cell works in SI units throughout. Lengths are in metres, times in seconds,
-velocities in metres per second, charge in coulombs, mass in kilograms, electric field
-in volts per metre, magnetic field in tesla, charge density in coulombs per cubic
-metre and current density in amperes per square metre. Energies are per unit area
-(J/m²) because the box is one-dimensional in space.
+Everything is SI, unmodified. There is no normalisation layer, so a number that goes in
+or comes out is in the unit its physics has.
 
-The physical constants are available as module attributes:
-
-| name | value |
+| quantity | unit |
 |---|---|
-| `jaxincell.epsilon_0` | $8.854\,187\,82\times10^{-12}$ F/m |
-| `jaxincell.mu_0` | $1.256\,637\,06\times10^{-6}$ H/m |
-| `jaxincell.speed_of_light` | $2.997\,924\,58\times10^{8}$ m/s |
-| `jaxincell.elementary_charge` | $1.602\,176\,63\times10^{-19}$ C |
-| `jaxincell.mass_electron` | $9.109\,383\,71\times10^{-31}$ kg |
-| `jaxincell.mass_proton` | $1.672\,621\,93\times10^{-27}$ kg |
-| `jaxincell.boltzmann_constant` | $1.380\,649\times10^{-23}$ J/K |
+| length, position | m |
+| time | s |
+| velocity, thermal speed, drift | m/s |
+| number density | m⁻³ |
+| charge | C, except `Species.charge`, which is in units of $e$ |
+| mass | kg |
+| electric field | V/m |
+| magnetic field | T |
+| current density | A/m² |
+| charge density | C/m³ |
+| energy | J/m², an energy per unit area of the ignorable directions |
+| temperature (diagnostic output) | eV |
 
-## Inputs that are dimensionless
+The physical constants importable from `jaxincell` are the CODATA 2018 values
+({doc}`../api`).
 
-Several inputs are ratios so that a configuration can be scaled without recomputing
-densities and fields:
+## Thermal speed
 
-| input | definition |
-|---|---|
-| `vth_over_c_*` | $v_{th}/c$ with $v_{th} = \sqrt{2 k_B T/m}$ |
-| `grid_points_per_Debye_length` | $\Delta x/\lambda_D$ |
-| `timestep_over_spatialstep_times_c` | $c\,\Delta t/\Delta x$ |
-| `perturbation_wavenumber_*` | mode number $m$, $k = 2\pi m/L$ |
-| `charge_over_elementary_charge`, `mass_over_proton_mass` | $q/e$, $m/m_p$ |
-| `ion_temperature_over_electron_temperature_*` | $T_i/T_e$ |
-
-The density follows from the Debye length, see {doc}`species`. The perturbation
-amplitude and the drift speeds are dimensional (metres, metres per second).
-
-## Derived quantities
-
-For the first electron population, with $n_e$ its density, $T_e$ its temperature from
-the largest thermal speed, and $\lambda_D = \Delta x/g$:
+The one convention worth stating twice, because codes differ:
 
 ```{math}
-\omega_{pe} = \sqrt{\frac{n_e e^2}{\epsilon_0 m_e}}, \qquad
-\lambda_D = \frac{v_{th,e}}{\sqrt 2\,\omega_{pe}} = \sqrt{\frac{\epsilon_0 k_B T_e}{n_e e^2}}, \qquad
-d_e = \frac{c}{\omega_{pe}}, \qquad
-k_B T_e = \frac{m_e v_{th,e}^2}{2}.
+f(v) \propto \exp\!\left(-\frac{(v-u)^2}{v_{th}^2}\right), \qquad
+v_{th} = \sqrt{\frac{2k_BT}{m}}, \qquad
+\lambda_D = \frac{v_{th}}{\sqrt{2}\,\omega_p} = \sqrt{\frac{\epsilon_0 k_B T}{n q^2}} .
 ```
 
-The summary printed at the start of a run with `print_info = true` lists $L/\lambda_D$,
-$L/d_e$, $n_e$, $k_B T_e$ in eV, $T_i/T_e$, $\lambda_D$, $d_e$, the number of
-pseudo-particles per cell, the weight, $1/(\omega_{pe}\Delta t)$, the total simulated
-time in units of $\omega_{pe}^{-1}$, $n_e\lambda_D^3$, the maximum and mean Lorentz
-factor of the initial velocities and the normalised external electric field
-$-q_e E_0\lambda_D/k_B T_e$. The line labelled `Wavenumber * Debye length` prints the
-mode number times $\lambda_D$ in metres; multiply by $2\pi/L$ to obtain $k\lambda_D$.
+`vth` is therefore $\sqrt2$ times the standard deviation of one velocity component.
+From a temperature in electronvolts:
 
-## Converting a physical problem
+```python
+import numpy as np
+from jaxincell import elementary_charge, mass_electron
 
-To simulate a plasma with density $n$ and temperature $T$:
+vth = np.sqrt(2 * T_ev * elementary_charge / mass_electron)
+```
 
-1. compute $v_{th} = \sqrt{2 k_B T/m_e}$ and set `vth_over_c_x = v_th / c`;
-2. compute $\lambda_D$ and choose the cell size, for example $\Delta x = \lambda_D/2$,
-   which gives `grid_points_per_Debye_length = 2`;
-3. choose the box in Debye lengths and set `length = L` in metres and
-   `number_grid_points = L / dx`;
-4. choose the time step from $\omega_{pe}\Delta t$ and set
-   `timestep_over_spatialstep_times_c = c dt / dx`.
+and back, which is what {func}`~jaxincell.temperatures` reports:
 
-The density that results is the one you started from, because the weight formula
-inverts the Debye-length relation. Check the printed summary against your numbers.
+```python
+T_ev = mass_electron * vth ** 2 / (2 * elementary_charge)
+```
 
-## Time axis of the output
+## Weights
 
-`time_array` is in seconds. Multiply by `plasma_frequency` for times in units of
-$\omega_{pe}^{-1}$, which is what all figures in this documentation use.
+A {class}`~jaxincell.Species` of `n` pseudo-particles at number density `density`
+in a box of length `length` gives each pseudo-particle the weight
+
+```{math}
+w = \frac{n_{\rm phys}\,L}{N},
+```
+
+the number of physical particles it stands for, per unit area of the $y$-$z$ plane.
+`Output.charge` and `Output.mass` are those of one physical particle, and
+`Output.weight` is the weight of every pseudo-particle at every stored step: an
+absorbing wall lowers it as it collects the particle, to zero when it keeps the particle
+whole. The charge a pseudo-particle carries is `charge * weight`.
+
+## Energies per unit area
+
+The simulation is one-dimensional, so an energy is an energy per unit area of the
+$y$-$z$ plane, in J/m². Ratios — the relative energy error, the fraction in the field
+— are unaffected, and those are what the diagnostics are usually used for.
+
+## Precision
+
+`jax_enable_x64` is switched on when the package is imported, unless JAX's own switch
+says otherwise: start Python with `JAX_ENABLE_X64=0` for single precision. Double
+precision is what makes the Gauss residual sit at $10^{-12}$ rather than about
+$10^{-3}$, and the implicit energy error at round-off rather than $10^{-7}$. The physics
+does not change: every rate, frequency and sheath comparison in the test suite passes in
+single precision too, and only the tests that check conservation to round-off fail.
+See {doc}`performance` for what it costs on a GPU.
+
+Every script in `examples/` sets `JAX_ENABLE_X64` at its top, before anything imports
+JAX, so the precision of a run is written in the script, and
+`JAX_ENABLE_X64=0 python examples/two_stream.py` switches it from the shell.
+
+## Frequencies
+
+Angular, in rad/s, throughout: `plasma_frequency()`, `dominant_frequency()` and every
+$\omega$ in this documentation. Rates are per second; when a figure axis reads
+$t\,\omega_{pe}$, the time has been multiplied by the angular plasma frequency.

@@ -1,169 +1,147 @@
-# Your first simulation
+# Your first simulation, in detail
 
-This page runs the two-stream instability from `examples/input.toml` and explains each
-choice along the way. The same file is used on the {doc}`quickstart` page; here the
-focus is on why the numbers are what they are and what to look at in the output.
+This page takes the two-stream run apart and explains every number in it. The script
+is `examples/two_stream.py`.
 
-## The physical setup
+## The physics
 
-Two electron beams stream through each other at $\pm v_d$ with $v_d = 0.2c$
-(`drift_speed_x = 6e7` m/s) and thermal speed $v_{th} = 0.05c$ (`vth_over_c_x = 0.05`).
-Protons with the same temperature as the electrons provide a neutralising background.
-The box is periodic, and a small sinusoidal displacement of the electrons
-(`perturbation_amplitude_x = 5e-7` m, `perturbation_wavenumber_x = 1`) seeds the longest
-wavelength that fits in the box. Cold-beam theory predicts an instability when
-$k v_d < \omega_{pe}$; the {doc}`../numerics/verification` page compares the measured growth
-rate with the kinetic dispersion relation.
+Two electron beams stream through one another at $\pm v_0$ on a background of
+protons. Each beam Landau-resonates with the space-charge wave carried by the other,
+and the pair is unstable: a small density perturbation grows exponentially until the
+beams trap each other and the phase space folds into a vortex. It is the standard
+first test of a kinetic code, because the growth rate is known in closed form
+{cite}`buneman1959`.
 
-The relevant parameters are collected in three sections:
+## Choosing the parameters
 
-```toml
-[domain_parameters]
-length = 0.01                          # box length in metres
-number_grid_points = 70
-timestep_over_spatialstep_times_c = 4.5   # c dt / dx
-total_steps = 1100
+```python
+import numpy as np
+from jaxincell import (Domain, Simulation, Solver, Species, diagnostics, plot,
+                       epsilon_0, mass_electron, elementary_charge as e, speed_of_light as c)
 
-[species_parameters.electrons.electrons0]
-number_pseudoparticles = 3500
-grid_points_per_Debye_length = 0.50265482457   # sets the density through lambda_D
-vth_over_c_x = 0.05
-drift_speed_x = 6e7
-velocity_plus_minus_x = true           # half the particles get -drift_speed_x
-perturbation_amplitude_x = 0.0000005
-perturbation_wavenumber_x = 1
-
-[species_parameters.ions.ions0]
-number_pseudoparticles = 3500
-grid_points_per_Debye_length = 0.50265482457
-mass_over_proton_mass = 1
-vth_over_c_x = "_electrons0"           # thermal speed from the electron temperature
-ion_temperature_over_electron_temperature_x = 1
+length, cells = 0.01, 64
+density, drift, vth = 4.37e17, 6e7, 0.05 * c
 ```
 
-Three conventions are worth knowing from the start:
+Everything else follows from these five numbers.
 
-* **Density is set through the Debye length.** There is no density parameter. The
-  pseudo-particle weight of each population is chosen so that the electron Debye
-  length equals `1 / grid_points_per_Debye_length` cells; see
-  {doc}`../user_guide/species` for the formula. With $\lambda_D \approx 2\,\Delta x$
-  the box holds $L/\lambda_D \approx 35$ Debye lengths.
-* **Thermal speed** $v_{th}$ is defined by $f(v) \propto \exp(-v^2/v_{th}^2)$, that is
-  $v_{th} = \sqrt{2 k_B T / m}$. Velocities are sampled with standard deviation
-  $v_{th}/\sqrt{2}$ per component.
-* **A string value refers to another species.** `"_electrons0"` for an ion thermal speed
-  means "the value that gives the temperature ratio
-  `ion_temperature_over_electron_temperature_x` relative to the population labelled
-  `electrons0`", with the mass ratio taken into account. The leading underscore is part
-  of the canonical label that the code assigns to each population.
+**Density → plasma frequency.** $\omega_{pe} = \sqrt{n e^2/\epsilon_0 m_e}$ is the
+clock of the problem. At $n = 4.37\times10^{17}\,\mathrm{m^{-3}}$ it is
+$3.7\times10^{10}$ rad/s, so a plasma period is 0.17 ns and the interesting physics
+takes a few tens of them.
+
+**Thermal speed → Debye length.** $\lambda_D = v_{th}/(\sqrt2\,\omega_{pe})$ is
+$2.8\times10^{-4}$ m here. The cell must resolve it, or the explicit scheme heats
+itself through the finite-grid instability. With `cells=64` and `length=0.01`,
+$\Delta x/\lambda_D = ${{ two_stream_dx_over_debye }} — comfortably below one.
+
+**Box length → the mode that is seeded.** Mode 1 has $k = 2\pi/L$, and the beams are
+most unstable near $kv_0/\omega_{pe} = \sqrt{3/8}$. Solving for $v_0$ at fixed $L$ and
+$n$ is how the drift was picked; at $v_0 = 6\times10^7$ m/s the mode sits at
+$kv_0/\omega_{pe} = 1.01$, just past the peak, which is a deliberately unexciting
+choice for a first run.
+
+**Time step.** `dt_over_dx_c=4.5` gives $\omega_{pe}\Delta t = $
+{{ two_stream_omega_pe_dt }}, well inside the accuracy limit of 0.2. It is above the
+light-wave Courant limit of one, which is allowed here because a purely electrostatic
+run never excites the transverse fields — see {doc}`../numerics/stability`, and note
+that adding a magnetic field, an isotropic temperature or collisions would make this
+choice diverge.
+
+## Building it
+
+```python
+electrons = Species.electrons(n=8000, density=density, vth=(vth, 0, 0),
+                              drift=(drift, 0, 0), plus_minus=True,
+                              perturbation_amplitude=5e-7, perturbation_mode=1)
+ions = Species.ions(n=8000, density=density, electrons=electrons)
+```
+
+`plus_minus=True` negates $v_x$ on every second particle, so one population becomes
+two counter-streaming beams of density $n/2$ each. `Species.ions` derives the proton
+thermal speed from the electrons, so the two start in thermal equilibrium.
+
+`perturbation_amplitude` is a **displacement** in metres, not a density: $5\times10^{-7}$
+m over a 0.01 m box with $k = 628\ \mathrm{m^{-1}}$ makes $ak = 3\times10^{-4}$, a
+small enough seed for the linear phase to be several e-foldings long.
+
+Eight thousand pseudo-particles per species is 125 per cell. That is enough to see the
+instability but not enough to measure its rate precisely; the verification runs use
+five times more and a quiet start ({doc}`../numerics/verification`).
+
+```python
+simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=4.5),
+                        [electrons, ions], Solver(filter_passes=2))
+```
+
+`filter_passes=2` smooths the deposited sources, which suppresses the grid-scale noise
+of a modest particle count. It also damps genuinely short-wavelength physics, so it is
+off in the runs that measure rates.
+
+## Checking before running
+
+```python
+print(f"omega_pe dt   = {float(simulation.plasma_frequency() * simulation.domain.dt):.3f}")
+print(f"dx / lambda_D = {float(simulation.domain.dx / simulation.debye_length()):.2f}")
+```
+
+Two numbers, both of which should be below one. Getting into the habit of printing
+them costs nothing and catches most bad runs before they start.
 
 ## Running
 
 ```python
-from jaxincell import Simulation, load_parameters, diagnostics, plot
-from jax import block_until_ready
-
-parameters = load_parameters("examples/input.toml")
-sim = Simulation(parameters)
-output = block_until_ready(sim.run())
+output = simulation.run(1200, seed=0, store_every=2)
 ```
 
-The first call to `run` traces and compiles the whole time loop, which takes a few
-seconds; later calls on the same `Simulation` object reuse the compiled program. With
-`print_info = true` the run starts by printing the derived quantities:
+The first call compiles for a second or two, then runs. `store_every=2` halves the
+stored history: 1200 steps of 16 000 particles at every step would be 460 MB, which is
+fine, but the same run at 100 000 particles would not be. The memory formula is in
+{doc}`../user_guide/running`.
 
-```text
-Length of the simulation box: 35.18583771989999 Debye lengths or 1.244007222673535 Skin Depths
-Density of electrons: 4.370228556770184e+17 m^-3
-Electron temperature: 638.7486896859264 eV
-Ion temperature / Electron temperature: 1.0
-Debye length: 0.0002842052555237108 m
-Skin depth: 0.008038538537186855 m
-Wavenumber * Debye length: 0.0002842052555237108
-Pseudoparticles per cell: 50.0
-Pseudoparticle weight: 1248636730505.7668
-Steps at each plasma frequency: 12.50439328006844
-Total time: 87.96908217477141 / plasma frequency
-Number of particles on a Debye cube: 10032298.935126843
-Relativistic gamma factor: Maximum 1.0540053444235398, Average 1.0106887144507677
-Charge x External electric field x Debye Length / Temperature: 0.0
-```
-
-`Steps at each plasma frequency` is $1/(\omega_{pe}\Delta t)$: about twelve steps per
-inverse plasma frequency, so one plasma period is resolved by roughly eighty steps.
-`Total time` is the simulated duration in units of $\omega_{pe}^{-1}$. The line
-`Wavenumber * Debye length` multiplies the mode number by the Debye length in metres
-rather than by $2\pi/L$; the dimensionless $k\lambda_D$ of this run is
-$2\pi \times 1 \times 2.84\times10^{-4}/0.01 = 0.179$.
-
-```{note}
-`timestep_over_spatialstep_times_c = 4.5` exceeds the light-wave Courant limit
-$c\,\Delta t/\Delta x \le 1$ of the explicit field solver. The run is stable only because
-no transverse field is ever excited: all velocities are along $x$, so $J_y = J_z = 0$ and
-the transverse Maxwell equations stay identically zero. If you give the particles a
-$y$ or $z$ thermal spread, or an external magnetic field, reduce this parameter to one
-or below. The {doc}`../numerics/stability` page lists all the constraints.
-```
-
-## Reading the diagnostics
+## Reading the result
 
 ```python
-diagnostics(output)
-print(output["plasma_frequency"])        # rad/s
-print(output["electric_field_energy"])   # (steps,) J/m^2, epsilon_0/2 * integral of E^2 dx
-print(output["total_energy"][-1] / output["total_energy"][0] - 1)
+energy = diagnostics(output)
+print(f"energy drift {abs(float(energy['total'][-1] / energy['total'][0]) - 1):.2e}")
+print(f"electric energy grew by {float(energy['electric'].max() / energy['electric'][0]):.3g}")
 ```
 
-`diagnostics` computes the field and kinetic energies at every step, splits the
-particles into electrons and ions (and into a per-population list under
-`output["species"]`), and finds the dominant frequency of $E_x$ at the box centre.
-It modifies the dictionary in place. The relative change of the total energy is a quick
-check of the run: for this configuration it stays below $4\times 10^{-3}$ with the
-explicit scheme and at round-off with the implicit one.
-
-To see the instability grow, plot the electrostatic energy on a logarithmic scale:
+The energy drift is the health check: a few parts in $10^5$ means the resolution is
+fine, and a steady rise would mean it is not. The electric energy growing by four
+orders of magnitude is the instability.
 
 ```python
-import matplotlib.pyplot as plt
-t = output["time_array"] * output["plasma_frequency"]
-plt.semilogy(t, output["electric_field_energy"])
-plt.xlabel(r"$t\,\omega_{pe}$"); plt.ylabel(r"$\epsilon_0/2 \int E_x^2\,dx$")
+plot(output, omega=float(simulation.plasma_frequency()))
 ```
 
-The energy first sits at the noise level set by the finite number of pseudo-particles,
-then grows exponentially, then saturates when the beams trap in the wave and form the
-phase-space vortex shown on the landing page.
+The animation shows the space-time map of $E_x$ and $\rho$, the velocity distribution,
+and the electron phase space rolling into its vortex.
 
-## Plotting and animating
+## Measuring the growth rate
+
+The rate is the slope of $\ln|E_k|$ during the linear phase:
 
 ```python
-plot(output, animation_interval=5)
-plot(output, save_mp4="two_stream.mp4", fps=50, dpi=150, save_stride=5, show=False)
+t = np.asarray(output.t) * float(simulation.plasma_frequency())
+amplitude = np.abs(np.fft.rfft(np.asarray(output.E[:, :, 0]), axis=1)[:, 1])
+peak = int(np.argmax(amplitude))
+window = ((amplitude > 10 * amplitude[0]) & (amplitude < 0.1 * amplitude[peak])
+          & (np.arange(t.size) < peak))
+print(np.polyfit(t[window], np.log(amplitude[window]), 1)[0])
 ```
 
-`plot` opens a figure with heat maps of the non-zero field components, the velocity
-distributions of electrons and ions, and their phase space, animated over time.
-`save_mp4` writes the animation with `ffmpeg`; `save_stride` keeps every n-th frame to
-reduce the file size. The options are described in {doc}`../user_guide/plotting`.
+Setting the window by amplitude rather than by time is what makes this robust: it
+follows the same part of the growth whatever the rate turns out to be. With this
+particle count expect a few tens of per cent scatter; {doc}`../numerics/verification`
+shows what a quiet start and more particles buy — {{ two_stream_scan_mean_deviation_percent }}
+per cent agreement with kinetic theory across the unstable range.
 
-## Saving the output
+## What to change next
 
-The output is a dictionary of arrays and can be stored with NumPy:
-
-```python
-import numpy as np
-np.savez("two_stream.npz", **output)
-data = dict(np.load("two_stream.npz", allow_pickle=True))
-```
-
-Nested dictionaries (the parameter sections) are stored as object arrays, hence
-`allow_pickle=True` when loading.
-
-## Changing the physics
-
-Everything about the run is controlled by the parameter tree. To see Landau damping
-instead, remove the drift, lower the perturbation wavenumber to `1.02`, raise the
-electron thermal speed and make the ions heavy: that is `examples/Landau_damping.py`.
-To add a beam, add a second electron population with its own label: that is
-`examples/bump-on-tail.toml`. The {doc}`../examples/index` describe each case and
-the {doc}`../user_guide/species` page explains multiple populations.
+* `drift`, to move along the growth-rate curve.
+* `n`, to watch the noise floor fall as $1/\sqrt N$.
+* `quiet=True`, to watch it fall much faster.
+* `Solver(algorithm="implicit")`, to see the energy error drop to round-off.
+* `cells`, to see the finite-grid instability appear when $\Delta x$ passes
+  $\lambda_D$.
