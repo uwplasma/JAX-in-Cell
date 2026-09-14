@@ -30,7 +30,7 @@ the setting applies to the whole Python process.
 
 The extras are `openpmd` (`openpmd-api`, to write openPMD), `docs` (Sphinx, and scipy
 for the figure scripts) and `dev` (`pytest`, `pytest-cov`, `flake8` and `openpmd-api`,
-see {doc}`../development/testing`). Saving an animation to MP4 with
+see {doc}`../development`). Saving an animation to MP4 with
 {func}`jaxincell.plot` needs `ffmpeg` on the `PATH`. To check the install:
 
 ```bash

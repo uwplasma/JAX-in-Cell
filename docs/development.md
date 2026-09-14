@@ -1,4 +1,120 @@
-# Tests and documentation
+# Development
+
+How to cite the code is in the
+[README](https://github.com/uwplasma/JAX-in-Cell#contributing-and-citing).
+
+## Contributing
+
+Search the [issue tracker](https://github.com/uwplasma/JAX-in-Cell/issues) before
+opening an issue, and give what you expected, what happened, the smallest script that
+reproduces it, and the versions of Python, JAX and JAX-in-Cell. Questions go to the
+[discussions](https://github.com/uwplasma/JAX-in-Cell/discussions); security problems
+to rogerio.jorge@wisc.edu, not in public. Contributions are released under the MIT
+licence.
+
+1. Fork and branch, then `pip install -e ".[dev]"`.
+2. Make the change with a test that exercises it, keeping the static and differentiable
+   parameters consistent (see Architecture below).
+3. Run `pytest` and `flake8`; CI fails on any lint violation and on coverage below
+   100 per cent.
+4. If a numerical method changed, rerun its figure script under `docs/scripts/` and
+   update the page that describes the method.
+5. Open a pull request against `main` saying what changed and why. Commit subjects are
+   imperative and under about seventy characters (`Add a thermal wall`); the body says
+   why.
+
+## Architecture
+
+The package is seven modules and about 2100 lines. Each one has a single job, and the
+dependency graph is a straight line with no cycles.
+
+```
+_config.py       Domain, Species, Solver, Collisions -- frozen pytree dataclasses; constants
+_core.py         the numerical kernels: shape function, deposit, gather, curls,
+                 Maxwell update, Gauss solve, Boris pushers, boundaries, filter
+_collisions.py   Takizuka-Abe binary collisions
+_simulation.py   Simulation, Output, the time loop, TOML input, quiet_start
+_diagnostics.py  energies, momentum, Gauss residual, temperatures, frequency
+_plot.py         the animated overview figure and the movie writer
+openpmd.py       optional openPMD export
+```
+
+`__init__.py` re-exports the public names and holds `main`, the `jaxincell` command.
+`plot` is imported on first use, since matplotlib would otherwise take a third of the
+import time, and `__version__` is `"unknown"` in a source tree that was never
+installed, since setuptools_scm writes `jaxincell/version.py` at build time.
+
+### Everything is a pytree
+
+`pytree_dataclass(static=(...))` in `_config.py` is twenty lines and does the work: it
+makes a frozen dataclass, registers it with `jax.tree_util`, and splits the fields into
+leaves and static metadata. Leaves are traced, so they can change without
+recompilation and be differentiated with respect to; static fields become part of the
+treedef and therefore of the cache key. A field that holds a function, such as a
+velocity-dependent reflection law, is moved into the static metadata whatever its
+declaration, since a function is not an array; in a tuple such as `(law, 0.3)` only the
+function moves, and the number stays a leaf.
+
+The split is the main design decision in the package. A parameter is static if the
+*shape* of the computation depends on it — particle counts, cell counts, boundary
+types, the algorithm name, the number of Picard iterations — and a leaf otherwise.
+Getting it wrong shows up immediately: a static physical parameter recompiles on every
+change, and a leaf that controls a shape fails to trace.
+
+JAX rebuilds an object from its leaves without calling `__init__`, so `__post_init__`
+normalises and validates only what is constructed or passed to `replace`, and tree
+operations can put anything in the leaves: stacked ensembles, tracers, `None`. Since
+`replace` converts the stored values again, the conversions must be idempotent (the
+boundary-name conversion accepts codes as well as names) and must not force a traced
+value (the Courant check skips values that are not plain Python numbers). An object with
+`None` where it always holds a number is a template, such as a `vmap` `in_axes`, and is
+stored as given.
+
+### The time loop
+
+`_run` is jitted with `steps`, `store_every` and `store_particles` as static
+arguments. Inside, `lax.scan` runs the chunks and an inner `lax.scan` runs the
+`store_every - 1` steps that are not kept, so thinning the history costs nothing and
+the whole loop is a single XLA program with no Python in it.
+
+The step function itself is a method on `Simulation`, chosen once from
+`solver.algorithm`. Because `Simulation` is a pytree and `self` is traced, the method
+closes over the traced parameters without capturing them as constants.
+
+### Adding something
+
+**A diagnostic**: a function of `Output` in `_diagnostics.py`, added to the dictionary
+that `diagnostics` returns. Nothing else has to change; it can be computed on a stored
+run.
+
+**A boundary condition**: a code in `BOUNDARIES`, a branch in `map_indices`,
+`apply_particle_bc`, `_left_ghost_E`, `_right_ghost_B` and `_shift`. The branches are
+resolved at trace time because the codes are static, so they cost nothing at run time.
+A wall that needs random numbers, as the thermal wall does to redraw velocities, is a
+position map in `apply_particle_bc` and a method on `Simulation`, which holds the key.
+
+**A field solver or an integrator**: a branch in `Solver` and a method on
+`Simulation` with the same signature as `_explicit_step`. Keep any iteration a
+`lax.scan` of fixed length rather than a `lax.while_loop`, or reverse-mode
+differentiation stops working.
+
+**A species initialisation**: `Species.replace(x=..., v=...)` covers most of it from
+outside the package; {func}`~jaxincell.quiet_start` exists so that a custom condition
+can start from the quiet sampling.
+
+### What the design gives up
+
+Shapes are static, so particles cannot be created or destroyed. Absorption zeroes a
+particle's weight and parks it outside the grid rather than removing it, which keeps
+the arrays rectangular at the cost of memory for dead particles, and partial reflection
+lowers the weight instead of splitting the particle in two. Ionisation and
+injection would need the same treatment, with a pool of inactive particles.
+
+The geometry is one-dimensional. Two and three dimensions would change `_core.py`
+thoroughly, the rest much less: the configuration objects, the loop, the diagnostics
+and the differentiability are not specific to one dimension.
+
+## Tests and documentation
 
 ```bash
 pip install -e ".[dev]"
@@ -24,7 +140,7 @@ line whose behaviour nobody has checked.
 | `tests/test_config_and_outputs.py` | configuration objects as pytrees (leaves, validation, tree operations, `vmap`), diagnostics, openPMD records and the plotting helpers |
 | `tests/test_api.py` | reproducibility, gradients, `vmap`, storage options, restarts, TOML, the command line, plotting and openPMD export |
 
-## What is tested, and how
+### What is tested, and how
 
 The suite is deliberately not a set of regression tests against stored output. A
 regression test tells you that something changed; it does not tell you whether the
@@ -80,7 +196,7 @@ openPMD export reads back with the right iterations, staggering and particle rec
 and that the Courant warning fires for a run that would diverge and stays quiet for the
 electrostatic and implicit runs that would not.
 
-## Writing a new one
+### Writing a new one
 
 Prefer a comparison with something that can be derived on paper. When that is not
 available, a conservation law or an exact symmetry is the next best thing. Reach for a
@@ -91,7 +207,7 @@ result — usually a few tens of thousands of particles for a few hundred steps 
 state the tolerance they need. A test that takes a minute will be skipped by someone in
 a hurry, and a tolerance chosen to make today's number pass is not a test.
 
-## Continuous integration
+### Continuous integration
 
 `build_test.yml` installs the `dev` extra and, on Python 3.10 to 3.13 for every push and
 pull request, runs `flake8` over the whole repository with the configuration in
@@ -99,13 +215,13 @@ pull request, runs `flake8` over the whole repository with the configuration in
 build fails on any lint violation and on coverage below 100 per cent of statements and
 branches, the threshold set under `[tool.coverage]` in `pyproject.toml`, and it prints
 the ten slowest tests. A second job runs the four quickest examples (collisions, wall
-reflection, energy conservation and the Langmuir scan), so that a change to the
+reflection, conservation and the Langmuir scan), so that a change to the
 interface cannot quietly break the scripts people start from; the others take minutes
 each. `docs.yml` builds the documentation with `-W`, so a broken cross-reference or a
 missing substitution fails the build, and the release workflow runs the same tests
 before it builds anything.
 
-## Documentation
+### Documentation
 
 The documentation is MyST Markdown built with Sphinx and the `pydata-sphinx-theme`;
 Read the Docs builds `latest` from `main` and `stable` from the last tag.
@@ -140,3 +256,32 @@ to record. `conf.py` exposes the numbers as substitutions, so that a page can wr
 `{{ landau_gamma_measured }}` and always quote the value of the committed figure.
 `fig_scaling.py` measures wall-clock time and should be run on an otherwise idle
 machine.
+
+## Releasing
+
+Versions come from git tags through `setuptools_scm`; there is no version string to
+edit. Publishing a GitHub release runs `pypi_publish.yml`, which runs the tests on the
+tagged commit and only then builds and uploads to PyPI; Read the Docs rebuilds
+`stable` from the tag.
+
+```bash
+git tag v0.2 && git push origin v0.2
+gh release create v0.2 --generate-notes
+```
+
+## Roadmap
+
+Planned, in no particular order; open an issue first so that the design can be discussed
+before the code is written.
+
+* Particle sources and sinks, which need a pool of inactive particles because array
+  shapes are static. An ionisation source is what a bounded-plasma run needs to reach a
+  true steady state instead of slowly draining ({doc}`examples/sheath`).
+* A series RLC circuit between the two electrodes, so that a wall can be biased or left
+  genuinely floating rather than short-circuited to its partner {cite}`verboncoeur1993`.
+* Time-dependent external fields.
+* Ionisation and recombination.
+* Secondary electron emission with an energy-dependent yield {cite}`furman2002`, which,
+  unlike reflection, creates electrons and needs the same pool of inactive particles.
+* A two-dimensional version. `_core.py` would change thoroughly; the configuration
+  objects, the time loop, the diagnostics and the differentiability would not.

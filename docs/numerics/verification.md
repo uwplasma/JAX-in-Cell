@@ -208,4 +208,4 @@ explicit wall runs are filtered, the implicit ones cannot be.
 The whole suite runs on one CPU core in a few minutes. `pytest` repeats the physics
 above at reduced resolution as part of the test suite, so a regression in any of the
 rates fails CI rather than waiting to be noticed in a figure; see
-{doc}`../development/testing`.
+{doc}`../development`.

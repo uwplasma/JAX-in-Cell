@@ -104,9 +104,10 @@ Gathering from the centres is what makes the gather the transpose of the deposit
 {cite}`birdsall1991`. Gathering $E_x$ straight from the faces with the same spline, as the
 code once did, is not: a lone particle in a periodic box pushed itself with up to 8 % of
 its own field, and near a wall the unstored left face read as zero or as its neighbour
-while the stored right face read as itself. The implicit scheme takes its current as the
-exact transpose of this gather, so the energy balance of {doc}`implicit` holds whatever the
-walls. What stays one-sided is the transverse Yee update at the walls ({doc}`field_solvers`):
+while the stored right face read as itself. The implicit scheme gathers the transverse
+fields this way and takes their current as its transpose; its longitudinal field and current
+are the discrete gradient and the continuity current of {doc}`implicit`, which keep both the
+energy and the charge whatever the walls. What stays one-sided is the transverse Yee update at the walls ({doc}`field_solvers`):
 the right wall face is stored and advanced, the left one is only a ghost value, so an
 electromagnetic wave meets the two walls of a reflective or absorbing box slightly
 differently.

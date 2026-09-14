@@ -29,7 +29,7 @@ fields on a staggered (Yee) grid with Maxwell's equations. It provides
   relativistic), a charge-conserving current deposit that keeps the discrete Gauss law
   satisfied to round-off, and a compensated digital filter;
 * an implicit Crank-Nicolson integrator solved by Picard iteration, which conserves
-  energy to round-off and has no time-step limit;
+  both energy and charge to round-off and has no time-step limit;
 * binary Coulomb collisions (Takizuka-Abe), verified against the Fokker-Planck
   relaxation rates;
 * periodic, reflective and absorbing boundaries, chosen separately for particles and
@@ -186,7 +186,7 @@ Bug reports and feature requests go to the
 [issue tracker](https://github.com/uwplasma/JAX-in-Cell/issues), questions to the
 [discussions](https://github.com/uwplasma/JAX-in-Cell/discussions), and code through
 pull requests, as the
-[development guide](https://jax-in-cell.readthedocs.io/en/latest/development/contributing.html)
+[development guide](https://jax-in-cell.readthedocs.io/en/latest/development.html)
 describes. If you use JAX-in-Cell in your work, please cite it, together with JAX and
 the papers of the methods you rely on, listed in the
 [references](https://jax-in-cell.readthedocs.io/en/latest/numerics/index.html#references):

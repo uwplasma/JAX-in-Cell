@@ -150,5 +150,5 @@ user_guide/index
 numerics/index
 examples/index
 api
-development/contributing
+development
 ```
