@@ -18,7 +18,11 @@ def _blocks(out):
 
 
 def energies(out):
-    """Field and kinetic energies per unit area (J/m^2) at every stored step."""
+    """Field and kinetic energies per unit area (J/m^2) at every stored step, the momentum, and
+    the relative errors of the two: ``energy_error``, :math:`|W(t) - W(0)|/W(0)`, and
+    ``momentum_error``, :math:`|\\mathbf P(t) - \\mathbf P(0)|/\\sum_p |\\mathbf p_p(0)|`, with ``0``
+    the first stored step. The total momentum can vanish, as it does for two counter-streaming
+    beams, while the sum of the magnitudes of the particle momenta does not."""
     field_E = 0.5 * epsilon_0 * jnp.sum(out.E ** 2, axis=(1, 2)) * out.dx
     field_B = 0.5 / mu_0 * jnp.sum(out.B ** 2, axis=(1, 2)) * out.dx
     result = {"electric": field_E, "magnetic": field_B}
@@ -35,13 +39,25 @@ def energies(out):
         for name, block in _blocks(out):
             result[f"kinetic_{name}"] = jnp.sum(kinetic_p[:, block], axis=1)
         result["total"] = field_E + field_B + result["kinetic"]
-        result["momentum"] = jnp.sum((gamma * mass)[..., None] * out.v, axis=1)
+        p = (gamma * mass)[..., None] * out.v              # the momentum the pusher conserves, gamma m v
+        result["momentum"] = jnp.sum(p, axis=1)
+        result["energy_error"] = jnp.abs(result["total"] - result["total"][0]) / _nonzero(result["total"][0])
+        result["momentum_error"] = (jnp.linalg.norm(result["momentum"] - result["momentum"][0], axis=1)
+                                    / _nonzero(jnp.sum(jnp.linalg.norm(p[0], axis=1))))
     return result
 
 
+def _nonzero(scale):
+    return jnp.maximum(scale, jnp.finfo(scale.dtype).tiny)
+
+
 def gauss_residual(out):
-    """Relative violation of the discrete Gauss law at every stored step,
-    :math:`\\max_i |(E_{i+1/2} - E_{i-1/2})/\\Delta x - \\rho_i/\\epsilon_0| / \\max_i |\\rho_i/\\epsilon_0|`.
+    """Relative violation of the discrete Gauss law at every stored step, the error in the
+    conservation of charge: :math:`\\max_i |(E_{i+1/2} - E_{i-1/2})/\\Delta x - \\rho_i/\\epsilon_0|`
+    over :math:`e n/\\epsilon_0`, where :math:`e n` is the mean density of the charge of one sign,
+    the larger of the positive and the negative, from the weights of that step (of the final
+    state when the particles were not stored). The net density :math:`\\rho` is no scale: in a
+    neutral plasma it is the particle noise, which a quiet start makes as small as it likes.
 
     In a periodic box the field beyond the left wall is the field at the far end,
     and the law is checked in every cell. At a wall it is not: :math:`E_{-1/2}` is
@@ -57,7 +73,9 @@ def gauss_residual(out):
     else:
         div = (E[:, 1:] - E[:, :-1]) / out.dx
         rhs = out.rho[:, 1:] / epsilon_0
-    return jnp.max(jnp.abs(div - rhs), axis=1) / jnp.maximum(jnp.max(jnp.abs(rhs), axis=1), jnp.finfo(rhs.dtype).tiny)
+    charge = out.charge * (out.state[4] if out.weight is None else out.weight)
+    one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
+    return jnp.max(jnp.abs(div - rhs), axis=1) / _nonzero(one_sign / (out.length * epsilon_0))
 
 
 def potential(out):

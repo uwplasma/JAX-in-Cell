@@ -7,8 +7,9 @@ import numpy as np
 import pytest
 from jax import random
 
-from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, epsilon_0, mass_electron,
-                       potential, quiet_start, temperatures, elementary_charge as e_charge, speed_of_light as c)
+from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, epsilon_0, gauss_residual,
+                       mass_electron, potential, quiet_start, temperatures, elementary_charge as e_charge,
+                       speed_of_light as c)
 from jaxincell._collisions import collide
 from jaxincell._core import boris, boris_relativistic, smooth
 from conftest import electron_plasma, growth_rate, mode_amplitude, rate_and_frequency
@@ -211,9 +212,7 @@ def test_periodic_box_conserves_charge_exactly_and_momentum_to_the_solver_error(
     charge = np.asarray(out.charge * out.weight[-1])
     on_grid = np.asarray(out.rho).sum(axis=1) * out.dx
     assert float(np.abs(on_grid - charge.sum()).max()) < 1e-12 * float(np.abs(charge).sum())
-    p = np.asarray(diagnostics(out)["momentum"])[:, 0]
-    momentum_content = float(np.sum(np.asarray(out.mass * out.weight[0]) * np.abs(np.asarray(out.v[0, :, 0]))))
-    assert float(np.max(np.abs(p - p[0]))) < 1e-4 * momentum_content
+    assert float(np.asarray(diagnostics(out)["momentum_error"]).max()) < 1e-4
 
 
 def test_reflective_walls_hold_the_particles_and_absorbing_walls_remove_them():
@@ -357,9 +356,7 @@ def test_collisions_through_the_simulation_conserve_momentum_and_isotropise():
     simulation = Simulation(Domain(length=2e-5, cells=16, dt_over_dx_c=1.0), [electrons, ions],
                             Solver(filter_passes=0), Collisions(coulomb_log=1e4))
     out = simulation.run(300, seed=0)
-    momentum = np.asarray(diagnostics(out)["momentum"])[:, 0]
-    content = float(np.sum(np.asarray(out.mass * out.weight[0]) * np.abs(np.asarray(out.v[0, :, 0]))))
-    assert float(np.abs(momentum - momentum[0]).max()) < 1e-4 * content
+    assert float(np.asarray(diagnostics(out)["momentum_error"]).max()) < 1e-4
     T = np.asarray(temperatures(out)["electrons"])
     start, end = T[0], T[-1]
     assert end[2] > start[2] and end[0] < start[0]          # the cold axis heats
@@ -393,6 +390,10 @@ def test_gauss_law_holds_at_every_wall_with_and_without_filtering(particle_bc, f
                                             filter_strides=(1, 2))).run(120, seed=0)
     d = diagnostics(out)
     assert float(np.asarray(d["gauss_residual"]).max()) < 1e-10
+    # relative to e n/eps0, the density of one sign of charge, and not to the net density; at the first
+    # step, before a wall has taken any ion
+    kicked = gauss_residual(out.replace(E=out.E.at[:, 10, 0].add(1.0)))
+    assert float(kicked[0]) == pytest.approx(1 / out.dx / (1e17 * e_charge / epsilon_0), rel=1e-6)
     if field_bc == "absorbing":
         # short-circuited conductors: the right wall stays at the potential of the left one
         phi = np.abs(np.asarray(d["potential"]))
