@@ -275,5 +275,8 @@ def test_the_version_and_the_packaging_metadata():
     config = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert config["tool"]["setuptools_scm"] == {"version_file": "jaxincell/version.py"}
     assert any(requirement.startswith("matplotlib") for requirement in config["project"]["dependencies"])
-    assert "plot" in jaxincell.__all__
+    assert config["project"]["scripts"] == {"jaxincell": "jaxincell:main"} and callable(jaxincell.main)
+    assert "plot" in jaxincell.__all__ and jaxincell.plot.__module__ == "jaxincell._plot"   # imported on first use
+    with pytest.raises(AttributeError, match="no attribute 'plots'"):
+        jaxincell.plots
     assert not any((ROOT / name).exists() for name in ("setup.py", "setup.cfg", "requirements.txt"))

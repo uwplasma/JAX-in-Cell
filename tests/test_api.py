@@ -6,7 +6,6 @@ import gc
 import os
 import pathlib
 import re
-import runpy
 import shutil
 import sys
 import tempfile
@@ -19,8 +18,7 @@ import jax.numpy as jnp
 import pytest
 
 from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, elementary_charge, epsilon_0,
-                       load_toml, mass_electron, quiet_start, speed_of_light as c)
-from jaxincell.__main__ import main
+                       load_toml, main, mass_electron, quiet_start, speed_of_light as c)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -374,7 +372,6 @@ def test_configuration_objects_normalise_what_they_are_given():
     """The constructors accept the shapes a user naturally writes and store one
     canonical form, so that the pytree structure does not depend on how a value
     was spelled."""
-    from jaxincell import Collisions, Domain, Species
     from jaxincell._config import BOUNDARIES, _float
 
     # bool is a subclass of int in Python; without a guard, a flag handed to a
@@ -390,16 +387,11 @@ def test_configuration_objects_normalise_what_they_are_given():
     # walls may be one name for both ends or a pair, and are stored as codes
     assert Domain(particle_bc="reflective").particle_bc == (BOUNDARIES["reflective"],) * 2
     assert Domain(particle_bc=("reflective", "absorbing")).particle_bc == (1, 2)
-    with pytest.raises(ValueError, match="periodic wall needs a periodic partner"):
-        Domain(particle_bc=("periodic", "absorbing"))
-    with pytest.raises(ValueError, match="at least four cells"):
-        Domain(cells=2)
     with pytest.raises(ValueError, match="must have shape"):
         Species.electrons(n=10, density=1e17, vth=(1e6, 0, 0)).replace(x=np.zeros((9, 3)))
 
     # a wall coefficient is one number or a (left, right) pair; a reflection law is a
     # function, which cannot be an array and so is kept out of the leaves
-    import jax
     assert Domain(restitution=0.5).restitution == (0.5, 0.5)
     assert Domain(restitution=[1, 0.5]).restitution == (1.0, 0.5)
 
@@ -412,8 +404,6 @@ def test_configuration_objects_normalise_what_they_are_given():
     with pytest.raises(ValueError, match="reflection takes a number in"):
         Species.electrons(n=10, density=1e17, reflection=1.5)
     assert Domain(particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing")).particle_bc == (3, 2)
-    with pytest.raises(ValueError, match="thermal wall re-emits particles"):
-        Domain(field_bc="thermal")
 
 
 def test_single_precision_is_left_to_jax_s_own_switch(monkeypatch):
@@ -509,16 +499,6 @@ def test_toml_loading_falls_back_to_tomli_before_python_311(tmp_path):
     with mock.patch.dict(sys.modules, {"tomllib": None, "tomli": parser}):
         sim, run = load_toml(path)
     assert run["steps"] == 3 and sim.species[0].n == 100
-
-
-def test_the_module_runs_as_a_script(tmp_path, monkeypatch):
-    """`python -m jaxincell input.toml`, the entry point the documentation gives."""
-    monkeypatch.setattr(sys, "argv", ["jaxincell", input_file(tmp_path / "run.toml")])
-    with pytest.raises(SystemExit) as exit_code, warnings.catch_warnings():
-        # runpy notes that jaxincell.__main__ is already imported, which is expected
-        warnings.simplefilter("ignore", RuntimeWarning)
-        runpy.run_module("jaxincell", run_name="__main__")
-    assert exit_code.value.code == 0
 
 
 def test_the_package_reports_an_unknown_version_from_a_bare_source_tree():

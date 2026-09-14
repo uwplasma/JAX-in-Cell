@@ -1,6 +1,6 @@
 # Architecture
 
-The package is nine modules and about 1600 lines. Each one has a single job, and the
+The package is eight modules and about 1500 lines. Each one has a single job, and the
 dependency graph is a straight line with no cycles.
 
 ```
@@ -13,11 +13,11 @@ _simulation.py   Simulation, Output, the time loop, TOML input, quiet_start
 _diagnostics.py  energies, momentum, Gauss residual, temperatures, frequency
 _plot.py         the animated overview figure and the movie writer
 openpmd.py       optional openPMD export
-__main__.py      the command line
 ```
 
-`__init__.py` re-exports the public names, `plot` among them (matplotlib is a required
-dependency), and `__version__`, which is `"unknown"` in a source tree that was never
+`__init__.py` re-exports the public names and holds `main`, the `jaxincell` command.
+`plot` is imported on first use, since matplotlib would otherwise take a third of the
+import time, and `__version__` is `"unknown"` in a source tree that was never
 installed, since setuptools_scm writes `jaxincell/version.py` at build time.
 
 ## Everything is a pytree

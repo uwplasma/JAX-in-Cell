@@ -55,7 +55,7 @@ Source = "https://github.com/uwplasma/JAX-in-Cell"
 Issues = "https://github.com/uwplasma/JAX-in-Cell/issues"
 
 [project.scripts]
-jaxincell = "jaxincell.__main__:main"
+jaxincell = "jaxincell:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
