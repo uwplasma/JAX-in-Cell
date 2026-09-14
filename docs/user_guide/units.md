@@ -18,14 +18,8 @@ or comes out is in the unit its physics has.
 | energy | J/m², an energy per unit area of the ignorable directions |
 | temperature (diagnostic output) | eV |
 
-## Constants
-
-```python
-from jaxincell import (epsilon_0, mu_0, speed_of_light, elementary_charge,
-                       mass_electron, mass_proton, boltzmann_constant)
-```
-
-CODATA 2018 values, exactly as published.
+The physical constants importable from `jaxincell` are the CODATA 2018 values
+({doc}`../api`).
 
 ## Thermal speed
 

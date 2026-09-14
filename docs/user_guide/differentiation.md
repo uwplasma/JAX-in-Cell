@@ -98,13 +98,5 @@ window boundaries jump as the parameter changes, and the objective is not smooth
 objective in the figure above is instead $\ln|E_k|$ at a **fixed** time, which is
 $\gamma t$ plus a constant while the mode grows and is a smooth function of the drift.
 
-## vmap and ensembles
-
-`seed` is traced, so an ensemble is one `vmap` and one compilation:
-
-```python
-fields = jax.vmap(lambda s: simulation.run(300, seed=s).E[-1, :, 0])(jnp.arange(32))
-```
-
-Combining `vmap` with `grad` gives the gradient of an ensemble average, which is the
-practical way to optimise through a noisy simulation.
+Combining `grad` with a `vmap` over seeds ({doc}`running`) gives the gradient of an
+ensemble average, which is the practical way to optimise through a noisy simulation.

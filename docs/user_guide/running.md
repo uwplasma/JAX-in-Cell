@@ -33,14 +33,15 @@ output = hotter.run(1000, seed=0)     # no recompilation
 
 ## Memory
 
-The particle history dominates. Its size is
+The particle history is almost always the binding constraint, not speed. Its size is
 
 ```{math}
-\text{bytes} = \frac{\text{steps}}{\text{store\_every}} \times N \times 3 \times 8 \times 2
+\text{bytes} = \frac{\text{steps}}{\text{store\_every}} \times N \times 8 \times (3 + 3 + 1)
 ```
 
-for the positions and the velocities together. Ten thousand steps of a hundred
-thousand particles is 48 GB, which will not fit anywhere. Two ways out:
+for the positions, the velocities and the weights: six thousand steps of sixty thousand
+particles is 20 GB, while the same run's fields on a 128-cell grid are under a hundred
+megabytes. Two ways out:
 
 ```python
 output = simulation.run(20000, store_every=20)        # 1/20 of the samples

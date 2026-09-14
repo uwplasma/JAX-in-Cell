@@ -12,19 +12,7 @@ plot(output, omega=float(simulation.plasma_frequency()))   # time axis in 1/omeg
 plot(output, direction="xz", save="run.mp4", show=False)   # write a file
 ```
 
-| argument | meaning | default |
-|---|---|---|
-| `direction` | velocity components to show, any of `"x"`, `"y"`, `"z"`, e.g. `"xz"` | `"x"` |
-| `omega` | frequency that makes the time axis dimensionless | `None` |
-| `save` | file name of an MP4 to write with ffmpeg | `None` |
-| `fps` | frames per second of the file | `25` |
-| `stride` | keep every n-th stored step in the file | `1` |
-| `dpi` | resolution of the figure | `80` |
-| `interval` | delay between frames of the on-screen animation, ms | `30` |
-| `show` | call `plt.show()` | `True` |
-| `vbins` | velocity bins; reduced automatically if the histograms would be too large | `96` |
-
-The colour limits and the axes are fixed over the whole run, so a feature that grows
+Every argument, with its default, is listed in {func}`~jaxincell.plot`. The colour limits and the axes are fixed over the whole run, so a feature that grows
 is visible as growth rather than being renormalised away at every frame. All the
 per-frame arrays — the space-time maps, the distributions, the phase-space histograms
 — are computed once, up front, so both the on-screen animation and the file are one
@@ -63,9 +51,5 @@ plt.xlabel(r"$t\,\omega_{pe}$"); plt.ylabel(r"$|E_{k=1}|$ (V/m)")
 
 The scripts in `docs/scripts/` that produce every figure in this documentation are
 written that way and are worth reading as templates; `docs/scripts/common.py` holds
-the shared style and the fitting helpers.
-
-## Matplotlib
-
-Matplotlib is a required dependency, installed with the package, and `jaxincell`
-imports `plot` unconditionally: there is no build without it to keep working.
+the shared style and the fitting helpers. Matplotlib is a required dependency, imported
+when `plot` is first used rather than with the package.

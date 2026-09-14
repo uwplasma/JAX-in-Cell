@@ -38,11 +38,9 @@ nothing by more than 1 %, so they keep the default.
 
 ## Compilation
 
-The first call to `run` compiles, which takes a second or two. It is reused whenever
-the static arguments are unchanged: `steps`, `store_every`, `store_particles`, the
-particle and cell counts, the boundary types and every `Solver` switch. Physical
-parameters are pytree leaves, so a scan over density, drift or temperature compiles
-once:
+The first call to `run` compiles, and the program is reused while the static
+arguments are unchanged ({doc}`running`), so a scan over density, drift or temperature
+compiles once:
 
 ```python
 base = jax.jit(lambda s: s.run(1000, seed=0).E)
@@ -52,19 +50,8 @@ for density in densities:
 
 Watch out for the opposite: changing `steps` in a loop recompiles every iteration.
 
-## Memory
-
-The particle history is almost always the binding constraint, not speed:
-
-```{math}
-\text{bytes} = \frac{\text{steps}}{\text{store\_every}} \times N \times 8 \times (3 + 3 + 1) ,
-```
-
-for the positions, the velocities and the weights. Six thousand steps of sixty thousand
-particles is 20 GB. Use `store_every` to thin the
-history, `store_particles=False` when only the fields are needed, or `state` to run in
-chunks ({doc}`running`). A long field-only run costs almost nothing to store: the same
-six thousand steps of a 128-cell grid is under a hundred megabytes.
+Memory, not speed, is usually the binding constraint; {doc}`running` gives the size of
+the particle history and the options that bound it.
 
 ## GPUs and TPUs
 
@@ -72,9 +59,7 @@ Nothing in the package is CPU-specific; install a JAX build for the accelerator 
 the same program runs on it. The gain is largest where the particle count is large
 enough to fill the device — panel (a) shows the cost per particle still falling at
 {{ scaling_particles_max }} particles on a CPU, and an accelerator moves that knee
-much further out. Double precision is enabled at import (`jax_enable_x64`), which is
-what the conservation properties need; a run that does not need it can start Python
-with `JAX_ENABLE_X64=0` ({doc}`units`). Measure before choosing single precision for
+much further out. Measure before choosing single precision ({doc}`units`) for
 speed. On a CPU the two cost about the same, and on the NVIDIA RTX A4000 we tested, with
 JAX 0.10.2, a single-precision run was many times slower than a double-precision one.
 
