@@ -7,9 +7,10 @@ charge-conserving current of {doc}`deposition`.
 ## The state
 
 The loop carries the fields $\mathbf E^n$, $\mathbf B^n$, the half-step positions
-$x^{n+1/2}$, the velocities $\mathbf v^n$, the pseudo-particle charges and
-charge-to-mass ratios (which change only when a particle is absorbed), and the random
-key. Before the loop starts the initial positions are displaced by
+$x^{n+1/2}$, the velocities $\mathbf v^n$ ($\gamma\mathbf v^n$ in a relativistic run, see
+below), the pseudo-particle charges and charge-to-mass ratios (which change only when a
+particle is absorbed), the charge density $\rho^n$ at the integer-time positions, and the
+random key. Before the loop starts the initial positions are displaced by
 $\tfrac12\Delta t\,\mathbf v^0$ to create $x^{1/2}$, and $\mathbf E^0$ is taken from
 Gauss's law so that the constraint holds from the first step.
 
@@ -18,8 +19,8 @@ Gauss's law so that the constraint holds from the first step.
 Write $x^{n} = x^{n+1/2} - \tfrac12\Delta t\,\mathbf v^n$ for the integer-time
 position reconstructed from the state.
 
-1. **Sources over the first half step.** $\rho^n$ and $\rho^{n+1/2}$ are deposited and
-   {eq}`cumsum-current` gives $J_x$ for the motion $x^n\to x^{n+1/2}$; the transverse
+1. **Sources over the first half step.** $\rho^n$ is the density the previous step ended
+   on, carried in the state, $\rho^{n+1/2}$ is deposited, and {eq}`cumsum-current` gives $J_x$ for the motion $x^n\to x^{n+1/2}$; the transverse
    currents are deposited at $x^{n+1/2}$. The digital filter of {doc}`filtering` is
    applied to every source.
 2. **First half field update**, Ampere then Faraday over $\Delta t/2$:
@@ -27,8 +28,10 @@ position reconstructed from the state.
    \mathbf E \mathrel{+}= \frac{\Delta t}{2}\left(c^2\nabla\times\mathbf B - \frac{\mathbf J}{\epsilon_0}\right), \qquad
    \mathbf B \mathrel{-}= \frac{\Delta t}{2}\nabla\times\mathbf E .
    ```
-3. **Gather and push.** The fields, plus `external_E` and `external_B` if given, are
-   interpolated to $x^{n+1/2}$ with the same $S_2$ used for the deposit, and the Boris
+3. **Gather and push.** $\mathbf E$ is averaged from the faces to the cell centres,
+   where $\mathbf B$ and the charge live, and the fields, plus `external_E` and
+   `external_B` if given, are interpolated to $x^{n+1/2}$ with the $S_2$ of the deposit,
+   with image values beyond the walls ({doc}`boundaries`); the Boris
    rotation advances $\mathbf v^n\to\mathbf v^{n+1}$.
 4. **Collisions**, if a {class}`~jaxincell.Collisions` model is set ({doc}`collisions`).
 5. **Move.** $x^{n+3/2} = x^{n+1/2} + \Delta t\,\mathbf v^{n+1}$, then the boundary
@@ -85,11 +88,17 @@ $\mathbf p = \gamma m\mathbf v$:
 \mathbf t = \frac{q\Delta t}{2 m\gamma^-}\mathbf B,
 ```
 
-after which $\mathbf p^+$ follows the same rotation formula and
-$\mathbf v^{n+1} = \mathbf p^{n+1}/(\gamma^{n+1}m)$. Evaluating $\gamma^-$ from
-$\mathbf p^-$ rather than from $\mathbf v^n$ is what makes the rotation angle correct
-for a relativistic particle; the initial $\gamma$ does come from $\mathbf v$, which is
-why velocities are clipped to $0.99c$ at initialisation.
+after which $\mathbf p^+$ follows the same rotation formula. Evaluating $\gamma^-$ from
+$\mathbf p^-$ rather than from $\mathbf v^n$ is what makes the rotation angle correct for
+a relativistic particle. A relativistic run carries $\mathbf u = \mathbf p/m = \gamma\mathbf v$
+in its state instead of the velocity, so that $\gamma = \sqrt{1 + u^2/c^2}$ stays exact
+at any energy: converting to $\mathbf v$ and back every step loses a fraction
+$\gamma^2\epsilon$ of $\gamma$ each time, which in single precision took a particle started
+at $\gamma = 1000$ to 1423 in a thousand steps with no field. The velocity is formed from
+$\mathbf u$ only where it is needed, for the position update, the output, the collisions
+and the walls. The initial $\mathbf u$ comes from the sampled velocities, of which only
+one with $v^2/c^2 > 1 - 10^{-5}$ is changed, brought back to that speed along its own
+direction ({doc}`initialization`).
 
 ## Accuracy
 

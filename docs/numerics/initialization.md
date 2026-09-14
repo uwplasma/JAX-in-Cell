@@ -109,4 +109,9 @@ crossed the wall comes back somewhere else, and building the field from the plac
 positions leaves the discrete Gauss law violated from the first step and violated for
 the rest of the run.
 
-Velocities are clipped to $0.99c$ so that the relativistic $\gamma$ is finite.
+In a relativistic run a sampled velocity with $v^2/c^2 > 1 - 10^{-5}$, which the tail of
+a hot Maxwellian or a drift given too close to $c$ can produce, is brought back to that
+speed along its own direction, which caps $\gamma$ at 316; the margin is about a hundred
+times the resolution of single precision, so $\gamma$ is still known to a per cent there.
+Every other velocity is left as drawn, and a non-relativistic run changes none, so its
+derivatives with respect to `vth` and `drift` are not cut.
