@@ -194,13 +194,42 @@ def test_explicit_scheme_has_bounded_energy_error_and_an_exact_gauss_law():
     assert float(np.asarray(d["electric"]).max()) > 1e3 * float(np.asarray(d["electric"])[0])
 
 
-def test_implicit_scheme_conserves_energy_to_round_off():
-    """The Crank-Nicolson scheme with the orbit-averaged current conserves the
-    discrete total energy once the Picard iteration has converged (Chen, Chacon
-    and Barnes, J. Comput. Phys. 230, 7018, 2011; Markidis and Lapenta 2011)."""
-    out = two_stream("implicit", 150, n=2000, picard_iterations=8)
-    total = np.asarray(diagnostics(out)["total"])
-    assert float(np.max(np.abs(total / total[0] - 1))) < 1e-11
+@pytest.mark.parametrize("drift, relativistic", [(6e7, False), (0.6 * c, True)])
+def test_implicit_scheme_conserves_energy_and_charge_to_round_off(drift, relativistic):
+    """Once the Picard iteration has converged the Crank-Nicolson scheme conserves the
+    discrete total energy (Chen, Chacon and Barnes, J. Comput. Phys. 230, 7018, 2011)
+    and, in the same run, the discrete Gauss law: E_x is the discrete gradient whose work
+    is what the charge-conserving current takes from the field (Kormann and
+    Sonnendruecker, J. Comput. Phys. 425, 109890, 2021). With relativity the particles
+    move at (u + u')/(gamma + gamma'), along which the Boris step does exactly the work of
+    E; the mean of the two velocities, which the scheme once took, is not that velocity,
+    and left 7e-13 at eight iterations and at twelve. Both errors come out a few 1e-16."""
+    out = two_stream("implicit", 150, n=2000, drift=drift, relativistic=relativistic, picard_iterations=8)
+    d = diagnostics(out)
+    assert float(np.asarray(d["energy_error"]).max()) < 1e-14
+    assert float(np.asarray(d["gauss_residual"]).max()) < 1e-10
+
+
+def test_the_implicit_gauss_law_holds_along_its_derivative():
+    """Reverse-mode derivatives run through the implicit scheme at a wall that returns half
+    of each electron, with ions that start at rest, whose zero displacement takes the slope
+    of the potential in place of the quotient 0/0. The Gauss law holds for every value of a
+    parameter, so it holds for the derivative too: the derivative of div E with respect to
+    the electron drift is the derivative of rho/eps0, on a random combination of cells."""
+    e = Species.electrons(n=300, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), reflection=0.5)
+    i = Species.ions(n=300, density=1e17, vth=(0.0, 0.0, 0.0), quiet=True)
+    domain = Domain(length=1e-2, cells=16, dt_over_dx_c=2.0, particle_bc="absorbing", field_bc="absorbing")
+    sim = Simulation(domain, [e, i], Solver(algorithm="implicit", picard_iterations=4))
+    cells = jnp.asarray(np.random.default_rng(0).normal(size=15))
+
+    def divergence_and_density(drift):
+        out = sim.replace(species=(e.replace(drift=(drift, 0.0, 0.0)), i)).run(30, seed=0)
+        E = out.E[-1, :, 0]
+        return jnp.stack([jnp.sum(cells * (E[1:] - E[:-1]) / out.dx), jnp.sum(cells * out.rho[-1, 1:] / epsilon_0)])
+
+    slopes = np.asarray(jax.jacrev(divergence_and_density)(0.05 * c))
+    assert np.all(np.isfinite(slopes)) and slopes[1] != 0
+    assert abs(slopes[0] - slopes[1]) < 1e-10 * abs(slopes[1])
 
 
 def test_periodic_box_conserves_charge_exactly_and_momentum_to_the_solver_error(quiet_two_stream):
@@ -366,11 +395,15 @@ def test_collisions_through_the_simulation_conserve_momentum_and_isotropise():
 @pytest.mark.parametrize("particle_bc, field_bc, reflection", [
     ("periodic", "periodic", 0.0), ("reflective", "reflective", 0.0), ("absorbing", "absorbing", 0.0),
     ("absorbing", "absorbing", 0.5), (("thermal", "absorbing"), ("reflective", "absorbing"), 0.0)])
-@pytest.mark.parametrize("filter_passes", [0, 2])
-def test_gauss_law_holds_at_every_wall_with_and_without_filtering(particle_bc, field_bc, reflection, filter_passes):
+@pytest.mark.parametrize("algorithm, filter_passes", [("explicit", 0), ("explicit", 2), ("implicit", 0)])
+def test_gauss_law_holds_at_every_wall_with_and_without_filtering(particle_bc, field_bc, reflection, algorithm,
+                                                                  filter_passes):
     """The discrete Gauss law is exact for every wall type -- including a wall that
     returns part of each electron and a thermal wall that re-emits them -- because
     the current is derived from the same charge density the field is checked against.
+    That holds for both schemes: the implicit one takes the continuity current of the
+    deposits at the two ends of every sub-step, where it once took the transpose of the
+    gather and missed the Gauss law by 0.15 to 1.7 of e n/eps0 at these walls.
 
     Three things have to line up for that, and each was wrong once. The density
     at the half step has to be the one the first half of the step ended on, or
@@ -386,7 +419,7 @@ def test_gauss_law_holds_at_every_wall_with_and_without_filtering(particle_bc, f
                           reflection=reflection)
     i = Species.ions(n=2000, density=1e17, electrons=e, quiet=True)
     domain = Domain(length=1e-2, cells=32, dt_over_dx_c=1.0, particle_bc=particle_bc, field_bc=field_bc)
-    out = Simulation(domain, [e, i], Solver(filter_passes=filter_passes,
+    out = Simulation(domain, [e, i], Solver(algorithm, filter_passes=filter_passes,
                                             filter_strides=(1, 2))).run(120, seed=0)
     d = diagnostics(out)
     assert float(np.asarray(d["gauss_residual"]).max()) < 1e-10

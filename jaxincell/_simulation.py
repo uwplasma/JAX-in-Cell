@@ -251,12 +251,25 @@ class Simulation:
         the same numbers."""
         return random.split(key, 3)
 
+    def _gamma(self, u):
+        """The Lorentz factor of the carried ``u``, ``(N, 1)``, and one in a Newtonian run."""
+        if not self.solver.relativistic:
+            return 1.0
+        return jnp.sqrt(1 + jnp.sum(u * u, axis=1, keepdims=True) / c ** 2)
+
     def _velocity(self, u):
         """The velocity of the carried ``u``, which is :math:`\\gamma\\mathbf v` in a
         relativistic run and the velocity itself otherwise."""
-        if not self.solver.relativistic:
-            return u
-        return u / jnp.sqrt(1 + jnp.sum(u * u, axis=1, keepdims=True) / c ** 2)
+        return u / self._gamma(u)
+
+    def _mean_velocity(self, u, u_new):
+        """The velocity that carries a particle through a push from ``u`` to ``u_new``,
+        :math:`(\\mathbf u + \\mathbf u')/(\\gamma + \\gamma')`, the mean of the two velocities in
+        a Newtonian run. The Boris step changes :math:`|\\mathbf u|^2` by exactly
+        :math:`2(q/m)\\Delta t\\,\\mathbf E\\cdot(\\mathbf u + \\mathbf u')/2`, so the kinetic energy,
+        :math:`m|\\mathbf v|^2/2` or :math:`(\\gamma - 1)mc^2`, changes by the work of E along this
+        velocity to round-off, relativistic or not."""
+        return (u + u_new) / (self._gamma(u) + self._gamma(u_new))
 
     def _momentum(self, v):
         """The carried ``u`` of a velocity: :math:`\\gamma\\mathbf v` in a relativistic run,
@@ -444,60 +457,88 @@ class Simulation:
     def _implicit_step(self, carry, extra):
         """Crank-Nicolson step solved by a fixed number of Picard iterations.
 
-        Fields are advanced with their time-centred averages and the particles
-        are sub-stepped in those averaged fields. The midpoint positions of every
-        sub-step, at which the fields are gathered and the current is deposited,
-        are carried across the iterations, so that at convergence gather and
-        deposit use the same time-centred orbit (Chen, Chacon and Barnes 2011)."""
+        Fields are advanced with their time-centred averages and the particles are
+        sub-stepped in them, each sub-step along the straight line from its start to its
+        end at :meth:`_mean_velocity`. The longitudinal current of a sub-step is the
+        continuity current of the deposits at the two ends, so the discrete Gauss law holds
+        at every wall. E_x at a particle is the discrete gradient that makes its work equal
+        to the energy that current takes from the field (Kormann and Sonnendruecker, J.
+        Comput. Phys. 425, 109890, 2021): the transpose of the current, then of the deposit,
+        turns E_x into a potential at the particles, and E_x is its difference between the
+        two ends over the displacement. The transverse fields are gathered at the mid-point,
+        and their current is the transpose of that gather (Chen, Chacon and Barnes 2011).
+        The end and velocity of every sub-step are carried from one Picard iteration to the
+        next; the state is the last iteration's, whose field and charge come from one orbit."""
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
-        box = (L, d.length_y, d.length_z)
+        box, bc = (L, d.length_y, d.length_z), d.field_bc
         m, q = extra
         E, B, x, u, w, qm, rho, key = carry
         n_sub = self.solver.substeps
         dtau = dt / n_sub
+        # Below this displacement E_x is the slope of the potential at the mid-point, which differs from the
+        # difference quotient by the displacement squared in cells, the round-off the quotient then has.
+        tiny = jnp.sqrt(jnp.finfo(x.dtype).eps) * dx
 
         # one thermal-wall key per sub-step, the same in every Picard iteration, so that
         # the wall re-emits a particle identically each time the orbit is recomputed
         key, k_collide, k_wall = self._split_step_key(key)
         keys = random.split(k_wall, n_sub)
 
-        def substeps(E_half, B_half, x_mid_all):
+        def deposit_x(positions, amounts):
+            return deposit(positions, amounts, d.grid[0], dx, d.cells, d.particle_bc)
+
+        def substeps(E_half, B_half, orbits):
+            # E_x as a potential at the particles: the transpose of the continuity current, then of the deposit
+            to_current = partial(current_from_continuity, jnp.zeros_like(rho), dt=1.0, dx=dx, mean_current=0.0, bc=bc)
+            phi = jax.linear_transpose(to_current, rho)(E_half[:, 0])[0]
+            E_mean = jnp.mean(E_half[:, 0]) if bc[0] == 0 else 0.0     # the work of the periodic mean current
+
+            def potential(positions):
+                return dx * jax.linear_transpose(partial(deposit_x, positions), w)(phi)[0]
+
             def one(state, inputs):
-                x_mid, k_sub = inputs
-                xs, us, ws, qms, J_acc = state
-                # the current is the transpose of the gather of E, the condition for energy conservation
-                fields, transpose = jax.vjp(lambda E: self._fields_at(x_mid, E, B_half, rho), E_half)
-                u_new = self._accelerate(us, fields, qms, dtau)
-                v_mid = 0.5 * (self._velocity(us) + self._velocity(u_new))
-                x_free = xs + dtau * v_mid
-                x_new, u_new, ws, qms = apply_particle_bc(x_free, u_new, ws, qms, box, d.particle_bc,
-                                                          d.restitution, self._reflection(v_mid), dx)
+                (x_end, v_bar), k_sub = inputs
+                xs, us, ws, qms, rho_s, x_start, phi_start, J_acc = state
+                shift = dtau * v_bar[:, 0]
+                x_mid = wrap_positions(x_start + 0.5 * dtau * v_bar, ws, box, d.particle_bc, dx)
+                # the gather without the self-consistent E_x, which the discrete gradient below replaces
+                gather = partial(self._fields_at, x_mid, B=B_half, rho=jnp.zeros_like(rho))
+                fields, transpose = jax.vjp(gather, E_half.at[:, 0].set(0.0))
+                phi_end = potential(x_end[:, 0])
+                slope = jax.jvp(potential, (x_mid[:, 0],), (jnp.ones_like(shift),))[1]
+                small = jnp.abs(shift) < tiny
+                E_x = jnp.where(small, slope, (phi_end - phi_start) / jnp.where(small, tiny, shift)) + E_mean
+                u_new = self._accelerate(us, fields.at[:, 0].add(E_x), qms, dtau)
+                v_new = self._mean_velocity(us, u_new)
+                x_free = xs + dtau * v_new
+                x_new, u_new, w_new, qms = apply_particle_bc(x_free, u_new, ws, qms, box, d.particle_bc,
+                                                             d.restitution, self._reflection(v_new), dx)
                 u_new = self._thermalise(k_sub, x_free, u_new)
-                new_mid = wrap_positions(x_new - 0.5 * dtau * v_mid, ws, box, d.particle_bc, dx)
-                carried = jnp.concatenate([(q * ws)[:, None] * v_mid, jnp.zeros_like(v_mid)], axis=1)
-                J = transpose(carried)[0] / dx
-                return (x_new, u_new, ws, qms, J_acc + J / n_sub), new_mid
-            init = (x, u, w, qm, jnp.zeros((d.cells, 3)))
-            (xs, us, ws, qms, J_avg), new_mids = lax.scan(one, init, (x_mid_all, keys))
-            return xs, us, ws, qms, J_avg, new_mids
+                rho_new = deposit_x(x_new[:, 0], q * w_new)
+                J = transpose(jnp.concatenate([(q * ws)[:, None] * v_new, jnp.zeros_like(v_new)], axis=1))[0] / dx
+                mean_current = jnp.sum(q * ws * v_new[:, 0]) / L
+                J = J.at[:, 0].set(current_from_continuity(rho_s, rho_new, dtau, dx, mean_current, bc))
+                return (x_new, u_new, w_new, qms, rho_new, x_end, phi_end, J_acc + J / n_sub), (x_new, v_new)
+
+            init = (x, u, w, qm, rho, x, potential(x[:, 0]), jnp.zeros((d.cells, 3)))
+            state, orbits = lax.scan(one, init, (orbits, keys))
+            return state[:5], state[-1], orbits
 
         def picard(state, _):
-            E_new, x_mid_all = state
+            E_new, orbits, _ = state
             E_half = 0.5 * (E + E_new)
-            B_new = B - dt * curl_E(E_half, B, dx, d.field_bc)
-            B_half = 0.5 * (B + B_new)
-            _, _, _, _, J, x_mid_all = substeps(E_half, B_half, x_mid_all)
-            E_next = E + dt * (c ** 2 * curl_B(B_half, E_half, dx, d.field_bc) - J / epsilon_0)
-            return (E_next, x_mid_all), None
+            B_half = B - 0.5 * dt * curl_E(E_half, B, dx, bc)
+            particles, J, orbits = substeps(E_half, B_half, orbits)
+            return (E + dt * (c ** 2 * curl_B(B_half, E_half, dx, bc) - J / epsilon_0), orbits, (particles, J)), None
 
-        x_mid0 = jnp.broadcast_to(wrap_positions(x + 0.5 * dtau * self._velocity(u), w, box, d.particle_bc, dx),
-                                  (n_sub,) + x.shape)
-        (E_new, x_mid_all), _ = lax.scan(picard, (E, x_mid0), None, length=self.solver.picard_iterations)
-        E_half = 0.5 * (E + E_new)
-        B_new = B - dt * curl_E(E_half, B, dx, d.field_bc)
-        x, u, w, qm, J, _ = substeps(E_half, 0.5 * (B + B_new), x_mid_all)
+        v = self._velocity(u)      # the first guess: every particle streams freely at its present velocity
+        free = jax.vmap(lambda s: wrap_positions(x + s * dtau * v, w, box, d.particle_bc, dx))
+        orbits = (free(jnp.arange(1.0, n_sub + 1)), jnp.broadcast_to(v, (n_sub,) + v.shape))
+        state, _ = lax.scan(picard, (E, orbits, ((x, u, w, qm, rho), jnp.zeros_like(E))), None,
+                            length=self.solver.picard_iterations)
+        E_new, _, ((x, u, w, qm, rho_next), J) = state
+        B_new = B - dt * curl_E(0.5 * (E + E_new), B, dx, bc)
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
-        rho_next = deposit(x[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc)
         return (E_new, B_new, x, u, w, qm, rho_next, key), (x, self._velocity(u), w, E_new, B_new, J, rho_next)
 
     # -- the run ---------------------------------------------------------------------------------
