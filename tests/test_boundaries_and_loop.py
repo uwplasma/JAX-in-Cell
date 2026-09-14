@@ -8,7 +8,8 @@ import pytest
 from jax import random
 
 import jaxincell._simulation as simulation_module
-from jaxincell import Collisions, Domain, Simulation, Solver, Species, epsilon_0, speed_of_light as c
+from jaxincell import (Collisions, Domain, Simulation, Solver, Species, elementary_charge, epsilon_0,
+                       speed_of_light as c)
 from jaxincell._core import E_x_from_rho, apply_particle_bc, current_from_continuity, deposit, wrap_positions
 
 L, CELLS = 1.0, 32
@@ -339,6 +340,9 @@ def test_collisions_without_a_coulomb_logarithm_need_a_negative_species():
         Simulation(Domain(), [ions], Solver(), Collisions())
     Simulation(Domain(), [ions], Solver(), Collisions(coulomb_log=10.0))
     Simulation(Domain(), [ions, Species.electrons(n=10, density=1e20)], Solver(), Collisions())
+    # a traced charge has no sign until the program runs, so construction leaves it alone
+    built = jax.jit(lambda q: Simulation(Domain(), [ions.replace(charge=q)], Solver(), Collisions()).species[0].charge)
+    assert float(built(elementary_charge)) == elementary_charge
 
 
 def test_simulation_and_run_refuse_bad_arguments_with_value_errors():

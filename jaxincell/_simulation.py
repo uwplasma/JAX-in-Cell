@@ -395,11 +395,9 @@ class Simulation:
         if ln_lambda is None:
             # The NRL logarithm is the electrons': the lightest negatively charged species, at its
             # density and at the temperature m v_th^2 / 2 of its largest thermal-speed component.
+            # construction has checked that a negatively charged species exists; inside the run the
+            # charges are traced, so the choice is made with array operations
             charges = [s.charge for s in self.species]
-            if not any(isinstance(q, jax.core.Tracer) for q in charges) and not any(q < 0 for q in charges):
-                raise ValueError("Collisions(coulomb_log=None) takes the Coulomb logarithm from the electrons, "
-                                 "but no species has a negative charge: give coulomb_log explicitly.")
-            # traced inside the run, where the choice has to be made with array operations
             charge = jnp.stack([jnp.asarray(q, float) for q in charges])
             mass = jnp.stack([jnp.asarray(s.mass, float) for s in self.species])
             e = jnp.argmin(jnp.where(charge < 0, mass, jnp.inf))

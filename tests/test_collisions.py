@@ -179,14 +179,6 @@ def test_default_coulomb_logarithm_comes_from_the_electrons_wherever_they_are_li
     assert np.allclose(np.asarray(default.v), np.asarray(explicit.v), rtol=1e-9, atol=0)
 
 
-def test_default_coulomb_logarithm_needs_an_electron_species():
-    ions = Species.ions(n=40, density=1e20, vth=(1e4, 1e4, 1e4), quiet=True)
-    simulation = Simulation(Domain(length=1e-4, cells=4, dt_over_dx_c=1.0), [ions], Solver(), Collisions())
-    x, v = jnp.zeros((40, 3)), jnp.ones((40, 3))
-    with pytest.raises(ValueError, match="negative charge"):
-        simulation._collide(random.PRNGKey(0), x, v, jnp.ones(40), jnp.ones(40), jnp.ones(40), 1e-12)
-
-
 def test_gradients_through_collisions_stay_finite_for_identical_velocities():
     """Particles with identical velocities, or differing only along z, leave the
     scattering frame undefined and the variance unbounded. The operator is
