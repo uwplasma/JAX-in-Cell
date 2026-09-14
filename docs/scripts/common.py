@@ -12,7 +12,6 @@ import json
 import platform
 import shutil
 import subprocess
-from importlib import metadata
 from pathlib import Path
 
 import matplotlib
@@ -28,14 +27,9 @@ MEASUREMENTS = FIGURE_DIR / "measurements.json"
 # Okabe-Ito palette, colourblind safe. The assignment is fixed across figures:
 # electrons blue, ions orange, explicit blue, implicit vermillion, theory black.
 COLORS = {"blue": "#0072B2", "orange": "#E69F00", "green": "#009E73", "vermillion": "#D55E00",
-          "purple": "#CC79A7", "sky": "#56B4E9", "yellow": "#F0E442", "black": "#000000",
-          "grey": "#7F7F7F"}
+          "purple": "#CC79A7", "sky": "#56B4E9", "black": "#000000", "grey": "#7F7F7F"}
 C_ELECTRONS = C_EXPLICIT = COLORS["blue"]
-C_IONS = COLORS["orange"]
-C_IMPLICIT = COLORS["vermillion"]
-C_THEORY = COLORS["black"]
-C_FIT = COLORS["green"]
-CMAP_SIGNED, CMAP_DENSITY = "RdBu_r", "viridis"
+C_IONS, C_IMPLICIT, C_THEORY, C_FIT = COLORS["orange"], COLORS["vermillion"], COLORS["black"], COLORS["green"]
 SINGLE, WIDE = (6.0, 3.6), (7.4, 3.4)
 
 plt.rcParams.update({
@@ -87,31 +81,17 @@ def _git_revision():
     return f"{sha}-dirty" if changed else sha
 
 
-def _version(module, distribution):
-    version = getattr(module, "__version__", None)
-    if version:
-        return str(version)
-    try:
-        return metadata.version(distribution)
-    except metadata.PackageNotFoundError:
-        return "unknown"
-
-
 def provenance():
     """What produced a set of numbers: the commit, the library versions, the
     precision and the device."""
     import jax
     import jaxincell
     try:
-        from jaxincell.version import __version__ as jaxincell_version
-    except ImportError:                              # a source tree that was never built
-        jaxincell_version = _version(jaxincell, "jaxincell")
-    try:
         import scipy
         scipy_version = scipy.__version__
     except ImportError:
         scipy_version = "not installed"
-    return {"git": _git_revision(), "jaxincell": jaxincell_version, "jax": jax.__version__,
+    return {"git": _git_revision(), "jaxincell": jaxincell.__version__, "jax": jax.__version__,
             "numpy": np.__version__, "scipy": scipy_version,
             "jax_enable_x64": bool(jax.config.read("jax_enable_x64")),
             "backend": jax.default_backend(), "platform": f"{platform.system()} {platform.machine()}"}
@@ -157,7 +137,7 @@ def rate_and_frequency(t, amplitude, above=0.0):
     return np.polyfit(t[i], np.log(amplitude[i]), 1)[0], np.pi / np.mean(np.diff(t[i])), i
 
 
-def phase_space_hist(ax, x, v, box_length, v_max, weights=None, bins=(70, 90), cmap=CMAP_DENSITY):
+def phase_space_hist(ax, x, v, box_length, v_max, weights=None, bins=(70, 90), cmap="viridis"):
     """Weighted histogram of (x/L, v) for one species at one time. The colour
     scale saturates at the 99.5th percentile of the occupied bins so that a few
     dense bins do not hide the rest."""
