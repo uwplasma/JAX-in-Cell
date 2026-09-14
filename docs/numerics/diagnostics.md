@@ -9,8 +9,12 @@ they can be recomputed at will and applied to a reloaded run.
 from jaxincell import diagnostics
 
 d = diagnostics(output)
-print(float(abs(d["total"][-1] / d["total"][0] - 1)))
+print(float(d["energy_error"].max()), float(d["momentum_error"].max()), float(d["gauss_residual"].max()))
 ```
+
+The three errors of the conservation laws are relative, each to a scale that does not vanish
+for the plasmas a particle-in-cell code is used on, and all three are measured from the
+first stored step; {doc}`../examples/conservation` plots them for both schemes.
 
 ## Energies
 
@@ -27,34 +31,52 @@ their sum. With `Solver(relativistic=True)` the kinetic energy becomes
 $\sum_p (\gamma_p - 1)m_pc^2$, which is the quantity the relativistic pusher conserves;
 the diagnostic follows the solver automatically.
 
-The relative change of `total` is the single most informative number about a run. A
-bounded oscillation of a few parts in $10^{4}$ is what the explicit scheme does; a
-steady rise means a resolution problem ({doc}`stability`).
+`energy_error` is $|W(t) - W(0)|/W(0)$ for $W$ = `total`, the single most informative
+number about a run. A bounded oscillation of a few parts in $10^{4}$ is what the explicit
+scheme does and round-off what the implicit one does; a steady rise means a resolution
+problem ({doc}`stability`). Walls that collect, re-emit or slow particles change the energy
+physically.
 
 ## Momentum
 
-`momentum` is $\sum_p \gamma_p m_p\mathbf v_p$, shape `(steps, 3)`. In a periodic box
-its $x$ component should stay put: over the two-stream run it drifts by
-{{ momentum_error_relative }} of $\sum_p m_p|v_{x,p}|$ ({doc}`deposition`).
+`momentum` is $\mathbf P = \sum_p \gamma_p m_p\mathbf v_p$, shape `(steps, 3)`, the momentum
+the pusher conserves, and `momentum_error` is
+
+```{math}
+|\mathbf P(t) - \mathbf P(0)| \Big/ \sum_p \gamma_p m_p|\mathbf v_p| \text{ at } t = 0 ,
+```
+
+relative to the sum of the magnitudes of the particle momenta rather than to the total,
+which vanishes for two counter-streaming beams. In a periodic electrostatic run it should
+stay small: over the two-stream run it reaches {{ momentum_error_relative }} with the
+explicit scheme, whose gather makes the forces between particles antisymmetric
+({doc}`deposition`), and {{ momentum_error_implicit }} with the implicit one, which gives
+that up for the energy ({doc}`implicit`).
 
 ## Gauss-law residual
 
-`gauss_residual` is the relative violation of {eq}`discrete-gauss` at every step,
+`gauss_residual` is the error in the conservation of charge, the violation of
+{eq}`discrete-gauss` at every step relative to the density of one sign of charge,
 
 ```{math}
 \max_i\left|\frac{E_{x,i+1/2}-E_{x,i-1/2}}{\Delta x} - \frac{\rho_i}{\epsilon_0}\right|
-\Big/ \max_i\left|\frac{\rho_i}{\epsilon_0}\right| .
+\Big/ \frac{e n}{\epsilon_0}, \qquad
+e n = \frac1L\max\Big(\sum_{q_p>0} q_p w_p,\ \sum_{q_p<0} |q_p| w_p\Big),
 ```
 
-with $E_{-1/2}$ taken as the solver takes it: the far end of the box for a periodic
-wall, zero otherwise. Measuring it as periodic regardless reports a violation in the
-first cell that the solver never committed, which at an absorbing wall — where the
-field at the far end is the sheath field and nowhere near zero — can be larger than
-the density itself.
+from the weights of that step, or of the final state when the particles were not stored.
+The net density is no scale: in a neutral plasma it is the particle noise, which a quiet
+start makes as small as it likes, so a residual relative to $\max_i|\rho_i|$ measures the
+start as much as the solver. $E_{-1/2}$ is taken as the solver takes it: the far end of the
+box for a periodic wall, zero otherwise. Measuring it as periodic regardless reports a
+violation in the first cell that the solver never committed, which at an absorbing wall —
+where the field at the far end is the sheath field and nowhere near zero — can be larger
+than the density itself.
 
-It should sit at round-off, {{ gauss_residual_max_explicit }}, for the whole run, at
-every wall type. It will not if the current deposit is bypassed, which makes it a good
-regression check.
+It should sit at round-off for the whole run, at every wall type and in both schemes:
+{{ gauss_residual_max_explicit }} explicit and {{ gauss_residual_max_implicit }} implicit
+over the two-stream run. It will not if the current deposit is bypassed, which makes it a
+good regression check.
 
 ## Potential
 
@@ -95,7 +117,7 @@ amplitude = np.abs(np.fft.rfft(np.asarray(output.E[:, :, 0]), axis=1)[:, mode])
 
 Only what {meth}`~jaxincell.Simulation.run` was asked to keep. With
 `store_particles=False` the particle history is dropped, so `kinetic`, `total`,
-`momentum` and `temperatures` are absent from the dictionary and only the field
+`momentum`, their errors and `temperatures` are absent from the dictionary and only the field
 diagnostics are available — which is usually the right trade when the run is long,
 since the particle history dominates the memory
 ({doc}`../user_guide/performance`).

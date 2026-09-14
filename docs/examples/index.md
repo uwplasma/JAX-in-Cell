@@ -43,10 +43,10 @@ python two_stream.py
 `weibel.py` — a temperature anisotropy driving magnetic modes. Weibel 1959.
 :::
 
-:::{grid-item-card} Energy conservation
-:link: energy_conservation
+:::{grid-item-card} Conservation laws
+:link: conservation
 :link-type: doc
-`energy_conservation.py` — explicit against implicit as the Picard iteration converges.
+`conservation.py` — energy, momentum and charge in both schemes, periodic and between absorbing walls.
 :::
 
 :::{grid-item-card} Collisions
@@ -83,7 +83,7 @@ landau_damping
 langmuir_wave
 bump_on_tail
 weibel
-energy_conservation
+conservation
 collisions
 wall_reflection
 sheath

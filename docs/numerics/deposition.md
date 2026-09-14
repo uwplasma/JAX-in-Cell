@@ -92,11 +92,11 @@ Poisson solve inside the loop.
 
 ```{figure} ../_static/figures/conservation.png
 :width: 100%
-:alt: Energy error and Gauss-law residual for the explicit and implicit schemes
+:alt: Energy, momentum and Gauss-law errors of the explicit and implicit schemes
 
-(a) Total energy error. (b) The Gauss-law residual, at round-off for the explicit scheme,
-which deposits the charge-conserving current. The implicit scheme deposits the orbit
-current its energy balance needs instead, and does not hold the discrete Gauss law.
+(a) Total energy error. (b) Momentum error. (c) The Gauss-law residual, at round-off for
+both schemes in a periodic box and between absorbing walls: the implicit scheme takes the
+same charge-conserving current, from the two ends of every sub-step ({doc}`implicit`).
 ```
 
 ## Momentum conservation
@@ -116,8 +116,8 @@ gather consistent with the staggered current the second {cite}`birdsall1991`. Th
 two-stream run of {doc}`explicit` changed its total energy by $4\times10^{-5}$ when the
 field was gathered from the faces, and changes it by {{ energy_error_max_explicit }} now,
 still bounded over the run. A run that needs the energy exact should use the
-{doc}`implicit` scheme, whose current is the transpose of this gather and conserves it to
-round-off at any wall.
+{doc}`implicit` scheme, which conserves it and the Gauss law to round-off at any wall and
+pays with the momentum, {{ momentum_error_implicit }} over the same run.
 
 A code that gathers with a different shape than it deposits, or that interpolates the
 field to the particle from a different grid than the one the charge was written to,

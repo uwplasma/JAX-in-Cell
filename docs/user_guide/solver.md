@@ -11,7 +11,7 @@ solver = Solver(algorithm="explicit", field_solver="ampere", filter_passes=2)
 
 | argument | meaning | default |
 |---|---|---|
-| `algorithm` | `"explicit"` (Boris leapfrog) or `"implicit"` (Crank-Nicolson) | `"explicit"` |
+| `algorithm` | `"explicit"` (Boris leapfrog) or `"implicit"` (energy- and charge-conserving Crank-Nicolson) | `"explicit"` |
 | `field_solver` | `"ampere"` advances $E_x$ from the current; `"gauss"` recomputes it from $\rho$ | `"ampere"` |
 | `relativistic` | relativistic Boris pusher | `False` |
 | `filter_passes` | binomial smoothing passes on the sources; `0` disables | `0` |
@@ -27,20 +27,21 @@ error is bounded rather than growing, and it is stable while
 $\omega_p\Delta t \lesssim 2$, $c\Delta t \le \Delta x$ and
 $\Delta x \lesssim \lambda_D$.
 
-`"implicit"` is the energy-conserving Crank-Nicolson scheme of Chen, Chacón and
-Barnes. It is unconditionally stable and drives the energy error to round-off, at
-about {{ scaling_implicit_over_explicit }} times the cost per step. Use it when the
-energy budget matters, when the step you want breaks an explicit limit, or when the
-Debye length cannot be resolved.
+`"implicit"` is a Crank-Nicolson scheme that conserves the energy and the discrete Gauss
+law to round-off (Chen, Chacón and Barnes; Kormann and Sonnendrücker), relativistic or
+not, and gives up the exact momentum. It is unconditionally stable and costs about
+{{ scaling_implicit_over_explicit }} times an explicit step. Use it when the energy budget
+matters, when the step you want breaks an explicit limit, or when the Debye length cannot
+be resolved.
 
 ```python
 Solver(algorithm="implicit", picard_iterations=8, substeps=2)
 ```
 
-The energy error falls geometrically with `picard_iterations` —
-{{ energy_error_max_implicit_1 }} at one, {{ energy_error_max_implicit_4 }} at four,
-{{ energy_error_max_implicit_8 }} at eight — so raising it is the first thing to try
-if the budget is not tight enough. `substeps` resolves orbits that turn inside one
+The Gauss law holds whatever the iteration count. The energy error falls geometrically
+with `picard_iterations` — {{ energy_error_max_implicit_1 }} at one,
+{{ energy_error_max_implicit_4 }} at four, {{ energy_error_max_implicit_8 }} at eight — so
+raising it is the first thing to try if the budget is not tight enough. `substeps` resolves orbits that turn inside one
 field step without refining the field grid. Both schemes are differentiable;
 {doc}`../numerics/implicit` explains why the iteration count is fixed rather than
 adaptive.

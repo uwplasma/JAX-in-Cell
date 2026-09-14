@@ -77,7 +77,7 @@ jobs:
         pip install -e .
     - name: Run the fastest examples
       run: |
-        for script in collisions wall_reflection energy_conservation langmuir_wave; do
+        for script in collisions wall_reflection conservation langmuir_wave; do
           echo "::group::examples/$script.py"
           python "examples/$script.py"
           echo "::endgroup::"

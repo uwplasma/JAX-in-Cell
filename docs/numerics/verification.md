@@ -188,17 +188,20 @@ theory; see {doc}`collisions` for the figure and the details.
 
 ## Conservation
 
-| quantity | value |
-|---|---|
-| energy error, explicit | {{ energy_error_max_explicit }} |
-| energy error, implicit (8 Picard) | {{ energy_error_max_implicit_8 }} |
-| Gauss-law residual | {{ gauss_residual_max_explicit }} |
-| Gauss-law residual, reflective walls | {{ gauss_residual_reflective_wall }} |
-| Gauss-law residual, absorbing walls | {{ gauss_residual_absorbing_wall }} |
-| Gauss-law residual, walls returning half of each electron | {{ gauss_residual_reflecting_wall }} |
-| Gauss-law residual, thermal wall and floating conductor | {{ gauss_residual_thermal_wall }} |
-| charge, deposited against carried | {{ charge_error_relative }} |
-| momentum drift | {{ momentum_error_relative }} |
+Largest relative errors ({doc}`diagnostics`) over the two-stream run of
+{doc}`../examples/conservation` and, at the walls, over a drifting plasma of 120 steps; the
+explicit wall runs are filtered, the implicit ones cannot be.
+
+| quantity | explicit | implicit (8 Picard) |
+|---|---|---|
+| energy | {{ energy_error_max_explicit }} | {{ energy_error_max_implicit_8 }} |
+| momentum | {{ momentum_error_relative }} | {{ momentum_error_implicit }} |
+| Gauss law, periodic | {{ gauss_residual_max_explicit }} | {{ gauss_residual_max_implicit }} |
+| Gauss law, reflective walls | {{ gauss_residual_reflective_wall }} | {{ gauss_residual_reflective_wall_implicit }} |
+| Gauss law, absorbing walls | {{ gauss_residual_absorbing_wall }} | {{ gauss_residual_absorbing_wall_implicit }} |
+| Gauss law, walls returning half of each electron | {{ gauss_residual_reflecting_wall }} | {{ gauss_residual_reflecting_wall_implicit }} |
+| Gauss law, thermal wall and floating conductor | {{ gauss_residual_thermal_wall }} | {{ gauss_residual_thermal_wall_implicit }} |
+| charge, deposited against carried | {{ charge_error_relative }} | |
 
 ## Reproducibility
 

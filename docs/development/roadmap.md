@@ -31,12 +31,6 @@
 
 ## Planned
 
-* A charge-conserving current for the implicit scheme. The Crank-Nicolson step conserves
-  the discrete energy exactly, with the transpose of the gather as its current, but it
-  does not keep the discrete Gauss law: the residual reaches 0.66 in the two-stream run,
-  and at an absorbing wall the charge the conductor collects is not recorded. Keeping
-  both needs the orbit of every particle split where it crosses a cell face, as Chen,
-  Chacón and Barnes do (J. Comput. Phys. 230, 7018, 2011).
 * Particle sources and sinks, which need a pool of inactive particles because array
   shapes are static. An ionisation source is what a bounded-plasma run needs to reach a
   true steady state instead of slowly draining ({doc}`../examples/sheath`).
