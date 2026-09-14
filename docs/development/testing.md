@@ -5,8 +5,8 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Seventy-two tests in three files, about two minutes on one CPU core, covering every
-statement and every branch of the package.
+178 tests in six files, about three minutes on a laptop CPU, covering every statement
+and every branch of the package; CI fails below 100 %.
 
 That number is not the goal in itself, and the suite is not padded to reach it. It is
 worth having because of what chasing it turns up: five of the defects fixed in the
@@ -19,6 +19,9 @@ line whose behaviour nobody has checked.
 |---|---|
 | `tests/test_kernels.py` | the numerical kernels in isolation, against exact results |
 | `tests/test_physics.py` | rates, frequencies and conserved quantities against the literature |
+| `tests/test_boundaries_and_loop.py` | the wall closures and their mirror symmetry, the gather with images at the walls, the random keys, the carried density and $\gamma\mathbf v$, and what the time loop traces |
+| `tests/test_collisions.py` | pairing inside each cell, conservation per collision, the pair density, the Coulomb logarithm and gradients through the operator |
+| `tests/test_config_and_outputs.py` | configuration objects as pytrees (leaves, validation, tree operations, `vmap`), diagnostics, openPMD records and the plotting helpers |
 | `tests/test_api.py` | reproducibility, gradients, `vmap`, storage options, restarts, TOML, the command line, plotting and openPMD export |
 
 ## What is tested, and how
