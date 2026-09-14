@@ -174,7 +174,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-178 tests, about three minutes, covering every statement and branch. They
+177 tests, about three minutes, covering every statement and branch. They
 are physics tests rather than regression tests: closed-form rates and frequencies,
 conservation laws, exact results for the kernels, and the behaviour of the interface.
 They run on Python 3.10 to 3.13 on every pull request, together with a build of the
