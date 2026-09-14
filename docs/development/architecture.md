@@ -1,6 +1,6 @@
 # Architecture
 
-The package is eight modules and about 1500 lines. Each one has a single job, and the
+The package is eight modules and about 1600 lines. Each one has a single job, and the
 dependency graph is a straight line with no cycles.
 
 ```
