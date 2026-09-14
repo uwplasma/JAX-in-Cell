@@ -105,7 +105,8 @@ direction ({doc}`initialization`).
 Over the growth and saturation of the two-stream instability of {doc}`verification`,
 at $\omega_{pe}\Delta t = $ {{ energy_omega_pe_dt }} and $c\Delta t/\Delta x = $
 {{ energy_courant }}, the total energy changes by
-{{ energy_error_max_explicit }} and does not drift; the Gauss residual stays at
+{{ energy_error_max_explicit }} and does not drift, while the momentum is conserved to
+round-off, the trade the gather of {doc}`deposition` makes; the Gauss residual stays at
 {{ gauss_residual_max_explicit }}. When the energy error itself has to be small, use
 the {doc}`implicit` scheme, which drives it to round-off at a cost of about
 {{ scaling_implicit_over_explicit }} times more work per step.

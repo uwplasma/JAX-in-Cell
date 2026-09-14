@@ -110,6 +110,15 @@ none on itself {cite}`birdsall1991`: in a periodic electrostatic run the total m
 conserved to round-off. Over the same run it drifts by {{ momentum_error_relative }} of
 $\sum_p m_p|v_{x,p}|$.
 
+The price is paid in energy. An explicit particle-in-cell scheme can conserve momentum or,
+to the order of its time step, energy, but not both: the centred gather does the first, a
+gather consistent with the staggered current the second {cite}`birdsall1991`. The
+two-stream run of {doc}`explicit` changed its total energy by $4\times10^{-5}$ when the
+field was gathered from the faces, and changes it by {{ energy_error_max_explicit }} now,
+still bounded over the run. A run that needs the energy exact should use the
+{doc}`implicit` scheme, whose current is the transpose of this gather and conserves it to
+round-off at any wall.
+
 A code that gathers with a different shape than it deposits, or that interpolates the
 field to the particle from a different grid than the one the charge was written to,
 loses this property and develops a self-force: a single particle in an empty periodic
