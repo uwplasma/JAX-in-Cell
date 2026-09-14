@@ -1,41 +1,11 @@
 """Binary Coulomb collisions, after Takizuka and Abe (J. Comput. Phys. 25, 205, 1977).
 
-Inside every cell the particles are paired at random and each pair is scattered
-through an angle whose variance carries the collision frequency. Only the
-relative velocity is rotated and the change is shared in inverse proportion to
-the masses, so a pair conserves momentum and energy exactly, whatever the time
-step.
-
-Pairing, cell by cell, with one random order per species per pair of species:
-
-* **A species with itself** (Takizuka and Abe): particles 0-1, 2-3, ... collide.
-  When the cell holds an odd number, the last three collide 1-2, 2-3 and 3-1,
-  one after the other, each with half the variance, so that every particle still
-  receives one collision's worth of scattering. A lone particle does not collide.
-* **Two species**: the longer of the two lists drives. Each of its particles
-  collides once, with the partner of the same rank in the other list, which is
-  cycled when shorter; a particle of the shorter list then collides several
-  times in the step. Those collisions are computed from the velocities at the
-  start of the step, which keeps momentum exact but leaves energy exact only in
-  cells with as many particles of both species.
-
-Unequal pseudo-particle weights follow Nanbu and Yonemura (J. Comput. Phys. 145,
-639, 1998): the change is applied to each partner with probability
-:math:`w_{\\rm other}/\\max(w_a, w_b)`, which conserves momentum and energy on
-average rather than per pair. The density in the variance is then
-:math:`n = n_a n_b / n_{ab}` (Perez et al., Phys. Plasmas 19, 083104, 2012),
-with :math:`n_{ab}` the sum of :math:`\\min(w_a, w_b)` over the pairs of the cell,
-per unit length, counted twice for a species with itself. This is what makes
-the mean exchange rate right for every particle: for equal weights it reduces to
-:math:`\\min(n_a, n_b)` between species and to :math:`n_a` within one, and a
-particle of the shorter list sees the density of the longer one through the
-number of its collisions, not through the acceptance.
-
-The variance of one collision follows from matching the perpendicular velocity
-diffusion of the Fokker-Planck operator,
-:math:`\\langle\\delta^2\\rangle = q_a^2 q_b^2 n \\ln\\Lambda\\,\\Delta t
-/ (8\\pi\\epsilon_0^2 m_{ab}^2 u^3)`, with :math:`\\tan(\\Theta/2)=\\delta`.
-"""
+Inside every cell the particles are paired at random and the relative velocity of
+each pair is rotated through an angle whose variance carries the collision frequency,
+which conserves the pair's momentum and energy. The pairing within a species and
+between two, the Nanbu-Yonemura acceptance for unequal weights, the pair density of
+Perez et al. and the variance are derived on the Collisions page of the numerical
+methods."""
 import jax.numpy as jnp
 from jax import lax, random
 

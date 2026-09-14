@@ -11,19 +11,9 @@ Layout:
     ``position`` and ``momentum`` and the scalar ``weighting`` per particle, and ``positionOffset``
     (zero), ``charge`` and ``mass`` (of one physical particle) as constant records; skipped when
     ``out.x is None``. The momentum is the one the pusher advances: ``m * gamma * v`` for a
-    relativistic run and ``m * v`` otherwise.
-
-Weighting:
-    A one-dimensional run has no transverse extent: its pseudo-particle weight ``out.weight`` is a
-    number of physical particles per unit area of the y-z plane. openPMD's ``weighting`` is a number
-    of physical particles, so the export multiplies by the transverse ``area`` the run is taken to
-    stand for, which the record carries as the attribute ``transverseArea`` (m^2). The default of
-    1 m^2 writes the per-unit-area weights unchanged; ``area=domain.length_y * domain.length_z``
-    matches the periods of the exported y and z positions. The meshes are volume densities and do not
-    depend on it.
-
-Example:
-    >>> write_openpmd(sim.run(steps=1000, store_every=10), "run.json", every=5)  # or .h5 / .bp
+    relativistic run and ``m * v`` otherwise. ``weighting`` is ``out.weight * area``, with ``area``
+    recorded as the attribute ``transverseArea`` (m^2), since a 1D weight counts particles per unit
+    area of the y-z plane.
 """
 import os
 
