@@ -498,6 +498,12 @@ def test_a_floating_wall_holds_the_sheath_drop_of_hobbs_and_wesson():
     The thermal wall keeps the electrons reaching the conductor Maxwellian, which is
     what the formula needs; between two absorbing walls the tail is stripped within a
     few transits. The mass ratio is 100 to fit the ion transit into a test.
+
+    The drop is converged in cell size here, and what limits the comparison is where the
+    edge is put: the potential still falls by about 0.1 T_e/e per Debye length at the Bohm
+    point, which these bins, two Debye lengths wide, place to within about one. Both drops
+    are held to 0.15 T_e/e; they come out 0.06 and 0.002 away, and a wall that returned no
+    electron in the second case would miss by ln 2 = 0.69.
     """
     T_e, density, mass_ratio, n, cells, steps = 1.0, 1e16, 100.0, 20000, 60, 1500
     sigma = np.sqrt(T_e * e_charge / mass_electron)
@@ -523,8 +529,11 @@ def test_a_floating_wall_holds_the_sheath_drop_of_hobbs_and_wesson():
         flow = (np.histogram(position, bins, weights=weight * speed)[0]
                 / np.maximum(np.histogram(position, bins, weights=weight)[0], 1e-300))
         assert (flow >= c_s).any()
-        edge = 0.5 * (bins[:-1] + bins[1:])[np.argmax(flow >= c_s)]
+        # where the flow crosses c_s, between the first bin that reaches it and the one before; a bin
+        # centre alone would move the edge by half a bin, where the potential falls 0.1 T_e/e per lambda_D
+        k, centres = int(np.argmax(flow >= c_s)), 0.5 * (bins[:-1] + bins[1:])
+        edge = np.interp(c_s, flow[k - 1:k + 1], centres[k - 1:k + 1]) if k > 0 else centres[0]
         drop = np.interp(edge, faces, phi.mean(axis=0) - phi[:, -1].mean())
-        assert abs(drop / expected - 1) < 0.2, (reflection, drop, expected)
+        assert abs(drop - expected) < 0.15, (reflection, drop, expected)
         rho = np.asarray(out.rho)[late].mean(axis=0) / (density * e_charge)
         assert rho[-3:].mean() > 0.02 and abs(rho[: cells // 2].mean()) < 0.01

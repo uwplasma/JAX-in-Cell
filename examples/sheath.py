@@ -67,7 +67,12 @@ for name, (reflection, R_eff) in walls.items():
     position, speed, weight = (np.asarray(a)[late, particles:] for a in (out.x[..., 0], out.v[..., 0], out.weight))
     ions_per_bin = np.histogram(position, bins, weights=weight)[0]
     flow = np.histogram(position, bins, weights=weight * speed)[0] / np.maximum(ions_per_bin, 1e-300) / c_s
-    edge = (length / 2 - 0.5 * (bins[:-1] + bins[1:])[np.argmax(flow >= 1)]) / debye   # ions reach c_s
+    # the ions reach c_s where their flow crosses it, between the first bin that reaches c_s and the
+    # one before; a bin centre alone would move the edge by half a bin, where the potential falls by
+    # about 0.1 T_e/e per Debye length
+    k, positions = int(np.argmax(flow >= 1)), 0.5 * (bins[:-1] + bins[1:])
+    crossing = np.interp(1.0, flow[k - 1:k + 1], positions[k - 1:k + 1]) if k > 0 else positions[0]
+    edge = (length / 2 - crossing) / debye
     results[name] = dict(profile=profile, flow=flow, edge=edge, sheath=np.interp(edge, distance[::-1], profile[::-1]),
                          theory=0.5 * np.log(mass_ratio / (2 * np.pi)) + np.log(1 - R_eff),
                          rho=np.asarray(out.rho)[late].mean(axis=0) / (density * e_charge))

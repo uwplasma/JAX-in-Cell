@@ -37,7 +37,10 @@ for name, (reflection, R_eff, color) in WALLS.items():
     position, speed, weight = (np.asarray(a)[late, PARTICLES:] for a in (out.x[..., 0], out.v[..., 0], out.weight))
     flow = (np.histogram(position, bins, weights=weight * speed)[0]
             / np.maximum(np.histogram(position, bins, weights=weight)[0], 1e-300) / C_S)
-    edge = centres[np.argmax(flow >= 1)]
+    # where the flow crosses c_s, between the first bin that reaches it and the one before; a bin
+    # centre alone would move the edge by half a bin, where the potential falls 0.1 T_e/e per lambda_D
+    k = int(np.argmax(flow >= 1))
+    edge = float(np.interp(1.0, flow[k - 1:k + 1], centres[k - 1:k + 1])) if k > 0 else float(centres[0])
     results[name] = dict(profile=profile, flow=flow, edge=edge, color=color, expected=theory + np.log(1 - R_eff),
                          sheath=float(np.interp(edge, distance[::-1], profile[::-1])),
                          rho=np.asarray(out.rho)[late].mean(axis=0) / (DENSITY * e_charge),

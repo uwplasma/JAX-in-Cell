@@ -46,6 +46,13 @@ clears the barrier, of which the wall keeps the fraction $1 - R_{\rm eff}$, give
 The runs give {{ sheath_drop_absorbing }}, {{ sheath_drop_half }} and
 {{ sheath_drop_slow }}, all within {{ sheath_drop_deviation_percent }} per cent.
 
+That remainder is not the grid: with the cells halved twice, to an eighth of a Debye
+length, the drop stays where it is. Most of it is where the edge is put. At the Bohm point
+the potential still falls by about 0.1 $T_e/e$ per Debye length, so the edge is taken where
+the ion flow crosses $c_s$, interpolated between the bins on either side of the crossing,
+not at the centre of the first bin to reach it, which moves the drop by several per cent
+from one bin width to the next.
+
 **The same flux average gives the same sheath.** The two reflecting walls return quite
 different electrons, one half of every electron and the other the slow ones through
 $R(v) = e^{-v^2/2\sigma^2}$, but both have $R_{\rm eff} = 1/2$, the flux average of
