@@ -3,7 +3,7 @@ temperatures and the dominant frequency. Everything is a plain function of the
 stored arrays and can be recomputed at will."""
 import jax.numpy as jnp
 
-from ._constants import epsilon_0, mu_0, speed_of_light as c, elementary_charge
+from ._config import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
 __all__ = ["diagnostics", "dominant_frequency", "energies", "gauss_residual", "potential", "temperatures"]
 

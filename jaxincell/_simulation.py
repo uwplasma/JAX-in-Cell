@@ -13,7 +13,7 @@ from jax.scipy.special import erfinv
 
 from ._collisions import collide, coulomb_logarithm
 from ._config import Collisions, Domain, Solver, Species, pytree_dataclass
-from ._constants import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
+from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
 from ._core import (PARITY, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, current_from_continuity,
                     curl_B, curl_E, deposit, gather, half_step_fields, smooth, to_centres, to_faces, wall_faces_E,
                     with_ghosts, wrap_positions)

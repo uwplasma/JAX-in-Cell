@@ -1,9 +1,8 @@
 """JAX-in-Cell: a differentiable 1D3V particle-in-cell code."""
 import sys
 
-from ._config import Collisions, Domain, Solver, Species
-from ._constants import (boltzmann_constant, elementary_charge, epsilon_0, mass_electron,
-                         mass_proton, mu_0, speed_of_light)
+from ._config import (Collisions, Domain, Solver, Species, boltzmann_constant, elementary_charge, epsilon_0,
+                      mass_electron, mass_proton, mu_0, speed_of_light)
 from ._diagnostics import (diagnostics, dominant_frequency, energies, gauss_residual, potential,
                            temperatures)
 from ._simulation import Output, Simulation, load_toml, quiet_start

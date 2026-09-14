@@ -13,7 +13,7 @@ wall is a reflective one here; the simulation then redraws the velocities.
 """
 import jax.numpy as jnp
 
-from ._constants import epsilon_0, speed_of_light as c
+from ._config import epsilon_0, speed_of_light as c
 
 __all__ = ["s2_weights", "map_indices", "deposit", "PARITY", "to_centres", "with_ghosts", "gather",
            "current_from_continuity", "to_faces", "wall_faces_E", "curl_E", "curl_B", "half_step_fields",

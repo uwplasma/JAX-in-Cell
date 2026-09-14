@@ -9,7 +9,7 @@ from jax import random
 
 from jaxincell import Collisions, Domain, Simulation, Solver, Species, _collisions, epsilon_0
 from jaxincell._collisions import collide, coulomb_logarithm
-from jaxincell._constants import elementary_charge as e_charge, mass_electron
+from jaxincell import elementary_charge as e_charge, mass_electron
 
 
 def _cells(per_cell, rng):

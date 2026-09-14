@@ -9,7 +9,7 @@ methods."""
 import jax.numpy as jnp
 from jax import lax, random
 
-from ._constants import epsilon_0
+from ._config import epsilon_0
 
 __all__ = ["coulomb_logarithm", "collide"]
 
