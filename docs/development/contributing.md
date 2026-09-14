@@ -1,37 +1,47 @@
-# Contributing
+# Development
 
-Contributions are welcome through pull requests on
-[GitHub](https://github.com/uwplasma/JAX-in-Cell): bug fixes, new physics, examples and
-documentation. By contributing you confirm that the work is yours to give and agree
-that it is released under the project's MIT licence.
+```{toctree}
+:maxdepth: 1
 
-## Reporting a bug or asking for a feature
+architecture
+testing
+roadmap
+```
 
-Search the [issue tracker](https://github.com/uwplasma/JAX-in-Cell/issues) first, then
-open an issue with what you expected, what happened, and the smallest script that
-reproduces it, together with the versions of Python, JAX and JAX-in-Cell and the
-platform. Questions are better placed on the
-[discussions](https://github.com/uwplasma/JAX-in-Cell/discussions) page. Do not report
-a security problem in public; send it to rogerio.jorge@wisc.edu.
+{doc}`architecture` maps the modules and is the first thing to read before changing
+the code, {doc}`testing` describes the test suite, the documentation build and
+continuous integration, and {doc}`roadmap` lists what is done and what is planned.
+How to cite the code is in the
+[README](https://github.com/uwplasma/JAX-in-Cell#contributing-and-citing).
 
-## Workflow
+## Contributing
 
-1. Fork the repository and clone your fork, or create a branch if you have write
-   access.
-2. Install in editable mode with the test dependencies:
-   ```bash
-   pip install -e ".[dev]"
-   ```
-3. Make the change with a test that exercises it. Keep the static and differentiable
-   parameter lists consistent (see {doc}`architecture`).
-4. Run `pytest` and `flake8`. Continuous integration fails on any lint violation under
-   the configuration in `.flake8` and on coverage below 100 per cent.
-5. If the change affects a numerical method, rerun the relevant figure script under
-   `docs/scripts/` and update the documentation page that describes the method.
-6. Open a pull request against `main` with a description of what changed and why.
-   The continuous-integration workflow runs the tests on four Python versions and
-   builds the documentation.
+Search the [issue tracker](https://github.com/uwplasma/JAX-in-Cell/issues) before
+opening an issue, and give what you expected, what happened, the smallest script that
+reproduces it, and the versions of Python, JAX and JAX-in-Cell. Questions go to the
+[discussions](https://github.com/uwplasma/JAX-in-Cell/discussions); security problems
+to rogerio.jorge@wisc.edu, not in public. Contributions are released under the MIT
+licence.
 
-Write commit subjects in the imperative mood and under about seventy characters
-(`Add a thermal wall`), and use the body for why the change was needed and anything a
-reviewer would not guess from the diff.
+1. Fork and branch, then `pip install -e ".[dev]"`.
+2. Make the change with a test that exercises it, keeping the static and differentiable
+   parameters consistent ({doc}`architecture`).
+3. Run `pytest` and `flake8`; CI fails on any lint violation and on coverage below
+   100 per cent.
+4. If a numerical method changed, rerun its figure script under `docs/scripts/` and
+   update the page that describes the method.
+5. Open a pull request against `main` saying what changed and why. Commit subjects are
+   imperative and under about seventy characters (`Add a thermal wall`); the body says
+   why.
+
+## Releasing
+
+Versions come from git tags through `setuptools_scm`; there is no version string to
+edit. Publishing a GitHub release runs `pypi_publish.yml`, which runs the tests on the
+tagged commit and only then builds and uploads to PyPI; Read the Docs rebuilds
+`stable` from the tag.
+
+```bash
+git tag v0.2 && git push origin v0.2
+gh release create v0.2 --generate-notes
+```

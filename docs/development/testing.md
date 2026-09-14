@@ -1,12 +1,12 @@
-# Tests
+# Tests and documentation
 
 ```bash
 pip install -e ".[dev]"
 pytest -q
 ```
 
-178 tests in six files, about three minutes on a laptop CPU, covering every statement
-and every branch of the package; CI fails below 100 %.
+The suite takes about three minutes on a laptop CPU and covers every statement and
+every branch of the package; CI fails below 100 %.
 
 That number is not the goal in itself, and the suite is not padded to reach it. It is
 worth having because of what chasing it turns up: five of the defects fixed in the
@@ -63,22 +63,21 @@ removing some but not all.
 
 **Documented behaviour that is easy to leave untested.** `store_particles=False`
 dropping exactly the diagnostics that need velocities; the openPMD switches and a run
-with no particles to write; the TOML loader's fallback for Python 3.10; `python -m
-jaxincell`; every example setting `JAX_ENABLE_X64` before it imports JAX; every example
-the documentation names existing under exactly that name; and the version fallback for a
-fresh clone that has not been installed,
-since `jaxincell/version.py` is generated at build time and is not in the repository.
+with no particles to write; the TOML loader's fallback for Python 3.10; every example
+setting `JAX_ENABLE_X64` before it imports JAX; every example the documentation names
+existing under exactly that name; and the version fallback for a fresh clone that has
+not been installed, since `jaxincell/version.py` is generated at build time and is not
+in the repository.
 
 **The interface.** That two runs with one seed agree bit for bit on the CPU, and to
 round-off on a GPU, whose scatter kernels need not sum in the same order twice, and that
-two seeds do not;
-that `jax.grad` matches a central difference to one part in $10^4$ through both
-integrators; that `vmap` over seeds gives an ensemble; that `store_every` and a restart
-reproduce the full run to round-off; that changing a physical parameter does not change the
-treedef, which is what guarantees no recompilation; that the overview figure has one
-panel per non-zero field component and per species; and that an openPMD export reads
-back with the right iterations, staggering and particle records; and that the
-Courant warning fires for a run that would diverge and stays quiet for the
+two seeds do not; that `jax.grad` matches a central difference to one part in $10^4$
+through both integrators; that `vmap` over seeds gives an ensemble; that `store_every`
+and a restart reproduce the full run to round-off; that changing a physical parameter
+does not change the treedef, which is what guarantees no recompilation; that the
+overview figure has one panel per non-zero field component and per species; that an
+openPMD export reads back with the right iterations, staggering and particle records;
+and that the Courant warning fires for a run that would diverge and stays quiet for the
 electrostatic and implicit runs that would not.
 
 ## Writing a new one
@@ -104,6 +103,40 @@ reflection, energy conservation and the Langmuir scan), so that a change to the
 interface cannot quietly break the scripts people start from; the others take minutes
 each. `docs.yml` builds the documentation with `-W`, so a broken cross-reference or a
 missing substitution fails the build, and the release workflow runs the same tests
-before it builds anything. The figures are committed rather than rebuilt in CI, because
-the full set takes a few minutes; regenerate them with `python docs/scripts/make_all.py`
-when the numbers they quote would change.
+before it builds anything.
+
+## Documentation
+
+The documentation is MyST Markdown built with Sphinx and the `pydata-sphinx-theme`;
+Read the Docs builds `latest` from `main` and `stable` from the last tag.
+
+```bash
+pip install -e ".[docs]"
+sphinx-build -W --keep-going -b html docs docs/_build/html
+```
+
+`-W` turns warnings into errors, as the CI build does, so a clean local build is the
+condition for merging. The pages are grouped in the directories under `docs/`, the
+bibliography is `docs/references.bib`, cited with `{cite}` roles, and the API page uses
+`autodoc`, so docstrings are part of the documentation (Google-style sections, parsed
+by Napoleon). Equations are LaTeX in MyST math, figures carry a caption naming the
+script that made them, and parameter tables list the default and whether the parameter
+is differentiable.
+
+The figures are committed, so the site builds quickly and deterministically. The
+scripts in `docs/scripts/` regenerate them, and `docs/scripts/dispersion.py` holds the
+linear kinetic dispersion solvers they compare against:
+
+```bash
+python docs/scripts/make_all.py                         # all, about seven minutes on a laptop
+python docs/scripts/make_all.py fig_landau_damping.py   # one script
+```
+
+Each script writes its PNG files and records the numbers it measured (growth rates,
+frequencies, energy errors, timings) in `docs/_static/figures/measurements.json`, with
+the commit, the library versions, the precision and the device under `_provenance`. The
+documentation quotes double-precision results, so a run with `JAX_ENABLE_X64=0` refuses
+to record. `conf.py` exposes the numbers as substitutions, so that a page can write
+`{{ landau_gamma_measured }}` and always quote the value of the committed figure.
+`fig_scaling.py` measures wall-clock time and should be run on an otherwise idle
+machine.

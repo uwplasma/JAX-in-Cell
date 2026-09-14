@@ -27,9 +27,9 @@ It runs on CPUs, GPUs and TPUs, compiles the whole time loop with XLA, and is di
 :gutter: 3
 
 :::{grid-item-card} Install
-:link: getting_started/installation
+:link: getting_started/quickstart
 :link-type: doc
-`pip install jaxincell`, from source, or with GPU support.
+`pip install jaxincell`, from source, or with GPU support, and three short runs.
 :::
 
 :::{grid-item-card} First simulation
@@ -57,7 +57,7 @@ Landau damping, two-stream, bump-on-tail, Weibel, collisions and optimisation.
 :::
 
 :::{grid-item-card} API reference
-:link: api/index
+:link: api
 :link-type: doc
 `Domain`, `Species`, `Solver`, `Simulation` and the numerical kernels.
 :::
@@ -145,10 +145,10 @@ print(gradient.species[0].drift, gradient.domain.length)
 :hidden:
 :maxdepth: 2
 
-getting_started/index
+getting_started/quickstart
 user_guide/index
 numerics/index
 examples/index
-api/index
-development/index
+api
+development/contributing
 ```

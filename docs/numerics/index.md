@@ -16,7 +16,6 @@ initialization
 stability
 diagnostics
 verification
-references
 ```
 
 These pages describe what the code computes, in the order in which a time step
@@ -26,8 +25,14 @@ integrators, the {doc}`field_solvers`, the {doc}`boundaries`, the {doc}`filterin
 the sources and the {doc}`collisions` operator, the {doc}`initialization` of the phase
 space, the {doc}`stability` constraints on the resolution, the {doc}`diagnostics` and
 the {doc}`verification` against linear kinetic theory. Symbols follow Birdsall and
-Langdon {cite}`birdsall1991`; the {doc}`references` page lists the sources.
+Langdon {cite}`birdsall1991`; the sources are listed below.
 
 Every statement about accuracy on these pages is a number produced by a script in
 `docs/scripts/`, recorded in `measurements.json` and substituted into the text, so the
 prose and the figures always come from the same run.
+
+## References
+
+```{bibliography}
+:all:
+```

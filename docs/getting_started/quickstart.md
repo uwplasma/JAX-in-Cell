@@ -1,7 +1,43 @@
-# Quickstart
+# Getting started
 
-Five minutes, three runs. Install with `pip install jaxincell` (see
-{doc}`installation`).
+```{toctree}
+:hidden:
+
+first_simulation
+```
+
+## Installation
+
+```bash
+pip install jaxincell                     # or, from source:
+git clone https://github.com/uwplasma/JAX-in-Cell && cd JAX-in-Cell && pip install -e .
+```
+
+Python 3.10 or newer is required (CI tests 3.10 to 3.13 on Linux). The dependencies
+are `jax`, `matplotlib`, and `tomli` on Python 3.10, which has no `tomllib`. The
+version is derived by `setuptools_scm` from the git tags, so a source install reports
+the last release plus the number of commits since.
+
+`pip` installs the CPU build of JAX. For a GPU, install the JAX wheel that matches your
+CUDA or ROCm stack first, following the
+[JAX installation instructions](https://docs.jax.dev/en/latest/installation.html), for
+example `pip install -U "jax[cuda12]"`. Nothing in the package is device specific;
+`jax.devices()` shows where it runs.
+
+Importing the package enables 64-bit floating point in JAX unless the environment
+variable `JAX_ENABLE_X64` is already set, which is how a run chooses single precision;
+the setting applies to the whole Python process.
+
+The extras are `openpmd` (`openpmd-api`, to write openPMD), `docs` (Sphinx, and scipy
+for the figure scripts) and `dev` (`pytest`, `pytest-cov`, `flake8` and `openpmd-api`,
+see {doc}`../development/testing`). Saving an animation to MP4 with
+{func}`jaxincell.plot` needs `ffmpeg` on the `PATH`. To check the install:
+
+```bash
+python -c "import jaxincell, jax; print(jaxincell.__file__, jax.devices())"
+```
+
+Five minutes, three runs.
 
 ## A Langmuir wave
 
@@ -90,8 +126,9 @@ solve, the Boris rotation and the boundary conditions.
 jaxincell examples/input.toml
 ```
 
-runs the same two-stream case from a TOML description, prints the energy balance and
-shows the animation.
+run from a clone of the repository, runs the same two-stream case from a TOML
+description, prints the energy drift and the Gauss-law residual, and shows the
+animation. Without a file, `jaxincell` prints its usage.
 
 ## Next
 
