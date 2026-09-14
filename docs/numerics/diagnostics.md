@@ -58,11 +58,16 @@ regression check.
 
 ## Potential
 
-{func}`~jaxincell.potential` integrates the longitudinal field,
-$\phi_{i+1/2} = -\Delta x\sum_{j\le i} E_{x,j+1/2}$, with the left wall as the gauge,
-so entry $i$ is the potential relative to that wall and the last entry is the potential
-of the right wall. Two absorbing walls are short-circuited conductors, so that last
-entry stays at zero and the bulk floats above both — see {doc}`../examples/sheath`. A
+{func}`~jaxincell.potential` integrates the longitudinal field from the left wall with
+the trapezoidal rule over the faces,
+$\phi_{i+1/2} = -\Delta x\sum_{j\le i} (E_{x,j-1/2} + E_{x,j+1/2})/2$, so entry $i$ is
+the potential relative to that wall and the last entry is the potential of the right
+wall. The field at the left wall face is not stored: it is the field at the far end of a
+periodic box, zero at a reflective wall, and at an absorbing wall the field of the
+collected charge, $E_{x,1/2} - \Delta x\,\rho_0/\epsilon_0$ from the Gauss law of the
+first cell. The field solver closes two absorbing walls with the same rule
+({doc}`field_solvers`), so between those short-circuited conductors the last entry stays
+at zero to round-off and the bulk floats above both — see {doc}`../examples/sheath`. A
 periodic box has no wall, so the mean is set to zero instead.
 
 ## Temperatures

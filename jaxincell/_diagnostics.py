@@ -61,15 +61,27 @@ def gauss_residual(out):
 
 
 def potential(out):
-    """Electrostatic potential at the cell faces,
-    :math:`\\phi_{i+1/2} = \\phi_{-1/2} - \\Delta x\\sum_{j\\le i} E_{x,j+1/2}`.
+    """Electrostatic potential at the cell faces, the trapezoidal integral of the
+    longitudinal field from the left wall,
+    :math:`\\phi_{i+1/2} = -\\Delta x\\sum_{j\\le i} (E_{x,j-1/2} + E_{x,j+1/2})/2`.
 
-    The gauge is the wall: :math:`\\phi_{-1/2} = 0`, so entry ``i`` is the potential
-    relative to the left wall and the last entry is the potential of the right wall.
-    Two absorbing walls are short-circuited, so that last entry stays at zero and the
-    bulk floats above both. A periodic box has no wall, so the mean is set to zero
-    instead."""
-    phi = -out.dx * jnp.cumsum(out.E[:, :, 0], axis=1)
+    The integral needs the field at the left wall face, which the output does not store:
+    in a periodic box it is the field at the far end; at a reflective wall, a symmetry
+    plane, it is zero; at an absorbing wall it is the field of the charge the conductor
+    has collected, which the Gauss law of the first cell gives,
+    :math:`E_{x,1/2} - \\Delta x\\,\\rho_0/\\epsilon_0`. The field solver closes two
+    absorbing walls with the same rule, so between them the last entry, the potential of
+    the right wall, is zero to round-off and the bulk floats above both. A periodic box
+    has no wall, so the mean is set to zero instead."""
+    E = out.E[:, :, 0]
+    if out.field_bc[0] == 0:
+        left = E[:, -1]
+    elif out.field_bc[0] == 1:
+        left = jnp.zeros_like(E[:, 0])
+    else:
+        left = E[:, 0] - out.dx * out.rho[:, 0] / epsilon_0
+    faces = jnp.concatenate([left[:, None], E], axis=1)
+    phi = -out.dx * jnp.cumsum(0.5 * (faces[:, :-1] + faces[:, 1:]), axis=1)
     return phi - jnp.mean(phi, axis=1, keepdims=True) if out.field_bc[0] == 0 else phi
 
 

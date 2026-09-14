@@ -394,12 +394,9 @@ def test_gauss_law_holds_at_every_wall_with_and_without_filtering(particle_bc, f
     d = diagnostics(out)
     assert float(np.asarray(d["gauss_residual"]).max()) < 1e-10
     if field_bc == "absorbing":
-        # the potential drop from wall to wall, the trapezoidal sum over the faces, with the
-        # unstored field at the left wall from the Gauss law of the first cell
-        E = np.asarray(out.E[:, :, 0])
-        E_left = E[:, 0] - out.dx * np.asarray(out.rho[:, 0]) / epsilon_0
-        drop = out.dx * (0.5 * E_left + E[:, :-1].sum(axis=1) + 0.5 * E[:, -1])
-        assert float(np.abs(drop).max()) < 1e-9 * float(np.abs(np.asarray(d["potential"])).max())
+        # short-circuited conductors: the right wall stays at the potential of the left one
+        phi = np.abs(np.asarray(d["potential"]))
+        assert float(phi[:, -1].max()) < 1e-9 * float(phi.max())
 
 
 @pytest.mark.parametrize("wall, conserving", [("periodic", True), ("reflective", True),
