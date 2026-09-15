@@ -134,7 +134,7 @@ def test_absorbed_particles_are_parked_symmetrically_off_both_grids():
     x = jnp.array([[-0.6, 0.0, 0.0], [0.6, 0.0, 0.0]])
     v = jnp.array([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
     nothing = (jnp.zeros(2), jnp.zeros(2))
-    parked, _, w, _ = apply_particle_bc(x, v, jnp.ones(2), jnp.ones(2), (L, L, L), (2, 2), (1.0, 1.0), nothing, DX)
+    parked, _, w, _, _ = apply_particle_bc(x, v, jnp.ones(2), jnp.ones(2), (L, L, L), (2, 2), (1.0, 1.0), nothing, DX)
     assert float(parked[0, 0]) == pytest.approx(-L / 2 - 1.5 * DX)
     assert float(parked[1, 0]) == pytest.approx(L / 2 + 1.5 * DX)
     for origin in (CENTRE0, CENTRE0 + DX / 2):
@@ -157,7 +157,7 @@ def test_wrap_positions_is_the_position_map_of_the_particle_walls(bc):
     w = jnp.asarray(np.where(rng.uniform(size=n) < 0.3, 0.0, 1.0))
     unchanged = (jnp.ones(n), jnp.ones(n))
     box = (L, 0.7, 0.9)
-    full, _, _, _ = apply_particle_bc(x, jnp.zeros_like(x), w, jnp.ones(n), box, bc, (1.0, 1.0), unchanged, DX)
+    full, _, _, _, _ = apply_particle_bc(x, jnp.zeros_like(x), w, jnp.ones(n), box, bc, (1.0, 1.0), unchanged, DX)
     assert np.array_equal(np.asarray(wrap_positions(x, w, box, bc, DX)), np.asarray(full))
 
 
@@ -179,11 +179,13 @@ def test_the_carried_density_is_the_density_at_the_integer_time_positions():
     sim = walled_simulation()
     d = sim.domain
     out = sim.run(40, seed=1, store_every=4)
-    E, B, x_half, v, w, qm, rho, key = out.state
-    x_n = wrap_positions(x_half - 0.5 * d.dt * v, w, (d.length, d.length_y, d.length_z), d.particle_bc, d.dx)
-    expected = sim._smooth(deposit(x_n[:, 0], out.charge * w, d.grid[0], d.dx, d.cells, d.particle_bc))
-    assert np.allclose(np.asarray(rho), np.asarray(expected), rtol=1e-12, atol=1e-12 * float(jnp.abs(expected).max()))
-    assert np.allclose(np.asarray(out.rho[-1]), np.asarray(rho), rtol=0, atol=0)
+    state = out.state
+    x_n = wrap_positions(state.x - 0.5 * d.dt * state.u, state.w,
+                         (d.length, d.length_y, d.length_z), d.particle_bc, d.dx)
+    expected = sim._smooth(deposit(x_n[:, 0], out.charge * state.w, d.grid[0], d.dx, d.cells, d.particle_bc))
+    assert np.allclose(np.asarray(state.rho), np.asarray(expected),
+                       rtol=1e-12, atol=1e-12 * float(jnp.abs(expected).max()))
+    assert np.allclose(np.asarray(out.rho[-1]), np.asarray(state.rho), rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("algorithm", ["explicit", "implicit"])

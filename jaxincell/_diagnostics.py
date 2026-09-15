@@ -73,7 +73,7 @@ def gauss_residual(out):
     else:
         div = (E[:, 1:] - E[:, :-1]) / out.dx
         rhs = out.rho[:, 1:] / epsilon_0
-    charge = out.charge * (out.state[4] if out.weight is None else out.weight)
+    charge = out.charge * (out.state.w if out.weight is None else out.weight)
     one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
     return jnp.max(jnp.abs(div - rhs), axis=1) / _nonzero(one_sign / (out.length * epsilon_0))
 

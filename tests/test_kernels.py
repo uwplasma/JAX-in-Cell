@@ -213,22 +213,22 @@ def test_particle_boundaries():
     x = jnp.array([[-0.6, 0.0, 0.0], [0.7, 0.0, 0.0], [0.1, 0.0, 0.0]])
     v = jnp.array([[-1.0, 2.0, 0.0], [3.0, 0.0, 1.0], [0.5, 0.0, 0.0]])
     w, qm, nothing = jnp.ones(3), jnp.full(3, 2.0), (jnp.zeros(3), jnp.zeros(3))
-    xp, vp, _, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (0, 0), (1.0, 1.0), nothing, dx)
+    xp, vp, _, _, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (0, 0), (1.0, 1.0), nothing, dx)
     assert same(xp[:, 0], [0.4, -0.3, 0.1]) and same(vp, v)
-    xr, vr, wr, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (1, 1), (0.5, 0.25), nothing, dx)
+    xr, vr, wr, _, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (1, 1), (0.5, 0.25), nothing, dx)
     assert same(xr[:, 0], [-0.4, 0.3, 0.1]) and same(wr, 1.0)
     assert same(vr[:, 0], [0.5, -0.75, 0.5])
     assert same(vr[:, 1:], v[:, 1:])
-    xa, va, wa, qma = apply_particle_bc(x, v, w, qm, (L, L, L), (2, 2), (1.0, 1.0), nothing, dx)
+    xa, va, wa, qma, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (2, 2), (1.0, 1.0), nothing, dx)
     assert same(wa, [0.0, 0.0, 1.0]) and same(va[:2], 0.0)
     assert float(xa[0, 0]) < -L / 2 and float(xa[1, 0]) > L / 2 and same(qma, [0.0, 0.0, 2.0])
 
     # 30 % of the left particle and 60 % of the right one come back, bounced
     reflect = (jnp.full(3, 0.3), jnp.full(3, 0.6))
-    xm, vm, wm, qmm = apply_particle_bc(x, v, w, qm, (L, L, L), (2, 2), (0.5, 1.0), reflect, dx)
+    xm, vm, wm, qmm, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (2, 2), (0.5, 1.0), reflect, dx)
     assert same(wm, [0.3, 0.6, 1.0]) and same(xm[:, 0], [-0.4, 0.3, 0.1])
     assert same(vm[:, 0], [0.5, -3.0, 0.5]) and same(qmm, 2.0)
-    xs, _, ws, _ = apply_particle_bc(xa, va, wa, qma, (L, L, L), (2, 2), (1.0, 1.0), reflect, dx)
+    xs, _, ws, _, _ = apply_particle_bc(xa, va, wa, qma, (L, L, L), (2, 2), (1.0, 1.0), reflect, dx)
     assert same(xs, xa) and same(ws, wa)
 
     # reconstructed positions: what still has weight was reflected and is mirrored

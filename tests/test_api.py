@@ -281,7 +281,7 @@ def test_random_positions_and_a_scalar_thermal_speed():
     for name, random_positions in (("random", True), ("lattice", False)):
         species = Species.electrons(n=1000, density=1e17, random_positions=random_positions)
         sim = Simulation(domain, [species], Solver())
-        x = sim.initial_state(jax.random.PRNGKey(0))[0][2]
+        x = sim.initial_state(jax.random.PRNGKey(0))[0].x
         spacing = np.diff(np.sort(np.asarray(x[:, 0])))
         spread[name] = spacing.std() / spacing.mean()
     assert spread["lattice"] < 1e-9 < 0.1 < spread["random"]

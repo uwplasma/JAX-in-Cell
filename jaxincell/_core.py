@@ -5,17 +5,20 @@ at cell centres :math:`x_i`, the electric field and the current density at cell
 faces :math:`x_{i+1/2}`. Every array has one entry per cell; entry ``i`` of a
 face quantity refers to :math:`x_{i+1/2}`.
 
-Boundary codes: 0 periodic, 1 reflective, 2 absorbing, 3 thermal, given per
-wall as a ``(left, right)`` pair. They are static, so the branches below are
+Boundary codes: 0 periodic, 1 reflective, 2 absorbing, 3 thermal, 4 open, given
+per wall as a ``(left, right)`` pair. They are static, so the branches below are
 resolved when the program is traced and cost nothing at run time. An absorbing
 wall may send back part of each particle, as a fraction of its weight. A thermal
-wall is a reflective one here; the simulation then redraws the velocities.
+wall is a reflective one here; the simulation then redraws the velocities. An
+open wall is the electrical condition of a plane a ``Source`` supplies through:
+nothing beyond it, as at a conductor, but no condition on the field either, whose
+constant then comes from the charge on the electrode opposite.
 """
 import jax.numpy as jnp
 
 from ._config import epsilon_0, speed_of_light as c
 
-__all__ = ["s2_weights", "map_indices", "deposit", "PARITY", "to_centres", "with_ghosts", "gather",
+__all__ = ["s2_weights", "map_indices", "deposit", "PARITY", "PARK", "to_centres", "with_ghosts", "gather",
            "current_from_continuity", "to_faces", "wall_faces_E", "curl_E", "curl_B", "half_step_fields",
            "E_x_from_rho", "boris", "boris_relativistic", "apply_particle_bc", "wrap_positions", "smooth"]
 
@@ -40,9 +43,9 @@ def map_indices(idx, n, bc):
     if bc[0] == 0:
         return idx % n, jnp.ones_like(idx, dtype=bool)
     keep = jnp.ones_like(idx, dtype=bool)
-    if bc[0] == 2:
+    if bc[0] in (2, 4):
         keep = keep & (idx >= 0)
-    if bc[1] == 2:
+    if bc[1] in (2, 4):
         keep = keep & (idx < n)
     return jnp.clip(idx, 0, n - 1), keep
 
@@ -83,7 +86,7 @@ def with_ghosts(F, bc, parity=None):
             return far
         if parity is None:
             return edge
-        return parity * edge if code == 1 else jnp.zeros_like(edge)
+        return parity * edge if code == 1 else jnp.zeros_like(edge)     # a conductor, or an open plane
 
     return jnp.concatenate([ghost(bc[0], F[0], F[-1])[None], F, ghost(bc[1], F[-1], F[0])[None]])
 
@@ -99,7 +102,7 @@ def gather(F, x, x0, dx):
 
 # --- sources -----------------------------------------------------------------------
 
-def _integrate_from_walls(s, dx, bc):
+def _integrate_from_walls(s, dx, bc, wall_value=0.0):
     """The face quantity :math:`F` with :math:`(F_{i+1/2} - F_{i-1/2})/\\Delta x = s_i` for a
     centred source :math:`s`. That fixes :math:`F` up to one constant, the value
     :math:`F_{-1/2}` at the left wall face (which the grid does not store), and the walls
@@ -123,6 +126,14 @@ def _integrate_from_walls(s, dx, bc):
       and each conductor half a cell beyond the last centre, that difference is the
       trapezoidal sum over the :math:`N_x + 1` faces from wall to wall,
       :math:`\\tfrac12 F_{-1/2} + \\sum_{i=0}^{N_x-2} F_{i+1/2} + \\tfrac12 F_{N_x-1/2} = 0`.
+    * **Open on the left, absorbing on the right**: the plane a source supplies through
+      imposes nothing, and the constant comes from the electrode opposite instead:
+      ``wall_value`` is what :math:`F` takes at the right wall face. For the Gauss solve
+      that is :math:`-\\sigma_w/\\epsilon_0`, the field of the charge the collector holds,
+      and for the continuity current it is the current the collector draws. A symmetry
+      plane would give the same answer when nothing crosses it and the box starts
+      neutral; with a source it is the ledger of the collector, not the source plane,
+      that closes the problem.
     """
     if bc[0] == bc[1] != 2:
         s = s - jnp.mean(s)
@@ -133,18 +144,21 @@ def _integrate_from_walls(s, dx, bc):
         return F - F[-1]
     if bc == (2, 2):
         return F - (jnp.sum(F) - 0.5 * F[-1]) / F.shape[0]
+    if bc == (4, 2):
+        return F + (wall_value - F[-1])
     return F
 
 
-def current_from_continuity(rho_old, rho_new, dt, dx, mean_current, bc):
+def current_from_continuity(rho_old, rho_new, dt, dx, wall_current, bc):
     """Longitudinal current at the faces that satisfies the discrete continuity
     equation :math:`(\\rho_i^{new} - \\rho_i^{old})/\\Delta t + (J_{i+1/2} - J_{i-1/2})/\\Delta x = 0`
     exactly, with the wall closures of :func:`_integrate_from_walls`. A periodic box has
     no wall to fix the constant, which is instead the mean current the particles carry,
     :math:`\\langle J\\rangle = L^{-1}\\sum_p q_p v_{x,p}`; between two absorbing walls the
-    current the closure removes is the one in the external circuit."""
-    J = _integrate_from_walls(-(rho_new - rho_old) / dt, dx, bc)
-    return J + mean_current if bc[0] == 0 else J
+    current the closure removes is the one in the external circuit; and with an open
+    source plane ``wall_current`` is the current the collector draws."""
+    J = _integrate_from_walls(-(rho_new - rho_old) / dt, dx, bc, wall_current)
+    return J + wall_current if bc[0] == 0 else J
 
 
 def to_faces(f, bc):
@@ -153,7 +167,7 @@ def to_faces(f, bc):
         right = f[0]
     elif bc[1] == 1:
         right = f[-1]
-    else:
+    else:                                 # a conductor, or an open plane
         right = jnp.zeros_like(f[-1])
     return 0.5 * (f + jnp.concatenate([f[1:], right[None]]))
 
@@ -192,7 +206,7 @@ def wall_faces_E(E, B, rho, dx, bc):
     left = _left_ghost_E(E, B, bc)
     if bc[0] == 1:
         left = left.at[0].set(0.0)
-    elif bc[0] == 2:
+    elif bc[0] in (2, 4):                 # a conductor, or an open plane: the Gauss law of the first cell
         left = left.at[0].set(E[0, 0] - dx * rho[0] / epsilon_0)
     return left, (E[-1].at[0].set(0.0) if bc[1] == 1 else E[-1])
 
@@ -223,13 +237,15 @@ def half_step_fields(E, B, J, dt2, dx, bc, electric_first):
     return E, B
 
 
-def E_x_from_rho(rho, dx, bc):
+def E_x_from_rho(rho, dx, bc, wall_field=0.0):
     """Solve the discrete Gauss law :math:`(E_{i+1/2} - E_{i-1/2})/\\Delta x = \\rho_i/\\epsilon_0`
     for the longitudinal field at the faces, with the wall closures of
-    :func:`_integrate_from_walls`. In a periodic box this is exactly the field the
-    finite-difference symbol :math:`(1 - e^{-ik\\Delta x})/\\Delta x` gives in Fourier
-    space, without the complex arithmetic."""
-    return _integrate_from_walls(rho / epsilon_0, dx, bc)
+    :func:`_integrate_from_walls`; ``wall_field`` is the field at the collector face,
+    :math:`-\\sigma_w/\\epsilon_0`, which closes a box with an open source plane. In a
+    periodic box this is exactly the field the finite-difference symbol
+    :math:`(1 - e^{-ik\\Delta x})/\\Delta x` gives in Fourier space, without the complex
+    arithmetic."""
+    return _integrate_from_walls(rho / epsilon_0, dx, bc, wall_field)
 
 
 # --- particles --------------------------------------------------------------------------
@@ -264,8 +280,9 @@ def boris_relativistic(u, E, B, qm, dt):
 PARK = 1.5      # cells beyond a wall where an absorbed particle is parked; see apply_particle_bc
 
 
-def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):
-    """Bring particles that left the box back according to the wall codes.
+def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx, floor=0.0):
+    """Bring particles that left the box back according to the wall codes, and
+    report what each wall received.
 
     A reflective wall mirrors the position and multiplies the normal velocity by
     ``-restitution``. An absorbing wall sends back the fraction ``reflection`` of
@@ -276,20 +293,42 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):
     spline, so that its cloud lies wholly beyond the wall on the centred grid and on
     the staggered one alike. ``restitution`` is a ``(left, right)`` pair and
     ``reflection`` a pair of per-particle arrays. The ignorable coordinates are
-    always periodic."""
+    always periodic.
+
+    ``floor`` is a weight, per particle or one for all, at or below which a wall keeps
+    what is left of a particle instead of reflecting it again. Without it a wall
+    returning the fraction :math:`R` of every impact holds a particle for ever, its
+    weight falling as :math:`R^k`, and its slot is never free for a
+    :class:`~jaxincell.Source` to refill. The remainder goes to the wall, so the
+    ledger below stays exact.
+
+    Returns:
+        tuple: ``x, v, w, qm`` and ``(arrived, kept)``, two ``(2, N)`` arrays, side 0
+        the left wall and side 1 the right: the weight of each particle that reached
+        that wall on this step, zero where it did not, and the part of it the wall
+        kept. The caller has the velocity before and after the bounce, so the charge,
+        energy and momentum a wall received follow from these two arrays alone.
+    """
     L, Ly, Lz = box
     x = x.at[:, 1].set((x[:, 1] + Ly / 2) % Ly - Ly / 2)
     x = x.at[:, 2].set((x[:, 2] + Lz / 2) % Lz - Lz / 2)
     xx, vx = x[:, 0], v[:, 0]
     out = jnp.zeros_like(xx, dtype=bool)
+    arrived, kept = [], []
     for code, beyond, mirror, park, e, r in (
             (bc[0], xx < -L / 2, -L - xx, -L / 2 - PARK * dx, restitution[0], reflection[0]),
             (bc[1], xx > L / 2, L - xx, L / 2 + PARK * dx, restitution[1], reflection[1])):
+        arrived.append(jnp.where(beyond, w, 0.0))
+        kept.append(jnp.zeros_like(w))
         if code == 0:
             xx = jnp.where(beyond, (xx + L / 2) % L - L / 2, xx)
             continue
         if code == 2:
-            w = jnp.where(beyond, w * r, w)
+            returned = jnp.where(beyond, w * r, 0.0)
+            spent = beyond & (returned <= floor)          # too little left to follow: the wall takes it
+            returned = jnp.where(spent, 0.0, returned)
+            kept[-1] = arrived[-1] - returned
+            w = jnp.where(beyond, returned, w)
             lost = beyond & (w <= 0)
             xx, out, beyond = jnp.where(lost, park, xx), out | lost, beyond & ~lost
         xx = jnp.where(beyond, mirror, xx)
@@ -299,7 +338,7 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx):
     if 2 in bc:
         v = jnp.where(out[:, None], 0.0, v)
         qm = jnp.where(out, 0.0, qm)
-    return x, v, w, qm
+    return x, v, w, qm, (jnp.stack(arrived), jnp.stack(kept))
 
 
 def wrap_positions(x, w, box, bc, dx):
@@ -351,9 +390,9 @@ def _shift(f, s, bc):
         idx = jnp.where(outside_right, 2 * n - idx - 1, idx)
     g = f[jnp.clip(idx, 0, n - 1)]
     expand = (slice(None),) + (None,) * (f.ndim - 1)
-    if bc[0] == 2:
+    if bc[0] in (2, 4):
         g = jnp.where(outside_left[expand], 0.0, g)
-    if bc[1] == 2:
+    if bc[1] in (2, 4):
         g = jnp.where(outside_right[expand], 0.0, g)
     return g
 

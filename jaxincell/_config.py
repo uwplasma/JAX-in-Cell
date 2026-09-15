@@ -26,9 +26,9 @@ mass_electron = 9.1093837015e-31      # kg
 mass_proton = 1.67262192369e-27       # kg
 boltzmann_constant = 1.380649e-23     # J/K
 
-__all__ = ["Domain", "Species", "Solver", "Collisions", "BOUNDARIES"]
+__all__ = ["Domain", "Species", "Solver", "Source", "Collisions", "BOUNDARIES"]
 
-BOUNDARIES = {"periodic": 0, "reflective": 1, "absorbing": 2, "thermal": 3}
+BOUNDARIES = {"periodic": 0, "reflective": 1, "absorbing": 2, "thermal": 3, "open": 4}
 
 
 def pytree_dataclass(static=()):
@@ -117,6 +117,12 @@ def _floats(values):
     return tuple(_float(v) for v in values)
 
 
+def _plain(value):
+    """Whether a value is a Python number, so that a check may look at it. A tracer or
+    an array is not: its value is not known until the program runs."""
+    return isinstance(value, (int, float, np.number)) and not isinstance(value, (bool, np.bool_))
+
+
 def _walls(value, name):
     """One value for both walls, or a ``(left, right)`` pair, as a pair of
     floats (functions and arrays pass through); plain numbers must lie in [0, 1]."""
@@ -146,6 +152,72 @@ def _boundary_codes(value, name):
     return tuple(int(c) for c in codes)
 
 
+@pytree_dataclass(static=("side", "emit"))
+class Source:
+    """A maintained inflow of one species through one wall: a reservoir of plasma
+    behind the plane that supplies a prescribed flux, independently of what leaves.
+
+    The distribution behind the plane is a Maxwellian at rest or a cold beam; the
+    flux that crosses is the velocity density weighted by the normal speed
+    (:mod:`~jaxincell._sources`). A fixed number of particles is emitted every step
+    with a continuous weight :math:`\\Gamma\\Delta t/N_{\\rm emit}`, so the emitted
+    weight is exactly the prescribed flux and is differentiable in ``density`` and
+    ``vth``.
+
+    Args:
+        density: Reservoir number density :math:`n_{\\rm in}`, :math:`\\mathrm{m^{-3}}`.
+        vth: Thermal speed per component of the reservoir, :math:`\\sqrt{2k_BT/m}`, m/s,
+            given as :class:`Species` takes it. Zero makes a cold beam.
+        drift: Drift velocity of the reservoir, m/s. Its normal component must
+            vanish unless ``vth`` does: the drifting crossing distribution needs a
+            sampler that is not implemented, and a Rayleigh sample plus a drift is
+            not it.
+        side: ``"left"`` or ``"right"``, the wall the plasma enters through.
+        emit: Particles emitted per step. They occupy the dead slots of the
+            species, so the species needs enough of them: ``n`` must exceed
+            ``emit`` times the longest residence time in steps.
+        min_weight: Fraction of the emitted weight below which a wall collects
+            what is left of a particle instead of reflecting it again, freeing its
+            slot. A wall that returns the fraction :math:`R` of each impact would
+            otherwise hold a particle for ever at a weight falling as :math:`R^k`.
+            The remainder is given to the wall, so the charge and energy ledgers
+            stay exact; what changes is where the last :math:`10^{-3}` of a
+            particle lands.
+    """
+    density: float = 0.0
+    vth: tuple = (0.0, 0.0, 0.0)
+    drift: tuple = (0.0, 0.0, 0.0)
+    side: str = "left"
+    emit: int = 0
+    min_weight: float = 1e-3
+
+    def __post_init__(self):
+        if _template(self):
+            return
+        object.__setattr__(self, "density", _float(self.density))
+        object.__setattr__(self, "min_weight", _float(self.min_weight))
+        for name in ("vth", "drift"):
+            object.__setattr__(self, name, _components(getattr(self, name), name))
+        _require(self.side in ("left", "right"), f"side is 'left' or 'right', not {self.side!r}")
+        _require(self.emit >= 1, "a Source emits at least one particle per step")
+        warm = any(_plain(u) and u != 0 for u in self.vth)
+        if warm and _plain(self.drift[0]) and self.drift[0] != 0:
+            raise ValueError("a Source is a Maxwellian at rest or a cold beam: the crossing distribution of a "
+                             "drifting Maxwellian, proportional to v exp[-(v-u)^2/2 sigma^2] on v > 0, has no "
+                             "sampler here. Give vth=0 for a beam, or drift=(0, u_y, u_z).")
+
+    @property
+    def sigma(self):
+        """Component spread :math:`\\sigma = v_{th}/\\sqrt2` of the reservoir."""
+        return jax.numpy.asarray(self.vth[0]) / jax.numpy.sqrt(2.0)
+
+    @property
+    def beam(self):
+        """Whether the reservoir is cold, so that :func:`~jaxincell._sources.sample_crossing`
+        draws a beam. Decided when the object is built, since it selects a branch."""
+        return not any(_plain(u) and u != 0 for u in self.vth)
+
+
 @pytree_dataclass(static=("cells", "particle_bc", "field_bc"))
 class Domain:
     """The simulation box.
@@ -158,7 +230,15 @@ class Domain:
             ``"thermal"``, or a ``(left, right)`` pair. A thermal wall re-emits
             every particle that reaches it from the half-Maxwellian flux of its
             species, at the species' thermal speed.
-        field_bc: The same choices except ``"thermal"``, for the fields.
+        field_bc: The electrical condition at each wall: ``"periodic"``;
+            ``"reflective"``, a symmetry plane where :math:`E_x` vanishes;
+            ``"absorbing"``, a conductor that holds the charge it collects, two of
+            them being short-circuited to each other; or ``"open"``, the plane a
+            :class:`Source` supplies through, which imposes nothing and leaves the
+            collector opposite to close the problem. A particle boundary and an
+            electrical one are separate choices: a wall that absorbs particles is
+            not necessarily a conductor, and a symmetry plane for the field does not
+            reflect particles.
         restitution: Coefficient of restitution of the walls, or a
             ``(left, right)`` pair: whatever a wall sends back has its normal
             velocity multiplied by ``-restitution``. It applies to everything a
@@ -187,6 +267,9 @@ class Domain:
         for bc in (self.particle_bc, self.field_bc):
             _require((0 in bc) == (bc == (0, 0)), "a periodic wall needs a periodic partner")
         _require(3 not in self.field_bc, "a thermal wall re-emits particles; give the fields a reflective one")
+        _require(4 not in self.field_bc or self.field_bc == (4, 2),
+                 "field_bc='open' is the source plane of a box closed by a collector opposite: "
+                 "use field_bc=('open', 'absorbing')")
 
     @property
     def dx(self):
@@ -232,6 +315,9 @@ class Species:
         random_positions: Uniformly random positions instead of equally spaced.
         x, v: Optional arrays of shape ``(n, 3)`` that replace the generated
             phase space.
+        source: A :class:`Source` that maintains this species through one wall,
+            or ``None``. The particles it emits occupy the species' own dead slots,
+            so ``n`` is a capacity rather than a fixed population.
         reflection: Fraction of each particle that an absorbing wall sends back
             instead of collecting: a number, a function of the normal impact
             speed :math:`|v_x|` in m/s that returns the fraction, or a
@@ -253,6 +339,7 @@ class Species:
     random_positions: bool = False
     x: object = None
     v: object = None
+    source: object = None
     reflection: object = 0.0
 
     def __post_init__(self):
@@ -292,7 +379,7 @@ class Species:
         return self.charge * elementary_charge
 
 
-@pytree_dataclass(static=("algorithm", "field_solver", "relativistic", "filter_passes",
+@pytree_dataclass(static=("algorithm", "model", "field_solver", "relativistic", "filter_passes",
                           "filter_strides", "picard_iterations", "substeps"))
 class Solver:
     """Numerical choices.
@@ -300,9 +387,18 @@ class Solver:
     Args:
         algorithm: ``"explicit"`` (leapfrog with the Boris pusher) or
             ``"implicit"`` (Crank-Nicolson with Picard iteration).
-        field_solver: ``"ampere"`` advances :math:`E_x` with Ampere's law and the
-            charge-conserving current; ``"gauss"`` recomputes it from the charge
-            density every step.
+        model: ``"electromagnetic"`` solves Maxwell's equations for all six field
+            components; ``"electrostatic"`` solves :math:`\\partial_x E_x = \\rho/\\epsilon_0`
+            alone. An electrostatic run keeps all three velocity components and any
+            external field, but the plasma's own transverse fields are not evolved and
+            the transverse currents are not deposited, which is cheaper and removes the
+            light-wave time-step limit. Choose it whenever the physics is
+            :math:`\\mathbf E = -\\nabla\\phi`: waves along the grid, sheaths, beam
+            instabilities.
+        field_solver: how an electromagnetic run advances :math:`E_x`: ``"ampere"``
+            with Ampere's law and the charge-conserving current, or ``"gauss"`` by
+            recomputing it from the charge density every step. An electrostatic run
+            always solves the Gauss law.
         relativistic: Relativistic Boris pusher.
         filter_passes: Binomial smoothing passes on the sources (0 disables).
             Each pass is followed by one compensation pass.
@@ -312,6 +408,7 @@ class Solver:
         substeps: Particle sub-steps per field step in the implicit scheme.
     """
     algorithm: str = "explicit"
+    model: str = "electromagnetic"
     field_solver: str = "ampere"
     relativistic: bool = False
     filter_passes: int = 0
@@ -323,12 +420,19 @@ class Solver:
     def __post_init__(self):
         _require(self.algorithm in ("explicit", "implicit"),
                  f"algorithm is 'explicit' or 'implicit', not {self.algorithm!r}")
+        _require(self.model in ("electromagnetic", "electrostatic"),
+                 f"model is 'electromagnetic' or 'electrostatic', not {self.model!r}")
         _require(self.field_solver in ("ampere", "gauss"),
                  f"field_solver is 'ampere' or 'gauss', not {self.field_solver!r}")
         _require(self.filter_passes >= 0 and self.picard_iterations >= 1 and self.substeps >= 1,
                  "filter_passes cannot be negative, and picard_iterations and substeps must be at least one")
         object.__setattr__(self, "filter_alpha", _float(self.filter_alpha))
         object.__setattr__(self, "filter_strides", tuple(int(s) for s in self.filter_strides))
+
+    @property
+    def electrostatic(self):
+        """Whether the plasma's own transverse fields are left out of the run."""
+        return self.model == "electrostatic"
 
 
 @pytree_dataclass(static=("pairs",))
