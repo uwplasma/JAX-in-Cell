@@ -64,16 +64,16 @@ beam_speed = 0.25                          # ion drift at the source plane, in e
 box_debye_lengths = 12.0
 cells = 48
 steps_per_plasma_period = 1 / 0.15         # omega_pe dt = 0.15
-capacity = 24000 if quick else 48000       # slots per species
-emit = 24 if quick else 48                 # emitted per step per species
-preparation = 800 if quick else 1200       # steps of preparation, at r_prepared, not differentiated
+capacity = 8000 if quick else 48000        # slots per species
+emit = 8 if quick else 48                  # emitted per step per species
+preparation = 300 if quick else 1200       # steps of preparation, at r_prepared, not differentiated
 window = 25                                # steps of the differentiated response experiment
 r_prepared = 0.25                          # the reflectivity the baseline plasma is prepared at
 r_reference = 0.35                         # the answer the optimiser has to find
 r_start = 0.08                             # where it starts, well away from it
 bounds = (0.02, 0.50)                      # admissible interval, away from the limiting branches
-training_seeds = (0, 1, 2, 3)              # fixed across every objective call and line search
-held_out_seeds = (10, 11, 12, 13)          # never used to choose a step
+training_seeds = (0, 1, 2) if quick else (0, 1, 2, 3)       # fixed across every call and line search
+held_out_seeds = (10, 11, 12) if quick else (10, 11, 12, 13)   # never used to choose a step
 field_angle = 30.0                         # degrees to the wall plane, with --oblique
 gyro_over_debye = 6.0                      # rho_s/lambda_D, which sets B_0, with --oblique
 
@@ -136,6 +136,12 @@ def measure(r, state):
     return sensors @ potential(out)[-1] / electron_temperature * domain.dx
 
 
+if quick:
+    print("--quick is a smoke run: a sixth of the particles, a quarter of the preparation and three\n"
+          "realisations instead of four. It checks that every step of this script executes and that\n"
+          "the gradient is still the derivative of the calculation. It usually recovers the control\n"
+          "too, but to about 0.01 rather than 0.005, and the identifiability check below is what\n"
+          "says how far to trust it. The documentation quotes the full preset.\n")
 print("preparing the baseline plasma at r = %.2f, %d steps, for %d training and %d held-out seeds"
       % (r_prepared, preparation, len(training_seeds), len(held_out_seeds)))
 prepared = {seed: jax.block_until_ready(simulation(r_prepared).run(preparation, seed=seed,
@@ -189,7 +195,7 @@ forward = float(jax.jit(lambda r: jax.jvp(one, (r,), (1.0,))[1])(r_prepared))
 one_jit = jax.jit(one)
 print(" reverse %+.10e   forward %+.10e   relative difference %.1e"
       % (reverse, forward, abs(forward / reverse - 1)))
-steps_of_h = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
+steps_of_h = [1e-1, 1e-3, 1e-5] if quick else [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
 differences = [float((one_jit(r_prepared + h) - one_jit(r_prepared - h)) / (2 * h)) for h in steps_of_h]
 for h, d in zip(steps_of_h, differences):
     print("   h %7.0e   central difference %+.8e   relative mismatch %.1e" % (h, d, abs(d / reverse - 1)))
@@ -197,7 +203,7 @@ best = min(range(len(steps_of_h)), key=lambda i: abs(differences[i] / reverse - 
 print(" best agreement %.1e at h = %.0e\n" % (abs(differences[best] / reverse - 1), steps_of_h[best]))
 
 # --- 2. is the response identifiable above the scatter between realisations? ----------------------
-scan_points = np.linspace(bounds[0], bounds[1], 6 if quick else 9)
+scan_points = np.linspace(bounds[0], bounds[1], 4 if quick else 9)
 scan = np.array([np.asarray(readings(float(r), training_seeds)) for r in scan_points])
 spread_of_seeds = np.std([np.asarray(measure_jit(r_reference, prepared[s])) for s in held_out_seeds], axis=0)
 signal = np.ptp(scan, axis=0)
@@ -211,7 +217,7 @@ print()
 r, history = r_start, []
 step_size = 0.02 / max(abs(float(value_and_grad(r_start)[1])), 1e-12)
 print("%4s %8s %12s %12s %10s" % ("iter", "r", "loss", "d loss/d r", "step"))
-for iteration in range(14 if quick else 20):
+for iteration in range(8 if quick else 20):
     objective, slope = value_and_grad(r)
     objective, slope = float(objective), float(slope)
     history.append((r, objective, slope))
@@ -255,7 +261,7 @@ for name, value in (("start", r_start), ("recovered", r_final), ("reference", r_
 
 # a coarse scan of the held-out loss locates the minimum without a gradient at all, and its
 # distance from the reference is the uncertainty of the recovered control, not the optimiser's
-fine = np.linspace(*bounds, 13 if quick else 25)
+fine = np.linspace(*bounds, 7 if quick else 25)
 held_out_curve = np.array([held_out_loss(float(v)) for v in fine])
 held_out_best = float(fine[int(np.argmin(held_out_curve))])
 print("  the held-out loss is smallest at r = %.4f on a scan of %d points; the recovered value is "

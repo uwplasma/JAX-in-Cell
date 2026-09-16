@@ -42,7 +42,8 @@ They are ordered by how much of the code they use, not by how interesting they a
 `sheath_optimization.py` also takes `--oblique`, which runs the same experiment in a
 magnetic field 30 degrees to the wall.
 
-The three sheath scripts take `--quick`, which runs a smaller version with the same
-structure and more noise; that is what continuous integration runs.
+The three sheath scripts take `--quick`, a smoke run with far fewer particles and a
+shorter run: 3, 23 and 12 seconds respectively, which is what continuous integration
+runs. It checks that they execute and reproduces the structure, with more noise.
 
 `input.toml` is for the command line, `jaxincell examples/input.toml`.

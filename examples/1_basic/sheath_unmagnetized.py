@@ -54,11 +54,11 @@ density = 1e16                        # m^-3, the upstream plasma density
 mass_ratio = 1836.0                   # m_i / m_e; 1836 is hydrogen
 beam_speed = 0.2                      # ion drift at the source plane, in electron spreads
 box_debye_lengths = 10.0              # box length in Debye lengths
-cells = 60 if quick else 120          # dx = L / cells
+cells = 48 if quick else 120          # dx = L / cells
 steps_per_plasma_period = 10.0        # omega_pe dt = 0.1
-transits = 2.0 if quick else 6.0      # how many ion transits of the box to run for
-capacity = 30000 if quick else 120000  # particle slots per species: a pool, not a population
-emit = 30 if quick else 120           # particles each source emits per step
+transits = 1.0 if quick else 6.0      # how many ion transits of the box to run for
+capacity = 12000 if quick else 120000  # particle slots per species: a pool, not a population
+emit = 12 if quick else 120           # particles each source emits per step
 
 # --- the setup -------------------------------------------------------------------------
 spread = np.sqrt(electron_temperature * e_charge / mass_electron)          # sigma_e = sqrt(T_e/m_e)

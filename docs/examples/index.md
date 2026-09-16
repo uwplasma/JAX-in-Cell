@@ -11,8 +11,8 @@ cd JAX-in-Cell
 python examples/1_basic/two_stream.py
 ```
 
-The three sheath scripts take `--quick`, which runs a smaller version with the same
-structure and more noise.
+The three sheath scripts take `--quick`, a smoke run of a few seconds with far fewer
+particles: it checks that they execute and reproduces the structure, with more noise.
 
 ::::{grid} 1 2 2 2
 :gutter: 3

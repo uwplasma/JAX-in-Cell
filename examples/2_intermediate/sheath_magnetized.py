@@ -50,14 +50,14 @@ electron_temperature = 1.0              # eV
 temperature_ratio = 1.0                 # T_i / T_e
 density = 1e16                          # m^-3
 mass_ratio = 400.0                      # m_i/m_e, reduced so that the ion transit fits in a laptop run
-angles = (90.0, 30.0, 15.0)             # degrees to the wall plane; 90 is normal incidence
+angles = (90.0, 30.0) if quick else (90.0, 30.0, 15.0)   # to the wall plane; 90 is normal incidence
 gyro_over_debye = 8.0                   # rho_s / lambda_D, which sets B_0
 box_debye_lengths = 60.0
-cells = 120 if quick else 240
+cells = 96 if quick else 240
 steps_per_plasma_period = 10.0
-transits = 1.5 if quick else 4.0
-capacity = 30000 if quick else 100000
-emit = 30 if quick else 100
+transits = 0.6 if quick else 4.0
+capacity = 10000 if quick else 100000
+emit = 10 if quick else 100
 
 # --- the setup ----------------------------------------------------------------------------
 spread = np.sqrt(electron_temperature * e_charge / mass_electron)
