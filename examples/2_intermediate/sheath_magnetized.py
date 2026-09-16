@@ -42,7 +42,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Simulation, Solver, Source, Species, epsilon_0, mass_electron, potential,
-                       elementary_charge as e_charge, speed_of_light as c)
+                       elementary_charge as e_charge)
 
 # --- what to change ---------------------------------------------------------------------
 quick = "--quick" in sys.argv
@@ -86,7 +86,7 @@ results = {}
 for angle in angles:
     radians = np.radians(angle)
     B = jnp.zeros((cells, 3)).at[:, 0].set(field * np.sin(radians)).at[:, 2].set(field * np.cos(radians))
-    domain = Domain(length=length, cells=cells, dt_over_dx_c=dt * c / (length / cells),
+    domain = Domain(length=length, cells=cells, time_step=dt,
                     particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread, 0, 0),
                         active=capacity // 4, quiet=True,

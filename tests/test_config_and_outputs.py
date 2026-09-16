@@ -280,3 +280,20 @@ def test_the_version_and_the_packaging_metadata():
     with pytest.raises(AttributeError, match="no attribute 'plots'"):
         jaxincell.plots
     assert not any((ROOT / name).exists() for name in ("setup.py", "setup.cfg", "requirements.txt"))
+
+
+def test_a_time_step_can_be_given_in_seconds_or_as_a_courant_number():
+    """`dt_over_dx_c` is the light-wave Courant number, which is the natural input for an
+    electromagnetic run and an awkward one for an electrostatic run set by the plasma
+    frequency; `time_step` says the seconds directly. `Domain.dt` is the step either way,
+    and `Domain.courant` the Courant number either way, returned as given so that a run
+    asking for exactly one does not get the round-off above it."""
+    length, cells = 0.01, 64
+    seconds = 0.37 * (length / cells) / c
+    by_courant = Domain(length=length, cells=cells, dt_over_dx_c=0.37)
+    by_seconds = Domain(length=length, cells=cells, time_step=seconds)
+    assert by_courant.dt == pytest.approx(seconds, rel=1e-15)
+    assert by_seconds.dt == seconds and by_seconds.courant == pytest.approx(0.37, rel=1e-15)
+    assert Domain().dt_over_dx_c == 1.0 and Domain().courant == 1.0        # exactly, not 1 + eps
+    with pytest.raises(ValueError, match="not both"):
+        Domain(dt_over_dx_c=1.0, time_step=1e-12)

@@ -51,7 +51,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Simulation, Solver, Source, Species, epsilon_0, mass_electron, potential,
-                       elementary_charge as e_charge, speed_of_light as c)
+                       elementary_charge as e_charge)
 from jaxincell.sheath import floating_potential, source_density
 
 # --- what to change ------------------------------------------------------------------------
@@ -84,7 +84,7 @@ debye = spread / omega_pe
 length = box_debye_lengths * debye
 dt = 1.0 / (steps_per_plasma_period * omega_pe)
 reservoir = float(source_density(float(floating_potential(beam_speed)))) * density
-domain = Domain(length=length, cells=cells, dt_over_dx_c=dt * c / (length / cells),
+domain = Domain(length=length, cells=cells, time_step=dt,
                 particle_bc="absorbing", field_bc=("open", "absorbing"))
 
 # The one line that makes this the magnetized experiment. B_0 = B_0 (sin alpha, 0, cos alpha)

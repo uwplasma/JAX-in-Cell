@@ -44,7 +44,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, mass_electron,
-                       potential, elementary_charge as e_charge, speed_of_light as c)
+                       potential, elementary_charge as e_charge)
 from jaxincell.sheath import densities, floating_potential, source_density
 
 # --- what to change ------------------------------------------------------------------
@@ -71,7 +71,7 @@ steps = stored * max(int(transits * length / (beam_speed * spread) / dt) // stor
 phi_wall = float(floating_potential(beam_speed))                # the reference, solved independently
 amplitude = float(source_density(phi_wall))                     # makes the source plane neutral
 
-domain = Domain(length=length, cells=cells, dt_over_dx_c=dt * c / (length / cells),
+domain = Domain(length=length, cells=cells, time_step=dt,
                 particle_bc="absorbing",                 # both planes take back whatever reaches them
                 field_bc=("open", "absorbing"))          # the source plane imposes nothing; the collector floats
 electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread, 0, 0),

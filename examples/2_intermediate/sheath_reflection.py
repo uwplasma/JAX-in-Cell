@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron, potential, quiet_start,
-                       elementary_charge as e_charge, speed_of_light as c)
+                       elementary_charge as e_charge)
 
 T_e, density, mass_ratio, particles, cells = 1.0, 1e16, 400.0, 30000, 120
 sigma = np.sqrt(T_e * e_charge / mass_electron)                  # electron thermal spread
@@ -46,7 +46,7 @@ length, steps = 60 * debye, 6000                                  # about one io
 v_th_e, v_th_i = np.sqrt(2) * sigma, np.sqrt(2) * sigma / np.sqrt(40 * mass_ratio)   # T_i = T_e / 40
 
 # electrostatic, so the time step follows the plasma frequency and not the speed of light
-domain = Domain(length=length, cells=cells, dt_over_dx_c=(0.2 / omega_pe) * c / (length / cells),
+domain = Domain(length=length, cells=cells, time_step=0.2 / omega_pe,
                 particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing"))
 walls = {"absorbing": (0.0, 0.0), "returns half": (0.5, 0.5),
          "returns the slow ones": (lambda speed: jnp.exp(-speed ** 2 / (2 * sigma ** 2)), 0.5)}

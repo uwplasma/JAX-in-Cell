@@ -14,6 +14,7 @@ domain = Domain(length=0.01, cells=64, dt_over_dx_c=1.0,
 | `length` | box length $L$ in metres; the box is $[-L/2, L/2]$ | `1e-2` |
 | `cells` | number of cells $N_x$ (static) | `64` |
 | `dt_over_dx_c` | the ratio $c\Delta t/\Delta x$ | `1.0` |
+| `time_step` | $\Delta t$ in seconds, instead of `dt_over_dx_c` | `None` |
 | `particle_bc` | wall type for particles, one name or a `(left, right)` pair (static) | `"periodic"` |
 | `field_bc` | wall type for fields (static) | `"periodic"` |
 | `restitution` | the normal velocity of whatever a wall sends back is multiplied by `-restitution`; one number or a `(left, right)` pair | `1.0` |
@@ -22,20 +23,27 @@ domain = Domain(length=0.01, cells=64, dt_over_dx_c=1.0,
 Derived quantities are properties, so they follow the arguments:
 
 ```python
-domain.dx      # length / cells
-domain.dt      # dt_over_dx_c * dx / c
-domain.grid    # cell centres, shape (cells,)
+domain.dx       # length / cells
+domain.dt       # the step in seconds, however it was given
+domain.courant  # c dt / dx, however it was given
+domain.grid     # cell centres, shape (cells,)
 ```
 
 ## Setting the time step
 
-`dt_over_dx_c` fixes $\Delta t$ through the grid rather than in seconds, so refining
-the mesh refines the step with it. The value to choose depends on the physics:
+Give the step one way or the other, not both: `dt_over_dx_c` fixes $\Delta t$ through the
+grid rather than in seconds, so refining the mesh refines the step with it, and
+`time_step` says the seconds. `Domain.dt` and `Domain.courant` are the two readings of
+whichever was given.
+
+Which is the natural input depends on the physics, and so does the value:
 
 * **Electromagnetic problems** need $c\Delta t/\Delta x \le 1$; at exactly one the
   vacuum wave propagates without error.
-* **Electrostatic problems** never excite the transverse fields, so the light-wave
-  limit does not apply and values well above one are normal — the two-stream runs in
+* **Electrostatic problems** never excite the transverse fields, so the light-wave limit
+  does not apply, the step is set by the plasma frequency or the gyro-frequency instead,
+  and `time_step=0.1 / omega_pe` says that where a Courant number would have to be worked
+  out from the grid. Values of `dt_over_dx_c` well above one are normal there — the two-stream runs in
   {doc}`../numerics/verification` use {{ energy_courant }}. What binds instead is
   $\omega_p\Delta t \lesssim 0.2$.
 

@@ -228,7 +228,12 @@ class Domain:
     Args:
         length: Box length :math:`L` in metres; the box spans :math:`[-L/2, L/2]`.
         cells: Number of cells :math:`N_x`.
-        dt_over_dx_c: Time step as :math:`c\\,\\Delta t/\\Delta x`.
+        time_step: Time step in seconds. Give this or ``dt_over_dx_c``, not both;
+            ``Domain.dt`` is the step in seconds either way.
+        dt_over_dx_c: Time step as :math:`c\\,\\Delta t/\\Delta x`, the Courant number of a
+            light wave, and the natural input for an electromagnetic run, whose stability
+            limit is one. An electrostatic run has no light wave and is set by the plasma
+            frequency instead, where ``time_step`` says directly what it means.
         particle_bc: ``"periodic"``, ``"reflective"``, ``"absorbing"`` or
             ``"thermal"``, or a ``(left, right)`` pair. A thermal wall re-emits
             every particle that reaches it from the half-Maxwellian flux of its
@@ -251,7 +256,8 @@ class Domain:
     """
     length: float = 1e-2
     cells: int = 64
-    dt_over_dx_c: float = 1.0
+    dt_over_dx_c: object = None
+    time_step: object = None
     particle_bc: object = "periodic"
     field_bc: object = "periodic"
     restitution: object = 1.0
@@ -261,7 +267,12 @@ class Domain:
     def __post_init__(self):
         if _template(self):
             return
-        for name in ("length", "dt_over_dx_c", "length_y", "length_z"):
+        _require(self.time_step is None or self.dt_over_dx_c is None,
+                 "give Domain either time_step, in seconds, or dt_over_dx_c, the light-wave Courant "
+                 "number, not both")
+        if self.time_step is None and self.dt_over_dx_c is None:
+            object.__setattr__(self, "dt_over_dx_c", 1.0)
+        for name in ("length", "dt_over_dx_c", "time_step", "length_y", "length_z"):
             object.__setattr__(self, name, _float(getattr(self, name)))
         object.__setattr__(self, "restitution", _walls(self.restitution, "restitution"))
         object.__setattr__(self, "particle_bc", _boundary_codes(self.particle_bc, "particle_bc"))
@@ -280,7 +291,16 @@ class Domain:
 
     @property
     def dt(self):
-        return self.dt_over_dx_c * self.dx / speed_of_light
+        """The time step in seconds, however it was given."""
+        return self.time_step if self.dt_over_dx_c is None else self.dt_over_dx_c * self.dx / speed_of_light
+
+    @property
+    def courant(self):
+        """:math:`c\\,\\Delta t/\\Delta x`, however the step was given: the Courant number of a
+        light wave, which the explicit electromagnetic field update needs below one. It is
+        returned as given rather than recomputed, so that a run asking for exactly one gets
+        exactly one and not the round-off above it."""
+        return self.time_step * speed_of_light / self.dx if self.dt_over_dx_c is None else self.dt_over_dx_c
 
     @property
     def grid(self):

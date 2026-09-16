@@ -265,7 +265,7 @@ class Simulation:
         def plain(v):
             return isinstance(v, (int, float)) and not isinstance(v, bool)
 
-        courant = self.domain.dt_over_dx_c
+        courant = self.domain.courant
         if (self.solver.algorithm != "explicit" or self.solver.electrostatic
                 or not plain(courant) or courant <= 1):
             return
