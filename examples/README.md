@@ -39,6 +39,9 @@ They are ordered by how much of the code they use, not by how interesting they a
 | `optimize_two_stream.py` | gradient ascent on a growth rate, through the whole run | `sqrt(3/8)`, the cold-beam optimum | ~2 min |
 | `sheath_optimization.py` | a wall's reflectivity recovered from the sheath it holds | the value the target was made at | ~15 min |
 
+`sheath_optimization.py` also takes `--oblique`, which runs the same experiment in a
+magnetic field 30 degrees to the wall.
+
 The three sheath scripts take `--quick`, which runs a smaller version with the same
 structure and more noise; that is what continuous integration runs.
 

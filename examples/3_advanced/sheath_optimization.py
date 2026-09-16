@@ -34,7 +34,9 @@ So the gradient here is the exact derivative of the discrete map, and over this 
 it is also a useful estimate of the physical response. Over a much longer one it would
 be neither useless nor wrong, but no longer the thing the optimiser wants.
 
-Run with `--quick` for a smaller, faster version.
+Run with `--quick` for a smaller, faster version, and with `--oblique` for the same
+experiment in a magnetic field 30 degrees to the wall: one array added to the same
+`Simulation`, and nothing else in the script changes.
 """
 
 import os
@@ -54,6 +56,7 @@ from jaxincell.sheath import floating_potential, source_density
 
 # --- what to change ------------------------------------------------------------------------
 quick = "--quick" in sys.argv
+oblique = "--oblique" in sys.argv         # the same experiment in a field 30 degrees to the wall
 electron_temperature = 1.0                 # eV
 density = 1e16                             # m^-3
 mass_ratio = 400.0                         # m_i/m_e, reduced so the ion transit fits in a laptop run
@@ -71,6 +74,8 @@ r_start = 0.08                             # where it starts, well away from it
 bounds = (0.02, 0.50)                      # admissible interval, away from the limiting branches
 training_seeds = (0, 1, 2, 3)              # fixed across every objective call and line search
 held_out_seeds = (10, 11, 12, 13)          # never used to choose a step
+field_angle = 30.0                         # degrees to the wall plane, with --oblique
+gyro_over_debye = 6.0                      # rho_s/lambda_D, which sets B_0, with --oblique
 
 # --- the setup ---------------------------------------------------------------------------------
 spread = np.sqrt(electron_temperature * e_charge / mass_electron)
@@ -82,6 +87,18 @@ reservoir = float(source_density(float(floating_potential(beam_speed)))) * densi
 domain = Domain(length=length, cells=cells, dt_over_dx_c=dt * c / (length / cells),
                 particle_bc="absorbing", field_bc=("open", "absorbing"))
 
+# The one line that makes this the magnetized experiment. B_0 = B_0 (sin alpha, 0, cos alpha)
+# with alpha to the wall plane, at a strength set by the ion gyro-radius in Debye lengths.
+external_B = None
+if oblique:
+    radians = np.radians(field_angle)
+    sound_speed = spread / np.sqrt(mass_ratio)
+    strength = mass_ratio * mass_electron * sound_speed / (e_charge * gyro_over_debye * debye)
+    external_B = jnp.zeros((cells, 3)).at[:, 0].set(strength * np.sin(radians)).at[:, 2].set(
+        strength * np.cos(radians))
+    print("oblique: alpha %.0f deg to the wall, rho_s/lambda_D %.1f, Omega_e dt %.2f"
+          % (field_angle, gyro_over_debye, e_charge * strength / mass_electron * dt))
+
 # Two fixed Gaussian sensors, one in the plasma and one in the sheath, both well inside the
 # box and both of a fixed physical width, so that neither moves if the grid is refined.
 faces = np.asarray(domain.grid) + domain.dx / 2
@@ -92,7 +109,12 @@ def sensor(centre, width):
     return jnp.asarray(k / (k.sum() * domain.dx))
 
 
-sensors = jnp.stack([sensor(-length / 2 + 3 * debye, 1.5 * debye), sensor(length / 2 - 2.5 * debye, 1.2 * debye)])
+# The sheath sensor sits where the response to the reflectivity is: a scan of positions puts
+# the response over the admissible interval at 3.9 times the scatter between realisations at
+# 1.5 Debye lengths from the collector, against 2.9 at 2.5 and 0.9 at 6. Closer still is
+# better again, but a Gaussian of this width centred inside two cloud half-widths of the wall
+# would take part of its reading from the cells the deposit truncates.
+sensors = jnp.stack([sensor(-length / 2 + 3 * debye, 1.5 * debye), sensor(length / 2 - 1.5 * debye, 1.0 * debye)])
 
 
 def simulation(r):
@@ -104,7 +126,7 @@ def simulation(r):
     ions = Species("ions", capacity, 1.0, mass_ratio * mass_electron, density, 0.0, (beam_speed * spread, 0, 0),
                    active=capacity // 3, quiet=True,
                    source=Source(density=density, vth=0.0, drift=(beam_speed * spread, 0, 0), emit=emit, beam=True))
-    return Simulation(domain, [electrons, ions], Solver(model="electrostatic"))
+    return Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=external_B)
 
 
 def measure(r, state):

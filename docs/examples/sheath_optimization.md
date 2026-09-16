@@ -69,21 +69,44 @@ choose a step.
 The script prints an identifiability check before optimising: the response of each
 sensor over the admissible interval against the scatter between realisations. The plasma
 sensor comes out at a ratio of 0.3 and carries almost no information; the sheath sensor
-at 2.6 and carries it all. That is worth seeing rather than hiding.
+at 3.5 and carries it all. That is worth seeing rather than hiding, and it is what put
+the sheath sensor where it is — a scan of positions gives 4.7 at 0.8 Debye lengths from
+the collector, 3.9 at 1.5, 2.9 at 2.5 and 0.9 at 6, and 1.5 is as close as a Gaussian of
+this width can sit without taking part of its reading from the cells the deposit
+truncates at the wall.
 
 Starting at $r = 0.08$ with the answer at $r = 0.35$, in the `--quick` preset:
 
 | | $r$ | training loss | held-out loss |
 |---|---|---|---|
-| start | 0.0800 | 2.146 | 1.425 |
-| recovered | 0.3550 | 0.00027 | 0.00223 |
+| start | 0.0800 | 3.379 | 2.511 |
+| recovered | 0.3432 | 0.00102 | 0.00166 |
 | reference | 0.3500 | 0 | 0 |
 
-The control is recovered to 0.005 absolute in fourteen iterations of projected gradient
-descent with backtracking, and the training loss falls by nearly four orders of
+The control is recovered to 0.0068 absolute in eleven iterations of projected gradient
+descent with backtracking, and the training loss falls by more than three orders of
 magnitude. A coarse scan of the held-out loss, which uses no gradient at all, puts its
-minimum at $r = 0.34$; the distance from the reference is the uncertainty of the
-recovered control, about 0.01, and not the optimiser's tolerance.
+minimum at $r = 0.34$; the recovered value is 0.003 from it, and the distance of that
+minimum from the reference, about 0.01, is the uncertainty of the recovered control
+rather than the optimiser's tolerance.
+
+## The same experiment in a magnetic field
+
+`--oblique` adds a uniform field 30 degrees to the wall at $\rho_s/\lambda_D = 6$. One
+array is passed to the same `Simulation` and nothing else in the script changes. The
+gradient stays exact — forward against reverse to $3\times10^{-15}$, and a central
+difference agrees to $1.5\times10^{-8}$ at $h = 10^{-5}$ — and the control is recovered,
+in the `--quick` preset, to better than 0.001.
+
+What changes is how much the measurement can resolve. The sheath sensor's response over
+the interval falls from 3.5 times the scatter between realisations to 0.5, and moving the
+sensor does not recover it: a scan at 30 degrees gives 1.5 at 0.8 Debye lengths, 1.1 at
+1.5 and 0.6 at 2.5, against 4.7, 3.9 and 2.9 without the field. The electrons are
+magnetised, $\rho_e/\lambda_D = 0.3$ here, so reflecting a fraction of the electron flux
+moves the sheath potential about three times less while the noise does not fall. The
+target is generated on the same realisations, so the inverse problem is still exactly
+solvable and the optimiser solves it; with independent data the same experiment would
+place the control about three times less well, and the held-out scan says so.
 
 ## What this is and is not
 
