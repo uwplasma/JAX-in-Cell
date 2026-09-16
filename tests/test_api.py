@@ -448,6 +448,18 @@ def test_every_example_the_documentation_names_exists():
     assert len(named) >= 13 and named <= scripts, sorted(named - scripts)
 
 
+def test_the_citation_file_and_the_readme_name_the_same_authors():
+    """CITATION.cff is what GitHub's "Cite this repository" reads, and the README has the
+    same names in a BibTeX entry. Two lists of authors drift apart unless something holds
+    them together."""
+    citation = (ROOT / "CITATION.cff").read_text()
+    surnames = re.findall(r"family-names: (\w+)", citation)
+    assert surnames and surnames[:len(surnames) // 2] == surnames[len(surnames) // 2:]   # both blocks agree
+    readme = re.search(r"author = \{([^}]*)\}", (ROOT / "README.md").read_text()).group(1)
+    assert {name.split(",")[0].strip() for name in readme.split(" and ")} == set(surnames)
+    assert "MIT" in citation and (ROOT / "LICENSE").read_text().startswith("MIT")
+
+
 def test_diagnostics_without_particles_gives_the_field_quantities_only():
     """`store_particles=False` keeps the fields and drops the particle history, so
     the diagnostics that need velocities are absent rather than wrong. That is the

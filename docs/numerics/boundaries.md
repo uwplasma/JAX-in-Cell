@@ -2,8 +2,8 @@
 
 `Domain(particle_bc=..., field_bc=...)` set the walls, either as one name applied to
 both ends or as a `(left, right)` pair. The kinds are `"periodic"`, `"reflective"`,
-`"absorbing"` and, for particles only, `"thermal"`. A periodic wall needs a periodic
-partner; the others can be mixed.
+`"absorbing"`, for particles only `"thermal"`, and for the field only `"open"`. A
+periodic wall needs a periodic partner; the others can be mixed.
 
 ```{figure} ../_static/figures/boundaries.png
 :width: 100%
@@ -148,7 +148,27 @@ A single absorbing wall facing a reflective or thermal one, on either side, is a
 floating electrode on its own: the symmetry plane fixes $E = 0$ at its end, the current
 through it is zero, the field is integrated from it, and the electrode sits at whatever
 potential the charge it has collected gives it. That is the setup of
-{doc}`../examples/sheath_reflection`. Two reflective walls are two symmetry planes, and the box
+{doc}`../examples/sheath_reflection`.
+
+An **open** wall is the plane a {class}`~jaxincell.Source` supplies through, and it is
+neither. A reservoir drives a current across it, so $E$ there is not zero and nothing at
+that end fixes the constant. The collector opposite does instead: it holds the charge it
+has collected, and a pillbox across its surface with $E = 0$ inside the conductor gives
+
+```{math}
+E_x(L^-) = -\sigma_w/\epsilon_0,
+\qquad \sigma_w = \sum_s q_s\,W_{s,\rm collected},
+```
+
+with $W$ the weight on the wall ledger. The field is integrated back from there and the
+potential is measured from the source plane, which is the gauge. With a symmetry plane
+opposite and nothing crossing it, closing on the electrode's charge and closing on
+$E = 0$ are the same problem, and the two agree to the charge the deposit truncates
+within half a cloud of the walls, which falls with the cell size; with a source they are
+not, and only the electrode closure is right. `field_bc=("open", "absorbing")` is the
+only pairing the open condition has, because it needs a collector to close on.
+
+Two reflective walls are two symmetry planes, and the box
 between them is half of a periodic box twice as long, holding the charge and its mirror
 image; as in a periodic box the charge must then be neutral, the mean is removed, and
 $E = 0$ at both walls. Each of these rules is its own mirror image, so a plasma and its

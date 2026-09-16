@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: If you use JAX-in-Cell in your work, please cite it and the paper below.
+title: "JAX-in-Cell: a differentiable particle-in-cell code for plasma physics"
+type: software
+url: https://github.com/uwplasma/JAX-in-Cell
+repository-code: https://github.com/uwplasma/JAX-in-Cell
+license: MIT
+authors:
+  - family-names: Ma
+    given-names: Longyu
+  - family-names: Jorge
+    given-names: Rogerio
+    orcid: https://orcid.org/0000-0003-2941-6571
+  - family-names: Lu
+    given-names: Hongke
+  - family-names: Tran
+    given-names: Aaron
+  - family-names: Woolford
+    given-names: Christopher
+preferred-citation:
+  type: article
+  title: "JAX-in-Cell: a differentiable particle-in-cell code for plasma physics applications"
+  year: 2025
+  identifiers:
+    - type: other
+      value: "arXiv:2512.12160"
+  authors:
+    - family-names: Ma
+      given-names: Longyu
+    - family-names: Jorge
+      given-names: Rogerio
+    - family-names: Lu
+      given-names: Hongke
+    - family-names: Tran
+      given-names: Aaron
+    - family-names: Woolford
+      given-names: Christopher

@@ -193,7 +193,9 @@ pull requests, as the
 [development guide](https://jax-in-cell.readthedocs.io/en/latest/development.html)
 describes. If you use JAX-in-Cell in your work, please cite it, together with JAX and
 the papers of the methods you rely on, listed in the
-[references](https://jax-in-cell.readthedocs.io/en/latest/numerics/index.html#references):
+[references](https://jax-in-cell.readthedocs.io/en/latest/numerics/index.html#references).
+[`CITATION.cff`](CITATION.cff) is the same entry in the form GitHub's "Cite this
+repository" reads:
 
 ```bibtex
 @software{jaxincell,
