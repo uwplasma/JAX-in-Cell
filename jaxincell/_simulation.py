@@ -78,7 +78,8 @@ class State:
 
     ``x`` is the half-step position of the leapfrog and ``u`` the momentum per unit
     mass of a relativistic run, or the velocity otherwise; the implicit scheme carries
-    integer-time positions instead.
+    integer-time positions instead. ``moments`` is the running sum of
+    :meth:`Simulation.moments`, or ``None`` when ``run(moments=False)``.
     """
     E: object
     B: object
@@ -90,6 +91,7 @@ class State:
     key: object
     time: object
     wall: object
+    moments: object
 
 
 @pytree_dataclass(static=("names", "counts", "relativistic", "field_bc"))
@@ -104,7 +106,9 @@ class Output:
     momentum per unit mass :math:`\\gamma\\mathbf v` where ``v`` has the velocity.
 
     ``t`` is absolute: a continued run goes on from the time its state had reached, so
-    the histories of a run split into chunks join without a shift."""
+    the histories of a run split into chunks join without a shift. ``moments`` is the
+    history of the running sums of :meth:`Simulation.moments` when ``run(moments=True)``
+    asked for them, and ``None`` otherwise."""
     t: object
     x: object
     v: object
@@ -120,6 +124,7 @@ class Output:
     mass: object
     weight: object
     wall: object
+    moments: object
     species: object
     state: object
     names: tuple
@@ -241,16 +246,17 @@ class Simulation:
                              "and there is none: give Collisions(coulomb_log=...).")
 
     def _check_courant(self):
-        """The explicit field update is unstable for ``c dt > dx``. Electrostatic
-        runs never excite the transverse fields and are often stepped above that
-        limit on purpose, so warn only when the particles carry the transverse
-        velocity that would seed a light wave. Traced values are skipped, so the
-        check happens when the object is first built and not on every rebuild."""
+        """The explicit field update is unstable for ``c dt > dx``. The electrostatic
+        model has no light wave to be unstable, and an electromagnetic run whose
+        particles carry no transverse velocity never seeds one, so warn only when a
+        run could. Traced values are skipped, so the check happens when the object is
+        first built and not on every rebuild."""
         def plain(v):
             return isinstance(v, (int, float)) and not isinstance(v, bool)
 
         courant = self.domain.dt_over_dx_c
-        if self.solver.algorithm != "explicit" or not plain(courant) or courant <= 1:
+        if (self.solver.algorithm != "explicit" or self.solver.electrostatic
+                or not plain(courant) or courant <= 1):
             return
 
         def transverse(s):
@@ -422,6 +428,32 @@ class Simulation:
             overflow = jnp.maximum(overflow, spill)
         return x, u, w, qm, wall.replace(injected=injected, overflow=overflow)
 
+    def moments(self, x, v, w):
+        """Density, particle flux and kinetic energy density of each species on the grid,
+        ``(species, 3, cells)``, in :math:`\\mathrm{m^{-3}}`, :math:`\\mathrm{m^{-2}s^{-1}}`
+        and :math:`\\mathrm{J/m^3}`.
+
+        They use the deposit's own shape function, so a profile lines up with the charge
+        density the field solver saw. ``run(moments=True)`` sums them over every step and
+        stores the running sum, which is how a mean over a long window is had without a
+        particle history: divide the difference of two stored sums by the number of steps
+        between them. It costs three passes over the particles per species per step.
+        """
+        d = self.domain
+        rows = []
+        for (start, n), sp in zip(self.blocks, self.species):
+            xs, vs, ws = x[start:start + n, 0], v[start:start + n], w[start:start + n]
+
+            def density_of(amount, xs=xs):
+                return deposit(xs, amount, d.grid[0], d.dx, d.cells, d.particle_bc)
+
+            rows.append(jnp.stack([density_of(ws), density_of(ws * vs[:, 0]),
+                                   density_of(0.5 * sp.mass * ws * jnp.sum(vs ** 2, axis=1))]))
+        return jnp.stack(rows)
+
+    def _accumulate(self, totals, x, v, w):
+        return None if totals is None else totals + self.moments(x, v, w)
+
     def _electrode_field(self, wall):
         """:math:`E_x` at the collector face, :math:`-\\sigma_w/\\epsilon_0`, from the charge it
         has collected. It closes the Gauss solve of a box whose other wall is an open source
@@ -460,7 +492,7 @@ class Simulation:
                 if s.random_positions and not s.quiet:
                     x1 = random.uniform(k_x, (s.n,), minval=-L / 2, maxval=L / 2)
                 else:
-                    x1 = -L / 2 + (jnp.arange(s.n) + 0.5) * (L / s.n)
+                    x1 = -L / 2 + (jnp.arange(s.n) % s.active + 0.5) * (L / s.active)
                 k = 2 * jnp.pi * s.perturbation_mode / L
                 x1 = x1 + s.perturbation_amplitude * jnp.sin(k * x1)
                 yz = (jnp.zeros((s.n, 2)) if s.quiet else
@@ -486,7 +518,7 @@ class Simulation:
                     v = v.at[:, 0].multiply(jnp.where(jnp.arange(s.n) % 2 == 0, 1.0, -1.0))
             xs.append(x)
             vs.append(v)
-            ws.append(jnp.full((s.n,), s.density * L / s.n))
+            ws.append(jnp.where(jnp.arange(s.n) < s.active, s.density * L / s.active, 0.0))
             qs.append(jnp.full((s.n,), s.charge_si))
             ms.append(jnp.full((s.n,), s.mass))
         x, v = jnp.concatenate(xs), jnp.concatenate(vs)
@@ -495,7 +527,7 @@ class Simulation:
         v = self._velocity(u)
         qm = q / m
         box = (L, d.length_y, d.length_z)
-        if self.sources:
+        if self.sources or any(sp.active < sp.n for sp in self.species):
             # A species a source maintains gives `n` as a capacity, and a slot of no weight
             # is a dead one: park it beyond the wall with no charge-to-mass ratio, exactly
             # where a wall leaves a particle it has collected, so that the source finds it
@@ -520,7 +552,7 @@ class Simulation:
         rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
         E = jnp.zeros((d.cells, 3)).at[:, 0].set(E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall)))
         B = jnp.zeros((d.cells, 3))
-        return State(E, B, x, u, w, qm, rho, key, jnp.zeros(()), wall), (m, q)
+        return State(E, B, x, u, w, qm, rho, key, jnp.zeros(()), wall, None), (m, q)
 
     def _smooth(self, f):
         s = self.solver
@@ -622,7 +654,8 @@ class Simulation:
         # discrete Gauss law would drift by that much every step.
         rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, jnp.sum(q * w * v[:, 0]) / L, rho_half)
         E, B = self._advance_fields(E, B, J2, dt / 2, rho_next, wall, electric_first=False)
-        state = State(E, B, x_next_half, u, w, qm, rho_next, key, st.time + dt, wall)
+        totals = self._accumulate(st.moments, x_next, v, w)
+        state = State(E, B, x_next_half, u, w, qm, rho_next, key, st.time + dt, wall, totals)
         return state, (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
     def _implicit_step(self, st, extra):
@@ -708,11 +741,13 @@ class Simulation:
         E_new, _, ((x, u, w, qm, rho_next, wall), J) = state
         B_new = B - dt * curl_E(0.5 * (E + E_new), B, dx, bc)
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
-        return (State(E_new, B_new, x, u, w, qm, rho_next, key, st.time + dt, wall),
-                (x, self._velocity(u), w, E_new, B_new, J, rho_next))
+        v = self._velocity(u)
+        return (State(E_new, B_new, x, u, w, qm, rho_next, key, st.time + dt, wall,
+                      self._accumulate(st.moments, x, v, w)),
+                (x, v, w, E_new, B_new, J, rho_next))
 
     # -- the run ---------------------------------------------------------------------------------
-    def run(self, steps, seed=0, store_every=1, store_particles=True, state=None):
+    def run(self, steps, seed=0, store_every=1, store_particles=True, moments=False, state=None):
         """Advance ``steps`` time steps and return an :class:`Output`.
 
         Args:
@@ -721,6 +756,9 @@ class Simulation:
                 over seeds gives an ensemble with one compilation).
             store_every: Keep every ``store_every``-th state in the output.
             store_particles: Keep the particle histories (the bulk of the memory).
+            moments: Sum :meth:`moments` over every step and store the running sums, so
+                that a mean profile over a long window needs no particle history. It
+                costs three passes over the particles per species per step.
             state: A previous :class:`State`, normally ``Output.state``, to continue
                 from. It carries the absolute time, the particles, the fields, the
                 random key, the source remainders and the wall ledger, so a run split
@@ -731,15 +769,18 @@ class Simulation:
         if store_every < 1 or steps % store_every:
             raise ValueError(f"steps ({steps}) must be a multiple of store_every ({store_every}), "
                              "which must be at least one")
-        return _run(self, steps, seed, store_every, store_particles, state)
+        return _run(self, steps, seed, store_every, store_particles, moments, state)
 
 
-@partial(jax.jit, static_argnames=("steps", "store_every", "store_particles"))
-def _run(sim, steps, seed, store_every, store_particles, state):
+@partial(jax.jit, static_argnames=("steps", "store_every", "store_particles", "moments"))
+def _run(sim, steps, seed, store_every, store_particles, moments, state):
     key = random.PRNGKey(seed)
     carry0, extra = sim.initial_state(key)
     if state is not None:
         carry0 = state
+    if moments:
+        carry0 = carry0.replace(moments=jnp.zeros((len(sim.species), 3, sim.domain.cells))
+                                if carry0.moments is None else carry0.moments)
     step = sim._explicit_step if sim.solver.algorithm == "explicit" else sim._implicit_step
     step = partial(step, extra=extra)
     # an output, overwritten before it is read
@@ -754,13 +795,13 @@ def _run(sim, steps, seed, store_every, store_particles, state):
         (carry, (x, v, w, E, B, J, rho)), _ = lax.scan(advance, (carry, placeholder), None, length=store_every)
         if not store_particles:
             x = v = w = None
-        return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time)
+        return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.moments)
 
-    carry, (x, v, w, E, B, J, rho, wall, t) = lax.scan(chunk, carry0, None, length=steps // store_every)
+    carry, (x, v, w, E, B, J, rho, wall, t, totals) = lax.scan(chunk, carry0, None, length=steps // store_every)
     d = sim.domain
     m, q = extra
     return Output(t=t, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,
-                  length=d.length, charge=q, mass=m, weight=w, wall=wall,
+                  length=d.length, charge=q, mass=m, weight=w, wall=wall, moments=totals,
                   species=jnp.concatenate([jnp.full((s.n,), i) for i, s in enumerate(sim.species)]),
                   state=carry, names=tuple(s.name for s in sim.species), counts=tuple(s.n for s in sim.species),
                   relativistic=sim.solver.relativistic, field_bc=d.field_bc)

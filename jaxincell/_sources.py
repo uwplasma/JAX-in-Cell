@@ -95,10 +95,12 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length):
     was overwritten because the pool was full. Finding them costs one partial sort of the
     block, not a search per slot.
 
-    Entry times are a quiet quadrature of the step, :math:`s_k = (k + 1/2)/N_{\\rm emit}`,
-    and each particle then streams freely for the rest of the interval at its entry
-    velocity, feeling no force until the next push. The leapfrog carries the half-step
-    position, so the flight to the end of the current interval is :math:`(3/2 - s_k)\\Delta t`.
+    Entry times are a quiet quadrature of the interval that ends where the leapfrog's
+    carried position stands, :math:`s_k = (k + 1/2)/N_{\\rm emit}`, and each particle then
+    streams freely for the remaining :math:`(1 - s_k)\\Delta t` at its entry velocity,
+    feeling no force until the next push. It is emitted at the top of a step, so the
+    deposit of that step already counts it and no charge appears between the two halves
+    of the step with no current to account for it.
 
     Returns:
         tuple: the updated ``x, v, w, qm``, the emitted weight per particle, the slot
@@ -109,7 +111,7 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length):
     inward = 1.0 if source.side == "left" else -1.0
     weight = crossing_flux(source) * dt / emit
     velocity = sample_crossing(key, source, emit, inward)
-    flight = (1.5 - (jnp.arange(emit) + 0.5) / emit) * dt
+    flight = (1.0 - (jnp.arange(emit) + 0.5) / emit) * dt
     wall = -inward * length / 2                                  # the left wall is at -L/2 and sends +x
     entry = wall + velocity[:, 0] * flight                       # the plane plus the residual flight
     # the tangential coordinates are ignorable and periodic; start on the plane

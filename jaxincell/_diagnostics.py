@@ -5,7 +5,8 @@ import jax.numpy as jnp
 
 from ._config import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
-__all__ = ["diagnostics", "dominant_frequency", "energies", "gauss_residual", "potential", "temperatures"]
+__all__ = ["bohm_edge", "diagnostics", "dominant_frequency", "energies", "gauss_residual", "potential",
+           "temperatures"]
 
 
 def _blocks(out):
@@ -76,6 +77,42 @@ def gauss_residual(out):
     charge = out.charge * (out.state.w if out.weight is None else out.weight)
     one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
     return jnp.max(jnp.abs(div - rhs), axis=1) / _nonzero(one_sign / (out.length * epsilon_0))
+
+
+def bohm_edge(position, flow, speed):
+    """Where a flow profile crosses a given speed, and whether that is a sheath edge.
+
+    The edge of a sheath is where the ions reach the Bohm speed, so it is read off a
+    measured flow profile rather than computed. Returns the interpolated position of the
+    first upward crossing of ``speed`` and the number of crossings there are.
+
+    A bin centre is not good enough: the potential still falls by about a tenth of
+    :math:`T_e/e` per Debye length at the Bohm point, so a crossing placed half a bin out
+    moves the sheath drop by several per cent. This interpolates linearly between the two
+    samples that bracket the crossing.
+
+    **No crossing is an answer.** Then the position is NaN and the count is zero, which
+    says the run has no sheath edge by this measure -- too short, too noisy, or a flow
+    already supersonic at the source. Returning the first sample instead would invent an
+    edge and a potential drop to go with it. More than one crossing means the profile is
+    not monotonic and the first one may not be the edge; look at the profile.
+
+    Args:
+        position: Sample positions, increasing.
+        flow: Mean flow speed at each, along the same axis.
+        speed: The speed to cross, such as :math:`c_s=\\sqrt{T_e/m_i}`.
+
+    Returns:
+        tuple: the crossing position (NaN if there is none) and the number of crossings.
+    """
+    position, flow = jnp.asarray(position), jnp.asarray(flow)
+    below, above = flow[:-1] < speed, flow[1:] >= speed
+    crossing = below & above
+    count = jnp.sum(crossing)
+    i = jnp.argmax(crossing)
+    gap = flow[i + 1] - flow[i]
+    fraction = jnp.where(gap == 0, 0.0, (speed - flow[i]) / jnp.where(gap == 0, 1.0, gap))
+    return jnp.where(count > 0, position[i] + fraction * (position[i + 1] - position[i]), jnp.nan), count
 
 
 def potential(out):

@@ -152,7 +152,7 @@ def _boundary_codes(value, name):
     return tuple(int(c) for c in codes)
 
 
-@pytree_dataclass(static=("side", "emit"))
+@pytree_dataclass(static=("side", "emit", "beam"))
 class Source:
     """A maintained inflow of one species through one wall: a reservoir of plasma
     behind the plane that supplies a prescribed flux, independently of what leaves.
@@ -173,6 +173,10 @@ class Source:
             sampler that is not implemented, and a Rayleigh sample plus a drift is
             not it.
         side: ``"left"`` or ``"right"``, the wall the plasma enters through.
+        beam: Whether the reservoir is cold, so that the sampler draws a beam rather
+            than a Maxwellian. It is worked out from ``vth`` when the object is built
+            and is then static, because it selects a branch: read live from ``vth`` it
+            would be a traced value, and inside ``jit`` every source would look cold.
         emit: Particles emitted per step. They occupy the dead slots of the
             species, so the species needs enough of them: ``n`` must exceed
             ``emit`` times the longest residence time in steps.
@@ -189,6 +193,7 @@ class Source:
     drift: tuple = (0.0, 0.0, 0.0)
     side: str = "left"
     emit: int = 0
+    beam: object = None
     min_weight: float = 1e-3
 
     def __post_init__(self):
@@ -201,6 +206,10 @@ class Source:
         _require(self.side in ("left", "right"), f"side is 'left' or 'right', not {self.side!r}")
         _require(self.emit >= 1, "a Source emits at least one particle per step")
         warm = any(_plain(u) and u != 0 for u in self.vth)
+        if self.beam is None:
+            _require(warm or all(_plain(u) for u in self.vth),
+                     "a Source built from a traced vth must say whether it is a beam: pass beam=True or False")
+            object.__setattr__(self, "beam", not warm)
         if warm and _plain(self.drift[0]) and self.drift[0] != 0:
             raise ValueError("a Source is a Maxwellian at rest or a cold beam: the crossing distribution of a "
                              "drifting Maxwellian, proportional to v exp[-(v-u)^2/2 sigma^2] on v > 0, has no "
@@ -210,12 +219,6 @@ class Source:
     def sigma(self):
         """Component spread :math:`\\sigma = v_{th}/\\sqrt2` of the reservoir."""
         return jax.numpy.asarray(self.vth[0]) / jax.numpy.sqrt(2.0)
-
-    @property
-    def beam(self):
-        """Whether the reservoir is cold, so that :func:`~jaxincell._sources.sample_crossing`
-        draws a beam. Decided when the object is built, since it selects a branch."""
-        return not any(_plain(u) and u != 0 for u in self.vth)
 
 
 @pytree_dataclass(static=("cells", "particle_bc", "field_bc"))
@@ -286,7 +289,7 @@ class Domain:
         return -self.length / 2 + (jnp.arange(self.cells) + 0.5) * self.dx
 
 
-@pytree_dataclass(static=("name", "n", "plus_minus", "quiet", "random_positions"))
+@pytree_dataclass(static=("name", "n", "active", "plus_minus", "quiet", "random_positions"))
 class Species:
     """One population of pseudo-particles.
 
@@ -297,7 +300,14 @@ class Species:
 
     Args:
         name: Label used in the output.
-        n: Number of pseudo-particles.
+        n: Number of pseudo-particle slots. Without a source every slot holds a
+            particle and ``n`` is the population; with one it is a capacity, and the
+            slots a wall empties are the ones the source refills.
+        active: Slots filled at :math:`t = 0`, ``n`` by default. They spread over the
+            whole box and carry the weight ``density * length / active``; the rest
+            start dead, parked beyond a wall with no weight, which is the headroom a
+            source needs. Use it to start from a plasma rather than an empty box
+            without giving the source a full pool.
         charge: Charge in units of the elementary charge.
         mass: Mass in kilograms.
         density: Number density in :math:`\\mathrm{m^{-3}}`.
@@ -334,6 +344,7 @@ class Species:
     drift: tuple = (0.0, 0.0, 0.0)
     perturbation_amplitude: float = 0.0
     perturbation_mode: float = 0.0
+    active: object = None
     plus_minus: bool = False
     quiet: bool = False
     random_positions: bool = False
@@ -346,6 +357,8 @@ class Species:
         if _template(self):
             return
         _require(self.n > 0, "a species needs at least one particle")
+        object.__setattr__(self, "active", self.n if self.active is None else int(self.active))
+        _require(0 <= self.active <= self.n, f"active must be between 0 and n = {self.n}, not {self.active}")
         for name in ("charge", "mass", "density", "perturbation_amplitude", "perturbation_mode"):
             object.__setattr__(self, name, _float(getattr(self, name)))
         object.__setattr__(self, "reflection", _walls(self.reflection, "reflection"))

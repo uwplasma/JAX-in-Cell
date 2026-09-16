@@ -80,13 +80,16 @@ def with_ghosts(F, bc, parity=None):
     the doubled box of the image method would, and a particle feels its image and not
     itself. An absorbing wall is a conductor with nothing beyond it, so the value there is
     zero, which is also what the deposit does with the part of a cloud outside the box.
+    Beyond an open plane is more of the same plasma, so the field continues unchanged;
+    zero there would be the field of a conductor that is not present, and a particle
+    within half a cloud of the plane would feel its image.
     Without ``parity`` the field is a prescribed one and simply continues beyond a wall."""
     def ghost(code, edge, far):
         if code == 0:
             return far
-        if parity is None:
+        if parity is None or code == 4:
             return edge
-        return parity * edge if code == 1 else jnp.zeros_like(edge)     # a conductor, or an open plane
+        return parity * edge if code == 1 else jnp.zeros_like(edge)
 
     return jnp.concatenate([ghost(bc[0], F[0], F[-1])[None], F, ghost(bc[1], F[-1], F[0])[None]])
 
