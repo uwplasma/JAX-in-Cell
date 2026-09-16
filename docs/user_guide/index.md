@@ -30,6 +30,7 @@ domain
 species
 solver
 collisions
+sources
 external_fields
 running
 output

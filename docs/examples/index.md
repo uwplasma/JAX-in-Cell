@@ -1,14 +1,18 @@
 # Examples
 
-Every script in `examples/` runs on its own on a laptop in seconds to about a minute,
-and each one reproduces a result from the literature rather than making a picture for
-its own sake.
+Every script in `examples/` runs on its own and reproduces a result the code does not
+itself compute, rather than making a picture for its own sake. They are in three
+directories by how much of the code they use, not by how interesting they are, and
+`examples/README.md` lists what each teaches and how long it takes.
 
 ```bash
 git clone https://github.com/uwplasma/JAX-in-Cell
-cd JAX-in-Cell/examples
-python two_stream.py
+cd JAX-in-Cell
+python examples/1_basic/two_stream.py
 ```
+
+The three sheath scripts take `--quick`, which runs a smaller version with the same
+structure and more noise.
 
 ::::{grid} 1 2 2 2
 :gutter: 3
@@ -29,6 +33,26 @@ python two_stream.py
 :link: langmuir_wave
 :link-type: doc
 `langmuir_wave.py` — the Bohm-Gross dispersion relation, scanned in $k$.
+:::
+
+:::{grid-item-card} A maintained sheath
+:link: sheath_unmagnetized
+:link-type: doc
+`sheath_unmagnetized.py` — a source-to-collector sheath against the kinetic floating
+potential, in closed form.
+:::
+
+:::{grid-item-card} An oblique magnetic field
+:link: sheath_magnetized
+:link-type: doc
+`sheath_magnetized.py` — the magnetic presheath, and what the wall is struck by.
+:::
+
+:::{grid-item-card} Recovering a wall's reflectivity
+:link: sheath_optimization
+:link-type: doc
+`sheath_optimization.py` — an inverse problem solved with the gradient of the whole
+calculation, and the horizon over which that gradient is useful.
 :::
 
 :::{grid-item-card} Bump-on-tail
@@ -61,16 +85,16 @@ python two_stream.py
 `wall_reflection.py` — a wall returns the flux average of its reflection law.
 :::
 
-:::{grid-item-card} Plasma sheath
-:link: sheath
+:::{grid-item-card} A wall that reflects electrons
+:link: sheath_reflection
 :link-type: doc
-`sheath.py` — the Bohm criterion and the sheath drop of Hobbs and Wesson, with and without reflection.
+`sheath_reflection.py` — the Bohm criterion and the sheath drop of Hobbs and Wesson, with and without reflection.
 :::
 
 :::{grid-item-card} Optimisation
-:link: optimisation
+:link: optimize_two_stream
 :link-type: doc
-`optimisation.py` — gradient ascent through the whole solver finds the fastest beam.
+`optimize_two_stream.py` — gradient ascent through the whole solver finds the fastest beam.
 :::
 
 ::::
@@ -81,13 +105,16 @@ python two_stream.py
 two_stream
 landau_damping
 langmuir_wave
+sheath_unmagnetized
 bump_on_tail
 weibel
-conservation
 collisions
 wall_reflection
-sheath
-optimisation
+sheath_magnetized
+sheath_reflection
+conservation
+optimize_two_stream
+sheath_optimization
 ```
 
 There is also `input.toml`, which runs the two-stream case from the command line:

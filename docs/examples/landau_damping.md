@@ -1,6 +1,6 @@
 # Landau damping
 
-`examples/landau_damping.py` — the figure and the numbers on this page come from
+`examples/1_basic/landau_damping.py` — the figure and the numbers on this page come from
 `docs/scripts/fig_landau_damping.py`, which runs this setup and adds the scan in $k$ of
 panel (b).
 

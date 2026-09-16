@@ -75,7 +75,7 @@ Every script in `examples/` sets the variable at its top, so its precision is wr
 the script and can be switched from the shell:
 
 ```bash
-JAX_ENABLE_X64=0 python examples/two_stream.py
+JAX_ENABLE_X64=0 python examples/1_basic/two_stream.py
 ```
 
 Single precision reproduces the growth rates, frequencies and sheath of the examples;
@@ -127,16 +127,20 @@ and no finite differences anywhere.
 
 ## Examples
 
-Ten scripts in `examples/`, each reproducing a result from the literature rather
-than making a picture: the two-stream instability (Buneman 1959), Landau damping
-(Landau 1946), the Bohm-Gross dispersion relation, the bump-on-tail instability and
-its quasilinear plateau, the Weibel instability and its marginal wavenumber
-(Weibel 1959), explicit against implicit energy conservation, the collision operator
-against the Fokker-Planck rates, a partly reflecting wall returning the flux average of
-its reflection law, the plasma sheath with the Bohm criterion and the Hobbs-Wesson drop
-with and without electron reflection, and an optimisation that recovers the
-fastest-growing beam by gradient ascent through the solver. Each is described in the
-[documentation](https://jax-in-cell.readthedocs.io/en/latest/examples/index.html).
+Thirteen scripts in `examples/`, in three tiers by how much of the code they use, each
+reproducing a result the code does not itself compute rather than making a picture: the
+two-stream instability (Buneman 1959), Landau damping (Landau 1946), the Bohm-Gross
+dispersion relation, the bump-on-tail instability and its quasilinear plateau, the
+Weibel instability and its marginal wavenumber (Weibel 1959), explicit against implicit
+energy conservation, the collision operator against the Fokker-Planck rates, a partly
+reflecting wall returning the flux average of its reflection law, the Hobbs-Wesson
+sheath drop with and without electron reflection, a maintained source-to-collector
+sheath against the kinetic floating potential in closed form, the same sheath in an
+oblique magnetic field, and two inverse problems solved by differentiating the whole
+solver: the fastest-growing beam, and a wall's reflectivity recovered from the sheath it
+holds. Each is described in the
+[documentation](https://jax-in-cell.readthedocs.io/en/latest/examples/index.html), and
+`examples/README.md` lists what each teaches and how long it takes.
 
 <p align="center">
     <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/two_stream_scan.png" width="70%" alt="Two-stream growth rate against the kinetic dispersion relation">

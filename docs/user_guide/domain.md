@@ -84,7 +84,7 @@ outside the grid, with a first-order Mur radiating condition on the fields so th
 outgoing waves leave without reflection; thermal mirrors the position and redraws the
 velocity from the half-Maxwellian of the species, standing for the plasma beyond the
 box. That last pair, a thermal wall facing a floating conductor, is what
-{doc}`../examples/sheath` uses.
+{doc}`../examples/sheath_reflection` uses.
 
 ## The ignorable coordinates
 

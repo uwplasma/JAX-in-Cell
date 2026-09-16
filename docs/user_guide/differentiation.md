@@ -82,7 +82,7 @@ $kv_0/\omega_{pe} = \sqrt{3/8} = ${{ autodiff_cold_optimum_k_v0_over_wpe }}, mov
 resonance, {{ autodiff_ascent_iterations }} steps of plain gradient ascent reach
 {{ autodiff_ascent_k_v0_over_wpe }}, within
 {{ autodiff_ascent_deviation_percent }} % of the kinetic optimum. The full script is
-`examples/optimisation.py`.
+`examples/3_advanced/optimize_two_stream.py`.
 
 ## Choosing an objective
 

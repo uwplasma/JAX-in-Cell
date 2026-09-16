@@ -148,7 +148,7 @@ A single absorbing wall facing a reflective or thermal one, on either side, is a
 floating electrode on its own: the symmetry plane fixes $E = 0$ at its end, the current
 through it is zero, the field is integrated from it, and the electrode sits at whatever
 potential the charge it has collected gives it. That is the setup of
-{doc}`../examples/sheath`. Two reflective walls are two symmetry planes, and the box
+{doc}`../examples/sheath_reflection`. Two reflective walls are two symmetry planes, and the box
 between them is half of a periodic box twice as long, holding the charge and its mirror
 image; as in a periodic box the charge must then be neutral, the mean is removed, and
 $E = 0$ at both walls. Each of these rules is its own mirror image, so a plasma and its
@@ -156,7 +156,7 @@ reflection, with the walls swapped, give reflected fields to round-off.
 
 One consequence for the diagnostics: with a wall, the field beyond it is a degree of
 freedom the output does not carry, so {func}`~jaxincell.gauss_residual` checks the
-discrete Gauss law on the cells that do not need it. See {doc}`../examples/sheath` for
+discrete Gauss law on the cells that do not need it. See {doc}`../examples/sheath_reflection` for
 what the closure produces.
 
 (partial-reflection)=
@@ -230,7 +230,7 @@ which limits the coefficient. Reflected electrons leave as fast as they came, so
 limit does not arise, and the drop simply vanishes as $R_{\rm eff}$ approaches
 $1-\sqrt{2\pi m_e/m_i}$. Restitution does not enter: however slowly the electrons
 leave, the sheath field returns them to the plasma, and the number the wall keeps is
-unchanged. {doc}`../examples/sheath` measures the drop for a wall that keeps everything
+unchanged. {doc}`../examples/sheath_reflection` measures the drop for a wall that keeps everything
 and for two laws with the same $R_{\rm eff}$.
 
 ## Charge accounting at an absorbing wall

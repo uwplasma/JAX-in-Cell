@@ -80,7 +80,7 @@ See {doc}`performance` for what it costs on a GPU.
 
 Every script in `examples/` sets `JAX_ENABLE_X64` at its top, before anything imports
 JAX, so the precision of a run is written in the script, and
-`JAX_ENABLE_X64=0 python examples/two_stream.py` switches it from the shell.
+`JAX_ENABLE_X64=0 python examples/1_basic/two_stream.py` switches it from the shell.
 
 ## Frequencies
 

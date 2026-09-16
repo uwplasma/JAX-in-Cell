@@ -1,6 +1,6 @@
 # Wall reflection
 
-`examples/wall_reflection.py` — the figure and the numbers on this page come from
+`examples/2_intermediate/wall_reflection.py` — the figure and the numbers on this page come from
 `docs/scripts/fig_wall_reflection.py`, which runs this setup.
 
 A real surface does not collect every electron that reaches it. Some are reflected, and
@@ -50,7 +50,7 @@ e^2\,\frac{\int_0^\infty R(v)\,v^3 e^{-v^2/2\sigma^2}\,dv}{\int_0^\infty v^3 e^{
 which the run follows to within {{ reflection_energy_max_error }}.
 
 The flux average is the coefficient that sets the floating potential of a wall
-{cite}`hobbs1967`; {doc}`sheath` measures that.
+{cite}`hobbs1967`; {doc}`sheath_reflection` measures that.
 
 ## The setup
 
@@ -70,7 +70,7 @@ electrons = Species.electrons(n=n, density=1e6, vth=(np.sqrt(2) * sigma, 0, 0), 
 ## Running it
 
 ```bash
-python examples/wall_reflection.py
+python examples/2_intermediate/wall_reflection.py
 ```
 
 A few seconds; each width compiles its own program, since the law is part of it.

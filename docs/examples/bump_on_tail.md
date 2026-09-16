@@ -1,6 +1,6 @@
 # Bump-on-tail instability
 
-`examples/bump_on_tail.py` — the figure and the numbers on this page come from
+`examples/2_intermediate/bump_on_tail.py` — the figure and the numbers on this page come from
 `docs/scripts/fig_bump_on_tail.py`, which runs this setup.
 
 A weak beam on the tail of a Maxwellian makes $\partial f/\partial v > 0$ there, and

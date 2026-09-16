@@ -177,7 +177,7 @@ every electron, and {{ sheath_drop_half }} and {{ sheath_drop_slow }} against
 that returns the slow electrons with the same flux average. The drop does not change
 when the cells are refined; what is left of the difference lies mostly in placing the Bohm
 point, where the potential still falls by about 0.1 $T_e/e$ per Debye length. See
-{doc}`../examples/sheath`.
+{doc}`../examples/sheath_reflection`.
 
 ## Collisions
 

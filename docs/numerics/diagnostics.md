@@ -89,7 +89,7 @@ periodic box, zero at a reflective wall, and at an absorbing wall the field of t
 collected charge, $E_{x,1/2} - \Delta x\,\rho_0/\epsilon_0$ from the Gauss law of the
 first cell. The field solver closes two absorbing walls with the same rule
 ({doc}`field_solvers`), so between those short-circuited conductors the last entry stays
-at zero to round-off and the bulk floats above both — see {doc}`../examples/sheath`. A
+at zero to round-off and the bulk floats above both — see {doc}`../examples/sheath_reflection`. A
 periodic box has no wall, so the mean is set to zero instead.
 
 ## Temperatures

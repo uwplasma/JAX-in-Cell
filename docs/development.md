@@ -276,7 +276,7 @@ before the code is written.
 
 * Particle sources and sinks, which need a pool of inactive particles because array
   shapes are static. An ionisation source is what a bounded-plasma run needs to reach a
-  true steady state instead of slowly draining ({doc}`examples/sheath`).
+  true steady state instead of slowly draining ({doc}`examples/sheath_reflection`).
 * A series RLC circuit between the two electrodes, so that a wall can be biased or left
   genuinely floating rather than short-circuited to its partner {cite}`verboncoeur1993`.
 * Time-dependent external fields.

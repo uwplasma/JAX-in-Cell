@@ -1,6 +1,6 @@
-# Plasma sheath
+# A wall that reflects electrons
 
-`examples/sheath.py`
+`examples/2_intermediate/sheath_reflection.py`
 
 Where a plasma touches a wall it does not stay neutral. Electrons are $\sqrt{m_i/m_e}$
 times faster than ions, so they reach the wall first and charge it negative, and the
@@ -14,6 +14,14 @@ from a Maxwellian at the starting temperature, as it would from the plasma behin
 is the source boundary of the classic source-collector simulations {cite}`schwager1990`.
 The run is repeated for three conductors: one that collects every electron, one that
 returns half of each electron, and one that returns the slow electrons.
+
+A thermal wall keeps the electrons that reach the conductor Maxwellian, which is what the
+Hobbs-Wesson formula needs, but it returns only what reaches it and so cannot replace
+what the conductor takes: the plasma drains slowly, and the run is stopped after about
+one ion transit for that reason. {doc}`sheath_unmagnetized` puts a reservoir there
+instead, which holds the plasma up indefinitely and reaches a steady state that can be
+compared with a closed-form wall potential rather than with a formula for the drop
+across the sheath alone.
 
 ```{figure} ../_static/figures/sheath.png
 :width: 100%
@@ -80,7 +88,7 @@ are then short-circuited conductors at one potential ({doc}`../numerics/boundari
 ## Running it
 
 ```bash
-python examples/sheath.py
+python examples/2_intermediate/sheath_reflection.py
 ```
 
 About a minute for the three runs, each with 30 000 particles per species, on

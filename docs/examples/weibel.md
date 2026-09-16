@@ -1,6 +1,6 @@
 # Weibel instability
 
-`examples/weibel.py`
+`examples/2_intermediate/weibel.py`
 
 A plasma hotter across the simulation axis than along it is unstable to purely growing
 transverse magnetic modes {cite}`weibel1959`. It is the electromagnetic instability of

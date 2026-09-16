@@ -1,6 +1,6 @@
 # Langmuir waves
 
-`examples/langmuir_wave.py`
+`examples/1_basic/langmuir_wave.py`
 
 The simplest plasma oscillation, measured across a range of wavenumbers. A small density
 perturbation of a Maxwellian oscillates at the real part of the least-damped root of the
@@ -19,7 +19,7 @@ whose limit at small $k\lambda_D$ is the fluid result of Bohm and Gross {cite}`b
 ## Running it
 
 ```bash
-python examples/langmuir_wave.py
+python examples/1_basic/langmuir_wave.py
 ```
 
 Six runs, one per $k\lambda_D$ from 0.05 to 0.3, each measuring the frequency from the

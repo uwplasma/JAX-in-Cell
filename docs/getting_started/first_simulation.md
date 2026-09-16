@@ -1,7 +1,7 @@
 # Your first simulation, in detail
 
 This page takes the two-stream run apart and explains every number in it. The script
-is `examples/two_stream.py`.
+is `examples/1_basic/two_stream.py`.
 
 ## The physics
 

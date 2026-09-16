@@ -1,6 +1,6 @@
 # Two-stream instability
 
-`examples/two_stream.py`
+`examples/1_basic/two_stream.py`
 
 Two counter-streaming electron beams on a proton background. The seeded mode grows
 exponentially, the beams trap each other, and the phase space rolls into the vortex
@@ -38,7 +38,7 @@ and {{ two_stream_scan_max_deviation_percent }} per cent at worst.
 ## Running it
 
 ```bash
-python examples/two_stream.py
+python examples/1_basic/two_stream.py
 ```
 
 prints the energy drift and the growth of the electric energy, then shows the

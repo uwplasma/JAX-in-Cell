@@ -95,7 +95,7 @@ Because the entire simulation is a pure JAX function, it can be differentiated w
 `jax.grad` with respect to physical inputs such as drift speeds, temperatures,
 perturbation amplitudes, external field profiles or the full initial phase space. The
 {doc}`user_guide/differentiation` page shows how, and
-{doc}`examples/optimisation` solves an inverse problem whose answer is known from
+{doc}`examples/optimize_two_stream` solves an inverse problem whose answer is known from
 linear theory.
 
 Every rate and frequency quoted in this documentation is measured against a

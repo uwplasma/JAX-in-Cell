@@ -57,9 +57,10 @@ jobs:
 
   examples:
     # The tests exercise the package; this checks that the scripts people copy from
-    # still run against it. These four take well under a minute together on a CPU
-    # runner; the others (sheath, bump-on-tail, Weibel, optimisation, two-stream) take
-    # minutes each and are left to the documentation build of the figures.
+    # still run against it. These take a couple of minutes together on a CPU runner, the
+    # three sheath scripts in the smaller preset their `--quick` flag selects; the rest
+    # (bump-on-tail, Weibel, two-stream, the full sheath presets) take minutes each and
+    # are left to the documentation build of the figures.
     runs-on: ubuntu-22.04
     name: Examples
     env:
@@ -77,8 +78,15 @@ jobs:
         pip install -e .
     - name: Run the fastest examples
       run: |
-        for script in collisions wall_reflection conservation langmuir_wave; do
+        for script in 2_intermediate/collisions 2_intermediate/wall_reflection \
+                      3_advanced/conservation 1_basic/langmuir_wave; do
           echo "::group::examples/$script.py"
           python "examples/$script.py"
+          echo "::endgroup::"
+        done
+        for script in 1_basic/sheath_unmagnetized 2_intermediate/sheath_magnetized \
+                      3_advanced/sheath_optimization; do
+          echo "::group::examples/$script.py --quick"
+          python "examples/$script.py" --quick
           echo "::endgroup::"
         done

@@ -423,8 +423,8 @@ def test_single_precision_is_left_to_jax_s_own_switch(monkeypatch):
 def test_every_example_states_its_precision():
     """Each example sets JAX_ENABLE_X64 before anything imports JAX, so the precision of
     a run is written in the script and can be changed from the shell."""
-    examples = sorted(ROOT.glob("examples/*.py"))
-    assert len(examples) >= 10
+    examples = sorted(ROOT.glob("examples/*/*.py"))
+    assert len(examples) >= 13
     for path in examples:
         body = ast.parse(path.read_text()).body
         sets = [i for i, node in enumerate(body)
@@ -435,15 +435,17 @@ def test_every_example_states_its_precision():
 
 
 def test_every_example_the_documentation_names_exists():
-    """The README and the docs name examples by file name, and on a case-sensitive file
-    system a name that differs only in case does not run. The names are compared with
-    the directory listing, because Path.exists ignores case on macOS and Windows."""
-    scripts = {path.name for path in (ROOT / "examples").iterdir()}
+    """The README and the docs name examples by path, and on a case-sensitive file system a
+    name that differs only in case does not run. The names are compared with the directory
+    listing, because Path.exists ignores case on macOS and Windows. The scripts sit in
+    `1_basic`, `2_intermediate` and `3_advanced`, so the listing is recursive."""
+    scripts = {path.name for path in (ROOT / "examples").rglob("*") if path.is_file()}
     pages = [ROOT / "README.md", *sorted((ROOT / "docs").rglob("*.md"))]
-    named = {name for page in pages for name in re.findall(r"examples/(\w+\.(?:py|toml))", page.read_text())}
+    named = {name.rsplit("/", 1)[-1] for page in pages
+             for name in re.findall(r"examples/([\w/]+\.(?:py|toml))", page.read_text())}
     for page in ("docs/examples/index.md", "docs/getting_started/quickstart.md"):
         named |= set(re.findall(r"`(\w+\.py)`", (ROOT / page).read_text()))
-    assert len(named) >= 10 and named <= scripts, sorted(named - scripts)
+    assert len(named) >= 13 and named <= scripts, sorted(named - scripts)
 
 
 def test_diagnostics_without_particles_gives_the_field_quantities_only():

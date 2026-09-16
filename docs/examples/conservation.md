@@ -1,6 +1,6 @@
 # Conservation laws
 
-`examples/conservation.py`
+`examples/3_advanced/conservation.py`
 
 The quiet two-stream problem of {doc}`two_stream`, run with the explicit leapfrog and with
 the implicit Crank-Nicolson scheme, in a periodic box and between two absorbing walls, with
