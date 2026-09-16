@@ -206,6 +206,10 @@ for iteration in range(14 if quick else 20):
     if not accepted:
         print("     converged: no step along the gradient lowers the loss")
         break
+    if abs(trial - r) < 1e-4:                  # a move smaller than the control is known to
+        r = trial
+        print("     converged: the step is below the uncertainty of the control")
+        break
     step_size *= 1.6
     r = trial
 

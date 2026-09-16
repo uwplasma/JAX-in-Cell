@@ -100,3 +100,58 @@ $\gamma t$ plus a constant while the mode grows and is a smooth function of the 
 
 Combining `grad` with a `vmap` over seeds ({doc}`running`) gives the gradient of an
 ensemble average, which is the practical way to optimise through a noisy simulation.
+
+## Which derivative, and over how long
+
+Four things get called "the derivative of the simulation", and they are not the same:
+
+1. the derivative of a **fixed discretisation and a fixed realisation** — the number
+   `jax.grad` returns;
+2. the derivative of a **finite-time expectation** of an observable, which a finite
+   number of particles estimates;
+3. a **continuum** response, the limit of refining the discretisation;
+4. a **long-time stationary** response.
+
+Forward mode agreeing with reverse mode checks the first against itself. A finite
+difference of the same run checks the first too. Neither says anything about the others,
+and the difference between them is not small.
+
+Where a wall absorbs particles this becomes concrete. Every absorption is a branch of the
+program: change a parameter enough to move one particle across the wall that did not
+cross before, and the objective takes a small step. The gradient is exactly the slope
+between those steps, and it is correct. Whether it is *useful* depends on how many
+branches a realistic change in the parameter flips, which grows with the length of the
+run. Measured on the sheath of {doc}`../examples/sheath_optimization`, differentiating
+with respect to a collector's electron reflectivity:
+
+| horizon | forward against reverse | central difference agrees to | at step |
+|---|---|---|---|
+| 5 steps | $8\times10^{-15}$ | $1.5\times10^{-9}$ | $10^{-3}$ |
+| 25 steps | $7\times10^{-16}$ | $1.1\times10^{-9}$ | $10^{-5}$ |
+| 100 steps | $3\times10^{-14}$ | $1.9\times10^{-7}$ | $10^{-7}$ |
+
+The implementation is exact at every horizon. What falls is the step over which the
+objective looks smooth. Beyond a few hundred steps the derivative of one realisation
+grows to tens of times the response of the average and changes sign from run to run: it
+is still the derivative of the program, and it is no longer an estimate of the physical
+response. {cite}`chung2020` analyse this for particle-in-cell methods and build
+sensitivities that do not follow the plasma particles, which is a different method rather
+than a tolerance to be loosened.
+
+The practical consequences, all of which the sheath example follows:
+
+* **Keep the differentiated window short.** Prepare the state you want to perturb
+  outside the differentiated calculation — the preparation is then genuinely independent
+  of the control — and differentiate only the response.
+* **Average the measurement over realisations first**, and take the loss of that mean.
+  The loss of the mean and the mean of the losses are different objectives.
+* **Keep counts out of it.** A functional that counts particles, or bins them sharply,
+  has a branchwise derivative of exactly zero almost everywhere, whatever its expectation
+  does. That is why a {class}`~jaxincell.Source` emits a fixed number of particles with a
+  continuous weight rather than a number of particles that depends on the flux, and why
+  the reflection at a wall is a fraction of each particle's weight rather than a
+  hit-or-miss trial. `tests/test_gradients.py` has the counting functional as a negative
+  control, with the zero it correctly returns.
+* **Say what the measurement can resolve.** A response smaller than the scatter between
+  realisations is not identifiable no matter how good the gradient is, and the scan the
+  sheath example prints before optimising is there to say so.

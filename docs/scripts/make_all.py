@@ -29,6 +29,7 @@ SCRIPTS = [
     "fig_boundaries.py",
     "fig_wall_reflection.py",
     "fig_sheath.py",
+    "fig_sheath_source.py",
     "fig_collisions.py",
     "fig_autodiff.py",
     "fig_scaling.py",

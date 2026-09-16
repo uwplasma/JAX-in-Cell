@@ -14,6 +14,17 @@ particle-in-cell calculation with respect to $r$. Nothing is finite-differenced:
 the source and the wall for every step of the experiment. The finite differences are
 there to check that gradient, not to compute it.
 
+```{figure} ../_static/figures/sheath_source.png
+:width: 100%
+:alt: The sheath potential and densities against kinetic theory, and the gradient against finite differences at three horizons
+
+(c) The reverse-mode gradient against a central difference of the same realisation, over
+seven decades of step size, at three lengths of the response window. The floor each
+curve reaches is where the two agree; the dotted line is how well forward and reverse
+mode agree with each other, which is round-off at every horizon. Panels (a) and (b) are
+the forward problem, in {doc}`sheath_unmagnetized`.
+```
+
 ## A short experiment, on purpose
 
 A plasma is prepared once at a fixed reflectivity, **outside** the differentiated
@@ -24,11 +35,11 @@ measurement lives in, and it is also as long as the gradient can usefully be tak
 
 The script measures why. At $r = 0.25$, from a state prepared over 1200 steps:
 
-| horizon | reverse mode | forward mode | best central difference | at $h$ |
-|---|---|---|---|---|
-| 5 steps | $-1.6457810097\times10^{-1}$ | identical to $8\times10^{-15}$ | $1.5\times10^{-9}$ | $10^{-3}$ |
-| 25 steps | $-8.3315086793\times10^{-1}$ | identical to $7\times10^{-16}$ | $1.1\times10^{-9}$ | $10^{-5}$ |
-| 100 steps | $+1.7036661618$ | identical to $3\times10^{-14}$ | $1.9\times10^{-7}$ | $10^{-7}$ |
+| horizon | forward against reverse | best central difference | at $h$ |
+|---|---|---|---|
+| 5 steps | {{ gradient_modes_agree_5 }} | {{ gradient_best_mismatch_5 }} | {{ gradient_best_step_5 }} |
+| 25 steps | {{ gradient_modes_agree_25 }} | {{ gradient_best_mismatch_25 }} | {{ gradient_best_step_25 }} |
+| 100 steps | {{ gradient_modes_agree_100 }} | {{ gradient_best_mismatch_100 }} | {{ gradient_best_step_100 }} |
 
 The implementation is exact at every horizon: the two modes agree to round-off and both
 agree with a central difference of the same realisation to nine digits. What changes is

@@ -1,6 +1,7 @@
 # A maintained sheath
 
-`examples/1_basic/sheath_unmagnetized.py`
+`examples/1_basic/sheath_unmagnetized.py` — the figure and the numbers on this page come
+from `docs/scripts/fig_sheath_source.py`, which runs this setup.
 
 Where a plasma touches a wall it does not stay neutral: electrons are
 $\sqrt{m_i/m_e}$ times faster than ions, reach the wall first and charge it negative,
@@ -39,17 +40,36 @@ across. Their printed wall potential, $+0.739$, does not solve their printed equ
 the root of that equation at $v_0=0.2$ is $-0.79926$, which is what is used here, and
 $n_{e0} = 1.11490$ follows from it.
 
+```{figure} ../_static/figures/sheath_source.png
+:width: 100%
+:alt: The sheath potential against the kinetic reference, the densities against n(phi), and the gradient against finite differences
+
+(a) The potential a reservoir and a floating collector hold, averaged over the second
+half of the run, against the root of the current-balance equation. (b) The measured
+densities against the local relation $n(\phi)$: the electrons are pushed out of the
+sheath and the beam is not, which is the positive charge that holds the drop up.
+(c) is explained in {doc}`sheath_optimization`.
+```
+
 ## What comes out
 
-At 120 cells, $\omega_{pe}\Delta t = 0.1$, 120000 slots and 120 particles emitted per
-step per species, over six ion transits:
+At {{ source_sheath_cells }} cells, $\omega_{pe}\Delta t = 0.1$,
+{{ source_sheath_capacity }} slots and {{ source_sheath_emit }} particles emitted per
+step per species, over six ion transits ({{ source_sheath_steps }} steps):
 
 | quantity | measured | reference |
 |---|---|---|
-| wall potential | $-0.783 \pm 0.007\,T_e/e$ | $-0.79926\,T_e/e$ |
-| net collector current, late window | $+0.01$ % of the ion current | zero at a floating wall |
-| $n_e(\phi)$, worst cell inside the box | $0.052\,n_0$ | the kinetic relation |
-| $n_i(\phi)$, worst cell inside the box | $0.034\,n_0$ | the kinetic relation |
+| wall potential | {{ source_sheath_phi_wall }} $\pm$ {{ source_sheath_phi_wall_error }} $T_e/e$ | {{ source_sheath_phi_wall_reference }} $T_e/e$ |
+| net collector current, late window | {{ source_sheath_net_current_percent }} % of the ion current | zero at a floating wall |
+| $n_e(\phi)$, worst cell inside the box | {{ source_sheath_density_error_electrons }} $n_0$ | the kinetic relation |
+| $n_i(\phi)$, worst cell inside the box | {{ source_sheath_density_error_ions }} $n_0$ | the kinetic relation |
+
+The pool ends with {{ source_sheath_live_electrons }} electrons and
+{{ source_sheath_live_ions }} ions live of {{ source_sheath_capacity }} slots, and
+`Output.wall.overflow` stays at zero. Refining the time step or lengthening the box
+without raising the capacity is the one way to get this wrong: both make particles live
+longer, the pool fills, and the source starts overwriting live particles. The overflow
+diagnostic says so.
 
 The ion flow never crosses $c_s$, and {func}`~jaxincell.bohm_edge` reports that there is
 no crossing rather than returning the first bin: at Mach 8.6 the beam enters far above

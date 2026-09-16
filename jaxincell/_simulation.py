@@ -157,6 +157,17 @@ def quiet_start(n, length, vth=(0.0, 0.0, 0.0), drift=(0.0, 0.0, 0.0)):
     coherent seed -- a transverse current for the Weibel instability, say -- and
     building that by hand otherwise means reproducing the sampling.
 
+    The sequence itself is built on the host, since it is a fixed set of quadrature
+    nodes and nothing differentiates with respect to it; the length, the thermal speed
+    and the drift that scale and shift it are ordinary JAX values, so a gradient with
+    respect to any of them passes through the advertised way of building an initial
+    state, and the whole function works inside ``jit``. That makes the arrays JAX arrays,
+    which are immutable, so a coherent seed is added with ``.at[]`` rather than in place::
+
+        x, v = quiet_start(n, length, vth=vth)
+        v = v.at[:, 2].add(0.01 * vth[2] * jnp.sin(2 * jnp.pi * x[:, 0] / length))
+        electrons = Species.electrons(n=n, density=n_e, vth=vth).replace(x=x, v=v)
+
     Args:
         n: Number of pseudo-particles.
         length: Box length; positions fill ``[-L/2, L/2]``.
@@ -167,10 +178,10 @@ def quiet_start(n, length, vth=(0.0, 0.0, 0.0), drift=(0.0, 0.0, 0.0)):
         tuple: ``x`` and ``v``, both ``(n, 3)``, ready for
         ``species.replace(x=x, v=v)``.
     """
-    x = np.zeros((n, 3))
-    x[:, 0] = -length / 2 + (np.arange(n) + 0.5) * (length / n)
-    u = np.stack([_van_der_corput(n, base) for base in (2, 3, 5)], axis=1)
-    return x, np.asarray(erfinv(2 * u - 1)) * np.asarray(vth) + np.asarray(drift)
+    lattice = jnp.asarray((np.arange(n) + 0.5) / n - 0.5)                 # host: the fixed nodes
+    nodes = jnp.asarray(np.stack([_van_der_corput(n, base) for base in (2, 3, 5)], axis=1))
+    x = jnp.zeros((n, 3)).at[:, 0].set(length * lattice)
+    return x, erfinv(2 * nodes - 1) * jnp.asarray(vth) + jnp.asarray(drift)
 
 
 @pytree_dataclass(static=())

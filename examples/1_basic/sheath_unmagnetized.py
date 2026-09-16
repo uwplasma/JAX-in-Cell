@@ -108,6 +108,9 @@ print(f"collector current balance: electrons {late_charge[0]:.4e}, ions {late_ch
 print(f"pool: {int((np.asarray(out.state.w)[:capacity] > 0).sum())} electrons and "
       f"{int((np.asarray(out.state.w)[capacity:] > 0).sum())} ions live of {capacity} slots, "
       f"overflow {float(out.wall.overflow[-1]):.3g}")
+if float(out.wall.overflow[-1]) > 0:
+    print("WARNING: the pool overflowed and live particles were overwritten. Raise `capacity`: a smaller\n"
+          "         time step or a longer box both make particles live longer and need more slots.")
 sound_speed = spread / np.sqrt(mass_ratio)
 edge, crossings = bohm_edge(faces, flow, sound_speed)
 print(f"ion flow reaches c_s at {crossings} place(s)" +

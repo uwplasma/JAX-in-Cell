@@ -274,11 +274,25 @@ gh release create v0.2 --generate-notes
 Planned, in no particular order; open an issue first so that the design can be discussed
 before the code is written.
 
-* Particle sources and sinks, which need a pool of inactive particles because array
-  shapes are static. An ionisation source is what a bounded-plasma run needs to reach a
-  true steady state instead of slowly draining ({doc}`examples/sheath_reflection`).
+* A **volumetric** source: ionisation of a neutral background, which is what a discharge
+  needs and which the boundary reservoir of {doc}`user_guide/sources` is not. The pool of
+  inactive particles it would emit into already exists.
+* A **drifting warm reservoir**. `Source` samples a Maxwellian at rest or a cold beam and
+  refuses the two together, because the crossing density of a drifting Maxwellian is
+  proportional to $v\exp[-(v-u)^2/2\sigma^2]$ on $v>0$ and adding a drift to a Rayleigh
+  sample is not a sample of it. An inverse-CDF sampler with a derivative taken from the
+  normalised distribution would lift the restriction.
+* A **source with the implicit scheme**, which is refused: it would emit a new population
+  inside every Picard iteration. Emitting once per step, before the iteration, and holding
+  the samples fixed across it is the obvious route.
+* **Sensitivities that do not follow the plasma particles** {cite}`chung2020`. The
+  gradient through a wall is exact but stops estimating the physical response over a long
+  window ({doc}`user_guide/differentiation`); a continuum-oriented sensitivity, carried by
+  its own particles, is the published way round it and is a research project rather than a
+  patch.
 * A series RLC circuit between the two electrodes, so that a wall can be biased or left
   genuinely floating rather than short-circuited to its partner {cite}`verboncoeur1993`.
+  The charge-evolving collector of `field_bc="open"` is the resistance-free limit of it.
 * Time-dependent external fields.
 * Ionisation and recombination.
 * Secondary electron emission with an energy-dependent yield {cite}`furman2002`, which,

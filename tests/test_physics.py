@@ -144,7 +144,7 @@ def test_weibel_growth_is_confined_to_the_unstable_wavenumbers():
     L = 4.0 * 2 * np.pi / k_c
     vth = (0.02 * c, 0.0, 0.02 * c * np.sqrt(ratio))
     x, v = quiet_start(n, L, vth=vth)
-    v[:, 2] += 1e-2 * vth[2] * sum(np.sin(2 * np.pi * m * x[:, 0] / L) for m in range(1, 9))
+    v = v.at[:, 2].add(1e-2 * vth[2] * sum(jnp.sin(2 * jnp.pi * m * x[:, 0] / L) for m in range(1, 9)))
     electrons = Species.electrons(n=n, density=n_e, vth=vth).replace(x=x, v=v)
     ions = Species.ions(n=n // 4, density=n_e, mass_ratio=1e6, vth=(0.0, 0.0, 0.0), quiet=True)
     sim = Simulation(Domain(length=L, cells=128, dt_over_dx_c=0.5), [electrons, ions], Solver(filter_passes=0))
