@@ -103,8 +103,8 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length):
     of the step with no current to account for it.
 
     Returns:
-        tuple: the updated ``x, v, w, qm``, the emitted weight per particle, the slot
-        indices, and ``overflow``.
+        tuple: the updated ``x, v, w, qm``, the weight each emitted particle carries, and
+        ``overflow``.
     """
     start, n = block
     emit = source.emit
@@ -120,7 +120,7 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length):
     slots = start + lax.top_k(-lax.dynamic_slice(w, (start,), (n,)), emit)[1]
     overflow = jnp.max(w[slots])
     return (x.at[slots].set(position), v.at[slots].set(velocity), w.at[slots].set(weight),
-            qm.at[slots].set(charge_over_mass), weight, slots, overflow)
+            qm.at[slots].set(charge_over_mass), weight, overflow)
 
 
 def check_sources(species, solver, domain):

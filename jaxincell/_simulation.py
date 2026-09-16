@@ -431,8 +431,8 @@ class Simulation:
             if sp.source is None:
                 continue
             key, k = random.split(key)
-            x, v, w, qm, weight, slots, spill = inject(k, sp.source, block, x, self._velocity(u), w, qm,
-                                                       sp.charge_si / sp.mass, d.dt, d.length)
+            x, v, w, qm, weight, spill = inject(k, sp.source, block, x, self._velocity(u), w, qm,
+                                                sp.charge_si / sp.mass, d.dt, d.length)
             u = self._momentum(v)
             side = 0 if sp.source.side == "left" else 1
             injected = injected.at[i, side].add(weight * sp.source.emit)
