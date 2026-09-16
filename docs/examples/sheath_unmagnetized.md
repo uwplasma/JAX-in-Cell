@@ -76,10 +76,35 @@ no crossing rather than returning the first bin: at Mach 8.6 the beam enters far
 the Bohm speed and there is no sheath edge to find. A sheath edge is a measurement, and
 a measurement that fails is information.
 
-The remaining two per cent in the wall potential does not fall with the grid or the time
-step; it is the finite box. The reference is the semi-infinite problem, in which the
-plasma is exactly neutral and field-free at the source plane, and ten Debye lengths of
-box is not that.
+## Convergence
+
+Changing one thing at a time from that baseline, with the pool scaled where a change
+makes particles live longer:
+
+| variation | $\phi_w$ ($T_e/e$) | s.e. | % from the reference |
+|---|---|---|---|
+| baseline | $-0.7832$ | 0.0069 | 2.01 |
+| $\Delta x/\lambda_D = 0.167$ (60 cells) | $-0.7993$ | 0.0074 | 0.00 |
+| $\Delta x/\lambda_D = 0.042$ (240 cells) | $-0.7751$ | 0.0068 | 3.03 |
+| $\omega_{pe}\Delta t = 0.05$ | $-0.8027$ | 0.0053 | 0.43 |
+| $\omega_{pe}\Delta t = 0.025$ | $-0.8119$ | 0.0064 | 1.58 |
+| a quarter of the particles | $-0.7850$ | 0.0111 | 1.79 |
+| four times the particles | $-0.7857$ | 0.0031 | 1.69 |
+| 3 ion transits | $-0.7913$ | 0.0081 | 0.99 |
+| 12 ion transits | $-0.7907$ | 0.0060 | 1.07 |
+| box 20 $\lambda_D$ | $-0.8050$ | 0.0378 | 0.72 |
+| seed 1 | $-0.7889$ | 0.0065 | 1.30 |
+| seed 2 | $-0.7854$ | 0.0053 | 1.73 |
+
+Everything lands within three per cent, most of it within two, and no single knob drives
+what is left. Four times the particles do not move it, so it is not statistical; three
+transits and twelve give the same answer, so it is not the duration. The two that do move
+it are the time step, worth 1.6 percentage points between 0.1 and 0.05, and the box,
+worth 1.3 between ten Debye lengths and twenty — and the box is where the difference
+should be, since the reference is the semi-infinite problem in which the plasma is exactly
+neutral and field-free at the source plane, and ten Debye lengths is not that. The scatter
+between seeds is about 0.4 percentage points and the standard error of a single run about
+0.7, so the residual is a real systematic of about one and a half per cent and not noise.
 
 ## Running it
 
