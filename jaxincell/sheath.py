@@ -6,6 +6,11 @@ integrates, so a simulation compared with them is compared with mathematics and
 not with itself. The examples, the documentation figures and the tests all use
 this module, which is why it is public.
 
+It is plain NumPy and returns plain arrays. That is deliberate: a reference has no
+business inside a differentiated run, and keeping it off JAX makes the separation
+one the interpreter enforces. Evaluate it before the simulation and pass the
+numbers in.
+
 Everything is in the normalisation of the sheath literature: the potential in
 :math:`T_e/e`, speeds in the electron spread :math:`\\sigma_e=\\sqrt{T_e/m_e}`,
 densities in the upstream plasma density and lengths in the Debye length. Turn a
@@ -19,14 +24,13 @@ so the electrons that reach the wall are those launched above the cutoff
 :math:`v_{\\rm cut}=\\sqrt{-2\\phi_w}`, and equal particle currents at a floating
 collector give the wall potential in closed form.
 """
+import math
+
 import numpy as np
-from jax.scipy.special import erf as _erf
 
 __all__ = ["floating_potential", "source_density", "densities", "hobbs_wesson"]
 
-
-def _erfn(z):
-    return np.asarray(_erf(np.asarray(z)))
+_erfn = np.vectorize(math.erf)      # the host's own erf: this module is never traced
 
 
 def floating_potential(beam_speed, iterations=80):
