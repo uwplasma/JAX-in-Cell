@@ -465,6 +465,14 @@ class Simulation:
     def _accumulate(self, totals, x, v, w):
         return None if totals is None else totals + self.moments(x, v, w)
 
+    def _current_closure(self, current_per_particle):
+        """The constant of the continuity current: the mean current the particles carry, which
+        a periodic box has no wall to replace, and zero at an open source plane, where the
+        current across the plane is not tracked (:func:`~jaxincell._core.current_from_continuity`)."""
+        if self.domain.field_bc == (4, 2):
+            return 0.0
+        return jnp.sum(current_per_particle) / self.domain.length
+
     def _electrode_field(self, wall):
         """:math:`E_x` at the collector face, :math:`-\\sigma_w/\\epsilon_0`, from the charge it
         has collected. It closes the Gauss solve of a box whose other wall is an open source
@@ -645,7 +653,7 @@ class Simulation:
         # is the one the previous step ended on (or the initial one), carried in the
         # state rather than deposited again from wrap(x^{n+1/2} - dt v/2), which is
         # the same positions, velocities and weights and so the same density.
-        rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, jnp.sum(q * w * v[:, 0]) / L, st.rho)
+        rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, self._current_closure(q * w * v[:, 0]), st.rho)
         E, B = self._advance_fields(st.E, st.B, J1, dt / 2, rho_half, wall, electric_first=True)
         # push with the fields at t^{n+1/2}
         u = self._accelerate(u, self._fields_at(x_half, E, B, rho_half), qm, dt)
@@ -663,7 +671,7 @@ class Simulation:
         # that apply_particle_bc has just reduced, so the density at x^{n+1/2} would jump
         # by the charge collected at the wall with no current to account for it, and the
         # discrete Gauss law would drift by that much every step.
-        rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, jnp.sum(q * w * v[:, 0]) / L, rho_half)
+        rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, self._current_closure(q * w * v[:, 0]), rho_half)
         E, B = self._advance_fields(E, B, J2, dt / 2, rho_next, wall, electric_first=False)
         totals = self._accumulate(st.moments, x_next, v, w)
         state = State(E, B, x_next_half, u, w, qm, rho_next, key, st.time + dt, wall, totals)

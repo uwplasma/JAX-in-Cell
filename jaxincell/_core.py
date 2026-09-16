@@ -130,13 +130,12 @@ def _integrate_from_walls(s, dx, bc, wall_value=0.0):
       trapezoidal sum over the :math:`N_x + 1` faces from wall to wall,
       :math:`\\tfrac12 F_{-1/2} + \\sum_{i=0}^{N_x-2} F_{i+1/2} + \\tfrac12 F_{N_x-1/2} = 0`.
     * **Open on the left, absorbing on the right**: the plane a source supplies through
-      imposes nothing, and the constant comes from the electrode opposite instead:
-      ``wall_value`` is what :math:`F` takes at the right wall face. For the Gauss solve
-      that is :math:`-\\sigma_w/\\epsilon_0`, the field of the charge the collector holds,
-      and for the continuity current it is the current the collector draws. A symmetry
-      plane would give the same answer when nothing crosses it and the box starts
-      neutral; with a source it is the ledger of the collector, not the source plane,
-      that closes the problem.
+      imposes nothing, and the constant comes from the electrode opposite instead.
+      ``wall_value`` is what :math:`F` takes at the right wall face; for the Gauss solve
+      that is :math:`-\\sigma_w/\\epsilon_0`, the field of the charge the collector holds.
+      A symmetry plane would give the same answer when nothing crosses it and the box
+      starts neutral; with a source it is the ledger of the collector, not the source
+      plane, that closes the problem.
     """
     if bc[0] == bc[1] != 2:
         s = s - jnp.mean(s)
@@ -158,8 +157,13 @@ def current_from_continuity(rho_old, rho_new, dt, dx, wall_current, bc):
     exactly, with the wall closures of :func:`_integrate_from_walls`. A periodic box has
     no wall to fix the constant, which is instead the mean current the particles carry,
     :math:`\\langle J\\rangle = L^{-1}\\sum_p q_p v_{x,p}`; between two absorbing walls the
-    current the closure removes is the one in the external circuit; and with an open
-    source plane ``wall_current`` is the current the collector draws."""
+    current the closure removes is the one in the external circuit.
+
+    With an open source plane the current across that plane is not tracked, and
+    ``wall_current`` is taken as zero: :math:`J_x` is then the internal transport measured
+    from the source plane rather than an absolute current density, which is a diagnostic
+    and nothing more. An electrostatic run, which is the only kind a source is allowed in,
+    takes :math:`E_x` from the charge density and never uses it."""
     J = _integrate_from_walls(-(rho_new - rho_old) / dt, dx, bc, wall_current)
     return J + wall_current if bc[0] == 0 else J
 
