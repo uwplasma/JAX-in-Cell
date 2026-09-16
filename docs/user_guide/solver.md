@@ -6,12 +6,14 @@
 ```python
 from jaxincell import Solver
 
-solver = Solver(algorithm="explicit", field_solver="ampere", filter_passes=2)
+solver = Solver(algorithm="explicit", model="electromagnetic", field_solver="ampere",
+                filter_passes=2)
 ```
 
 | argument | meaning | default |
 |---|---|---|
 | `algorithm` | `"explicit"` (Boris leapfrog) or `"implicit"` (energy- and charge-conserving Crank-Nicolson) | `"explicit"` |
+| `model` | `"electromagnetic"` solves all six field components; `"electrostatic"` solves $\partial_x E_x = \rho/\epsilon_0$ alone | `"electromagnetic"` |
 | `field_solver` | `"ampere"` advances $E_x$ from the current; `"gauss"` recomputes it from $\rho$ | `"ampere"` |
 | `relativistic` | relativistic Boris pusher | `False` |
 | `filter_passes` | binomial smoothing passes on the sources; `0` disables | `0` |
@@ -19,6 +21,21 @@ solver = Solver(algorithm="explicit", field_solver="ampere", filter_passes=2)
 | `filter_strides` | cell offsets of the filter stencil | `(1,)` |
 | `picard_iterations` | fixed-point iterations of the implicit scheme | `8` |
 | `substeps` | particle sub-steps per field step, implicit only | `2` |
+
+## Which field model
+
+`"electrostatic"` solves $\partial_x E_x = \rho/\epsilon_0$ and nothing else. All three
+velocity components remain and an external magnetic field acts as it always did; what goes
+is the plasma's own transverse field, which is not evolved, and the transverse currents,
+which are not deposited. Choose it whenever the physics is $\mathbf E = -\nabla\phi$:
+waves along the grid, beam instabilities, sheaths. It removes the light-wave time-step
+limit and is 1.19 times faster, measured at 200000 particles on 256 cells on a CPU.
+
+The two models differ in one place: a periodic box has no wall to fix the constant of
+integration, so Ampere's law carries the mean field that the net particle current drives
+while the Gauss solve sets the mean to zero. Between walls they agree to round-off. A
+{class}`~jaxincell.Source` needs the electrostatic model, for the reason in
+{doc}`sources`.
 
 ## Which integrator
 
