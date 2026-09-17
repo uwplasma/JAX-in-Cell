@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from jaxincell._parameters._solver_parameters import (
@@ -26,6 +27,49 @@ def test_clean_and_initialize_solver_parameters_defaults_and_tuple_coercion():
     overridden_input = clean_and_initialize_solver_parameters({}, input_parameters)
     assert overridden_input["filter_strides"] == (1, 3, 5)
     assert overridden_input["tolerance_Picard_iterations_implicit_CN"] == 1e-2
+
+
+@pytest.mark.parametrize(
+    "snapshot_steps, expected",
+    [
+        (None, None),
+        ([], None),
+        ((), None),
+        ([3, 1, 3, 0], (0, 1, 3)),
+        ((3, 1, 3, 0), (0, 1, 3)),
+        (np.array([3, 1, 3, 0], dtype=np.int32), (0, 1, 3)),
+        (np.array([3, 1, 3, 0], dtype=np.int64), (0, 1, 3)),
+        (range(3), (0, 1, 2)),
+    ],
+)
+def test_clean_and_initialize_solver_parameters_snapshot_steps(snapshot_steps, expected):
+    """Test snapshot schedule normalization.
+
+    Cases:
+    - None and empty sequences preserve the all-steps setting.
+    - lists, tuples, NumPy integers, and ranges become sorted unique Python integers.
+    """
+    parameters = clean_and_initialize_solver_parameters({"snapshot_steps": snapshot_steps})
+
+    assert parameters["snapshot_steps"] == expected
+    if expected is not None:
+        assert type(parameters["snapshot_steps"]) == tuple
+        assert all(type(step) == int for step in parameters["snapshot_steps"])
+
+
+@pytest.mark.parametrize(
+    "snapshot_steps",
+    [[1, 1.0], [1.0, 1], [1, True], [True, 1], [False], [np.bool_(True)], [-1], [1.5], ["1"]],
+)
+def test_clean_and_initialize_solver_parameters_rejects_invalid_snapshot_steps(snapshot_steps):
+    """Test snapshot validation before deduplication.
+
+    Cases:
+    - equal integers, floats, and booleans cannot conceal invalid elements in either order.
+    - negative integers, fractional values, and strings are rejected.
+    """
+    with pytest.raises(AssertionError, match="Snapshot steps must be a list of non-negative integers or None"):
+        clean_and_initialize_solver_parameters({"snapshot_steps": snapshot_steps})
 
 
 def test_clean_and_initialize_solver_parameters_rejects_invalid_values():

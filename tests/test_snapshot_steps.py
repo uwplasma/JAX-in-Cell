@@ -14,7 +14,9 @@ from tests.helpers import scalar
 from tests.test_simulation import small_simulation_parameters
 
 
-def test_snapshot_steps_matches_full_history_final_state():
+@pytest.mark.parametrize("snapshot_steps", [[0], [0, 5], [0, 5, 11], [11]])
+@pytest.mark.parametrize("time_evolution_algorithm", [0, 1])
+def test_snapshot_steps_matches_full_history_final_state(snapshot_steps, time_evolution_algorithm):
     """Test solver_parameters["snapshot_steps"].
 
     Cases:
@@ -23,6 +25,8 @@ def test_snapshot_steps_matches_full_history_final_state():
       output shapes reduced from (total_steps, ...) to (len(snapshot_steps), ...).
     - every recorded snapshot exactly matches the corresponding step of the
       equivalent full-history run (same seed).
+    - Boris and Crank-Nicolson both handle schedules ending before the final step.
+    - schedules can select only the first or last step.
     - time_array is realigned to the requested snapshot steps rather than
       staying at full length.
     """
@@ -36,12 +40,14 @@ def test_snapshot_steps_matches_full_history_final_state():
         number_pseudoparticles=number_pseudoparticles,
     )
     base_parameters["solver_parameters"]["seed"] = 4242
+    base_parameters["solver_parameters"]["time_evolution_algorithm"] = time_evolution_algorithm
+    base_parameters["solver_parameters"]["number_of_particle_substeps_implicit_CN"] = 1
+    base_parameters["solver_parameters"]["max_number_of_Picard_iterations_implicit_CN"] = 2
 
     full_output = Simulation(deepcopy(base_parameters)).run()
     assert full_output["electric_field"].shape == (total_steps, number_grid_points, 3)
     assert full_output["time_array"].shape == (total_steps,)
 
-    snapshot_steps = [0, 5, total_steps - 1]
     snap_parameters = deepcopy(base_parameters)
     snap_parameters["solver_parameters"]["snapshot_steps"] = snapshot_steps
     snap_output = Simulation(snap_parameters).run()
@@ -67,6 +73,35 @@ def test_snapshot_steps_matches_full_history_final_state():
         assert jnp.allclose(snap_output["magnetic_field"][snap_index], full_output["magnetic_field"][step])
         assert jnp.allclose(snap_output["positions"][snap_index], full_output["positions"][step])
         assert jnp.allclose(snap_output["velocities"][snap_index], full_output["velocities"][step])
+        assert jnp.allclose(snap_output["current_density"][snap_index], full_output["current_density"][step])
+        assert jnp.allclose(snap_output["charge_density"][snap_index], full_output["charge_density"][step])
+
+
+def test_snapshot_steps_preserves_gradients():
+    """Test differentiation through snapshot recording.
+
+    Cases:
+    - an early-ending sparse history has the same objective and gradient as selected full-history rows.
+    - runtime differentiable inputs remain supported by the snapshot cursor.
+    """
+    parameters = small_simulation_parameters(total_steps=4, number_grid_points=4, number_pseudoparticles=2)
+    full_simulation = Simulation(deepcopy(parameters))
+    snapshot_steps = jnp.array([0, 2])
+    parameters["solver_parameters"]["snapshot_steps"] = [0, 2]
+    snapshot_simulation = Simulation(parameters)
+
+    def full_objective(drift_speed):
+        output = full_simulation.run({"electrons": {"electrons0": {"drift_speed_x": drift_speed}}})
+        return jnp.mean(output["velocities"][snapshot_steps, :, 0])
+
+    def snapshot_objective(drift_speed):
+        output = snapshot_simulation.run({"electrons": {"electrons0": {"drift_speed_x": drift_speed}}})
+        return jnp.mean(output["velocities"][:, :, 0])
+
+    full_value, full_gradient = jax.value_and_grad(full_objective)(1e5)
+    snapshot_value, snapshot_gradient = jax.value_and_grad(snapshot_objective)(1e5)
+    np.testing.assert_allclose(snapshot_value, full_value, rtol=1e-10, atol=0)
+    np.testing.assert_allclose(snapshot_gradient, full_gradient, rtol=1e-10, atol=0)
 
 
 def _peak_gpu_bytes_in_subprocess(snapshot_steps, total_steps, number_grid_points, number_pseudoparticles, seed):

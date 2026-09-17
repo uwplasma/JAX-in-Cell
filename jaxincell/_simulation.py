@@ -244,77 +244,48 @@ class Simulation:
                 solver_parameters["number_of_particle_substeps_implicit_CN"]
             )
 
-        # solver_parameters["snapshot_steps"]: opt-in, memory-bounded history recording.
-        # Left unset, behavior is unchanged (full per-step history, via lax.scan's normal
-        # ys-stacking). When set to an explicit list of step indices (e.g.
-        # np.arange(total_steps)[::save_every], or just [total_steps - 1] for the final
-        # state only), only those snapshots are kept, using a small fixed-size buffer
-        # written into the scan carry instead of letting lax.scan stack an output for
-        # every one of the total_steps iterations -- this is what actually exhausts
-        # device memory for large grids/particle counts/long runs, since
-        # positions/velocities/E/B/J/rho are all stacked over total_steps by default.
-        snapshot_steps = solver_parameters.get("snapshot_steps")
-        if snapshot_steps is not None:
-            snapshot_step_list = sorted(set(int(s) for s in snapshot_steps))
-        else:
-            snapshot_step_list = None  # keep every step (default, original behavior)
+        # Keep the requested snapshots in fixed-size buffers carried through the scan.
+        # An unset snapshot_steps records every step.
+        num_snapshots = len(self._snapshot_steps)
+        snapshot_steps_arr = jnp.array(self._snapshot_steps, dtype=int)
+        time_array = (snapshot_steps_arr + 1) * dt
+        # The sentinel keeps the lookup valid after the last requested snapshot.
+        snapshot_steps_with_end = jnp.array((*self._snapshot_steps, total_steps), dtype=int)
+
+        _, sample_step_data = eval_shape(step_func, initial_carry, 0)
+        snapshot_buffers = tuple(
+            jnp.zeros((num_snapshots,) + leaf.shape, dtype=leaf.dtype)
+            for leaf in sample_step_data
+        )
 
         @scan_tqdm(total_steps)
-        def simulation_step(carry, step_index):
-            return step_func(carry, step_index)
+        def scan_body(carry_and_buffers, step_index):
+            sim_carry, buffers, next_snapshot = carry_and_buffers
+            new_sim_carry, step_data = step_func(sim_carry, step_index)
 
-        if snapshot_step_list is None:
-            # Original behavior: keep the full per-step history.
-            _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
-            positions_over_time, velocities_over_time, electric_field_over_time, \
-            magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
-        else:
-            # Snapshot mode: allocate one small buffer per output, sized
-            # (num_snapshots, *field_shape) instead of (total_steps, *field_shape).
-            snapshot_steps_arr = jnp.array(snapshot_step_list, dtype=jnp.arange(total_steps).dtype)
-            num_snapshots = len(snapshot_step_list)
+            should_save = step_index == snapshot_steps_with_end[next_snapshot]
 
-            sample_index = jnp.arange(total_steps)[0]
-            _, sample_step_data = eval_shape(step_func, initial_carry, sample_index)
-            snapshot_buffers = tuple(
-                jnp.zeros((num_snapshots,) + leaf.shape, dtype=leaf.dtype)
-                for leaf in sample_step_data
-            )
-
-            def scan_body(carry_and_buffers, step_index):
-                sim_carry, buffers = carry_and_buffers
-                new_sim_carry, step_data = simulation_step(sim_carry, step_index)
-
-                matches = snapshot_steps_arr == step_index
-                should_save = jnp.any(matches)
-                # argmax picks the matching slot when should_save is True; the value
-                # is unused (and irrelevant) on non-matching steps, since the false
-                # branch of lax.cond below leaves the buffer untouched either way.
-                snap_idx = jnp.argmax(matches)
-
-                buffers = tuple(
-                    lax.cond(
-                        should_save,
-                        lambda buf, val=value: buf.at[snap_idx].set(val),
-                        lambda buf: buf,
-                        buf,
-                    )
+            def save_snapshot(buffers):
+                return tuple(
+                    buf.at[next_snapshot].set(value)
                     for buf, value in zip(buffers, step_data)
                 )
-                return (new_sim_carry, buffers), None
 
-            (_, snapshot_buffers), _ = lax.scan(
-                scan_body, (initial_carry, snapshot_buffers), jnp.arange(total_steps)
+            buffers = lax.cond(
+                should_save,
+                save_snapshot,
+                lambda buffers: buffers,
+                buffers,
             )
-            positions_over_time, velocities_over_time, electric_field_over_time, \
-            magnetic_field_over_time, current_density_over_time, charge_density_over_time = snapshot_buffers
+            next_snapshot += should_save.astype(next_snapshot.dtype)
+            # Returning None prevents scan from stacking a second output history.
+            return (new_sim_carry, buffers, next_snapshot), None
 
-        # In snapshot mode, time_array must line up with the recorded snapshots
-        # rather than every one of the total_steps iterations.
-        if snapshot_step_list is None:
-            time_array = jnp.linspace(0, total_steps * dt, total_steps)
-        else:
-            time_array = jnp.array(snapshot_step_list, dtype=dt.dtype if hasattr(dt, "dtype") else jnp.float64) * dt
+        (_, snapshot_buffers, _), _ = lax.scan(
+            scan_body, (initial_carry, snapshot_buffers, jnp.array(0, dtype=int)), jnp.arange(total_steps)
+        )
+        positions_over_time, velocities_over_time, electric_field_over_time, \
+        magnetic_field_over_time, current_density_over_time, charge_density_over_time = snapshot_buffers
 
         # **Output results**
         from ._constants import epsilon_0, mass_electron
@@ -491,6 +462,7 @@ class Simulation:
         self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
         self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
         self.build_domain()
+        self.resolve_snapshot_steps()
         self.initialize_particles()
         self.initialize_fields()
         self.build_hash_values()
@@ -520,6 +492,15 @@ class Simulation:
         self.dx = domain_state["dx"]
         self.dt = domain_state["dt"]
         self.grid = domain_state["grid"]
+
+    def resolve_snapshot_steps(self):
+        snapshot_steps = self._solver_parameters["snapshot_steps"]
+        if snapshot_steps is None:
+            snapshot_steps = tuple(range(self._domain_parameters["total_steps"]))
+        else:
+            snapshot_steps = tuple(s for s in snapshot_steps if 0 <= s < self._domain_parameters["total_steps"])
+            assert len(snapshot_steps) > 0, "All snapshot steps are out of bounds. Please provide at least one valid snapshot step."
+        self._snapshot_steps = snapshot_steps
 
     def initialize_particles(self):
         domain_state = self.current_domain_state()
