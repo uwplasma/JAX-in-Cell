@@ -604,7 +604,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 
 - [x] **W0** baseline: reproduce the register, record hardware and versions, port what is wanted from PR #43.
 - [x] **W1** parameter contracts, validation, coordinates, absolute step and time, supported combinations.
-- [ ] **W2** sources and boundary physics: sampling, safe pools, charge/current/energy exchange, true impacts.
+- [x] **W2** sources and boundary physics: sampling, safe pools, charge/current/energy exchange, true impacts. *(S04's remaining half is the magnetised example's own entrance condition, a physics choice that belongs to W7.)*
 - [ ] **W3** diagnostics and statistics: weighted moments, independent balances, correct windows, uncertainty.
 - [ ] **W4** orchestration and progress: pure kernels, host-owned meter, one snapshot schedule, exact restart.
 - [ ] **W5** TOML/CLI and persistence: one resolver, native archives, openPMD round trip.
