@@ -271,6 +271,11 @@ gh release create v0.2 --generate-notes
 
 ## Roadmap
 
+`plan.md` at the root of the repository is the working plan for the branch under review: a
+verified defect register, the work order, the contracts each work package has to meet, and the
+acceptance checklist. It is a development document rather than user documentation, which is why
+it lives outside this site. The items below are the longer-range ones that plan does not cover.
+
 Planned, in no particular order; open an issue first so that the design can be discussed
 before the code is written.
 

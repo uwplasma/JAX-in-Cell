@@ -1,0 +1,508 @@
+# JAX-in-Cell: correctness, teaching interface, and kinetic benchmarks
+
+**Working plan and live checklist.** It supersedes the sheath-only handoff that PR #42 carried
+in its description. It specifies work to do; it is not a report that the work is done. Tick a
+box only when a commit, a test and a reproducible number exist for it.
+
+## 0. Where the work happens
+
+| | |
+|---|---|
+| **Development branch** | **`research-release`**, PR #42 -> `main`, head `433d401` at the time of writing. All changes in this plan are made here. |
+| Reference only | `rj/additions-to-pr`, PR #43 -> `research-release`, head `ffa5d6f`. Read it for the example changes and the progress-meter attempt, and port what is worth keeping onto `research-release` deliberately. **Do not commit to it, merge it, or rebase it.** |
+
+Leave both pull requests open. Do not push to `main`, merge, force-push, tag or publish; the
+maintainer chooses the integration order. New commits are authored and committed by
+`Rogerio Jorge <rogerio.jorge@ist.utl.pt>`, with no AI author or co-author trailers, and no
+existing human attribution is rewritten.
+
+What to take from PR #43: the larger Weibel domain and mode spectrum, the longer bump-on-tail
+and Landau runs, the bigger magnetised-sheath quick settings, and the intent of a progress
+meter. Each is ported with the corrections in this plan (U13 for Weibel's precision and memory,
+section 5 for the meter), not copied.
+
+### 0.1 What completion means
+
+Correct code and inputs, the requested teaching workflows, independent numerical evidence,
+figures regenerated with provenance, clean package and documentation builds, and a review
+report. A ticked box, a green coverage badge, a successful trace, a pretty plot, or two copies
+of the same formula agreeing is not evidence.
+
+Where a literature reproduction fails, keep the disagreement and diagnose it. Do not tune a
+test until a wrong answer passes, change a physical model quietly, or manufacture an
+instability. A documented negative reproduction is a result; a fabricated positive one is not.
+
+## 1. Strategy: extend this small code
+
+These already exist and are to be repaired or extended, not recreated: frozen configuration
+pytrees with static structure and traced physics; explicit and implicit integrators; a real
+electrostatic model; `Source`, a fixed-capacity pool, a named `State`, a `Wall` ledger;
+streaming moments; `load_toml` and the `jaxincell` entry point; `plot` and a blitted ffmpeg
+writer; optional openPMD; host-side theory in `jaxincell.sheath` and `docs/scripts`.
+
+The separation is **numerical kernels / run orchestration / input-output and presentation**.
+The kernels stay pure and JAX-compatible: no plotting, progress objects, filesystem access or
+host fitting inside a differentiated step.
+
+Three targets, distinguished on purpose:
+
+1. **Maintenance** -- one authoritative implementation of each operator, sampler, diagnostic and
+   input conversion.
+2. **Runtime** -- no redundant deposits, histories, callbacks, sorts or recompiles.
+3. **Pedagogy** -- examples keep the line from mathematics to code. Shortening an example by
+   hiding its setup behind `run_example(...)` is not an improvement.
+
+A small `jaxincell/_io.py` is justified if it takes I/O out of `_simulation.py`. A shared host
+theory module is justified if it removes duplicated theory from docs and examples. Splitting
+`_simulation.py` further needs a clearer dependency graph, not a smaller file. No plugin
+framework, no task engine, no class per boundary.
+
+## 2. Defect register
+
+Every row was re-checked against `research-release`. **confirmed** rows carry the check that
+found them. Several are in code this project previously reported as validated; they are listed
+plainly for that reason.
+
+### 2.1 Sheath physics, sources, boundaries
+
+| ID | Status | Finding | Required correction |
+|---|---|---|---|
+| S01 | **confirmed** | Cumulative moments are divided by one interval too many: `(stored-late)*steps//stored` spans `stored-1-late` chunks. A constant 1.0000e16 density reads back 9.6667e15, exactly 29/30. The magnetic example gives 19/20. | Divide by the actual elapsed steps or duration, carried with the accumulator. Regenerate every density comparison and the docs figure. |
+| S02 | **confirmed** | `sheath_magnetized.py` calls `(x > L/2 - 2*dx) & (w > 0)` an impact. That is snapshot occupancy: it repeats particles across frames, includes outgoing ones, and weights by population instead of crossing flux. | Record true boundary events before velocity and weight change; build wall spectra from them. Withdraw the published impact-energy and incidence numbers until re-measured. |
+| S03 | **confirmed** | `sample_crossing` uses `source.sigma` (from `vth[0]`) for all three components; `Source.vth[1:3]` is ignored. `test_the_sampler_draws_the_flux_and_not_the_velocity_density` asserts the wrong behaviour. | Use the three requested spreads. Fix the test with the code; add anisotropic and degenerate cases. |
+| S04 | confirmed by inspection | Magnetic initial particles have transverse spread and a normal ion drift while the source is at rest and isotropic (via S03), and the source does not inherit the species drift. | Make initial and injected distributions explicit and consistent. Do not claim field-aligned sonic entrance from this setup. |
+| S05 | confirmed by inspection | Only an at-rest Maxwellian and a cold beam are supported; the drifting crossing distribution is refused. | Add the sampler of section 3.1, with normalisation, moment and reparameterisation checks. |
+| S06 | to reproduce | Cloud charge is truncated outside a wall before the centre crosses, while surface charge is credited at centre crossing. | Derive compatible volume/cloud/surface bookkeeping and current; test a sheet moving continuously through a wall at many subcell offsets. |
+| S07 | confirmed by inspection | Injected particles free-stream for a residual step with no field interaction; source correctness is inferred from the Gauss solve alone. | Define the staggering; use partial trajectories of matching order; test with nonzero prescribed E and B. |
+| S08 | **confirmed** | With an open plane the continuity current is anchored at zero, now documented as "the internal transport measured from the source plane". Honest, but not an absolute current. | Supply the real boundary current; distinguish conduction, displacement and circuit current. |
+| S09 | **partly fixed** | `wall.overflow` exists and `sheath_unmagnetized.py` warns on it. `sheath_magnetized.py` and `sheath_optimization.py` ignore it, and the library never invalidates a run. | Structured invalid-run status; optimisation and validation must reject it; check capacity at each injection. |
+| S10 | confirmed by inspection | The reflection weight cutoff truncates the last part of an orbit and adds a branch. | Declare and track the truncation budget; test cutoff convergence and its effect on sensitivities. |
+| S11 | to reproduce | Thermal-wall outgoing energy is recorded before the redraw; injected energy and momentum are missing from the budget. | Record post-interaction states; accumulate source energy and momentum and reservoir heat. |
+| S12 | confirmed by inspection | Wall energies use `m v^2/2` on relativistic paths, and nonrelativistic collisions can be combined with a relativistic pusher. | Use carried momentum and a stable `K = m|u|^2/(gamma+1)`; reject unsupported combinations explicitly. |
+| S13 | **confirmed** | `active=0` reaches `jnp.arange(n) % s.active` and `L / s.active`. | Make empty starts safe under jit, grad and vmap; validate counts, `emit<=capacity`, positive masses and steps, field shapes. |
+| S14 | **confirmed** | `gauss_residual` skips cell 0 because that cell's equation defines the missing boundary field. Documented, but therefore not an independent full check. | Report an all-cell residual with stored boundary data, plus independent surface and global ledgers. |
+| S15 | confirmed by inspection | `sheath_reflection.py` is still an unmaintained thermal-wall run on the default electromagnetic model with four filter passes and a bare `argmax` edge fallback. | Explicit model selection, maintained-source comparison, measured `R_eff`, the validated edge helper; keep a labelled transient variant. |
+| S16 | **confirmed** | "Normal incidence is the field-free case" is printed from the normal-field run itself; no `B=0` control is executed. | Run matched `B=0` and normal-field controls at the same seed and resolution. Quick is a smoke preset, not evidence. |
+| S17 | **confirmed** | `floating_potential` says its left side is `1/2` at `phi=0`; it is `1`. The guard therefore rejects `v0` in `[0.3989, 0.7979)`, which have valid roots: `v0=0.5 -> -0.134117`, `v0=0.7 -> -0.012507`. This already forced a benchmark parameter change during the previous round. | Correct the endpoint and the bound to `sqrt(2/pi)`. Distinguish algebraic root existence from sheath admissibility. |
+| S18 | to reproduce | References are compared at clipped positive potentials, mixed wall potentials, and face-versus-centre coordinates. | State each reference's domain, use correct coordinates, quantify rather than clip. Distinguish `mean[n(phi)]` from `n(mean[phi])`. |
+
+### 2.2 Derivatives, optimisation, tests that cannot fail
+
+| ID | Status | Finding | Required correction |
+|---|---|---|---|
+| G01 | **confirmed, serious** | `pytest.approx(x, rel=...)` keeps its default `abs=1e-12`, and `np.allclose` its default `atol=1e-8`. Three assertions in `tests/test_gradients.py` compare SI quantities of order `1e-19` to `1e-25` and therefore pass with **zero and with the wrong sign**. | Normalise the observables or set explicit absolute tolerances from a physical scale. Audit the whole suite. Every such assertion must fail when the observable is replaced by zero. |
+| G02 | **confirmed, serious** | In `test_the_impact_energy_...` the particle never reaches the wall: `wall.arrived = 0.0`, `energy_in = 0.0`. The run is 0.80 ns against a 2.26 ns transit. It passes only because of G01. The "analytic impact control" reported in PR #42 tests nothing. | Assert nonzero collected weight, an event time inside the window, and the expected event count **before** comparing energy. Then differentiate the arrival time consistently (section 3.4). |
+| G03 | **confirmed** | The charge-sheet invariant compares a `1.35e-23` V/m field using `np.allclose` with default `atol=1e-8`. Zero and the wrong sign both pass. Sparse storage can also step over the cloud overlap. | Dimensionless fields, sampling at every crossing step, a subcell-offset sweep, and a test that fails when the cloud term is dropped. |
+| G04 | open | Forward/reverse/small-h agreement verifies one realised map, not an ensemble, continuum or stationary response. | Keep the derivative support matrix of section 4.3 and demonstrate each advertised response separately. |
+| G05 | **confirmed** | The optimisation builds one target on the training seeds and another on the held-out seeds, so both are exactly zero at the reference by construction. That is a plumbing self-test, not out-of-sample prediction. | Keep it, labelled a paired-realisation self-test. Add one fixed, independent, refined target used by both training and validation. |
+| G06 | **confirmed** | `np.linspace(0.02, 0.50, 25)` has spacing 0.02 and does not contain `r_reference = 0.35`; its nearest point is 0.34. The reported "uncertainty 0.01" is the distance to a grid point. | Separate scan discretisation from statistical uncertainty; include the known control in the grid; refine the minimum independently. |
+| G07 | **confirmed** | The loop can leave the final accepted point out of `history`, and "the step is below the uncertainty of the control" is a hard-coded threshold reported as convergence. | Record and evaluate every accepted point, return the best accepted point, separate stalled from converged, use projected-gradient/step/objective criteria with named tolerances. |
+| G08 | **confirmed** | The response window is `25 * 0.15 = 3.75` inverse electron plasma frequencies, about 0.60 oscillations. The documentation calls it "about four electron plasma periods". | Report inverse-frequency time and cycles separately. Keep the preparation fixed and do not call the result a stationary derivative. |
+| G09 | open | Source clipping, slot selection, sorting, accept/reject collisions and the weight floor all add derivative discontinuities. | Test and document each. No blanket claim that ensemble-averaged branchwise AD repairs missing event terms. |
+
+### 2.3 Interface, progress, plots, export
+
+| ID | Status | Finding | Required correction |
+|---|---|---|---|
+| U01 | confirmed by inspection | `load_toml` passes a few run keys only; sources, external fields, output, movies, restart, scans and optimisation are not reachable from TOML. | One normalised configuration path; never accept an ignored key silently. |
+| U02 | **confirmed** | PR #43 builds `tqdm` inside the jitted `_run` and captures it in `jax.debug.callback`. The bar is trace-time state: a cached program reuses a closed bar on the second identical call. | Own progress on the host, per invocation; kernels stay callback-free. See section 5. |
+| U03 | **confirmed** | `from tqdm import tqdm` is unconditional and `tqdm` is absent from `pyproject.toml`, so a clean install cannot import the package. The bar also prints during library calls inside tests. | No new required dependency; lazy optional `tqdm`; cadence independent of the snapshot schedule; silent under tracing. |
+| U04 | **confirmed** | `_plot.py` uses `out.weight[-1] > 0` to choose the particles drawn in **every** frame. Particles collected earlier vanish from all frames; refilled slots appear from the start. | Species membership is fixed; activity and weight are per frame. Test losses, injections, unequal weights and reused slots. |
+| U05 | **confirmed** | `_hist` clips outliers into the edge bins and the phase-space array adds `+1.0` to weighted counts for log display. | Track overflow or widen documented ranges; mask positive weighted values for log display; state normalisation and units. |
+| U06 | **confirmed** | Face quantities (`E_x`, potential) are drawn on `out.grid`, which is cell centres. | Centralise centre, face and boundary coordinates and use them in plots and I/O. |
+| U07 | confirmed by inspection | Energy, momentum, charge and balance histories are not in the general plot. | Restore configurable diagnostic panels separating closed invariants, open budgets and bare changes. |
+| U08 | to reproduce | Plot preprocessing can allocate very large histogram arrays and assumes evenly spaced stored times; save and show are coupled. | Bounded streaming frames, irregular schedules, independent save and show, keep the blitting. |
+| U09 | confirmed by inspection | `omega` always labels the axis `omega_pe`; `quiet` is ambiguous. | Explicit reference-frequency labels and `sampling='low_noise'`, with migration aliases that do not change physics. |
+| U10 | **confirmed (convention to re-check)** | `openpmd.py` sets `grid_global_offset=-L/2` with `position=0.0` for centres and `0.5` for faces. Under `x_i = offset + (i + position)*spacing` those are the left edge and the centre, half a cell left of the true locations. | Fix per the standard and test with an independent reader. Confirm the exact `position` semantics from the specification before changing. |
+| U11 | confirmed by inspection | openPMD output is not a restart state and carries no source or wall context or readback example. | Native versioned restart and analysis archives plus an honest openPMD round trip. |
+| U12 | confirmed by inspection | Examples do not systematically save configuration, data, figures and provenance; documentation quotes numbers from different presets. | Provenance and controlled saves in every teaching template; regenerate documentation from the exact named preset. |
+| U13 | confirmed by inspection | PR #43's Weibel sets float32 while the comment says float64, stores large histories, and widens the unstable spectrum with no fitted linear benchmark. | Keep the engaging run; fix the precision contract and memory policy; add verified linear-mode measurements in the same script. |
+| U14 | open | The requested numerical-comparison and output/restart examples do not exist. | Implement the inventory of section 6 without four copies of the PIC setup. |
+
+## 3. W2 contracts: sources, collectors, events
+
+### 3.1 A source is a boundary distribution
+
+Use the three requested component spreads. At a plane the normal velocity comes from the flux
+distribution and the tangential components from their own. For a factorised Maxwellian with
+inward normal drift `u` and normal spread `sigma_n`,
+
+```math
+\Gamma=n[u\Phi(u/\sigma_n)+\sigma_n\varphi(u/\sigma_n)],\qquad
+p(v_n)=\frac{n v_n}{\Gamma\sqrt{2\pi}\sigma_n}e^{-(v_n-u)^2/2\sigma_n^2},\quad v_n>0,
+```
+
+with the cumulative numerator from 0 to `v`
+
+```math
+u[\Phi((v-u)/\sigma_n)-\Phi(-u/\sigma_n)]+\sigma_n[\varphi(u/\sigma_n)-\varphi((v-u)/\sigma_n)]
+```
+
+divided by `Gamma/n`, as an independent CDF and quadrature check. The sign of `u` matters:
+`abs(drift[0])` is not a drifting reservoir, and an outward cold beam is rejected rather than
+reflected. Keep the zero-drift Rayleigh and cold-beam limits as fast paths. Do not shift a
+Rayleigh sample at nonzero drift.
+
+If a numerical inverse is used, validate its **derivative** as well as its value; differentiating
+bisection branches gives the wrong sensitivity. A documented implicit-function `custom_jvp` with
+a tested transpose is the right mechanism.
+
+Field-aligned non-Maxwellian input needs a compact `(v_par, v_perp, gyrophase)` or invariant
+representation with explicit units, measure and normalisation, transformed to Cartesian and
+weighted by the **normal crossing flux** `max(v_n,0) f`. Sampling a gyrotropic density and
+rejecting `v_n<0` without flux weighting is wrong. Mark tabulated or accept/reject routes
+nondifferentiable in the affected parameters until a validated estimator exists.
+
+### 3.2 Two source models
+
+- **Prescribed reservoir**: incoming characteristics set externally, outgoing particles leave;
+  neither density nor flux is reset from collector losses.
+- **Schwager-Birdsall**: charge-balanced baseline injection plus the specified electron thermal
+  reflux. Confirm the prescription from the source before claiming it; the present thermal wall
+  alone is not it.
+
+A source normalisation derived to match a benchmark is a setup step. It must not become a hidden
+function of an optimisation control.
+
+### 3.3 Pool and particle identity
+
+Fixed shapes and continuous emitted weights stay. Exhausted capacity sets a persistent invalid
+status and stops safely at a host boundary; jitted and AD paths return a validity result the
+optimiser rejects. Record requested and emitted amounts and the overflow count and weight. A
+reused slot is not the same particle. Physical observables must be invariant under permutation of
+free slots and changes of capacity when nothing overflows.
+
+### 3.4 Injection, reflection, events
+
+Draw the one-step staggering diagram before touching `_explicit_step`. New particles enter at
+known substep times, see the appropriate residual force, and contribute consistent trajectories
+and boundary current. At a wall, locate the crossing on the numerical trajectory, capture the
+incident state, apply the law, and advance the remaining substep; mirroring the overshoot with
+the old speed is wrong after thermalisation or restitution. Bounded substepping or a checked step
+restriction handles repeated hits.
+
+Record per species and wall: fluence, conduction charge, kinetic energy in and out, momentum
+transfer, and optional fixed-bin energy and angle accumulators with overflow bins. Use
+`theta_hit = atan2(|v_t|, v_n)` for `v_n > 0`. Each event is weighted once, and histogram
+integrals must recover the independently accumulated fluence.
+
+For a crossing `g(x(tau;theta),theta)=0`,
+
+```math
+\frac{d\tau}{d\theta}=-\frac{g_x\,\partial_\theta x|_\tau+g_\theta}{g_x\dot x+g_t},
+```
+
+and event observables must include that term. Test `K_hit = K_0 + q E (x_w - x_0)` in a uniform
+static field, whose derivatives are `q(x_w-x_0)` and `m v_0` -- **after** asserting that the event
+happened. A correct value at a fixed impact-step index can still have a wrong derivative.
+Event-time treatment does not fix the derivative of a hard count by a fixed time; keep the
+ballistic negative control.
+
+### 3.5 Clouds, wall charge, continuity
+
+Distinguish charge on volume cells, reversible shape overlap at a boundary, irreversibly collected
+physical charge, and charge exchanged with a reservoir or supply. Deposited interior plus exterior
+fractions sum to one per active particle. Do not credit the exterior part to the electrode and then
+count it again at centre crossing. For the ideal conductor,
+
+```math
+E_x(x_w^-)=-\sigma_w/\epsilon_0,\qquad
+\dot\sigma_w=\sum_s q_s(\Gamma_{s,\rm in}-\Gamma_{s,\rm returned})+j_{\rm supply},
+```
+
+with `j_supply = 0` meaning floating. A gauge is not an extra boundary condition. The discrete
+continuity relation carries the physical boundary current; taking the collector current to zero by
+construction is not an absolute-current diagnostic.
+
+## 4. W3 contracts: diagnostics that can fail
+
+### 4.1 Windows and coordinates
+
+A cumulative diagnostic carries its step counter or accumulated duration; averages are differences
+divided by the actual difference, never inferred from array length. State whether a window is
+`(t_a, t_b]`. Test a constant signal, a linear signal, an irregular schedule, the first and last
+interval, restarts, and a final step not divisible by the stride. **Fix S01 in both sheath drivers
+and the figure script first**; it is a 3.3 % and 5 % bias, not statistics.
+
+Publish centre, face and boundary coordinate arrays in the output and use them everywhere. `E_x`
+and the potential are on faces; densities and deposited moments are on centres.
+
+### 4.2 Moments and conservation
+
+Add streaming density, three first moments and six second moments with consistent weights, so that
+pressure and temperature tensors are available without particle histories. Separate the cadences of
+compact diagnostics, field snapshots and particle snapshots.
+
+Expose both the raw physical change and the numerical residual. For open runs,
+
+```math
+W(t)-W(0)=W_{\rm injected}-W_{\rm escaping}+W_{\rm external}+W_{\rm supply}+W_{\rm other}+R_W,
+```
+
+with every sign and domain written down. Normalise by physical scales fixed at initialisation: a
+neutral plasma's net charge and a two-stream state's net momentum are not denominators. Separate
+`gauss_residual` from global charge conservation and test each with an independent deliberate
+perturbation.
+
+### 4.3 Tests that can fail, and the derivative matrix
+
+Audit every `pytest.approx`, `allclose` and fixed tolerance on SI-scale quantities; both carry
+absolute defaults that swallow tiny physical values. Each assertion must fail when the observable is
+replaced by zero or by the wrong sign. Replace `std/sqrt(frames)` with block means, independent
+seeds, or an integrated autocorrelation estimate, and label plain scatter as scatter.
+
+| Observable / path | What may be asserted |
+|---|---|
+| Fixed-time smooth field sensor, fixed realisation | JVP/VJP and small-step finite-difference agreement. |
+| The same sensor averaged over an ensemble | An estimate of the expected response, after ensemble and perturbation-scale checks. |
+| One transversely crossing impact | Event-aware derivative, checked against independent trajectory mathematics. |
+| Hard count or histogram bin by fixed time | Discontinuous; branchwise AD is not an expected-flux derivative. |
+| Long-time stationary average | Needs preparation, duration, sampling and discretisation convergence. |
+| Cutoff, creation count, collision acceptance, material branching | Support-changing terms identified; no blanket end-to-end claim. |
+
+## 5. W4: a progress meter that does not live in the kernel
+
+A progress meter is a requirement: a long run must say how far it has got. PR #43 supplies one
+and is the right instinct; its mechanism is the thing to replace.
+
+### 5.1 Why the callback route is rejected
+
+PR #43 builds a `tqdm` object inside the jitted `_run` and captures it in
+`jax.debug.callback(..., ordered=True)`. Three separate problems:
+
+1. **The bar is trace-time state.** `_run` is `jax.jit`-ed, so its body runs once per
+   compilation. The second call with the same static arguments reuses the compiled program and
+   the already-closed bar. Two identical sequential runs do not both show a bar.
+2. **Callbacks are not guaranteed.** JAX documents that debug callbacks may be dropped,
+   duplicated or reordered by transformations; `ordered=True` buys ordering at the cost of
+   serialising the dispatch. Under `grad`, `vmap` or a user's own `jit`, behaviour is not the
+   plain one.
+3. **It puts a side effect in the differentiated path**, which is exactly what the
+   kernel/orchestration separation exists to prevent.
+
+`tqdm` itself is a second, smaller problem: PR #43 imports it unconditionally and it is not in
+`pyproject.toml`, so a clean install cannot import the package at all (U03).
+
+### 5.2 The mechanism to use
+
+Own progress on the **host**, per invocation, outside the traced region:
+
+- `verbose=False` (the default whenever the caller is tracing) runs exactly the fused
+  `lax.scan` the code runs today. The differentiated path is untouched, byte for byte.
+- `verbose=True` splits the same scan into host-driven groups and blocks once per group. The
+  state carries everything, so a grouped run is the ungrouped run: this is already guaranteed
+  by `test_the_clock_is_absolute_and_a_run_split_in_two_is_the_run_taken_whole`.
+- Group count is chosen for a bounded number of updates (order 20-50), **not** tied to the
+  snapshot schedule, so progress cadence and `store_every` are independent.
+- Auto-disable when any argument is a tracer, so `jax.jit(lambda r: sim.run(...))` and
+  `jax.grad` are silent without the user asking.
+
+Measured cost on a 2000-step, 200000-particle electrostatic run (M3 Max, double precision, best
+of three): the fused scan takes 13.174 s; host groups cost **+1.2 % at 10 updates, +1.4 % at 20,
++1.5 % at 50**. That is the price of a truthful meter and it is small. The callback variant was
+not timed like for like and is rejected on the correctness grounds above, not on speed.
+
+One implementation note: `_run` currently computes `initial_state` and then discards it when a
+`state` is supplied. Grouped execution would repeat that per group, which is wasteful at large
+particle counts; skip it when continuing from a state.
+
+### 5.3 The reporter itself
+
+No new required dependency. A dependency-free reporter writing `\r`-updated lines to stderr is
+about fifteen lines and covers the need: elapsed, fraction, steps per second, estimated
+remaining. Use `tqdm` only if it is already importable, behind a lazy optional import, and add
+it to an optional extra rather than to the runtime dependencies. A non-interactive stream
+(a log, CI) gets periodic plain lines instead of carriage returns.
+
+Progress reports host-side facts only -- steps completed and wall-clock time. It never changes
+the simulation, the random numbers or the output, and there is a test that a verbose run and a
+silent run produce identical arrays.
+
+**W4 acceptance:** two identical sequential runs both report; `jit`/`grad`/`vmap` of a run are
+silent and unchanged; a verbose run equals a silent run exactly; progress cadence is independent
+of `store_every`; a clean install without `tqdm` imports and runs; an interrupted run leaves a
+usable terminal.
+
+## 6. Examples: repair, then extend
+
+Every example keeps a short physical explanation and reference; imports; editable parameters;
+derived scales; construction of public objects; execution with progress; a quantified comparison;
+and saved data, figures and an optional movie. Presets are `quick` (smoke, same physics),
+`reference` (the documented validation) and optionally `movie`. A quick run is never quoted as a
+reference. Output paths name the preset and store the actual configuration.
+
+| File | Required result |
+|---|---|
+| `1_basic/parameters_and_sampling.py` (new) | Physical versus numerical inputs; random versus low-noise loading; units and derived scales. |
+| `1_basic/sheath_unmagnetized.py` | S01, S17, S18 and U06 repairs; boundary and current diagnostics; resolution and duration studies. |
+| `2_intermediate/sheath_magnetized.py` | One documented source problem; true impact spectra (S02); matched `B=0` and normal-field controls (S16). Port PR #43's larger quick settings as a reproducible historical input, not a target. |
+| `2_intermediate/sheath_reflection.py` | Maintained source, explicit electrostatic model, measured `R_eff`, the validated edge helper. |
+| `2_intermediate/weibel.py` | Port PR #43's larger domain, broader spectrum and longer run; fix the precision contract and history size (U13); add mode-by-mode linear growth against `docs/scripts/dispersion.py`. |
+| `2_intermediate/compare_models.py` (new) | Explicit/implicit, filtered/unfiltered, collisional/collisionless, relativistic/not -- four short pairs, not a sixteen-case product. |
+| `2_intermediate/output_and_restart.py` (new) | Native save, load and restart; optional openPMD write and read back. |
+| `3_advanced/sheath_optimization.py` | G05-G08 repairs: independent fixed target, honest uncertainty, fixed optimiser bookkeeping. |
+| `3_advanced/grazing_sheath.py` (new) | Matched GYRAZE case, then a controlled finite-ordering study. |
+| `3_advanced/electron_field_instability.py` (new) | Published setup plus the accelerating-frame and ion-background controls. |
+| Existing `conservation.py`, `optimize_two_stream.py`, `collisions.py`, `landau_damping.py`, `bump_on_tail.py` | Preserved and improved on shared machinery; port PR #43's longer runs where they help. |
+
+Shared algorithms -- moment averaging, impact histograms, root and fit calculations, saving and
+loading, field and source profiles -- become public functions. Host theory moves out of
+`docs/scripts` into a small reference location rather than being imported by a `sys.path` hack.
+SciPy stays an optional example and validation dependency, not a core one.
+
+## 7. W5: one TOML and CLI path
+
+Extend the existing command; do not add a second application. One normalised resolver builds the
+same objects the Python API builds, from the same vocabulary, and an unknown or conflicting key is
+an error rather than a silent default. It must reach sources, external fields, output selection,
+movies, restart and scans, and support `--describe`/`--validate-only` that resolves derived scales
+without running. Native versioned archives hold exact restart state; openPMD holds interoperable
+analysis data with coordinates and weights that an independent reader reproduces (U10, U11).
+
+Parameter vocabulary is fixed once and used in constructors, TOML, plots, exports and documentation:
+`sampling` (`low_noise`/`random`, not `quiet`), `verbose`, `temperature_ev`, `density_m3`,
+`particles`, `capacity`, `emit_per_step`, `mass`/`mass_kg`, `charge_number`, `drift_m_s`, exactly one
+of `time_step_s`/`dt_omega_pe`/`courant`, exactly one of `length_m`/`length_debye`,
+`reference_frequency` for plots, `potential_v` for electrodes. Publish a migration table, accept
+legacy names during migration, and reject conflicting pairs. Never warn from inside a trace.
+`steps_per_plasma_period` in the current scripts actually means `1/(omega_pe dt)`; rename it.
+
+## 8. Benchmarks
+
+### 8.1 Grazing incidence against GYRAZE (W8)
+
+Reference: Geraldini, Ewart, Brunner and Parra, *Characteristics of monotonic sheaths near a wall
+with grazing magnetic incidence*, arXiv:2508.09067, and the GYRAZE code. This is a grazing-angle,
+separated-scale kinetic model with finite electron gyro-orbits and a monotonic-potential assumption
+-- not a Boltzmann-electron solver missing only kinetic electrons.
+
+First target: its figure 6, `M=3600`, `Z=1`, `bar_T_i/T_e=1`, `alpha=2.5 deg`,
+`gamma=rho_e/lambda_{D,DS}=0.3`, zero net wall current. The `gamma=0.7` case sits at a critical
+boundary and is not the first validation. Use the paper's equations 133-137 for the incoming
+distributions. Generate reference numbers from the pinned author code or obtain them from the
+authors; do not digitise rendered figures, and do not vendor external code without checking its
+licence.
+
+A benchmark manifest is mandatory and fails fast when incomplete: code commit and paper version;
+the selected case and the provenance and licence of the reference data; both coordinate
+orientations and potential references; all normalisations; mass ratio and charge; wall current
+**or** prescribed potential, not both; the incoming distributions with normalisation, support,
+Jacobian and gyrophase convention; the Debye reference density location; and the asymptotic
+assumptions of the reference against the finite parameters of full-orbit PIC.
+
+`gamma` uses the electron density at the **Debye-sheath entrance**:
+
+```math
+\gamma_{\rm DS}=\gamma_{\rm upstream}\sqrt{n_{e,\rm DS}/n_{e,\rm upstream}},\qquad
+\frac{\rho_S}{\lambda_{D,\rm DS}}=\sqrt{M(1+\bar T_i/T_e)}\,\gamma_{\rm DS}.
+```
+
+These parameters are not independent: varying `epsilon = lambda_D/rho_S` while holding `M`, `gamma`
+and the temperature ratio fixed is impossible. Any convergence sequence must say which dimensionless
+parameters move and regenerate the reference for them.
+
+Sequence: single-particle orbit and source-flux checks; the matched monotonic absorbing case with
+zero net collector current, stationary inventory, no source-position dependence, no overflow and
+closed balances; profile, flux, drop and impact-distribution comparison on common coordinates with
+predeclared tolerances; then a scan **within** the reference's valid range.
+
+### 8.2 Electron-field instability (W10)
+
+Reference: Beving, Hopkins and Baalrud, *Electron-field instability: excitation of electron plasma
+waves by an electric field*, Phys. Plasmas 30, 112105 (2023), doi 10.1063/5.0156041. Reported case:
+helium, `n=3e14 m^-3`, `T_e=3 eV`, `T_i=0.026 eV`, `E_0=-800 V/m`, `L=1200 lambda_D`, five cells per
+Debye length, 400 particles per cell per species, sixteen realisations. Verify every number and the
+thermal-speed convention against the publisher PDF before freezing the benchmark.
+
+Represent the imposed field as an external uniform E, not a sawtooth potential differenced on the
+grid. Record external work. Support an exact uniform background, mobile helium ions, and frozen ion
+macro-particles as three distinct controls. Resolve the accelerated drift over the **whole** run,
+not only at `t=0`.
+
+The indispensable control: for collisionless electrostatic Vlasov-Poisson with an exactly uniform
+immobile background and uniform acceleration `a = q_e E_0/m_e`, the change of variables
+`x' = x - a t^2/2`, `v' = v - a t` removes the acceleration. A driven and an undriven run
+transformed into that frame must converge to the same fluctuation dynamics. Frozen noisy ion
+macro-particles, mobile ions, collisions and boundaries each break it; isolate them one at a time.
+Do not force a positive growth assertion in a limiting control where the continuum equations imply
+equivalence to the undriven case. If the published growth is not reproduced under a matched
+configuration, preserve the evidence and report it rather than relabelling numerical heating.
+
+## 9. W11: algorithms
+
+Audit charge continuity, the Gauss law, energy and momentum **separately** for each model, boundary,
+filter, gather/current pair, collision model and integrator. Publish the actual discrete invariant or
+residual, not an unconditional "conserves energy, charge and momentum".
+
+- **Mandatory: source-free implicit electrostatic.** The implicit path currently rejects
+  `model="electrostatic"`. Add it by suppressing transverse Maxwell evolution while keeping the
+  compatible longitudinal current, discrete-gradient force and nonlinear solve. Do not compute an
+  energy-preserving update and then overwrite `E_x` with a Poisson projection. Keep or explicitly
+  choose the periodic mean-field convention. Report the final residual.
+- **Mandatory: collision time-centering.** A pair-conserving binary scatter can still heat a
+  leapfrog PIC run when inserted at the wrong time. Derive the correct split for this code's
+  half-position, integer-velocity convention. Two half-duration Boris rotations do not compose to
+  the full-step rotation; the angle is nonlinear in `dt`. Test on an isolated oscillator, then
+  homogeneous thermal plasmas, then a relaxation case, comparing secular drift against the
+  collisionless baseline.
+- **Optional, only with measured gain**: ECSIM-type schemes, Ricketson-Hu explicit
+  energy-conserving, Higuera-Cary, Darwin. Each needs independent discrete identities, both AD modes
+  and an end-to-end benefit. Keep any prototype on a separate commit with a decision note.
+- **Out of scope**: higher dimensions, AMR, a kernel DSL, a general circuit or chemistry framework.
+
+## 10. Work order
+
+Reviewable commits, in this order. W9 and the source-free parts of W11 may run in parallel after W1
+and W3. W8 may not use invalid sources or occupancy spectra. W10 may not use misleading energy
+plots. Re-run dependent benchmarks after any underlying correction.
+
+- [ ] **W0** baseline: reproduce the register, record hardware and versions, port what is wanted from PR #43.
+- [ ] **W1** parameter contracts, validation, coordinates, absolute step and time, supported combinations.
+- [ ] **W2** sources and boundary physics: sampling, safe pools, charge/current/energy exchange, true impacts.
+- [ ] **W3** diagnostics and statistics: weighted moments, independent balances, correct windows, uncertainty.
+- [ ] **W4** orchestration and progress: pure kernels, host-owned meter, one snapshot schedule, exact restart.
+- [ ] **W5** TOML/CLI and persistence: one resolver, native archives, openPMD round trip.
+- [ ] **W6** plots and movies: evolving weighted populations, diagnostic histories, bounded memory, headless tests.
+- [ ] **W7** repair the four existing sheath and optimisation examples and their documentation.
+- [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension.
+- [ ] **W9** model-comparison and Weibel examples on the existing kernels and shared theory.
+- [ ] **W10** electron-field instability with its limiting controls.
+- [ ] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering.
+- [ ] **W12** convergence, performance, documentation, review packet.
+
+## 11. Acceptance checklist
+
+- [ ] Work is on `research-release`; `rj/additions-to-pr` untouched; no main writes, merges, force pushes or releases.
+- [ ] Every S/G/U row reproduced or marked resolved with evidence, then fixed with a test that fails on the old code.
+- [ ] Component-wise and drifting or field-aligned source sampling; supported-source contracts complete.
+- [ ] Source, cloud, collector, current and energy/momentum transfers derived and independently verified.
+- [ ] Event-based impact spectra and event-aware derivative checks; hard-count limitation retained.
+- [ ] Overflow invalidates a run; cutoff error measured; `active=0` safe.
+- [ ] Windows, coordinates, fluence-versus-current labels and statistical uncertainties corrected everywhere.
+- [ ] Pure JAX runner and host-owned progress both work; repeated-run, AD and restart tests pass; verbose equals silent.
+- [ ] One parameter vocabulary with a migration path; README parameter tutorial exists.
+- [ ] TOML/CLI covers every shipped workflow with strict validation.
+- [ ] Native archive and exact checkpoint work; openPMD read back independently.
+- [ ] Energy, charge and momentum panels restored with truthful open-system residuals; movies weight evolving populations.
+- [ ] Existing examples retained and corrected, with saved data and provenance.
+- [ ] Matched GYRAZE case with real reference data, uncertainty, and a documented finite-ordering study.
+- [ ] Weibel linear growth verified mode by mode; PR #43's nonlinear preset ported and preserved.
+- [ ] Explicit/implicit, collisional/collisionless, filtered/unfiltered and relativistic comparisons demonstrated.
+- [ ] Independent-target sheath inference with real statistical uncertainty.
+- [ ] Electron-field example with verified inputs, limiting controls and an honest interpretation.
+- [ ] Source-free implicit ES and collision time-centering done; optional algorithms have implement/defer evidence.
+- [ ] Fast suite and headless examples pass; scientific claims carry separate convergence evidence.
+- [ ] Clean install, CLI and documentation builds pass; precision and supported versions documented.
+- [ ] Warm timings, compilation, memory and device coverage reported without fabrication.
+- [ ] Pushed to `research-release` with the right author and committer; PR #42 updated and left open.
+
+## 12. Report to the maintainer
+
+Final branch and head; changes grouped by physics, numerics and interface; file and line counts with
+reasons for growth; test commands and actual results; the exact command for each figure and movie;
+TOML examples; theory provenance; performance and precision; migration notes; and the unresolved
+scientific limitations. Distinguish **implemented**, **kernel-tested**, **physically validated** and
+**not yet validated**. A benchmark whose script runs is not a completed benchmark.
+
+No requested functionality disappears in a simplification. An example's comments and explicit
+construction lines are part of its function as a teaching tool.
