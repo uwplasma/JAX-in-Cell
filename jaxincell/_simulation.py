@@ -11,6 +11,8 @@ import numpy as np
 from jax import lax, random
 from jax.scipy.special import erfinv
 
+from tqdm import tqdm
+
 from ._collisions import collide, coulomb_logarithm
 from ._config import Collisions, Domain, Solver, Species, pytree_dataclass
 from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
@@ -808,15 +810,27 @@ def _run(sim, steps, seed, store_every, store_particles, moments, state):
     def advance(pair, _):
         return step(pair[0]), None
 
-    def chunk(carry, _):
+    n_chunks = steps // store_every
+    bar = tqdm(total=n_chunks, desc="Running simulation")
+
+    def _tick(i):
+        # Runs on host via callback; keeps tqdm in sync with the traced/JIT-compiled
+        # scan without being part of the traced computation (no effect on gradients).
+        bar.update(1)
+        if i == n_chunks - 1:
+            bar.close()
+
+    def chunk(carry, i):
         # The output of the last step rides along with the state, so that the step is
         # traced once, not once for the first store_every - 1 steps and again for the last.
         (carry, (x, v, w, E, B, J, rho)), _ = lax.scan(advance, (carry, placeholder), None, length=store_every)
         if not store_particles:
             x = v = w = None
+        jax.debug.callback(_tick, i, ordered=True)
         return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.moments)
 
-    carry, (x, v, w, E, B, J, rho, wall, t, totals) = lax.scan(chunk, carry0, None, length=steps // store_every)
+
+    carry, (x, v, w, E, B, J, rho, wall, t, totals) = lax.scan(chunk, carry0, jnp.arange(n_chunks), length=n_chunks)
     d = sim.domain
     m, q = extra
     return Output(t=t, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,

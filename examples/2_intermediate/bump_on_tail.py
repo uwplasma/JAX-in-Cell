@@ -22,9 +22,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron,
-                       elementary_charge as e_charge, speed_of_light as c)
+                       plot, elementary_charge as e_charge, speed_of_light as c)
 
-length, cells, mode, steps = 1.0, 128, 5, 2000
+length, cells, mode, steps = 1.0, 128, 5, 2400
 omega_pe = 0.05 * c * cells / length
 density = omega_pe ** 2 * epsilon_0 * mass_electron / e_charge ** 2
 beam_fraction, beam_drift_over_vth, beam_width = 0.03, 5.0, 0.7
@@ -40,6 +40,8 @@ ions = Species.ions(n=10000, density=density, mass_ratio=1e9, vth=(0, 0, 0), qui
 simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [bulk, beam, ions],
                         Solver(filter_passes=0))
 output = simulation.run(steps, seed=0, store_every=16)
+
+plot(output, direction="x", omega=omega_pe)
 
 t = np.asarray(output.t) * omega_pe
 amplitude = np.abs(np.fft.rfft(np.asarray(output.E[:, :, 0]), axis=1)[:, mode]) / cells
