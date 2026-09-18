@@ -32,6 +32,26 @@ Where a literature reproduction fails, keep the disagreement and diagnose it. Do
 test until a wrong answer passes, change a physical model quietly, or manufacture an
 instability. A documented negative reproduction is a result; a fabricated positive one is not.
 
+### 0.2 Baseline
+
+Everything below was measured on the machine this branch is developed on, before any W1 change,
+so that later timings and tolerances have something to be compared with.
+
+| | |
+|---|---|
+| Host | Apple M4, 24 GiB, macOS 26.6.2 (`arm64`), 1 CPU device, no GPU |
+| Python | 3.13.7; JAX and jaxlib 0.11.1; NumPy 2.5.3 |
+| Precision | `jax_enable_x64` is off by default; the examples that need it set it themselves |
+| Suite | `pytest -q`: **221 passed in 189 s** |
+| Library | 2826 lines over 10 modules in `jaxincell/`; 2970 lines of tests |
+
+`ssh office` is available for anything that needs a GPU; nothing in the register does.
+
+The four rows the register carried as *to reproduce* were reproduced here and are now marked
+**confirmed** with their numbers. The scripts that produced them are throwaway; what matters is
+that each number is reproducible from the row's own description, and the W2/W3/W6 work turns each
+into a test that fails on today's code.
+
 ## 1. Strategy: extend this small code
 
 These already exist and are to be repaired or extended, not recreated: frozen configuration
@@ -80,19 +100,19 @@ plainly for that reason.
 | S03 | **confirmed** | `sample_crossing` uses `source.sigma` (from `vth[0]`) for all three components; `Source.vth[1:3]` is ignored. `test_the_sampler_draws_the_flux_and_not_the_velocity_density` asserts the wrong behaviour. | Use the three requested spreads. Fix the test with the code; add anisotropic and degenerate cases. |
 | S04 | confirmed by inspection | Magnetic initial particles have transverse spread and a normal ion drift while the source is at rest and isotropic (via S03), and the source does not inherit the species drift. | Make initial and injected distributions explicit and consistent. Do not claim field-aligned sonic entrance from this setup. |
 | S05 | confirmed by inspection | Only an at-rest Maxwellian and a cold beam are supported; the drifting crossing distribution is refused. | Add the sampler of section 3.1, with normalisation, moment and reparameterisation checks. |
-| S06 | to reproduce | Cloud charge is truncated outside a wall before the centre crosses, while surface charge is credited at centre crossing. | Derive compatible volume/cloud/surface bookkeeping and current; test a sheet moving continuously through a wall at many subcell offsets. |
+| S06 | **confirmed** | Cloud charge is truncated outside a wall before the centre crosses, while surface charge is credited at centre crossing. A unit charge walked through an absorbing wall in 0.1 dx steps has volume-plus-surface charge between 0.500 and 1.405: half of it has vanished when the centre is at the wall, and 40 % too much exists one tenth of a cell later. | Derive compatible volume/cloud/surface bookkeeping and current; test a sheet moving continuously through a wall at many subcell offsets. |
 | S07 | confirmed by inspection | Injected particles free-stream for a residual step with no field interaction; source correctness is inferred from the Gauss solve alone. | Define the staggering; use partial trajectories of matching order; test with nonzero prescribed E and B. |
 | S08 | **confirmed** | With an open plane the continuity current is anchored at zero, now documented as "the internal transport measured from the source plane". Honest, but not an absolute current. | Supply the real boundary current; distinguish conduction, displacement and circuit current. |
 | S09 | **partly fixed** | `wall.overflow` exists and `sheath_unmagnetized.py` warns on it. `sheath_magnetized.py` and `sheath_optimization.py` ignore it, and the library never invalidates a run. | Structured invalid-run status; optimisation and validation must reject it; check capacity at each injection. |
 | S10 | confirmed by inspection | The reflection weight cutoff truncates the last part of an orbit and adds a branch. | Declare and track the truncation budget; test cutoff convergence and its effect on sensitivities. |
-| S11 | to reproduce | Thermal-wall outgoing energy is recorded before the redraw; injected energy and momentum are missing from the budget. | Record post-interaction states; accumulate source energy and momentum and reservoir heat. |
+| S11 | **confirmed** | `_record` runs before `_thermalise`, so `energy_out` is the specular energy of the bounce, not the energy of the redrawn particle. At a thermal wall with restitution 1 the ledger therefore reports `energy_in - energy_out` identically zero, which is not a measurement: a run whose walls returned 1.1159e-08 J/m^2 against 1.0716e-08 received is reported as exchanging nothing. Injected energy and momentum are absent from `Wall` altogether. | Record post-interaction states; accumulate source energy and momentum and reservoir heat. |
 | S12 | confirmed by inspection | Wall energies use `m v^2/2` on relativistic paths, and nonrelativistic collisions can be combined with a relativistic pusher. | Use carried momentum and a stable `K = m|u|^2/(gamma+1)`; reject unsupported combinations explicitly. |
 | S13 | **confirmed** | `active=0` reaches `jnp.arange(n) % s.active` and `L / s.active`. | Make empty starts safe under jit, grad and vmap; validate counts, `emit<=capacity`, positive masses and steps, field shapes. |
 | S14 | **confirmed** | `gauss_residual` skips cell 0 because that cell's equation defines the missing boundary field. Documented, but therefore not an independent full check. | Report an all-cell residual with stored boundary data, plus independent surface and global ledgers. |
 | S15 | confirmed by inspection | `sheath_reflection.py` is still an unmaintained thermal-wall run on the default electromagnetic model with four filter passes and a bare `argmax` edge fallback. | Explicit model selection, maintained-source comparison, measured `R_eff`, the validated edge helper; keep a labelled transient variant. |
 | S16 | **confirmed** | "Normal incidence is the field-free case" is printed from the normal-field run itself; no `B=0` control is executed. | Run matched `B=0` and normal-field controls at the same seed and resolution. Quick is a smoke preset, not evidence. |
 | S17 | **confirmed** | `floating_potential` says its left side is `1/2` at `phi=0`; it is `1`. The guard therefore rejects `v0` in `[0.3989, 0.7979)`, which have valid roots: `v0=0.5 -> -0.134117`, `v0=0.7 -> -0.012507`. This already forced a benchmark parameter change during the previous round. | Correct the endpoint and the bound to `sqrt(2/pi)`. Distinguish algebraic root existence from sheath admissibility. |
-| S18 | to reproduce | References are compared at clipped positive potentials, mixed wall potentials, and face-versus-centre coordinates. | State each reference's domain, use correct coordinates, quantify rather than clip. Distinguish `mean[n(phi)]` from `n(mean[phi])`. |
+| S18 | **confirmed** | `sheath_unmagnetized.py` hands `np.minimum(phi_profile, 0)` to the reference: in the quick preset **34 of 48** cell centres are positive, up to +0.0505 T_e/e, and every one of them is silently moved to zero. The same call passes the analytic `phi_wall = -0.79926` with a measured profile whose own wall value is -0.73439, and `phi_profile[0]` is a face value used as a centre. | State each reference's domain, use correct coordinates, quantify rather than clip. Distinguish `mean[n(phi)]` from `n(mean[phi])`. |
 
 ### 2.2 Derivatives, optimisation, tests that cannot fail
 
@@ -119,7 +139,7 @@ plainly for that reason.
 | U05 | **confirmed** | `_hist` clips outliers into the edge bins and the phase-space array adds `+1.0` to weighted counts for log display. | Track overflow or widen documented ranges; mask positive weighted values for log display; state normalisation and units. |
 | U06 | **confirmed** | Face quantities (`E_x`, potential) are drawn on `out.grid`, which is cell centres. | Centralise centre, face and boundary coordinates and use them in plots and I/O. |
 | U07 | confirmed by inspection | Energy, momentum, charge and balance histories are not in the general plot. | Restore configurable diagnostic panels separating closed invariants, open budgets and bare changes. |
-| U08 | to reproduce | Plot preprocessing can allocate very large histogram arrays and assumes evenly spaced stored times; save and show are coupled. | Bounded streaming frames, irregular schedules, independent save and show, keep the blitting. |
+| U08 | **confirmed** | `plot` precomputes every frame before drawing any. On a 400-step, 256-cell, 25000-particle run it grew resident memory by **1.1 GB** while the histograms it keeps are 79 MB; the documented cap `_MAX_ELEMENTS = 2e8` allows 0.8 GB per copy. The time axis is an `imshow` extent built from `(t[-1] - t[0])/(S - 1)`, so an irregular store schedule is drawn as if it were even, and `save` and `show` are exclusive: passing `save` gives a still figure on screen, never an animation. | Bounded streaming frames, irregular schedules, independent save and show, keep the blitting. |
 | U09 | confirmed by inspection | `omega` always labels the axis `omega_pe`; `quiet` is ambiguous. | Explicit reference-frequency labels and `sampling='low_noise'`, with migration aliases that do not change physics. |
 | U10 | **confirmed** | The standard is `x_i = (gridGlobalOffset + (i + position)*gridSpacing)*gridUnitSI` with `position` in `[0,1)`, `0.0` at the lower corner of the element; openPMD-viewer, WarpX and PIConGPU all agree. `openpmd.py` sets `grid_global_offset=-L/2` with `position=0.0` for centres and `0.5` for faces -- **exactly backwards**. Centres belong at `0.5`. The stored faces are the *right* faces, `-L/2+(i+1)dx`, which is `position=1.0` and outside the allowed range. | Centres get `position=0.5`. For the right faces either shift that record's `grid_global_offset` to `-L/2+dx` with `position=0.0`, or re-index. Test with an independent reader. Note WarpX's default openPMD output writes `0.5` on every component because it cell-centres before writing, so it is **not** a usable reference for Yee staggering; PIConGPU is. |
 | U11 | confirmed by inspection | openPMD output is not a restart state and carries no source or wall context or readback example. | Native versioned restart and analysis archives plus an honest openPMD round trip. |
@@ -333,7 +353,7 @@ Own progress on the **host**, per invocation, outside the traced region:
 - Auto-disable when any argument is a tracer, so `jax.jit(lambda r: sim.run(...))` and
   `jax.grad` are silent without the user asking.
 
-Measured cost on a 2000-step, 200000-particle electrostatic run (M3 Max, double precision, best
+Measured cost on a 2000-step, 200000-particle electrostatic run (Apple M4, double precision, best
 of three): the fused scan takes 13.174 s; host groups cost **+1.2 % at 10 updates, +1.4 % at 20,
 +1.5 % at 50**. That is the price of a truthful meter and it is small. The callback variant was
 not timed like for like and is rejected on the correctness grounds above, not on speed.
@@ -557,7 +577,7 @@ Reviewable commits, in this order. W9 and the source-free parts of W11 may run i
 and W3. W8 may not use invalid sources or occupancy spectra. W10 may not use misleading energy
 plots. Re-run dependent benchmarks after any underlying correction.
 
-- [ ] **W0** baseline: reproduce the register, record hardware and versions, port what is wanted from PR #43.
+- [x] **W0** baseline: reproduce the register, record hardware and versions, port what is wanted from PR #43.
 - [ ] **W1** parameter contracts, validation, coordinates, absolute step and time, supported combinations.
 - [ ] **W2** sources and boundary physics: sampling, safe pools, charge/current/energy exchange, true impacts.
 - [ ] **W3** diagnostics and statistics: weighted moments, independent balances, correct windows, uncertainty.
