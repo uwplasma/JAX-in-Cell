@@ -3,8 +3,8 @@ import sys
 
 from ._config import (Collisions, Domain, Impacts, Solver, Source, Species, boltzmann_constant,
                       elementary_charge, epsilon_0, mass_electron, mass_proton, mu_0, speed_of_light)
-from ._diagnostics import (bohm_edge, diagnostics, dominant_frequency, energies, gauss_residual,
-                           potential, temperatures)
+from ._diagnostics import (bohm_edge, charge_balance, diagnostics, dominant_frequency, energies,
+                           gauss_residual, potential, temperatures)
 from ._simulation import Output, Simulation, load_toml, quiet_start
 
 try:
@@ -15,7 +15,8 @@ except ImportError:  # a source tree that was never installed: version.py is wri
 __all__ = ["Simulation", "Output", "Domain", "Species", "Solver", "Source", "Collisions", "Impacts",
            "load_toml",
            "quiet_start",
-           "diagnostics", "energies", "gauss_residual", "potential", "temperatures", "bohm_edge",
+           "diagnostics", "energies", "gauss_residual", "charge_balance", "potential", "temperatures",
+           "bohm_edge",
            "dominant_frequency", "plot",
            "epsilon_0", "mu_0", "speed_of_light", "elementary_charge", "mass_electron",
            "mass_proton", "boltzmann_constant"]

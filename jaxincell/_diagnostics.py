@@ -5,8 +5,8 @@ import jax.numpy as jnp
 
 from ._config import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
-__all__ = ["bohm_edge", "diagnostics", "dominant_frequency", "energies", "gauss_residual", "potential",
-           "temperatures"]
+__all__ = ["bohm_edge", "charge_balance", "diagnostics", "dominant_frequency", "energies",
+           "gauss_residual", "potential", "temperatures"]
 
 
 def _blocks(out):
@@ -66,7 +66,9 @@ def gauss_residual(out):
     output does not carry it. The equation for the first cell then *defines* that
     field rather than testing anything, so the residual is taken over the
     remaining cells, which are still one independent check short of the number of
-    stored values."""
+    stored values. :func:`charge_balance` is the independent check this is not: it compares the
+    deposit with the wall ledger, covers every cell and both walls, and passes or fails on its
+    own."""
     E = out.E[:, :, 0]
     if out.field_bc[0] == 0:
         div = (E - jnp.roll(E, 1, axis=1)) / out.dx
@@ -77,6 +79,41 @@ def gauss_residual(out):
     charge = out.charge * (out.state.w if out.weight is None else out.weight)
     one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
     return jnp.max(jnp.abs(div - rhs), axis=1) / _nonzero(one_sign / (out.length * epsilon_0))
+
+
+def charge_balance(out):
+    """Charge the box has gained that nothing accounts for, at every stored step, as a fraction
+    of the charge of one sign it holds.
+
+    Everything the box holds is the charge on the grid plus the charge on the two walls, and
+    everything that has entered or left it is what the sources injected:
+
+    .. math::
+
+        \\Delta\\Big[\\Delta x\\sum_i \\rho_i + \\sigma_L + \\sigma_R\\Big]
+        = \\sum_s q_s W_{s,\\rm injected},
+
+    with the difference taken from the first stored step. A wall's own charge is on the ledger,
+    so a particle it takes moves from the first term to the second and the total does not
+    notice; one that a cloud has reached past is on the wall too, which is the only way the
+    two can balance while it is half in and half out.
+
+    This is **not** what :func:`gauss_residual` measures. That one asks whether the field solve
+    inverted the charge density it was given, and it cannot ask it of the first cell, whose
+    equation defines the wall field the output does not store. This one asks whether the charge
+    density and the wall ledger -- two different passes over the particles, one a deposit and
+    one a boundary law -- agree about how much charge exists, and it covers every cell and both
+    walls. A run can pass either and fail the other.
+
+    A periodic box has no walls to hold charge and no sources, so the sum is constant and this
+    is the drift of the deposit alone.
+    """
+    held = out.dx * jnp.sum(out.rho, axis=1) + jnp.sum(out.sigma, axis=1)
+    per_species = jnp.stack([out.charge[block][0] for _, block in _blocks(out)])   # one particle's
+    put_in = jnp.sum(per_species[None, :, None] * out.wall.injected, axis=(1, 2))
+    charge = out.charge * (out.state.w if out.weight is None else out.weight)
+    one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
+    return jnp.abs((held - held[0]) - (put_in - put_in[0])) / _nonzero(one_sign)
 
 
 def bohm_edge(position, flow, speed):
@@ -130,10 +167,11 @@ def potential(out, centres=False):
     has no wall, so the mean is set to zero instead.
 
     ``centres=True`` gives it on ``Output.grid`` instead, the mean of the two faces bounding
-    each cell, which is where a density or a deposited moment lives. The left wall face, the
-    zero of the integral, is one of the two for the first cell, so that cell's value is half
-    the first stored face and not the face itself -- half a cell out and a factor of two in
-    the one place a sheath profile is steepest."""
+    each cell, which is where a density or a deposited moment lives. The face to the left of
+    the first cell is the far end of a periodic box, and at a wall it is the wall face itself,
+    where the integral starts and which is therefore the zero of the gauge: that cell's value
+    is then half the first stored face and not the face itself -- half a cell out and a factor
+    of two in the one place a sheath profile is steepest."""
     E = out.E[:, :, 0]
     if out.field_bc[0] == 0:
         left = E[:, -1]
@@ -143,9 +181,14 @@ def potential(out, centres=False):
         left = E[:, 0] - out.dx * out.rho[:, 0] / epsilon_0
     faces = jnp.concatenate([left[:, None], E], axis=1)
     phi = -out.dx * jnp.cumsum(0.5 * (faces[:, :-1] + faces[:, 1:]), axis=1)
-    if centres:
-        phi = 0.5 * (jnp.concatenate([jnp.zeros_like(phi[:, :1]), phi[:, :-1]], axis=1) + phi)
-    return phi - jnp.mean(phi, axis=1, keepdims=True) if out.field_bc[0] == 0 else phi
+    if out.field_bc[0] == 0:
+        phi = phi - jnp.mean(phi, axis=1, keepdims=True)         # the gauge, fixed on the faces
+    if not centres:
+        return phi
+    # the face to the left of the first cell: the far end of a periodic box, and otherwise the
+    # wall face, which is where the integral above started and so is the zero of the gauge
+    before = phi[:, -1:] if out.field_bc[0] == 0 else jnp.zeros_like(phi[:, :1])
+    return 0.5 * (jnp.concatenate([before, phi[:, :-1]], axis=1) + phi)
 
 
 def temperatures(out):
@@ -179,6 +222,7 @@ def diagnostics(out):
     """All of the above in one dictionary."""
     result = energies(out)
     result["gauss_residual"] = gauss_residual(out)
+    result["charge_balance"] = charge_balance(out)
     result["potential"] = potential(out)
     result["dominant_frequency"] = dominant_frequency(out)
     if out.v is not None:

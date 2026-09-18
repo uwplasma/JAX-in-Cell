@@ -148,6 +148,21 @@ def test_the_three_coordinate_arrays_name_what_lives_on_them():
     assert np.allclose(np.asarray(out.faces), faces, rtol=0, atol=1e-15)
     assert np.allclose(np.asarray(out.walls), [-1.0, 1.0], rtol=0, atol=1e-15)
     assert out.rho.shape[1] == out.grid.shape[0] == out.E.shape[1] == out.faces.shape[0]
+    # the potential can be had on either, and the first centre is bounded by the wall face that
+    # is the zero of the gauge, so it is half the first stored face and not the face itself
+    from jaxincell import potential
+    at_faces = np.asarray(potential(out))
+    at_centres = np.asarray(potential(out, centres=True))
+    assert at_centres.shape == at_faces.shape
+    assert np.allclose(at_centres[:, 1:], 0.5 * (at_faces[:, :-1] + at_faces[:, 1:]), rtol=1e-12, atol=0)
+    assert np.allclose(at_centres[:, 0], 0.5 * (at_faces[:, -1] + at_faces[:, 0]), rtol=1e-12, atol=0)
+    assert not np.allclose(at_centres[:, 0], at_faces[:, 0], rtol=1e-3, atol=0)
+    # at a wall the face to the left of the first cell is the wall itself, the zero of the gauge
+    walled = Simulation(domain.replace(particle_bc="absorbing", field_bc="absorbing"),
+                        [Species.electrons(n=8, density=1e14, vth=(1e5, 0, 0), quiet=True)],
+                        Solver()).run(2)
+    assert np.allclose(np.asarray(potential(walled, centres=True))[:, 0],
+                       0.5 * np.asarray(potential(walled))[:, 0], rtol=1e-12, atol=0)
     # and the bins of an impact spectrum publish their edges the same way
     bins = Impacts(energy_max=8e-19, energy_bins=4, angle_bins=3)
     assert np.allclose(np.asarray(bins.energy_edges), [0.0, 2e-19, 4e-19, 6e-19, 8e-19], rtol=1e-12, atol=0)
@@ -222,6 +237,48 @@ def test_diagnostics_of_a_run_that_stored_one_step():
     assert out.t.shape == (1,) and np.isnan(float(d["dominant_frequency"]))
     assert np.isfinite(float(d["total"][0])) and d["temperatures"]["ions"].shape == (1, 3)
     assert "dominant_frequency" in jaxincell._diagnostics.__all__
+
+
+@pytest.mark.parametrize("walls", ["periodic", "absorbing", "reflective", "thermal"])
+def test_the_charge_balance_is_independent_of_the_gauss_residual(walls):
+    """Two checks of different things, and a run can pass either and fail the other.
+
+    `gauss_residual` asks whether the field solve inverted the charge density it was given. It
+    reads E and rho and nothing else, and at a wall it cannot ask it of the first cell, whose
+    equation defines the wall field the output does not carry.
+
+    `charge_balance` asks whether the deposit and the wall ledger -- a deposit and a boundary
+    law, two different passes over the particles -- agree about how much charge exists. It reads
+    rho, the wall charges and the injected weights, never E, and it covers every cell and both
+    walls.
+
+    So a deliberate error in the ledger moves one and not the other, and a deliberate error in
+    the field moves the other and not the one. Both hold to round-off on a clean run, whatever
+    the walls hold charge or wrap it or clamp it into the boundary cell."""
+    from jaxincell import charge_balance, gauss_residual
+
+    field = "reflective" if walls == "thermal" else walls
+    domain = Domain(length=1e-2, cells=16, particle_bc=walls, field_bc=field)
+    electrons = Species.electrons(n=400, density=1e14, vth=(1e6, 0, 0), quiet=True)
+    ions = Species.ions(n=100, density=1e14, mass_ratio=1e9, vth=0.0, quiet=True)
+    out = Simulation(domain, [electrons, ions], Solver()).run(40, seed=0, store_every=10)
+    clean_charge = np.asarray(charge_balance(out))
+    clean_gauss = np.asarray(gauss_residual(out))
+    assert clean_charge.max() < 1e-12 and clean_gauss.max() < 1e-9
+
+    # a wall that claims to have taken charge it did not, on the last step only -- the balance is
+    # a difference from the first, so a constant offset is no error and correctly goes unreported
+    charge = np.asarray(out.charge) * np.asarray(out.weight)[-1]
+    scale = max(charge[charge > 0].sum(), -charge[charge < 0].sum())
+    ledger = out.replace(sigma=out.sigma.at[-1, 1].add(1e-3 * scale))
+    assert float(np.asarray(charge_balance(ledger))[-1]) == pytest.approx(1e-3, rel=1e-6, abs=0)
+    assert np.allclose(np.asarray(gauss_residual(ledger)), clean_gauss, rtol=1e-12, atol=0)
+    assert np.asarray(charge_balance(out.replace(sigma=out.sigma + scale))).max() < 1e-12
+
+    # a field that does not invert the density it was given: the solve is wrong, the charge is not
+    tilted = out.replace(E=out.E.at[:, :, 0].add(1e-3 * float(np.abs(out.E).max()) * jnp.arange(16)))
+    assert np.asarray(gauss_residual(tilted)).max() > 100 * clean_gauss.max()
+    assert np.allclose(np.asarray(charge_balance(tilted)), clean_charge, rtol=1e-12, atol=0)
 
 
 def test_per_species_diagnostics_are_the_masked_sums():

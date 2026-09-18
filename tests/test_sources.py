@@ -573,7 +573,7 @@ def test_the_collector_field_is_the_charge_it_holds_and_the_clouds_reaching_past
     collected = np.asarray(out.wall.collected)[:, :, 1] @ np.array([-e_charge, e_charge])
     # from the integer-time positions the last deposit used, not the half-step ones the
     # leapfrog carries in the state
-    overlap = float(sim._overlap_charge(out.x[-1], out.weight[-1]))
+    overlap = float(sim._overlap_charge(out.x[-1], out.weight[-1])[1])
     assert np.asarray(out.E[:, -1, 0])[-1] == pytest.approx(-(collected[-1] + overlap) / epsilon_0, rel=1e-10)
     assert abs(overlap / collected[-1]) > 1e-4        # and it is not a rounding-sized correction
 
@@ -596,7 +596,7 @@ def test_a_sheet_crossing_the_collector_takes_its_whole_charge_with_it():
         w = jnp.array([1.0 / e_charge])
         volume = float(jnp.sum(deposit(x[:, 0], jnp.array([e_charge]) * w, box_only.grid[0], dx,
                                        cells, box_only.particle_bc)) * dx)
-        assert volume + float(sim._overlap_charge(x, w)) == pytest.approx(1.0, rel=1e-12)
+        assert volume + float(sim._overlap_charge(x, w)[1]) == pytest.approx(1.0, rel=1e-12, abs=0)
     # and the field of the sheet at an interior face, as it approaches and crosses
     # the leftmost face, which the sheet starts to the right of and never returns past: every
     # charge in the box is between it and the collector, so its field is -1/eps_0 throughout

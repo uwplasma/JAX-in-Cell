@@ -147,11 +147,16 @@ class Output:
     :meth:`Simulation.moments` when ``run(moments=True)`` asked for them, and ``None``
     otherwise.
 
+    ``sigma`` is the charge on each wall, ``(stored, 2)``: what it has collected plus the part
+    of the live clouds that reaches past it. With the charge on the grid it is everything the box
+    holds, which is what :func:`~jaxincell.charge_balance` checks against what went in and out.
+
     ``grid``, ``faces`` and ``walls`` are the three coordinate arrays of the staggered grid.
     Densities and deposited moments are on ``grid``; :math:`E_x` and the potential are on
     ``faces``."""
     t: object
     steps: object
+    sigma: object
     x: object
     v: object
     E: object
@@ -673,12 +678,14 @@ class Simulation:
         return (sigma_new - sigma_old) / interval
 
     def _surface_charge(self, wall, x, w):
-        """Charge on the collector: what it has taken plus the clouds reaching past it."""
-        return wall.charge([sp.charge_si for sp in self.species])[1] + self._overlap_charge(x, w)
+        """Charge on each wall, ``(left, right)``: what it has taken plus the clouds reaching
+        past it. The two together with the charge on the grid are everything the box holds, which
+        is what :func:`~jaxincell.charge_balance` checks against what went in and out."""
+        return wall.charge([sp.charge_si for sp in self.species]) + self._overlap_charge(x, w)
 
     def _overlap_charge(self, x, w):
-        """Charge of the parts of the live particle clouds that reach past the collector,
-        :math:`\\mathrm{C/m^2}`.
+        """Charge of the parts of the live particle clouds that reach past each wall,
+        ``(left, right)`` in :math:`\\mathrm{C/m^2}`.
 
         A cloud is one and a half cells wide, so it crosses the wall before its centre does,
         and :func:`~jaxincell._core.deposit` drops the part outside the grid. That part is not
@@ -688,12 +695,19 @@ class Simulation:
         itself, and the field inside jump by half a particle at the crossing. It is taken from
         the same shape function and the same positions the deposit used, so the two partition
         each particle exactly.
+
+        Only a wall the deposit actually drops charge at has any: a periodic wall wraps it to
+        the far end and a reflective one clamps it into the boundary cell, and in both it is
+        already on the grid. Counting it twice there would make the charge balance drift by a
+        part in ten thousand with nothing wrong.
         """
         d = self.domain
         index, weights = s2_weights(x[:, 0], d.grid[0], d.dx)
-        beyond = jnp.sum(jnp.where(index >= d.cells, weights, 0.0), axis=1)
         charges = jnp.concatenate([jnp.full((sp.n,), sp.charge_si) for sp in self.species])
-        return jnp.sum(charges * w * beyond)
+        outside = (index < 0, index >= d.cells)
+        return jnp.stack([jnp.sum(charges * w * jnp.sum(jnp.where(side, weights, 0.0), axis=1))
+                          if code in (2, 4) else jnp.zeros(())
+                          for side, code in zip(outside, d.particle_bc)])
 
     def _electrode_field(self, wall, overlap=0.0):
         """:math:`E_x` at the collector face, :math:`-\\sigma_w/\\epsilon_0`, from the charge it
@@ -709,6 +723,10 @@ class Simulation:
         if self.domain.field_bc != (4, 2):
             return 0.0
         return -(wall.charge([sp.charge_si for sp in self.species])[1] + overlap) / epsilon_0
+
+    def _electrode_overlap(self, sigma, wall):
+        """The collector's share of ``sigma`` that is not collected charge."""
+        return sigma[1] - wall.charge([sp.charge_si for sp in self.species])[1]
 
     def _advance_fields(self, E, B, J, dt_half, rho, wall, electric_first, overlap=0.0):
         """Half a step of the field equations.
@@ -810,7 +828,7 @@ class Simulation:
             x_integer = x
         rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
         E = jnp.zeros((d.cells, 3)).at[:, 0].set(
-            E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall, self._overlap_charge(x_integer, w))))
+            E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall, self._overlap_charge(x_integer, w)[1])))
         B = jnp.zeros((d.cells, 3))
         return (State(E, B, x, u, w, qm, rho, self._surface_charge(wall, x_integer, w), key, jnp.zeros(()),
                       jnp.zeros((), jnp.int32), wall, None), (m, q))
@@ -896,11 +914,11 @@ class Simulation:
         # state rather than deposited again from wrap(x^{n+1/2} - dt v/2), which is
         # the same positions, velocities and weights and so the same density.
         sigma_half = self._surface_charge(wall, x_half, w)
-        closure = (self._collector_current(st.sigma, sigma_half, dt / 2) if d.field_bc == (4, 2)
+        closure = (self._collector_current(st.sigma[1], sigma_half[1], dt / 2) if d.field_bc == (4, 2)
                    else self._current_closure(q * w * v[:, 0]))
         rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, closure, st.rho)
         E, B = self._advance_fields(st.E, st.B, J1, dt / 2, rho_half, wall, electric_first=True,
-                                    overlap=sigma_half - wall.charge([sp.charge_si for sp in self.species])[1])
+                                    overlap=self._electrode_overlap(sigma_half, wall))
         # push with the fields at t^{n+1/2}
         fields = self._fields_at(x_half, E, B, rho_half)
         u = self._accelerate(u, fields, qm, dt)
@@ -928,11 +946,11 @@ class Simulation:
         # by the charge collected at the wall with no current to account for it, and the
         # discrete Gauss law would drift by that much every step.
         sigma_next = self._surface_charge(wall, x_next, w)
-        closure = (self._collector_current(sigma_half, sigma_next, dt / 2) if d.field_bc == (4, 2)
+        closure = (self._collector_current(sigma_half[1], sigma_next[1], dt / 2) if d.field_bc == (4, 2)
                    else self._current_closure(q * w * v[:, 0]))
         rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, closure, rho_half)
         E, B = self._advance_fields(E, B, J2, dt / 2, rho_next, wall, electric_first=False,
-                                    overlap=sigma_next - wall.charge([sp.charge_si for sp in self.species])[1])
+                                    overlap=self._electrode_overlap(sigma_next, wall))
         totals = self._accumulate(st.moments, x_next, v, w)
         state = State(E, B, x_next_half, u, w, qm, rho_next, sigma_next, key, st.time + dt, st.steps + 1,
                       wall, totals)
@@ -1076,13 +1094,14 @@ def _run(sim, steps, seed, store_every, store_particles, moments, state):
         (carry, (x, v, w, E, B, J, rho)), _ = lax.scan(advance, (carry, placeholder), None, length=store_every)
         if not store_particles:
             x = v = w = None
-        return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.steps, carry.moments)
+        return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.steps, carry.sigma,
+                       carry.moments)
 
     chunks = steps // store_every
-    carry, (x, v, w, E, B, J, rho, wall, t, n, totals) = lax.scan(chunk, carry0, None, length=chunks)
+    carry, (x, v, w, E, B, J, rho, wall, t, n, sigma, totals) = lax.scan(chunk, carry0, None, length=chunks)
     d = sim.domain
     m, q = extra
-    return Output(t=t, steps=n, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,
+    return Output(t=t, steps=n, sigma=sigma, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,
                   length=d.length, charge=q, mass=m, weight=w, wall=wall, moments=totals,
                   species=jnp.concatenate([jnp.full((s.n,), i) for i, s in enumerate(sim.species)]),
                   state=carry, names=tuple(s.name for s in sim.species), counts=tuple(s.n for s in sim.species),
