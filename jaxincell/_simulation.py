@@ -60,6 +60,10 @@ class Wall:
             difference is what the wall absorbed, including the loss to a coefficient of
             restitution below one and the heat a thermal wall gives or takes.
         energy_injected: Kinetic energy a :class:`~jaxincell.Source` carried in.
+        truncated: Weight a wall kept only because ``Source.min_weight`` stopped the orbit,
+            which its reflection law would otherwise have sent back. It is the cost of the
+            cutoff, in the units the rest of the ledger is in, so a run can say what it was
+            rather than assume it was nothing.
         momentum: Momentum delivered to the wall, ``(species, side, 3)``, in
             :math:`\\mathrm{kg\\,m^{-1}s^{-1}}`: what arrived less what went back out. Its
             sign is the direction the wall is pushed, so the left wall's x component is
@@ -83,6 +87,7 @@ class Wall:
     energy_injected: object
     momentum: object
     momentum_injected: object
+    truncated: object
     spectrum: object
     overflow: object
 
@@ -494,7 +499,8 @@ class Simulation:
         bins = self.impacts
         spectrum = None if bins is None else jnp.zeros((len(self.species), 2,
                                                         bins.energy_bins + 1, bins.angle_bins))
-        return Wall(zeros, zeros, zeros, zeros, zeros, zeros, vectors, vectors, spectrum, jnp.zeros(()))
+        return Wall(zeros, zeros, zeros, zeros, zeros, zeros, vectors, vectors, zeros, spectrum,
+                    jnp.zeros(()))
 
     def _spectrum(self, wall, arrived, m, u_in):
         """Add this step's crossings to the energy-incidence accumulator.
@@ -543,11 +549,12 @@ class Simulation:
         def per_species(per_particle):
             return jnp.stack([jnp.sum(per_particle[:, a:a + n], axis=1) for a, n in self.blocks])
 
-        arrived, kept = hits
+        arrived, kept, truncated = hits
         returned = arrived - kept
         return wall.replace(spectrum=self._spectrum(wall, arrived, m, u_in),
                             arrived=wall.arrived + per_species(arrived),
                             collected=wall.collected + per_species(kept),
+                            truncated=wall.truncated + per_species(truncated),
                             energy_in=wall.energy_in + per_species(arrived * self._kinetic(m, u_in)),
                             energy_out=wall.energy_out + per_species(returned * self._kinetic(m, u_out)),
                             momentum=wall.momentum + jnp.stack(

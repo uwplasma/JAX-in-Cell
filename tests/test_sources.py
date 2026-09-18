@@ -317,7 +317,7 @@ def test_the_wall_ledger_counts_one_impact_exactly():
     x = jnp.array([[0.6, 0.0, 0.0]])
     v = jnp.array([[speed, 0.0, 0.0]])
     reflection = (jnp.zeros(1), jnp.full(1, R))
-    _, v_out, w_out, _, (arrived, kept) = apply_particle_bc(
+    _, v_out, w_out, _, (arrived, kept, _) = apply_particle_bc(
         x, v, jnp.full(1, w), jnp.ones(1), (1.0, 1.0, 1.0), (2, 2), (1.0, restitution), reflection, 0.1)
     assert float(arrived[1, 0]) == pytest.approx(w) and float(arrived[0, 0]) == 0.0
     assert float(kept[1, 0]) == pytest.approx((1 - R) * w)
@@ -453,17 +453,40 @@ def test_a_reflecting_wall_would_hold_a_particle_for_ever_without_a_floor():
     so nothing is lost, and the slot comes back."""
     domain = box(cells=16, particle_bc="absorbing", field_bc="reflective")
     source = maxwellian_source(10, density=1e-10 * DENSITY)
-    weights = {}
+    weights, cost = {}, {}
     for name, floor in (("floor", 1e-2), ("none", 0.0)):
         species = Species("electrons", 12000, -1.0, mass_electron, 0.0, reflection=0.5,
                           source=source.replace(min_weight=floor))
         out = Simulation(domain, [species], Solver(model="electrostatic")).run(600, store_particles=False)
         live = np.asarray(out.state.w)
         weights[name] = (live > 0).sum()
-        assert float(out.wall.overflow[-1]) == 0.0
+        assert float(out.overflow[-1]) == 0.0
         total = np.asarray(out.wall.collected)[-1].sum() + live.sum()
         assert total == pytest.approx(float(np.asarray(out.wall.injected)[-1].sum()), rel=1e-9)
+        cost[name] = float(np.asarray(out.wall.truncated)[-1].sum() / np.asarray(out.wall.collected)[-1].sum())
     assert weights["floor"] < weights["none"]
+    # what the cutoff cost is on the ledger, not assumed to be nothing
+    assert cost["none"] == 0.0
+    assert 1e-4 < cost["floor"] < 5e-2
+
+
+def test_the_cutoff_budget_falls_with_the_cutoff():
+    """`min_weight` truncates the last part of an orbit, and how much is a choice. The weight a
+    wall takes for that reason rather than by its reflection law is on the ledger, and it falls
+    with the cutoff, so a run can be refined until the budget is below whatever it is being
+    compared against instead of hoping that it is."""
+    domain = box(cells=16, particle_bc="absorbing", field_bc="reflective")
+    source = maxwellian_source(10, density=1e-10 * DENSITY)
+    budget = []
+    for floor in (1e-1, 1e-2, 1e-3):
+        species = Species("electrons", 20000, -1.0, mass_electron, 0.0, reflection=0.5,
+                          source=source.replace(min_weight=floor))
+        out = Simulation(domain, [species], Solver(model="electrostatic")).run(600, store_particles=False)
+        assert out.problems == ()
+        budget.append(float(np.asarray(out.wall.truncated)[-1].sum()
+                            / np.asarray(out.wall.collected)[-1].sum()))
+    assert budget[0] > budget[1] > budget[2] > 0.0
+    assert budget[2] < 0.1 * budget[0]
 
 
 # --- the electrical boundary -----------------------------------------------------------------

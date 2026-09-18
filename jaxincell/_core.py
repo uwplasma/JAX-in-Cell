@@ -310,29 +310,33 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx, floor=0
     ledger below stays exact.
 
     Returns:
-        tuple: ``x, v, w, qm`` and ``(arrived, kept)``, two ``(2, N)`` arrays, side 0
-        the left wall and side 1 the right: the weight of each particle that reached
-        that wall on this step, zero where it did not, and the part of it the wall
-        kept. The caller has the velocity before and after the bounce, so the charge,
-        energy and momentum a wall received follow from these two arrays alone.
+        tuple: ``x, v, w, qm`` and ``(arrived, kept, truncated)``, three ``(2, N)`` arrays,
+        side 0 the left wall and side 1 the right: the weight of each particle that reached
+        that wall on this step, zero where it did not; the part of it the wall kept; and the
+        part of *that* the wall kept only because ``floor`` stopped the orbit, which the
+        reflection law would otherwise have sent back. The caller has the velocity before and
+        after the bounce, so the charge, energy and momentum a wall received follow from these
+        arrays alone, and the third says what the cutoff cost.
     """
     L, Ly, Lz = box
     x = x.at[:, 1].set((x[:, 1] + Ly / 2) % Ly - Ly / 2)
     x = x.at[:, 2].set((x[:, 2] + Lz / 2) % Lz - Lz / 2)
     xx, vx = x[:, 0], v[:, 0]
     out = jnp.zeros_like(xx, dtype=bool)
-    arrived, kept = [], []
+    arrived, kept, truncated = [], [], []
     for code, beyond, mirror, park, e, r in (
             (bc[0], xx < -L / 2, -L - xx, -L / 2 - PARK * dx, restitution[0], reflection[0]),
             (bc[1], xx > L / 2, L - xx, L / 2 + PARK * dx, restitution[1], reflection[1])):
         arrived.append(jnp.where(beyond, w, 0.0))
         kept.append(jnp.zeros_like(w))
+        truncated.append(jnp.zeros_like(w))
         if code == 0:
             xx = jnp.where(beyond, (xx + L / 2) % L - L / 2, xx)
             continue
         if code == 2:
             returned = jnp.where(beyond, w * r, 0.0)
             spent = beyond & (returned <= floor)          # too little left to follow: the wall takes it
+            truncated[-1] = jnp.where(spent, returned, 0.0)
             returned = jnp.where(spent, 0.0, returned)
             kept[-1] = arrived[-1] - returned
             w = jnp.where(beyond, returned, w)
@@ -345,7 +349,7 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx, floor=0
     if 2 in bc:
         v = jnp.where(out[:, None], 0.0, v)
         qm = jnp.where(out, 0.0, qm)
-    return x, v, w, qm, (jnp.stack(arrived), jnp.stack(kept))
+    return x, v, w, qm, (jnp.stack(arrived), jnp.stack(kept), jnp.stack(truncated))
 
 
 def wrap_positions(x, w, box, bc, dx):

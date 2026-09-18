@@ -115,7 +115,7 @@ def test_a_weighted_reflection_has_the_derivative_the_algebra_says():
 
     def collected(R):
         reflection = (jnp.zeros(1), jnp.broadcast_to(R, (1,)))
-        _, _, w_out, _, (arrived, kept) = apply_particle_bc(
+        _, _, w_out, _, (arrived, kept, _) = apply_particle_bc(
             jnp.array([[0.6, 0.0, 0.0]]), jnp.array([[1e6, 0.0, 0.0]]), jnp.full(1, w), jnp.ones(1),
             (1.0, 1.0, 1.0), (2, 2), (1.0, 1.0), reflection, 0.1)
         return jnp.sum(q * kept[1]), jnp.sum(w_out)

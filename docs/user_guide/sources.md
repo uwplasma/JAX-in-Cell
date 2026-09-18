@@ -119,6 +119,12 @@ of the emitted weight at or below which the wall keeps the remainder instead; th
 remainder goes on the ledger, so the charge and energy balances stay exact, and what
 changes is only where the last $10^{-3}$ of a particle lands.
 
+How much that is, is on the ledger too. `Wall.truncated` is the weight a wall kept only
+because the cutoff stopped the orbit, which the reflection law would otherwise have sent
+back, so a run says what the cutoff cost instead of assuming it was nothing — and it falls
+with `min_weight`, which is how far a result should be refined before it is compared with
+anything.
+
 ## The electrical boundary
 
 A particle boundary and an electrical one are separate choices. `particle_bc` says what
