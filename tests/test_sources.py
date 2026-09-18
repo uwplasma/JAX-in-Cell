@@ -217,6 +217,44 @@ def test_an_injected_half_maxwellian_fills_the_box_to_half_the_reservoir_density
     assert interior.std() < 0.08
 
 
+def test_an_injected_particle_enters_on_a_trajectory_and_not_on_a_straight_line():
+    """An emitted particle enters part-way through a step and is put in the arrays as if it
+    had always been there. Streaming it freely to the end of that interval and then giving it
+    the whole step's push leaves an error of order (q/m)|E| dt / v in its entry velocity, and
+    a run has no way to see it. Both are checked against a closed form: a cold beam falling
+    through a prescribed uniform field has n(x) = Gamma / v(x) with v^2 = v_0^2 + 2(q/m)E x,
+    and one turning in a prescribed uniform B moves on a circle of radius v_0/Omega, giving
+    n(x) = 2 Gamma / (v_0 sqrt(1 - (x/r)^2)) out to that radius."""
+    length, cells, v0 = 1e-2, 64, 1e6
+    mass = 1e4 * mass_electron            # heavy and tenuous, so its own field is nothing
+    over_mass, reservoir = e_charge / mass, 1e6
+
+    def profile(steps, external_E=None, external_B=None, dt=1.0):
+        domain = Domain(length=length, cells=cells, time_step=dt, particle_bc="absorbing",
+                        field_bc=("open", "absorbing"))
+        beam = Species("beam", 80000, 1.0, mass, 0.0,
+                       source=Source(density=reservoir, vth=0.0, drift=(v0, 0, 0), emit=20))
+        out = Simulation(domain, [beam], Solver(model="electrostatic"),
+                         external_E=external_E, external_B=external_B).run(
+            steps, store_every=steps // 4, store_particles=False, moments=True)
+        assert out.problems == ()
+        return np.asarray(out.moments[-1] - out.moments[-2])[0, 0] / (steps // 4)
+
+    x = np.asarray(Domain(length=length, cells=cells).grid) + length / 2
+    field = 0.5 * v0 ** 2 / (over_mass * length)                    # doubles the kinetic energy
+    n = profile(600, external_E=jnp.zeros((cells, 3)).at[:, 0].set(field), dt=length / v0 / 200)
+    exact = reservoir * v0 / np.sqrt(v0 ** 2 + 2 * over_mass * field * x)
+    assert np.abs(n[3:-3] / exact[3:-3] - 1).max() < 2e-4           # free streaming gives 1.1e-3
+
+    radius = length / 3.0
+    strength = v0 / (over_mass * radius)
+    n = profile(480, external_B=jnp.zeros((cells, 3)).at[:, 2].set(strength),
+                dt=2 * np.pi / (over_mass * strength) / 80)         # Omega dt = 0.079
+    turning = (np.arange(cells) >= 3) & (x < 0.7 * radius)      # past the plane's cloud truncation
+    exact = 2 * reservoir / np.sqrt(np.maximum(1 - (x / radius) ** 2, 1e-30))
+    assert np.abs(n[turning] / exact[turning] - 1).mean() < 5e-3    # free streaming gives 4.0e-2
+
+
 def test_the_pool_is_capacity_and_the_source_refills_the_slots_the_walls_empty():
     """An empty start is a full set of dead slots, not an empty array: the shapes never
     change. Dead slots hold no weight and no charge-to-mass ratio, deposit nothing and feel

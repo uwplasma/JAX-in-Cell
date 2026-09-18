@@ -158,7 +158,7 @@ def sample_crossing(key, source, n, inward):
     return v.at[:, 0].set(inward * normal)
 
 
-def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length):
+def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length, field, push):
     """Emit one step's worth of the reservoir's flux into the dead slots of one
     species block, and return the new arrays and what was emitted.
 
@@ -170,31 +170,47 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length):
     was overwritten because the pool was full. Finding them costs one partial sort of the
     block, not a search per slot.
 
-    Entry times are a quiet quadrature of the interval that ends where the leapfrog's
-    carried position stands, :math:`s_k = (k + 1/2)/N_{\\rm emit}`, and each particle then
-    streams freely for the remaining :math:`(1 - s_k)\\Delta t` at its entry velocity,
-    feeling no force until the next push. It is emitted at the top of a step, so the
-    deposit of that step already counts it and no charge appears between the two halves
-    of the step with no current to account for it.
+    **The staggering.** The loop carries the position at half-integer times and the velocity
+    at integer ones. A particle emitted on this step enters the plane at
+    :math:`\\tau_k = t^n + (s_k - \\tfrac12)\\Delta t`, with
+    :math:`s_k = (k + 1/2)/N_{\\rm emit}` a quiet quadrature of the interval
+    :math:`(t^{n-1/2}, t^{n+1/2}]` that ends where the carried position stands. It is put in
+    the arrays as if it had always been there: at the position it reaches by
+    :math:`t^{n+1/2}`, and with the velocity it *would* have had at :math:`t^n`, so that the
+    one full-step push the rest of the loop applies leaves it with the right velocity at
+    :math:`t^{n+1}`. Both come from the field at the plane, ``field``, held constant over the
+    entry: the position to second order in the flight, and the velocity from ``push`` run over
+    the signed interval :math:`(\\tfrac12 - s_k)\\Delta t`, which is exact for a uniform field
+    and is what makes a magnetised entry keep its gyro-phase. Streaming freely instead leaves
+    an error of order :math:`(q/m)|E|\\Delta t/v` in the entry velocity of every particle.
+
+    It is emitted at the top of a step, so the deposit of that step already counts it and no
+    charge appears between the two halves of the step with no current to account for it.
 
     Returns:
         tuple: the updated ``x, v, w, qm``, the weight each emitted particle carries, the
-        ``(emit, 3)`` velocities it was given, and ``overflow``.
+        ``(emit, 3)`` velocities it crossed the plane with -- what the reservoir put in, not
+        the back-dated value the arrays hold -- and ``overflow``.
     """
     start, n = block
     emit = source.emit
     inward = 1.0 if source.side == "left" else -1.0
     weight = crossing_flux(source) * dt / emit
     velocity = sample_crossing(key, source, emit, inward)
-    flight = (1.0 - (jnp.arange(emit) + 0.5) / emit) * dt
+    fraction = (jnp.arange(emit) + 0.5) / emit
+    flight = (1.0 - fraction) * dt
     wall = -inward * length / 2                                  # the left wall is at -L/2 and sends +x
-    entry = wall + velocity[:, 0] * flight                       # the plane plus the residual flight
+    at_plane = jnp.broadcast_to(field, (emit, 6))
+    acceleration = charge_over_mass * (at_plane[:, :3] + jnp.cross(velocity, at_plane[:, 3:]))
+    entry = wall + velocity[:, 0] * flight + 0.5 * acceleration[:, 0] * flight ** 2
+    carried = push(velocity, at_plane, jnp.full((emit,), charge_over_mass),
+                   ((0.5 - fraction) * dt)[:, None])
     # the tangential coordinates are ignorable and periodic; start on the plane
     position = jnp.stack([entry, jnp.zeros(emit), jnp.zeros(emit)], axis=1)
     # dead slots first: the emit smallest weights in the block
     slots = start + lax.top_k(-lax.dynamic_slice(w, (start,), (n,)), emit)[1]
     overflow = jnp.max(w[slots])
-    return (x.at[slots].set(position), v.at[slots].set(velocity), w.at[slots].set(weight),
+    return (x.at[slots].set(position), v.at[slots].set(carried), w.at[slots].set(weight),
             qm.at[slots].set(charge_over_mass), weight, velocity, overflow)
 
 

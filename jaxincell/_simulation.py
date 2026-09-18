@@ -561,23 +561,32 @@ class Simulation:
                                 [per_species(arrived * (m * u_in[:, k]) - returned * (m * u_out[:, k]))
                                  for k in range(3)], axis=-1))
 
-    def _inject(self, key, x, u, w, qm, wall):
+    def _inject(self, key, x, u, w, qm, wall, E, B, rho):
         """Emit one step's worth of every source into the dead slots of its species.
 
-        The particles enter through the wall at a quiet quadrature of times across the
-        interval that ends at the position the leapfrog carries, and stream freely for the
-        rest of it, so that the deposit at the end of this step already sees them."""
+        The particles enter at a quiet quadrature of times across the interval that ends at
+        the position the leapfrog carries, and each is given the partial trajectory of
+        :func:`~jaxincell._sources.inject` in the field at its entry plane, so that the
+        deposit at the end of this step already sees it and the one full-step push the loop
+        applies afterwards is the push it should have had."""
         if not self.sources:
             return x, u, w, qm, wall
         d = self.domain
+
+        def push(velocity, fields, charge_over_mass, interval):
+            """A partial Boris step on a velocity, whichever pusher the run uses."""
+            return self._velocity(self._accelerate(self._momentum(velocity), fields,
+                                                   charge_over_mass, interval))
         injected, energy, momentum = wall.injected, wall.energy_injected, wall.momentum_injected
         overflow = wall.overflow
         for i, (sp, block) in enumerate(zip(self.species, self.blocks)):
             if sp.source is None:
                 continue
             key, k = random.split(key)
+            plane = jnp.full((1, 3), (-1.0 if sp.source.side == "left" else 1.0) * d.length / 2)
             x, v, w, qm, weight, entering, spill = inject(k, sp.source, block, x, self._velocity(u), w, qm,
-                                                          sp.charge_si / sp.mass, d.dt, d.length)
+                                                          sp.charge_si / sp.mass, d.dt, d.length,
+                                                          self._fields_at(plane, E, B, rho)[0], push)
             u = self._momentum(v)
             side = 0 if sp.source.side == "left" else 1
             carried = self._momentum(entering)      # the velocities as the pusher will carry them
@@ -834,7 +843,7 @@ class Simulation:
         # What the sources supplied over the interval ending at the position the leapfrog
         # carries. They enter first, so the deposit below already counts them and no charge
         # appears between the two halves of the step.
-        x_half, u, w, qm, wall = self._inject(k_source, st.x, st.u, st.w, st.qm, st.wall)
+        x_half, u, w, qm, wall = self._inject(k_source, st.x, st.u, st.w, st.qm, st.wall, st.E, st.B, st.rho)
         v = self._velocity(u)
         # First half step: sources from the motion x^n -> x^{n+1/2}. The density at x^n
         # is the one the previous step ended on (or the initial one), carried in the
