@@ -43,6 +43,12 @@ class Wall:
     :math:`\\mathrm{m^{-2}}`, and an energy is :math:`\\mathrm{J/m^2}`. Multiply a weight
     by the species' charge for a collected charge, or divide by the elapsed time for a flux.
 
+    Every exchange is recorded **after** the wall's law has acted, so a thermal wall's
+    ``energy_out`` is the energy of the particle it re-emitted and not of the bounce that
+    preceded the redraw. Kinetic energy is :math:`m|\\mathbf u|^2/(\\gamma+1)`, which is
+    :math:`m v^2/2` in a Newtonian run and the relativistic energy from the carried momentum
+    otherwise, so the ledger does not silently change meaning with ``Solver(relativistic=)``.
+
     Attributes:
         arrived: Weight that reached the wall, counting every impact of a particle that
             bounces more than once.
@@ -52,7 +58,13 @@ class Wall:
             drift segment on which the particle crossed.
         energy_out: Kinetic energy carried back out by what the wall returned. The
             difference is what the wall absorbed, including the loss to a coefficient of
-            restitution below one.
+            restitution below one and the heat a thermal wall gives or takes.
+        energy_injected: Kinetic energy a :class:`~jaxincell.Source` carried in.
+        momentum: Momentum delivered to the wall, ``(species, side, 3)``, in
+            :math:`\\mathrm{kg\\,m^{-1}s^{-1}}`: what arrived less what went back out. Its
+            sign is the direction the wall is pushed, so the left wall's x component is
+            negative for a plasma pressing outwards on both sides.
+        momentum_injected: Momentum a :class:`~jaxincell.Source` carried in, the same shape.
         overflow: Largest live weight a source has overwritten, zero while the pool of
             dead slots holds. A positive value means the capacity ``Species.n`` is too
             small and particles were destroyed to make room.
@@ -62,6 +74,9 @@ class Wall:
     injected: object
     energy_in: object
     energy_out: object
+    energy_injected: object
+    momentum: object
+    momentum_injected: object
     overflow: object
 
     def charge(self, charge_per_particle):
@@ -434,23 +449,36 @@ class Simulation:
 
     def _empty_wall(self):
         zeros = jnp.zeros((len(self.species), 2))
-        return Wall(zeros, zeros, zeros, zeros, zeros, jnp.zeros(()))
+        vectors = jnp.zeros((len(self.species), 2, 3))
+        return Wall(zeros, zeros, zeros, zeros, zeros, zeros, vectors, vectors, jnp.zeros(()))
 
-    def _record(self, wall, hits, m, v_in, v_out):
+    def _kinetic(self, m, u):
+        """Kinetic energy per unit weight of the carried ``u``, :math:`m|u|^2/(\\gamma+1)`.
+
+        In a Newtonian run :math:`\\gamma` is one and this is :math:`mv^2/2`. In a relativistic
+        one it is :math:`(\\gamma-1)mc^2` written so that it does not subtract two large numbers,
+        which at :math:`v \\ll c` would leave nothing but round-off."""
+        gamma = self._gamma(u)                 # 1.0, a scalar, in a Newtonian run
+        return m * jnp.sum(u * u, axis=1) / (jnp.reshape(gamma, (-1,)) + 1 if jnp.ndim(gamma) else gamma + 1)
+
+    def _record(self, wall, hits, m, u_in, u_out):
         """Add one step's impacts to the ledger. ``hits`` is what
-        :func:`~jaxincell._core.apply_particle_bc` returned, and ``v_in`` and ``v_out`` are the
-        velocities of the particles before and after the bounce, so that the energy each wall
-        received and returned follows without a second pass over the walls."""
+        :func:`~jaxincell._core.apply_particle_bc` returned, and ``u_in`` and ``u_out`` are the
+        carried momenta of the particles before the wall acted and after it has finished acting
+        -- after a thermal wall's redraw, not before it -- so that the energy and momentum each
+        wall received and returned follow without a second pass over the walls."""
         def per_species(per_particle):
             return jnp.stack([jnp.sum(per_particle[:, a:a + n], axis=1) for a, n in self.blocks])
 
         arrived, kept = hits
-        energy = 0.5 * m * jnp.sum(v_in ** 2, axis=1)
-        back = 0.5 * m * jnp.sum(v_out ** 2, axis=1)
+        returned = arrived - kept
         return wall.replace(arrived=wall.arrived + per_species(arrived),
                             collected=wall.collected + per_species(kept),
-                            energy_in=wall.energy_in + per_species(arrived * energy),
-                            energy_out=wall.energy_out + per_species((arrived - kept) * back))
+                            energy_in=wall.energy_in + per_species(arrived * self._kinetic(m, u_in)),
+                            energy_out=wall.energy_out + per_species(returned * self._kinetic(m, u_out)),
+                            momentum=wall.momentum + jnp.stack(
+                                [per_species(arrived * (m * u_in[:, k]) - returned * (m * u_out[:, k]))
+                                 for k in range(3)], axis=-1))
 
     def _inject(self, key, x, u, w, qm, wall):
         """Emit one step's worth of every source into the dead slots of its species.
@@ -461,18 +489,23 @@ class Simulation:
         if not self.sources:
             return x, u, w, qm, wall
         d = self.domain
-        injected, overflow = wall.injected, wall.overflow
+        injected, energy, momentum = wall.injected, wall.energy_injected, wall.momentum_injected
+        overflow = wall.overflow
         for i, (sp, block) in enumerate(zip(self.species, self.blocks)):
             if sp.source is None:
                 continue
             key, k = random.split(key)
-            x, v, w, qm, weight, spill = inject(k, sp.source, block, x, self._velocity(u), w, qm,
-                                                sp.charge_si / sp.mass, d.dt, d.length)
+            x, v, w, qm, weight, entering, spill = inject(k, sp.source, block, x, self._velocity(u), w, qm,
+                                                          sp.charge_si / sp.mass, d.dt, d.length)
             u = self._momentum(v)
             side = 0 if sp.source.side == "left" else 1
+            carried = self._momentum(entering)      # the velocities as the pusher will carry them
             injected = injected.at[i, side].add(weight * sp.source.emit)
+            energy = energy.at[i, side].add(weight * jnp.sum(self._kinetic(sp.mass, carried)))
+            momentum = momentum.at[i, side].add(weight * sp.mass * jnp.sum(carried, axis=0))
             overflow = jnp.maximum(overflow, spill)
-        return x, u, w, qm, wall.replace(injected=injected, overflow=overflow)
+        return x, u, w, qm, wall.replace(injected=injected, energy_injected=energy,
+                                         momentum_injected=momentum, overflow=overflow)
 
     def moments(self, x, v, w):
         """Density, particle flux and kinetic energy density of each species on the grid,
@@ -603,9 +636,15 @@ class Simulation:
             # the initial field has to be built from the density the first step will
             # actually see; otherwise the discrete Gauss law starts out violated and
             # stays that way for the whole run.
-            x, u, w, qm, hits = apply_particle_bc(x + 0.5 * dt * v, u, w, qm, box, d.particle_bc, d.restitution,
-                                                  self._reflection(v), dx, self._weight_floor())
-            wall = self._record(wall, hits, m, v, self._velocity(u))
+            x_free = x + 0.5 * dt * v
+            x, u_out, w, qm, hits = apply_particle_bc(
+                x_free, u, w, qm, box, d.particle_bc, d.restitution, self._reflection(v), dx,
+                self._weight_floor())
+            if 3 in d.particle_bc:                # the same wall law as every later step, key and all
+                key, k_wall = random.split(key)
+                u_out = self._thermalise(k_wall, x_free, u_out)
+            wall = self._record(wall, hits, m, u, u_out)
+            u = u_out
             x_integer = wrap_positions(x - 0.5 * dt * self._velocity(u), w, box, d.particle_bc, dx)
         else:
             x_integer = x
@@ -701,10 +740,11 @@ class Simulation:
         u = self._collide_momenta(k_collide, x_half, u, w, qm, m, dt)
         v = self._velocity(u)
         x_free = x_half + dt * v
-        x_next_half, u, w, qm, hits = apply_particle_bc(x_free, u, w, qm, box, d.particle_bc, d.restitution,
-                                                        self._reflection(v), dx, self._weight_floor())
-        wall = self._record(wall, hits, m, v, self._velocity(u))
-        u = self._thermalise(k_wall, x_free, u)
+        x_next_half, u_out, w, qm, hits = apply_particle_bc(x_free, u, w, qm, box, d.particle_bc, d.restitution,
+                                                            self._reflection(v), dx, self._weight_floor())
+        u_out = self._thermalise(k_wall, x_free, u_out)
+        wall = self._record(wall, hits, m, u, u_out)
+        u = u_out
         v = self._velocity(u)
         x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
         # Second half step, x^{n+1/2} -> x^{n+1}, starting from the charge density the
@@ -772,8 +812,9 @@ class Simulation:
                 x_new, u_bounced, w_new, qms, hits = apply_particle_bc(x_free, u_new, ws, qms, box, d.particle_bc,
                                                                        d.restitution, self._reflection(v_new), dx,
                                                                        self._weight_floor())
-                wall = self._record(wall, hits, m, self._velocity(u_new), self._velocity(u_bounced))
-                u_new = self._thermalise(k_sub, x_free, u_bounced)
+                u_bounced = self._thermalise(k_sub, x_free, u_bounced)
+                wall = self._record(wall, hits, m, u_new, u_bounced)
+                u_new = u_bounced
                 rho_new = deposit_x(x_new[:, 0], q * w_new)
                 J = transpose(jnp.concatenate([(q * ws)[:, None] * v_new, jnp.zeros_like(v_new)], axis=1))[0] / dx
                 mean_current = jnp.sum(q * ws * v_new[:, 0]) / L

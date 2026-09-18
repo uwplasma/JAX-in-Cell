@@ -174,6 +174,31 @@ def test_the_emitted_weight_is_exactly_the_prescribed_flux_and_differentiable_in
     assert float(grad[1]) == pytest.approx(DENSITY / (2 * np.sqrt(np.pi)) * domain.dt * steps, rel=1e-10)
 
 
+def test_the_ledger_carries_the_energy_and_momentum_a_source_puts_in():
+    """A budget for an open box needs what came in as well as what went out. The reservoir
+    emits N particles of weight Gamma dt / N whose mean energy is the flux-Maxwellian's
+    m(2 sigma_x^2 + sigma_y^2 + sigma_z^2)/2 and whose mean normal momentum is
+    m sigma_x sqrt(pi/2), both per unit weight and both closed forms."""
+    domain = box(cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
+    vth = (np.sqrt(2) * SIGMA, 0.6 * np.sqrt(2) * SIGMA, 0.0)
+    species = Species("electrons", 3000, -1.0, mass_electron, 0.0,
+                      source=Source(density=DENSITY, vth=vth, emit=60))
+    steps = 40
+    out = Simulation(domain, [species], Solver(model="electrostatic")).run(steps, store_every=steps)
+    wall = jax.tree.map(lambda a: a[-1], out.wall)
+    weight = float(wall.injected[0, 0])
+    sigma = np.asarray(vth) / np.sqrt(2)
+    assert weight == pytest.approx(DENSITY * SIGMA / np.sqrt(2 * np.pi) * domain.dt * steps, rel=1e-12)
+    assert float(wall.energy_injected[0, 0]) / weight == pytest.approx(
+        0.5 * mass_electron * (2 * sigma[0] ** 2 + sigma[1] ** 2 + sigma[2] ** 2), rel=0.02)
+    assert float(wall.momentum_injected[0, 0, 0]) / weight == pytest.approx(
+        mass_electron * sigma[0] * np.sqrt(np.pi / 2), rel=0.02)
+    assert float(wall.momentum_injected[0, 0, 1]) / weight == pytest.approx(0.0, abs=0.05 * mass_electron * SIGMA)
+    assert float(wall.momentum_injected[0, 0, 2]) == 0.0
+    # nothing was injected through the wall the source is not on
+    assert float(wall.injected[0, 1]) == 0.0 and float(wall.energy_injected[0, 1]) == 0.0
+
+
 def test_an_injected_half_maxwellian_fills_the_box_to_half_the_reservoir_density():
     """Free streaming from a reservoir gives the density of the half-space behind the
     plane, n/2, uniformly: the flux Gamma = n sigma / sqrt(2 pi) divided by the mean
@@ -294,6 +319,32 @@ def test_the_wall_ledger_counts_one_impact_exactly():
     assert float((arrived - kept)[1, 0]) * 0.5 * mass * (restitution * speed) ** 2 == pytest.approx(energy_out)
 
 
+def test_the_wall_energy_of_a_relativistic_impact_is_the_relativistic_one():
+    """m v^2/2 is not the kinetic energy of a particle at 0.9 c; (gamma - 1) m c^2 is, and
+    it is three times larger. The ledger takes it from the carried momentum as
+    m|u|^2/(gamma + 1), which is the same number written so that a slow particle does not
+    lose it to the difference of two large ones."""
+    speed, density = 0.9 * c, 1e-3            # a density low enough that the self-field is nothing
+    gamma = 1 / np.sqrt(1 - 0.81)
+    domain = Domain(length=1.0, cells=8, time_step=0.4 / c, particle_bc="absorbing", field_bc="reflective")
+    species = Species("electrons", 1, -1.0, mass_electron, density,
+                      x=np.array([[0.4, 0.0, 0.0]]), v=np.array([[speed, 0.0, 0.0]]))
+    sim = Simulation(domain, [species], Solver(model="electrostatic", relativistic=True))
+    wall = jax.tree.map(lambda a: a[-1], sim.run(3, store_every=3).wall)
+    arrived = float(wall.arrived[0, 1])
+    assert arrived == pytest.approx(density * domain.length, rel=1e-12)
+    assert float(wall.energy_in[0, 1]) / arrived == pytest.approx((gamma - 1) * mass_electron * c ** 2, rel=1e-9)
+    assert float(wall.energy_in[0, 1]) / arrived / (0.5 * mass_electron * speed ** 2) == pytest.approx(
+        (gamma - 1) / (0.5 * 0.81), rel=1e-9)              # 3.19 times the Newtonian value
+    assert float(wall.momentum[0, 1, 0]) / arrived == pytest.approx(gamma * mass_electron * speed, rel=1e-9)
+    # and the same expression is the Newtonian one when nothing is relativistic
+    slow = Simulation(domain.replace(time_step=0.4 / c), [species.replace(v=np.array([[1e5, 0.0, 0.0]]))],
+                      Solver(model="electrostatic"))
+    state, extra = slow.initial_state(random.PRNGKey(0))
+    assert float(slow._kinetic(extra[0], jnp.array([[1e5, 0.0, 0.0]]))[0]) == pytest.approx(
+        0.5 * mass_electron * 1e10, rel=1e-12)
+
+
 def test_the_wall_charge_and_energy_add_up_over_a_run():
     """Everything a wall took is what arrived minus what went back, species by species and
     wall by wall, and the charge on the collector is the sum of the collected weights times
@@ -307,9 +358,33 @@ def test_the_wall_charge_and_energy_add_up_over_a_run():
     assert np.all(collected <= arrived + 1e-9) and np.all(collected >= -1e-9)
     assert collected[0, 1] == pytest.approx(0.7 * arrived[0, 1], rel=1e-9)     # keeps 1 - R of every impact
     assert collected[1, 1] == pytest.approx(arrived[1, 1], rel=1e-12)          # ions are not reflected
-    assert np.all(np.asarray(wall.energy_out) <= np.asarray(wall.energy_in) + 1e-30)
+    # the collector returns the fraction R of each impact at the same speed, so it never
+    # gives back more than it received
+    energy_in, energy_out = np.asarray(wall.energy_in), np.asarray(wall.energy_out)
+    assert np.all(energy_out[:, 1] <= energy_in[:, 1] + 1e-30)
     charge = np.asarray(wall.charge([s.charge_si for s in (electrons, ions)]))
     assert charge[1] == pytest.approx(e_charge * (collected[1, 1] - collected[0, 1]), rel=1e-12)
+
+
+def test_a_thermal_wall_is_a_heat_bath_and_the_ledger_says_so():
+    """The energy a wall returns is the energy of the particle it re-emitted, which at a
+    thermal wall is a fresh draw from its own half-Maxwellian flux and not the bounce that
+    preceded the redraw. Recorded before the redraw -- as it was -- restitution one makes
+    energy_in and energy_out identical and the wall appears to exchange exactly nothing,
+    which is not a measurement. What it actually returns, per unit weight, is
+    m(2 sigma_x^2 + sigma_y^2 + sigma_z^2)/2, whatever arrived."""
+    domain = box(cells=32, particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing"))
+    electrons = Species.electrons(n=6000, density=DENSITY, vth=(np.sqrt(2) * SIGMA, SIGMA, 0.0))
+    out = Simulation(domain, [electrons], Solver(model="electrostatic")).run(300, store_every=300)
+    wall = jax.tree.map(lambda a: a[-1], out.wall)
+    arrived, out_energy = float(wall.arrived[0, 0]), float(wall.energy_out[0, 0])
+    sigma = np.asarray(electrons.vth) / np.sqrt(2)
+    expected = 0.5 * mass_electron * (2 * sigma[0] ** 2 + sigma[1] ** 2 + sigma[2] ** 2)
+    assert arrived > 0 and float(wall.collected[0, 0]) == 0.0      # a thermal wall keeps nothing
+    assert out_energy / arrived == pytest.approx(expected, rel=0.03)
+    assert abs(out_energy / float(wall.energy_in[0, 0]) - 1) > 0.02   # not the specular energy
+    # and it pushes: what arrived less what left, in the direction the wall is driven
+    assert float(wall.momentum[0, 0, 0]) < 0
 
 
 def test_a_reflecting_wall_would_hold_a_particle_for_ever_without_a_floor():

@@ -146,10 +146,19 @@ Both are refused when the `Simulation` is built rather than silently half-done.
 ## What the walls did
 
 `Output.wall` is a {class}`~jaxincell._simulation.Wall`: running totals, per species and
-per wall, of the weight that arrived, the part the wall kept, the weight a source
-emitted, and the kinetic energy carried in and back out. Differences between two stored
-steps are what happened in between, so a flux is a difference divided by a time and a
-collected charge is a difference times a charge.
+per wall, of the weight that arrived, the part the wall kept, the weight a source emitted,
+the kinetic energy carried in, back out and injected, and the momentum delivered and
+injected. Differences between two stored steps are what happened in between, so a flux is
+a difference divided by a time and a collected charge is a difference times a charge.
+
+Every exchange is recorded after the wall's law has acted. A thermal wall is a heat bath:
+what it returns is a fresh draw from its own half-Maxwellian flux, so `energy_out` can
+exceed `energy_in` and the difference is the heat the wall gave the plasma. Recorded
+before the redraw, a thermal wall with restitution one reports `energy_in` and
+`energy_out` identical and appears to exchange nothing at all. Kinetic energy is
+$m|\mathbf u|^2/(\gamma+1)$, which is $mv^2/2$ in a Newtonian run and the relativistic
+energy from the carried momentum otherwise, so `Solver(relativistic=True)` does not
+quietly change what the ledger means.
 
 ```{code-block} python
 :caption: the current the collector drew over the second half of a run
