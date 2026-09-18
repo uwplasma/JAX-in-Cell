@@ -580,6 +580,35 @@ def test_a_sheet_crossing_the_collector_takes_its_whole_charge_with_it():
     assert field[crossing] == pytest.approx(field[crossing - 1], rel=1e-12)
 
 
+def test_the_current_a_floating_collector_closes_on_is_the_real_one():
+    """Ampere's law makes the total current uniform across a one-dimensional box, so
+    J + eps0 dE/dt is the current in the external circuit. A floating collector is connected
+    to nothing, so it vanishes -- at every face, not only at the wall. The continuity current
+    is closed on the rate at which the electrode's charge changes, which is what makes that
+    true; anchored at zero, as it was, the residual is six tenths of the current's own size
+    and J is an internal transport measured from the source plane rather than a current."""
+    domain = box(cells=48, particle_bc="absorbing", field_bc=("open", "absorbing"))
+    electrons = Species("electrons", 12000, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA,) * 3,
+                        active=3000, quiet=True, source=maxwellian_source(12, density=1.1149 * DENSITY))
+    ions = Species("ions", 12000, 1.0, 1836 * mass_electron, DENSITY, 0.0, (0.2 * SIGMA, 0, 0),
+                   active=3000, quiet=True,
+                   source=Source(density=DENSITY, vth=0.0, drift=(0.2 * SIGMA, 0, 0), emit=12))
+    out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(
+        200, store_every=1, store_particles=False)
+    assert out.problems == ()
+    J, E = np.asarray(out.J)[:, :, 0], np.asarray(out.E)[:, :, 0]
+    residual = J[1:] + epsilon_0 * (E[1:] - E[:-1]) / float(domain.dt)
+    assert np.abs(residual).max() < 1e-12 * np.abs(J[1:]).max()
+
+
+def test_the_implicit_scheme_refuses_the_open_plane():
+    """It carries no surface charge, so there is nothing to close the continuity current on."""
+    with pytest.raises(ValueError, match="carries no surface charge"):
+        Simulation(box(field_bc=("open", "absorbing"), particle_bc="absorbing"),
+                   [Species.electrons(n=64, density=DENSITY, vth=(SIGMA, 0, 0))],
+                   Solver(algorithm="implicit"))
+
+
 def test_the_electrode_closure_and_a_symmetry_plane_agree_when_nothing_crosses():
     """With a wall that returns every particle on the left, the charge the collector has
     taken is all the charge the box has lost, so closing the field on that charge and

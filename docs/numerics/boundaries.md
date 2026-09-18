@@ -157,16 +157,40 @@ has collected, and a pillbox across its surface with $E = 0$ inside the conducto
 
 ```{math}
 E_x(L^-) = -\sigma_w/\epsilon_0,
-\qquad \sigma_w = \sum_s q_s\,W_{s,\rm collected},
+\qquad \sigma_w = \sum_s q_s\,W_{s,\rm collected} + \sigma_{\rm overlap},
 ```
 
-with $W$ the weight on the wall ledger. The field is integrated back from there and the
-potential is measured from the source plane, which is the gauge. With a symmetry plane
-opposite and nothing crossing it, closing on the electrode's charge and closing on
-$E = 0$ are the same problem, and the two agree to the charge the deposit truncates
-within half a cloud of the walls, which falls with the cell size; with a source they are
-not, and only the electrode closure is right. `field_bc=("open", "absorbing")` is the
-only pairing the open condition has, because it needs a collector to close on.
+with $W$ the weight on the wall ledger. The second term is the part of the live clouds
+that reaches past the wall: a cloud is one and a half cells wide, so it crosses before
+its centre does, and the deposit drops whatever lies outside the grid. That part is
+neither in the volume nor irreversibly collected — the particle may still turn round —
+but it is charge the wall already sees, and leaving it out of both makes a particle's
+total swing between a half and one and a half of itself as it crosses, and the field
+inside jump by half a particle at the moment the centre passes. With it, the deposited
+and the exterior fractions sum to one at every sub-cell offset and the field does not
+notice the crossing at all.
+
+The field is integrated back from there and the potential is measured from the source
+plane, which is the gauge. With a symmetry plane opposite and nothing crossing it,
+closing on the electrode's charge and closing on $E = 0$ are the same problem; with a
+source they are not, and only the electrode closure is right.
+`field_bc=("open", "absorbing")` is the only pairing the open condition has, because it
+needs a collector to close on, and for the same reason the implicit scheme, which carries
+no surface charge, refuses it.
+
+The same electrode closes the continuity current. Ampère's law makes the total current
+uniform across a one-dimensional box, so $J_x + \epsilon_0\,\partial_t E_x$ is the current
+in the external circuit, and a floating collector is connected to nothing:
+
+```{math}
+J_x(L^-) = \dot\sigma_w = -\epsilon_0\,\partial_t E_x(L^-).
+```
+
+Taken as a difference of $\sigma_w$ over the same interval the density change spans, that
+is exact for the discrete continuity relation, and `Output.J` is then an absolute
+conduction current whose total with the displacement current vanishes at every face to
+round-off. Anchored at zero instead, it was an internal transport measured from the
+source plane, and the residual was six tenths of its own size.
 
 Two reflective walls are two symmetry planes, and the box
 between them is half of a periodic box twice as long, holding the charge and its mirror

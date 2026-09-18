@@ -159,11 +159,14 @@ def current_from_continuity(rho_old, rho_new, dt, dx, wall_current, bc):
     :math:`\\langle J\\rangle = L^{-1}\\sum_p q_p v_{x,p}`; between two absorbing walls the
     current the closure removes is the one in the external circuit.
 
-    With an open source plane the current across that plane is not tracked, and
-    ``wall_current`` is taken as zero: :math:`J_x` is then the internal transport measured
-    from the source plane rather than an absolute current density, which is a diagnostic
-    and nothing more. An electrostatic run, which is the only kind a source is allowed in,
-    takes :math:`E_x` from the charge density and never uses it."""
+    With an open source plane the constant comes from the electrode opposite, and
+    ``wall_current`` is the conduction current at its face. For a floating collector that is
+    :math:`\\dot\\sigma_w`, the rate at which its charge changes, which by Ampere's law is
+    :math:`-\\epsilon_0\\partial_t E_x` there: the total current is uniform across a
+    one-dimensional box and vanishes when the electrode is connected to nothing. :math:`J_x`
+    is then an absolute conduction current, and :math:`J_x + \\epsilon_0\\partial_t E_x`
+    vanishes at every face. An electrostatic run, which is the only kind a source is allowed
+    in, takes :math:`E_x` from the charge density and does not use it to advance anything."""
     J = _integrate_from_walls(-(rho_new - rho_old) / dt, dx, bc, wall_current)
     return J + wall_current if bc[0] == 0 else J
 

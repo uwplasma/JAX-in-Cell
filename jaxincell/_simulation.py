@@ -109,7 +109,9 @@ class State:
 
     ``x`` is the half-step position of the leapfrog and ``u`` the momentum per unit
     mass of a relativistic run, or the velocity otherwise; the implicit scheme carries
-    integer-time positions instead. ``moments`` is the running sum of
+    integer-time positions instead. ``sigma`` is the charge on the collector at the time
+    ``rho`` is for, collected and overlapping together, which is what makes the boundary
+    current a difference rather than a guess. ``moments`` is the running sum of
     :meth:`Simulation.moments`, or ``None`` when ``run(moments=False)``.
     """
     E: object
@@ -119,6 +121,7 @@ class State:
     w: object
     qm: object
     rho: object
+    sigma: object
     key: object
     time: object
     steps: object
@@ -321,6 +324,11 @@ class Simulation:
             raise ValueError("the implicit scheme has no filter: conserving energy needs the same filter on the "
                              "current and on the gathered field, which is not implemented. Use filter_passes=0, "
                              "or algorithm='explicit'.")
+        if self.domain.field_bc == (4, 2):
+            raise ValueError("field_bc=('open', 'absorbing') is the source plane of a box closed by a "
+                             "collector, and the implicit scheme carries no surface charge to close it "
+                             "with: its continuity current would be anchored at nothing. A Source needs "
+                             "algorithm='explicit' in any case.")
         for setting in ("field_solver='gauss'" if s.field_solver == "gauss" else None,
                         "model='electrostatic'" if s.electrostatic else None):
             if setting is not None:
@@ -624,12 +632,30 @@ class Simulation:
         return None if totals is None else totals + self.moments(x, v, w)
 
     def _current_closure(self, current_per_particle):
-        """The constant of the continuity current: the mean current the particles carry, which
-        a periodic box has no wall to replace, and zero at an open source plane, where the
-        current across the plane is not tracked (:func:`~jaxincell._core.current_from_continuity`)."""
-        if self.domain.field_bc == (4, 2):
-            return 0.0
+        """The constant of the continuity current for a closure that does not take a
+        boundary value: the mean current the particles carry, which a periodic box has no
+        wall to replace (:func:`~jaxincell._core.current_from_continuity`)."""
         return jnp.sum(current_per_particle) / self.domain.length
+
+    def _collector_current(self, sigma_old, sigma_new, interval):
+        """Conduction current at the collector face, :math:`\\mathrm{A/m^2}`, which closes the
+        continuity current of a box whose other wall is an open plane.
+
+        Ampere's law makes the total current uniform across a one-dimensional box, so
+        :math:`J_{\\rm cond} + \\epsilon_0\\partial_t E_x` is the current in the external
+        circuit. A floating collector is connected to nothing, so that total is zero and the
+        conduction current at its face is :math:`-\\epsilon_0\\partial_t E_x = \\dot\\sigma_w`,
+        the rate at which the electrode's charge changes -- collected and overlapping alike,
+        since both are on the surface. Taken as a difference over the same interval the density
+        change spans, that is exact for the discrete continuity relation rather than an
+        approximation to it. Anchoring it at zero instead, as this did, leaves an internal
+        transport measured from the source plane and not an absolute current.
+        """
+        return (sigma_new - sigma_old) / interval
+
+    def _surface_charge(self, wall, x, w):
+        """Charge on the collector: what it has taken plus the clouds reaching past it."""
+        return wall.charge([sp.charge_si for sp in self.species])[1] + self._overlap_charge(x, w)
 
     def _overlap_charge(self, x, w):
         """Charge of the parts of the live particle clouds that reach past the collector,
@@ -767,7 +793,8 @@ class Simulation:
         E = jnp.zeros((d.cells, 3)).at[:, 0].set(
             E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall, self._overlap_charge(x_integer, w))))
         B = jnp.zeros((d.cells, 3))
-        return State(E, B, x, u, w, qm, rho, key, jnp.zeros(()), jnp.zeros((), jnp.int32), wall, None), (m, q)
+        return (State(E, B, x, u, w, qm, rho, self._surface_charge(wall, x_integer, w), key, jnp.zeros(()),
+                      jnp.zeros((), jnp.int32), wall, None), (m, q))
 
     def _smooth(self, f):
         s = self.solver
@@ -849,9 +876,12 @@ class Simulation:
         # is the one the previous step ended on (or the initial one), carried in the
         # state rather than deposited again from wrap(x^{n+1/2} - dt v/2), which is
         # the same positions, velocities and weights and so the same density.
-        rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, self._current_closure(q * w * v[:, 0]), st.rho)
+        sigma_half = self._surface_charge(wall, x_half, w)
+        closure = (self._collector_current(st.sigma, sigma_half, dt / 2) if d.field_bc == (4, 2)
+                   else self._current_closure(q * w * v[:, 0]))
+        rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, closure, st.rho)
         E, B = self._advance_fields(st.E, st.B, J1, dt / 2, rho_half, wall, electric_first=True,
-                                    overlap=self._overlap_charge(x_half, w))
+                                    overlap=sigma_half - wall.charge([sp.charge_si for sp in self.species])[1])
         # push with the fields at t^{n+1/2}
         u = self._accelerate(u, self._fields_at(x_half, E, B, rho_half), qm, dt)
         u = self._collide_momenta(k_collide, x_half, u, w, qm, m, dt)
@@ -869,11 +899,15 @@ class Simulation:
         # that apply_particle_bc has just reduced, so the density at x^{n+1/2} would jump
         # by the charge collected at the wall with no current to account for it, and the
         # discrete Gauss law would drift by that much every step.
-        rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, self._current_closure(q * w * v[:, 0]), rho_half)
+        sigma_next = self._surface_charge(wall, x_next, w)
+        closure = (self._collector_current(sigma_half, sigma_next, dt / 2) if d.field_bc == (4, 2)
+                   else self._current_closure(q * w * v[:, 0]))
+        rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, closure, rho_half)
         E, B = self._advance_fields(E, B, J2, dt / 2, rho_next, wall, electric_first=False,
-                                    overlap=self._overlap_charge(x_next, w))
+                                    overlap=sigma_next - wall.charge([sp.charge_si for sp in self.species])[1])
         totals = self._accumulate(st.moments, x_next, v, w)
-        state = State(E, B, x_next_half, u, w, qm, rho_next, key, st.time + dt, st.steps + 1, wall, totals)
+        state = State(E, B, x_next_half, u, w, qm, rho_next, sigma_next, key, st.time + dt, st.steps + 1,
+                      wall, totals)
         return state, (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
     def _implicit_step(self, st, extra):
@@ -961,7 +995,7 @@ class Simulation:
         B_new = B - dt * curl_E(0.5 * (E + E_new), B, dx, bc)
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
         v = self._velocity(u)
-        return (State(E_new, B_new, x, u, w, qm, rho_next, key, st.time + dt, st.steps + 1, wall,
+        return (State(E_new, B_new, x, u, w, qm, rho_next, st.sigma, key, st.time + dt, st.steps + 1, wall,
                       self._accumulate(st.moments, x, v, w)),
                 (x, v, w, E_new, B_new, J, rho_next))
 
