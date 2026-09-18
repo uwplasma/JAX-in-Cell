@@ -694,13 +694,15 @@ def test_the_implicit_scheme_refuses_the_electrostatic_model():
 
 
 @pytest.mark.parametrize("solver, message", [
-    (Solver(algorithm="implicit"), "explicit"),
+    (Solver(algorithm="implicit"), "algorithm='explicit'"),
     (Solver(model="electromagnetic"), "electrostatic"),
 ])
 def test_unsupported_source_combinations_are_refused_rather_than_half_done(solver, message):
+    # a reflective field wall, so that the implicit case reaches the source's own objection
+    # and not the open plane's, which is tested on its own above
     species = Species("electrons", 100, -1.0, mass_electron, 0.0, source=maxwellian_source(4))
     with pytest.raises(ValueError, match=message):
-        Simulation(box(particle_bc="absorbing", field_bc=("open", "absorbing")), [species], solver)
+        Simulation(box(particle_bc="absorbing", field_bc="reflective"), [species], solver)
 
 
 def test_a_source_needs_walls_and_a_wall_that_takes_particles_back():

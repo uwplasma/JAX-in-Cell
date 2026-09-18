@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from jaxincell import Collisions, Domain, Simulation, Solver, Source, Species, diagnostics, load_toml
+from jaxincell import Collisions, Domain, Impacts, Simulation, Solver, Source, Species, diagnostics, load_toml
 from jaxincell import mass_electron, mass_proton, speed_of_light as c
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -119,6 +119,8 @@ def _sourced(emit=2, capacity=64, active=None):
     (lambda: Species.electrons(n=4, density=-1.0), "density cannot be negative"),
     (lambda: Source(density=-1.0, vth=1e6, emit=1), "Source density cannot be negative"),
     (lambda: Source(density=1.0, vth=1e6, emit=1, min_weight=1.5), "min_weight is a fraction"),
+    (lambda: Impacts(energy_max=0.0), "energy_max is the top"),
+    (lambda: Impacts(energy_max=1e-18, angle_bins=0), "at least one bin of each"),
     (lambda: _sourced(emit=8, capacity=4), "into 4 slots"),
     (lambda: Simulation(Domain(), [Species.electrons(n=4, density=1.0)],
                         Solver(relativistic=True), Collisions(coulomb_log=10.0)), "not implemented"),
@@ -146,6 +148,11 @@ def test_the_three_coordinate_arrays_name_what_lives_on_them():
     assert np.allclose(np.asarray(out.faces), faces, rtol=0, atol=1e-15)
     assert np.allclose(np.asarray(out.walls), [-1.0, 1.0], rtol=0, atol=1e-15)
     assert out.rho.shape[1] == out.grid.shape[0] == out.E.shape[1] == out.faces.shape[0]
+    # and the bins of an impact spectrum publish their edges the same way
+    bins = Impacts(energy_max=8e-19, energy_bins=4, angle_bins=3)
+    assert np.allclose(np.asarray(bins.energy_edges), [0.0, 2e-19, 4e-19, 6e-19, 8e-19], rtol=1e-12)
+    assert np.allclose(np.asarray(bins.angle_edges), np.arange(4) * (np.pi / 6), rtol=1e-12)
+    assert Impacts(energy_max=None).energy_max is None       # a tree template, not a set of bins
 
 
 def test_tree_operations_stack_ensembles_and_build_in_axes():
