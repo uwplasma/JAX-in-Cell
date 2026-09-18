@@ -290,7 +290,7 @@ def boris_relativistic(u, E, B, qm, dt):
 PARK = 1.5      # cells beyond a wall where an absorbed particle is parked; see apply_particle_bc
 
 
-def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx, floor=0.0):
+def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx, floor=0.0, displacement=None):
     """Bring particles that left the box back according to the wall codes, and
     report what each wall received.
 
@@ -312,27 +312,40 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx, floor=0
     :class:`~jaxincell.Source` to refill. The remainder goes to the wall, so the
     ledger below stays exact.
 
+    ``displacement`` is the step the particles have just drifted along :math:`x`, which
+    locates the crossing on that segment: a particle that ends beyond a wall reached it at the
+    fraction :math:`s = (x_w - x_{\\rm start})/\\Delta x_p` of the drift, and the state it
+    arrived in is the state at that instant, not at the end of the step it overshot to. Without
+    it the fraction is reported as one half, which leaves every caller where it was.
+
     Returns:
-        tuple: ``x, v, w, qm`` and ``(arrived, kept, truncated)``, three ``(2, N)`` arrays,
-        side 0 the left wall and side 1 the right: the weight of each particle that reached
-        that wall on this step, zero where it did not; the part of it the wall kept; and the
-        part of *that* the wall kept only because ``floor`` stopped the orbit, which the
-        reflection law would otherwise have sent back. The caller has the velocity before and
-        after the bounce, so the charge, energy and momentum a wall received follow from these
-        arrays alone, and the third says what the cutoff cost.
+        tuple: ``x, v, w, qm`` and ``(arrived, kept, truncated, fraction)``, four ``(2, N)``
+        arrays, side 0 the left wall and side 1 the right: the weight of each particle that
+        reached that wall on this step, zero where it did not; the part of it the wall kept;
+        the part of *that* the wall kept only because ``floor`` stopped the orbit, which the
+        reflection law would otherwise have sent back; and where along the drift the crossing
+        happened. The caller has the velocity before and after the bounce, so the charge,
+        energy and momentum a wall received follow from these arrays alone, the third says
+        what the cutoff cost, and the fourth is what lets the first three be taken at the
+        crossing rather than past it.
     """
     L, Ly, Lz = box
     x = x.at[:, 1].set((x[:, 1] + Ly / 2) % Ly - Ly / 2)
     x = x.at[:, 2].set((x[:, 2] + Lz / 2) % Lz - Lz / 2)
     xx, vx = x[:, 0], v[:, 0]
     out = jnp.zeros_like(xx, dtype=bool)
-    arrived, kept, truncated = [], [], []
-    for code, beyond, mirror, park, e, r in (
-            (bc[0], xx < -L / 2, -L - xx, -L / 2 - PARK * dx, restitution[0], reflection[0]),
-            (bc[1], xx > L / 2, L - xx, L / 2 + PARK * dx, restitution[1], reflection[1])):
+    arrived, kept, truncated, fraction = [], [], [], []
+    step = jnp.zeros_like(xx) if displacement is None else displacement
+    for code, beyond, mirror, park, e, r, face in (
+            (bc[0], xx < -L / 2, -L - xx, -L / 2 - PARK * dx, restitution[0], reflection[0], -L / 2),
+            (bc[1], xx > L / 2, L - xx, L / 2 + PARK * dx, restitution[1], reflection[1], L / 2)):
         arrived.append(jnp.where(beyond, w, 0.0))
         kept.append(jnp.zeros_like(w))
         truncated.append(jnp.zeros_like(w))
+        # where on the drift the wall was met, a half by default so that a caller that does
+        # not say how far the particles moved is left exactly where it was
+        crossing = jnp.where(jnp.abs(step) > 0, (face - (xx - step)) / jnp.where(step == 0, 1.0, step), 0.5)
+        fraction.append(jnp.where(beyond, jnp.clip(crossing, 0.0, 1.0), 0.5))
         if code == 0:
             xx = jnp.where(beyond, (xx + L / 2) % L - L / 2, xx)
             continue
@@ -352,7 +365,7 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx, floor=0
     if 2 in bc:
         v = jnp.where(out[:, None], 0.0, v)
         qm = jnp.where(out, 0.0, qm)
-    return x, v, w, qm, (jnp.stack(arrived), jnp.stack(kept), jnp.stack(truncated))
+    return x, v, w, qm, (jnp.stack(arrived), jnp.stack(kept), jnp.stack(truncated), jnp.stack(fraction))
 
 
 def wrap_positions(x, w, box, bc, dx):

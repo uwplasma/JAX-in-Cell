@@ -113,7 +113,8 @@ def test_store_every_store_particles_and_restart():
     full = sim.run(40, seed=2)
     scale = float(np.abs(np.asarray(full.E)).max())   # components that vanish are compared on this scale
     thin = sim.run(40, seed=2, store_every=10)
-    assert thin.E.shape[0] == 4 and np.allclose(np.asarray(thin.t), np.asarray(full.t[9::10]))
+    assert thin.E.shape[0] == 4
+    assert np.allclose(np.asarray(thin.t), np.asarray(full.t[9::10]), rtol=1e-12, atol=0)
     assert np.allclose(np.asarray(thin.E), np.asarray(full.E[9::10]), rtol=1e-12, atol=1e-12 * scale)
     first = sim.run(20, seed=2, store_every=10)
     second = sim.run(20, seed=2, store_every=10, state=first.state)

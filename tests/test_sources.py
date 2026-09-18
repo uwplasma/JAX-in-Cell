@@ -120,13 +120,15 @@ def test_the_quantile_of_the_drifting_flux_is_inverted_and_differentiated_exactl
 def test_a_cold_beam_carries_its_drift_and_one_pointing_outwards_is_refused():
     beam = Source(density=DENSITY, vth=0.0, drift=(3e5, 1e5, 0), emit=4)
     v = np.asarray(sample_crossing(random.PRNGKey(0), beam, 16, 1.0))
-    assert np.allclose(v[:, 0], 3e5) and np.allclose(v[:, 1], 1e5) and np.allclose(v[:, 2], 0.0)
+    assert np.allclose(v[:, 0], 3e5, rtol=1e-12, atol=0) and np.allclose(v[:, 1], 1e5, rtol=1e-12, atol=0)
+    assert np.all(v[:, 2] == 0.0)
     assert float(crossing_flux(beam)) == pytest.approx(DENSITY * 3e5, rel=1e-12)
     with pytest.raises(ValueError, match="needs a normal drift towards the box"):
         Source(density=DENSITY, vth=0.0, drift=(-3e5, 0, 0), emit=4)
     right = Source(density=DENSITY, vth=0.0, drift=(-3e5, 0, 0), emit=4, side="right")
     assert float(crossing_flux(right)) == pytest.approx(DENSITY * 3e5, rel=1e-12)
-    assert np.allclose(np.asarray(sample_crossing(random.PRNGKey(0), right, 16, -1.0))[:, 0], -3e5)
+    assert np.allclose(np.asarray(sample_crossing(random.PRNGKey(0), right, 16, -1.0))[:, 0], -3e5,
+                       rtol=1e-12, atol=0)
 
 
 def test_which_crossing_distribution_a_source_is_gets_decided_once_and_not_read_from_a_tracer():
@@ -175,26 +177,49 @@ def test_the_emitted_weight_is_exactly_the_prescribed_flux_and_differentiable_in
     assert float(grad[1]) == pytest.approx(DENSITY / (2 * np.sqrt(np.pi)) * domain.dt * steps, rel=1e-10)
 
 
+def flux_energy(vth, mass):
+    """Mean and variance of the kinetic energy of one draw from a half-Maxwellian flux.
+
+    The normal square is exponential, :math:`v_n^2 = 2\\sigma_x^2 E`, so it has mean
+    :math:`2\\sigma_x^2` and variance :math:`4\\sigma_x^4`; each tangential square is
+    :math:`\\sigma^2\\chi^2_1`, mean :math:`\\sigma^2` and variance :math:`2\\sigma^4`. The
+    variance is what the scatter of a measured mean is, so a test can ask whether a difference
+    is real instead of guessing a tolerance."""
+    sigma = np.asarray(vth) / np.sqrt(2)
+    mean = 0.5 * mass * (2 * sigma[0] ** 2 + sigma[1] ** 2 + sigma[2] ** 2)
+    variance = 0.25 * mass ** 2 * (4 * sigma[0] ** 4 + 2 * sigma[1] ** 4 + 2 * sigma[2] ** 4)
+    return mean, variance
+
+
 def test_the_ledger_carries_the_energy_and_momentum_a_source_puts_in():
     """A budget for an open box needs what came in as well as what went out. The reservoir
     emits N particles of weight Gamma dt / N whose mean energy is the flux-Maxwellian's
     m(2 sigma_x^2 + sigma_y^2 + sigma_z^2)/2 and whose mean normal momentum is
-    m sigma_x sqrt(pi/2), both per unit weight and both closed forms."""
+    m sigma_x sqrt(pi/2), both per unit weight and both closed forms.
+
+    A mean over a finite sample is compared within four standard errors of that sample, worked
+    out from the variance of the same distribution rather than guessed: at 2400 draws the
+    scatter alone is 1.6 %, which a tolerance of 2 % would call a defect one time in a hundred
+    -- and, under the absolute tolerance `pytest.approx` keeps by default, would never call
+    anything at all."""
     domain = box(cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
     vth = (np.sqrt(2) * SIGMA, 0.6 * np.sqrt(2) * SIGMA, 0.0)
-    species = Species("electrons", 3000, -1.0, mass_electron, 0.0,
+    species = Species("electrons", 20000, -1.0, mass_electron, 0.0,
                       source=Source(density=DENSITY, vth=vth, emit=60))
-    steps = 40
+    steps, emit = 200, 60
     out = Simulation(domain, [species], Solver(model="electrostatic")).run(steps, store_every=steps)
     wall = jax.tree.map(lambda a: a[-1], out.wall)
     weight = float(wall.injected[0, 0])
     sigma = np.asarray(vth) / np.sqrt(2)
-    assert weight == pytest.approx(DENSITY * SIGMA / np.sqrt(2 * np.pi) * domain.dt * steps, rel=1e-12)
-    assert float(wall.energy_injected[0, 0]) / weight == pytest.approx(
-        0.5 * mass_electron * (2 * sigma[0] ** 2 + sigma[1] ** 2 + sigma[2] ** 2), rel=0.02)
-    assert float(wall.momentum_injected[0, 0, 0]) / weight == pytest.approx(
-        mass_electron * sigma[0] * np.sqrt(np.pi / 2), rel=0.02)
-    assert float(wall.momentum_injected[0, 0, 1]) / weight == pytest.approx(0.0, abs=0.05 * mass_electron * SIGMA)
+    assert weight == pytest.approx(DENSITY * SIGMA / np.sqrt(2 * np.pi) * domain.dt * steps, rel=1e-12, abs=0)
+    mean, variance = flux_energy(vth, mass_electron)
+    assert abs(float(wall.energy_injected[0, 0]) / weight - mean) < 4 * np.sqrt(variance / (steps * emit))
+    # <v_n> = sigma sqrt(pi/2) with variance (2 - pi/2) sigma^2
+    momentum = mass_electron * sigma[0] * np.sqrt(np.pi / 2)
+    scatter = mass_electron * sigma[0] * np.sqrt((2 - np.pi / 2) / (steps * emit))
+    assert abs(float(wall.momentum_injected[0, 0, 0]) / weight - momentum) < 4 * scatter
+    assert abs(float(wall.momentum_injected[0, 0, 1]) / weight) < 4 * mass_electron * sigma[1] / np.sqrt(
+        steps * emit)
     assert float(wall.momentum_injected[0, 0, 2]) == 0.0
     # nothing was injected through the wall the source is not on
     assert float(wall.injected[0, 1]) == 0.0 and float(wall.energy_injected[0, 1]) == 0.0
@@ -355,7 +380,7 @@ def test_the_wall_ledger_counts_one_impact_exactly():
     x = jnp.array([[0.6, 0.0, 0.0]])
     v = jnp.array([[speed, 0.0, 0.0]])
     reflection = (jnp.zeros(1), jnp.full(1, R))
-    _, v_out, w_out, _, (arrived, kept, _) = apply_particle_bc(
+    _, v_out, w_out, _, (arrived, kept, _, _) = apply_particle_bc(
         x, v, jnp.full(1, w), jnp.ones(1), (1.0, 1.0, 1.0), (2, 2), (1.0, restitution), reflection, 0.1)
     assert float(arrived[1, 0]) == pytest.approx(w) and float(arrived[0, 0]) == 0.0
     assert float(kept[1, 0]) == pytest.approx((1 - R) * w)
@@ -364,8 +389,9 @@ def test_the_wall_ledger_counts_one_impact_exactly():
     mass = mass_electron
     energy_in = 0.5 * mass * speed ** 2 * w
     energy_out = 0.5 * mass * (restitution * speed) ** 2 * (R * w)
-    assert float(arrived[1, 0]) * 0.5 * mass * speed ** 2 == pytest.approx(energy_in)
-    assert float((arrived - kept)[1, 0]) * 0.5 * mass * (restitution * speed) ** 2 == pytest.approx(energy_out)
+    assert float(arrived[1, 0]) * 0.5 * mass * speed ** 2 == pytest.approx(energy_in, rel=1e-12, abs=0)
+    assert float((arrived - kept)[1, 0]) * 0.5 * mass * (restitution * speed) ** 2 == pytest.approx(
+        energy_out, rel=1e-12, abs=0)
 
 
 def test_the_impact_spectrum_is_the_crossing_distribution_and_sums_to_the_fluence():
@@ -430,16 +456,18 @@ def test_the_wall_energy_of_a_relativistic_impact_is_the_relativistic_one():
     wall = jax.tree.map(lambda a: a[-1], sim.run(3, store_every=3).wall)
     arrived = float(wall.arrived[0, 1])
     assert arrived == pytest.approx(density * domain.length, rel=1e-12)
-    assert float(wall.energy_in[0, 1]) / arrived == pytest.approx((gamma - 1) * mass_electron * c ** 2, rel=1e-9)
+    assert float(wall.energy_in[0, 1]) / arrived == pytest.approx(
+        (gamma - 1) * mass_electron * c ** 2, rel=1e-9, abs=0)
     assert float(wall.energy_in[0, 1]) / arrived / (0.5 * mass_electron * speed ** 2) == pytest.approx(
         (gamma - 1) / (0.5 * 0.81), rel=1e-9)              # 3.19 times the Newtonian value
-    assert float(wall.momentum[0, 1, 0]) / arrived == pytest.approx(gamma * mass_electron * speed, rel=1e-9)
+    assert float(wall.momentum[0, 1, 0]) / arrived == pytest.approx(
+        gamma * mass_electron * speed, rel=1e-9, abs=0)
     # and the same expression is the Newtonian one when nothing is relativistic
     slow = Simulation(domain.replace(time_step=0.4 / c), [species.replace(v=np.array([[1e5, 0.0, 0.0]]))],
                       Solver(model="electrostatic"))
     state, extra = slow.initial_state(random.PRNGKey(0))
     assert float(slow._kinetic(extra[0], jnp.array([[1e5, 0.0, 0.0]]))[0]) == pytest.approx(
-        0.5 * mass_electron * 1e10, rel=1e-12)
+        0.5 * mass_electron * 1e10, rel=1e-12, abs=0)
 
 
 def test_the_wall_charge_and_energy_add_up_over_a_run():
@@ -471,14 +499,15 @@ def test_a_thermal_wall_is_a_heat_bath_and_the_ledger_says_so():
     which is not a measurement. What it actually returns, per unit weight, is
     m(2 sigma_x^2 + sigma_y^2 + sigma_z^2)/2, whatever arrived."""
     domain = box(cells=32, particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing"))
-    electrons = Species.electrons(n=6000, density=DENSITY, vth=(np.sqrt(2) * SIGMA, SIGMA, 0.0))
+    n, vth = 60000, (np.sqrt(2) * SIGMA, SIGMA, 0.0)
+    electrons = Species.electrons(n=n, density=DENSITY, vth=vth)
     out = Simulation(domain, [electrons], Solver(model="electrostatic")).run(300, store_every=300)
     wall = jax.tree.map(lambda a: a[-1], out.wall)
     arrived, out_energy = float(wall.arrived[0, 0]), float(wall.energy_out[0, 0])
-    sigma = np.asarray(electrons.vth) / np.sqrt(2)
-    expected = 0.5 * mass_electron * (2 * sigma[0] ** 2 + sigma[1] ** 2 + sigma[2] ** 2)
-    assert arrived > 0 and float(wall.collected[0, 0]) == 0.0      # a thermal wall keeps nothing
-    assert out_energy / arrived == pytest.approx(expected, rel=0.03)
+    expected, variance = flux_energy(vth, mass_electron)
+    impacts = arrived / (DENSITY * float(domain.length) / n)       # how many draws the mean is over
+    assert impacts > 1000 and float(wall.collected[0, 0]) == 0.0   # a thermal wall keeps nothing
+    assert abs(out_energy / arrived - expected) < 4 * np.sqrt(variance / impacts)
     assert abs(out_energy / float(wall.energy_in[0, 0]) - 1) > 0.02   # not the specular energy
     # and it pushes: what arrived less what left, in the direction the wall is driven
     assert float(wall.momentum[0, 0, 0]) < 0
@@ -728,15 +757,16 @@ def test_the_clock_is_absolute_and_a_run_split_in_two_is_the_run_taken_whole():
     first = sim.run(40, store_every=40, moments=True)
     rest = sim.run(80, store_every=40, moments=True, state=first.state)
     assert float(first.t[-1]) == pytest.approx(40 * domain.dt, rel=1e-12)
-    assert np.allclose(np.asarray(rest.t), np.asarray(whole.t[1:]), rtol=1e-12)
+    assert np.allclose(np.asarray(rest.t), np.asarray(whole.t[1:]), rtol=1e-12, atol=0)
     # the step count is absolute too, so a cumulative window is a difference of counts and
     # never the length of an array
     assert list(np.asarray(whole.steps)) == [40, 80, 120]
     assert list(np.asarray(first.steps)) == [40] and list(np.asarray(rest.steps)) == [80, 120]
     assert np.allclose(np.asarray(rest.E[-1]), np.asarray(whole.E[-1]), rtol=1e-12, atol=0)
     assert np.allclose(np.asarray(rest.state.w), np.asarray(whole.state.w), rtol=1e-12, atol=0)
-    assert np.allclose(np.asarray(rest.wall.injected[-1]), np.asarray(whole.wall.injected[-1]), rtol=1e-12)
-    assert np.allclose(np.asarray(rest.moments[-1]), np.asarray(whole.moments[-1]), rtol=1e-10)
+    assert np.allclose(np.asarray(rest.wall.injected[-1]), np.asarray(whole.wall.injected[-1]),
+                       rtol=1e-12, atol=0)
+    assert np.allclose(np.asarray(rest.moments[-1]), np.asarray(whole.moments[-1]), rtol=1e-10, atol=0)
 
 
 def test_the_streaming_moments_are_the_deposit_and_need_no_particle_history():

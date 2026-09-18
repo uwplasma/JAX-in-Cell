@@ -150,8 +150,8 @@ def test_the_three_coordinate_arrays_name_what_lives_on_them():
     assert out.rho.shape[1] == out.grid.shape[0] == out.E.shape[1] == out.faces.shape[0]
     # and the bins of an impact spectrum publish their edges the same way
     bins = Impacts(energy_max=8e-19, energy_bins=4, angle_bins=3)
-    assert np.allclose(np.asarray(bins.energy_edges), [0.0, 2e-19, 4e-19, 6e-19, 8e-19], rtol=1e-12)
-    assert np.allclose(np.asarray(bins.angle_edges), np.arange(4) * (np.pi / 6), rtol=1e-12)
+    assert np.allclose(np.asarray(bins.energy_edges), [0.0, 2e-19, 4e-19, 6e-19, 8e-19], rtol=1e-12, atol=0)
+    assert np.allclose(np.asarray(bins.angle_edges), np.arange(4) * (np.pi / 6), rtol=1e-12, atol=0)
     assert Impacts(energy_max=None).energy_max is None       # a tree template, not a set of bins
 
 
@@ -200,7 +200,8 @@ def test_an_input_file_species_states_its_mass(tmp_path, mass, message):
     with pytest.raises(ValueError, match=message):
         load_toml(_write_input(tmp_path, f'name = "electrons"\nn = 10\ncharge = -1\ndensity = 1e17\n{mass}'))
     helium = 'name = "alpha"\nn = 10\ncharge = 2\ndensity = 1e17\nmass = "proton"\nmass_ratio = 4'
-    assert load_toml(_write_input(tmp_path, helium))[0].species[0].mass == pytest.approx(4 * mass_proton)
+    assert load_toml(_write_input(tmp_path, helium))[0].species[0].mass == pytest.approx(
+        4 * mass_proton, rel=1e-12, abs=0)
 
 
 def _two_species_run(steps, store_every=1):
@@ -339,8 +340,8 @@ def test_a_time_step_can_be_given_in_seconds_or_as_a_courant_number():
     seconds = 0.37 * (length / cells) / c
     by_courant = Domain(length=length, cells=cells, dt_over_dx_c=0.37)
     by_seconds = Domain(length=length, cells=cells, time_step=seconds)
-    assert by_courant.dt == pytest.approx(seconds, rel=1e-15)
-    assert by_seconds.dt == seconds and by_seconds.courant == pytest.approx(0.37, rel=1e-15)
+    assert by_courant.dt == pytest.approx(seconds, rel=1e-15, abs=0)
+    assert by_seconds.dt == seconds and by_seconds.courant == pytest.approx(0.37, rel=1e-15, abs=0)
     assert Domain().dt_over_dx_c == 1.0 and Domain().courant == 1.0        # exactly, not 1 + eps
     with pytest.raises(ValueError, match="not both"):
         Domain(dt_over_dx_c=1.0, time_step=1e-12)

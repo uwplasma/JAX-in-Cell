@@ -1,9 +1,57 @@
-"""Small configurations and the measurements the physics tests make."""
+"""Small configurations and the measurements the physics tests make, and the guard that
+keeps a comparison from being made against nothing."""
 import numpy as np
+import pytest
 
 from jaxincell import Domain, Simulation, Solver, Species, epsilon_0, mass_electron
 from jaxincell import elementary_charge as e_charge
 from jaxincell import speed_of_light as c
+
+_UNSET = object()
+_approx, _allclose = pytest.approx, np.allclose
+
+
+def _check(expected, floor, call):
+    """Refuse a comparison whose expected value is below the absolute tolerance it keeps.
+
+    ``pytest.approx`` keeps ``abs=1e-12`` and ``np.allclose`` an ``atol`` of ``1e-8``
+    *whatever relative tolerance is asked for*. A wall energy of 5e-20 J, a time of 2e-9 s or
+    a field of 1e-23 V/m is below both, so the comparison passes for the right answer, for
+    zero, for the wrong sign and for anything else that small: it is not a test. Three of them
+    were in this suite, one of them standing in for an analytic control of an impact that
+    never happened.
+
+    A comparison of an SI-scale quantity therefore has to say what absolute tolerance it
+    means -- ``abs=0`` or ``atol=0`` for a purely relative one, or a number taken from a
+    physical scale. Passing one explicitly is taken at face value; it is the silent default
+    that is refused.
+    """
+    try:
+        size = float(np.max(np.abs(np.asarray(expected, dtype=float))))
+    except (TypeError, ValueError):
+        return
+    if size < 10 * floor:
+        raise AssertionError(
+            f"{call} compares against {size:.3e}, which the default absolute tolerance of "
+            f"{floor:.0e} swallows: zero and the wrong sign would pass too. Give abs=0 or "
+            "atol=0 for a purely relative comparison, or an absolute tolerance from a "
+            "physical scale.")
+
+
+def approx(expected, rel=None, abs=None, nan_ok=False):
+    if abs is None:
+        _check(expected, 1e-12, "pytest.approx")
+    return _approx(expected, rel=rel, abs=abs, nan_ok=nan_ok)
+
+
+def allclose(a, b, rtol=1e-05, atol=_UNSET, **kwargs):
+    if atol is _UNSET:
+        _check(b, 1e-08, "np.allclose")
+    return _allclose(a, b, rtol=rtol, atol=1e-08 if atol is _UNSET else atol, **kwargs)
+
+
+pytest.approx = approx
+np.allclose = allclose
 
 
 def density_for(omega_pe):

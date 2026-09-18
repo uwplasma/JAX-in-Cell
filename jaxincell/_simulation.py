@@ -548,6 +548,25 @@ class Simulation:
         gamma = self._gamma(u)                 # 1.0, a scalar, in a Newtonian run
         return m * jnp.sum(u * u, axis=1) / (jnp.reshape(gamma, (-1,)) + 1 if jnp.ndim(gamma) else gamma + 1)
 
+    def _at_impact(self, u, hits, fields, qm, dt):
+        """The carried momentum of each particle at the moment it met a wall.
+
+        A particle is pushed once over the whole step and then drifts, so one that meets a wall
+        part-way through the drift is recorded, without this, in the state it reached by the end
+        of it: it has taken the whole step's push where only part of it belongs before the
+        impact. The value is wrong by :math:`O(\\Delta t)`, which is why it looks harmless, but
+        the **derivative** is wrong by a fixed fraction that does not fall with the time step,
+        because it is taken at a fixed step index instead of at the crossing -- the
+        :math:`d\\tau/d\\theta` term of an event observable, missing. Running the same pusher
+        backwards over the part of the step that follows the impact puts it back, and the
+        control in ``test_gradients`` then converges: the error falls as the time step, from
+        1.1e-3 to 1.3e-4 over a factor of eight, where before it sat at 6.2e-2 whatever the step.
+        """
+        fraction = hits[3]
+        # a particle meets at most one wall in a step; elsewhere a half means no correction
+        interval = (jnp.where(fraction[0] != 0.5, fraction[0], fraction[1]) - 0.5) * dt
+        return self._accelerate(u, fields, qm, interval[:, None])
+
     def _record(self, wall, hits, m, u_in, u_out):
         """Add one step's impacts to the ledger. ``hits`` is what
         :func:`~jaxincell._core.apply_particle_bc` returned, and ``u_in`` and ``u_out`` are the
@@ -557,7 +576,7 @@ class Simulation:
         def per_species(per_particle):
             return jnp.stack([jnp.sum(per_particle[:, a:a + n], axis=1) for a, n in self.blocks])
 
-        arrived, kept, truncated = hits
+        arrived, kept, truncated, _ = hits
         returned = arrived - kept
         return wall.replace(spectrum=self._spectrum(wall, arrived, m, u_in),
                             arrived=wall.arrived + per_species(arrived),
@@ -883,14 +902,23 @@ class Simulation:
         E, B = self._advance_fields(st.E, st.B, J1, dt / 2, rho_half, wall, electric_first=True,
                                     overlap=sigma_half - wall.charge([sp.charge_si for sp in self.species])[1])
         # push with the fields at t^{n+1/2}
-        u = self._accelerate(u, self._fields_at(x_half, E, B, rho_half), qm, dt)
+        fields = self._fields_at(x_half, E, B, rho_half)
+        u = self._accelerate(u, fields, qm, dt)
         u = self._collide_momenta(k_collide, x_half, u, w, qm, m, dt)
         v = self._velocity(u)
         x_free = x_half + dt * v
+        incident = qm                     # the wall zeroes it for what it collects; the impact had it
         x_next_half, u_out, w, qm, hits = apply_particle_bc(x_free, u, w, qm, box, d.particle_bc, d.restitution,
-                                                            self._reflection(v), dx, self._weight_floor())
+                                                            self._reflection(v), dx, self._weight_floor(),
+                                                            displacement=dt * v[:, 0])
         u_out = self._thermalise(k_wall, x_free, u_out)
-        wall = self._record(wall, hits, m, u, u_out)
+        # The ledger records the state the particle arrived in, which is its state at the
+        # crossing and not at the end of the step it overshot to. The two differ by the part
+        # of the push that belongs after the impact, and the difference does not go away with
+        # the time step: the derivative of the recorded energy is off by a fixed fraction,
+        # 6 % in the control of test_gradients, because it is taken at a fixed step index
+        # rather than at the wall. Undoing that part is the dtau/dtheta term of an event.
+        wall = self._record(wall, hits, m, self._at_impact(u, hits, fields, incident, dt), u_out)
         u = u_out
         v = self._velocity(u)
         x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
