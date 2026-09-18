@@ -88,7 +88,8 @@ print(f"m_i/m_e {mass_ratio:.0f}   v_0/sigma_e {beam_speed}   Mach {beam_speed *
 print(f"{steps} steps = {transits:.0f} ion transits; {capacity} slots and {emit} emitted a step per species")
 print(f"reference wall potential {phi_wall:.5f} T_e/e, source amplitude {amplitude:.4f} n_0\n")
 
-out = simulation.run(steps, seed=0, store_every=steps // stored, store_particles=False, moments=True)
+out = simulation.run(steps, seed=0, store_every=steps // stored, store_particles=False,
+                     moments=True).validate()     # a pool that overflowed invalidates everything below
 
 # --- what came out -----------------------------------------------------------------------
 late = stored // 2                                  # average over the second half of the run
@@ -107,10 +108,7 @@ print(f"collector current balance: electrons {late_charge[0]:.4e}, ions {late_ch
       f"net {(late_charge[1] - late_charge[0]) / late_charge[1] * 100:+.2f} % of the ion current")
 print(f"pool: {int((np.asarray(out.state.w)[:capacity] > 0).sum())} electrons and "
       f"{int((np.asarray(out.state.w)[capacity:] > 0).sum())} ions live of {capacity} slots, "
-      f"overflow {float(out.wall.overflow[-1]):.3g}")
-if float(out.wall.overflow[-1]) > 0:
-    print("WARNING: the pool overflowed and live particles were overwritten. Raise `capacity`: a smaller\n"
-          "         time step or a longer box both make particles live longer and need more slots.")
+      f"overflow {float(out.overflow[-1]):.3g}")
 sound_speed = spread / np.sqrt(mass_ratio)
 edge, crossings = bohm_edge(faces, flow, sound_speed)
 print(f"ion flow reaches c_s at {crossings} place(s)" +

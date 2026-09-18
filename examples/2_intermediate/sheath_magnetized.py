@@ -95,7 +95,7 @@ for angle in angles:
                    (sound_speed, 0, 0), active=capacity // 4, quiet=True,
                    source=Source(density=density, vth=(np.sqrt(2) * ion_spread,) * 3, emit=emit))
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=B).run(
-        steps, seed=0, store_every=steps // stored, moments=True)
+        steps, seed=0, store_every=steps // stored, moments=True).validate()
 
     late = stored // 2
     phi = np.asarray(potential(out))[late:].mean(axis=0) / electron_temperature

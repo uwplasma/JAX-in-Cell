@@ -244,7 +244,17 @@ def test_a_pool_too_small_says_so_instead_of_pretending():
     species = Species("electrons", 60, -1.0, mass_electron, 0.0,
                       source=maxwellian_source(20, density=1e-10 * DENSITY))
     out = Simulation(domain, [species], Solver(model="electrostatic")).run(200, store_particles=False)
-    assert float(out.wall.overflow[-1]) > 0.0
+    assert float(out.overflow[-1]) > 0.0
+    # and saying so is not enough: a run that overwrote live particles has to be refusable in
+    # one line, or every script has to remember to look
+    assert len(out.problems) == 1 and "overwrote live particles" in out.problems[0]
+    with pytest.raises(RuntimeError, match="Species.n is a capacity"):
+        out.validate()
+    # the report is a running maximum, so a run cannot look valid because it recovered later
+    assert np.all(np.diff(np.asarray(out.overflow)) >= 0)
+    roomy = Simulation(domain, [species.replace(n=6000)], Solver(model="electrostatic")).run(
+        200, store_particles=False)
+    assert roomy.problems == () and roomy.validate() is roomy
 
 
 def test_active_separates_the_initial_population_from_the_capacity():

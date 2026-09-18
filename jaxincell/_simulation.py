@@ -160,6 +160,36 @@ class Output:
     field_bc: tuple
 
     @property
+    def overflow(self):
+        """Largest live weight a source has had to overwrite, at each stored step: zero while
+        the pool of dead slots holds, and a running maximum once it has not, so it never falls
+        back to zero and a run cannot look valid because it recovered later."""
+        return self.wall.overflow
+
+    @property
+    def problems(self):
+        """What makes this run unusable, as a tuple of sentences, empty when nothing does.
+
+        It reads values, so it belongs on the host: inside ``jit`` or ``grad`` there is nothing
+        to read. A differentiated objective takes :attr:`overflow` out with its result instead
+        and rejects the trial itself; :meth:`validate` is the host-side shortcut."""
+        spilt = float(jnp.max(jnp.asarray(self.overflow)))
+        if spilt <= 0:
+            return ()
+        return (f"a source overwrote live particles: the largest weight destroyed was {spilt:.3g}, "
+                f"against {float(jnp.sum(jnp.asarray(self.weight)[-1])) if self.weight is not None else 0:.3g} "
+                "left alive. Species.n is a capacity and has to hold every particle alive at once, so it "
+                "grows with the emission rate and with how long a particle lives -- a smaller time step and "
+                "a longer box both lengthen that. Nothing this run reports is trustworthy.",)
+
+    def validate(self):
+        """Raise :class:`RuntimeError` if :attr:`problems` is not empty, and return the output
+        otherwise, so that a script can write ``out = simulation.run(...).validate()``."""
+        if self.problems:
+            raise RuntimeError(" ".join(self.problems))
+        return self
+
+    @property
     def faces(self):
         """The cell faces the staggered grid stores, :math:`x_{i+1/2} = -L/2 + (i+1)\\Delta x`:
         the right face of each cell. The left wall face :math:`-L/2` is not among them, which is

@@ -102,10 +102,16 @@ nothing, and the source refills the emptiest slots it can find. Nothing ever cha
 shape, so the whole loop stays compiled.
 
 Give the pool enough headroom: the steady population is `emit` times the residence time
-in steps, and `Output.wall.overflow` is the largest live weight a source has had to
+in steps, and `Output.overflow` is the largest live weight a source has had to
 overwrite. It stays at zero while the pool holds and goes positive when it does not,
 which is a capacity that needs raising rather than a density quietly set by an array
-size.
+size. It is a running maximum, so a run cannot look valid because it recovered later.
+
+`Output.problems` turns that into sentences and `Output.validate()` raises on them, so a
+script can write `out = simulation.run(...).validate()` and get nothing rather than
+numbers it should not use. Both read values and so belong on the host; a differentiated
+objective takes `Output.overflow` out with its result and rejects the trial itself, or
+checks the worst case of its admissible interval once before it starts.
 
 A wall that returns the fraction $R$ of every impact would hold a particle for ever, its
 weight falling as $R^k$ and its slot never free. `Source(min_weight=...)` is the fraction

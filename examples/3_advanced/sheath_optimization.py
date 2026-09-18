@@ -142,11 +142,22 @@ if quick:
           "the gradient is still the derivative of the calculation. It usually recovers the control\n"
           "too, but to about 0.01 rather than 0.005, and the identifiability check below is what\n"
           "says how far to trust it. The documentation quotes the full preset.\n")
+# The pool has to hold every particle alive at once, and an electron lives longest at the
+# largest reflectivity the optimiser may try. Checking the worst case here, once, on the
+# host, covers every trial inside the interval: the differentiated measurement below is
+# traced and has nothing to read.
+worst = simulation(bounds[1]).run(preparation, seed=training_seeds[0], store_every=preparation,
+                                  store_particles=False)
+if worst.problems:
+    raise SystemExit("the pool is too small at the most reflective end of the admissible interval, "
+                     "r = %.2f, so no trial in it can be trusted. %s" % (bounds[1], worst.problems[0]))
+print("pool checked at r = %.2f, the longest electron lifetime the optimiser may ask for" % bounds[1])
+
 print("preparing the baseline plasma at r = %.2f, %d steps, for %d training and %d held-out seeds"
       % (r_prepared, preparation, len(training_seeds), len(held_out_seeds)))
 prepared = {seed: jax.block_until_ready(simulation(r_prepared).run(preparation, seed=seed,
                                                                    store_every=preparation,
-                                                                   store_particles=False).state)
+                                                                   store_particles=False).validate().state)
             for seed in training_seeds + held_out_seeds}
 
 measure_jit = jax.jit(measure)
