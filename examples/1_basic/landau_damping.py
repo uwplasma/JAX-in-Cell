@@ -20,11 +20,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron,
-                       elementary_charge as e_charge, speed_of_light as c)
+                       plot, elementary_charge as e_charge, speed_of_light as c)
 
 length, cells, k_lambda_d = 1.0, 64, 0.5
 k = 2 * np.pi / length
 omega_pe = 0.05 * c * cells / length                 # gives omega_pe * dt = 0.05 at dt = dx / c
+steps = 800
+
 density = omega_pe ** 2 * epsilon_0 * mass_electron / e_charge ** 2
 v_th = k_lambda_d / k * np.sqrt(2) * omega_pe
 
@@ -33,7 +35,8 @@ electrons = Species.electrons(n=150000, density=density, vth=(v_th, 0, 0), quiet
 ions = Species.ions(n=150000 // 8, density=density, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
 simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [electrons, ions],
                         Solver(filter_passes=0))
-output = simulation.run(500, seed=0, store_particles=False)
+
+output = simulation.run(steps, seed=0, store_particles=False)
 
 t = np.asarray(output.t) * omega_pe
 amplitude = np.abs(np.fft.rfft(np.asarray(output.E[:, :, 0]), axis=1)[:, 1]) / cells

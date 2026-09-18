@@ -16,27 +16,29 @@ import os
 
 # Double precision is the default, and what the conservation checks rely on. Run with
 # JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
-os.environ.setdefault("JAX_ENABLE_X64", "1")
+os.environ.setdefault("JAX_ENABLE_X64", "0")
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron, quiet_start,
-                       elementary_charge as e_charge, speed_of_light as c)
+                       plot, elementary_charge as e_charge, speed_of_light as c)
 
-ratio, density, n = 25.0, 1e15, 40000
+ratio, density, n, steps, cells, store_every = 25.0, 6e15, 120000, 12000, 284, 100
 omega_pe = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
 k_c = np.sqrt(ratio - 1) * omega_pe / c
-length = 4.0 * 2 * np.pi / k_c                      # four marginal wavelengths
+length = 12.0 * 2 * np.pi / k_c                      # twelve marginal wavelengths
 vth = (0.02 * c, 0.0, 0.02 * c * np.sqrt(ratio))
 
 x, _ = quiet_start(n, length, vth=vth)
 v = np.random.default_rng(0).standard_normal((n, 3)) * np.asarray(vth) / np.sqrt(2)
 electrons = Species.electrons(n=n, density=density, vth=vth).replace(x=x, v=v)
 ions = Species.ions(n=n // 4, density=density, mass_ratio=1e6, vth=(0, 0, 0), quiet=True)
-simulation = Simulation(Domain(length=length, cells=128, dt_over_dx_c=0.5), [electrons, ions],
+simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=0.5), [electrons, ions],
                         Solver(filter_passes=0))
-output = simulation.run(4000, seed=0, store_every=40, store_particles=False)
+output = simulation.run(steps, seed=0, store_every=store_every)#, store_particles=False)
+
+plot(output, direction="xz", omega=omega_pe)#, save="weibel.mp4", show=False)
 
 t = np.asarray(output.t) * omega_pe
 B_k = np.abs(np.fft.rfft(np.asarray(output.B[:, :, 1]), axis=1))
