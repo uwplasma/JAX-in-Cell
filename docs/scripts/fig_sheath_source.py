@@ -40,7 +40,8 @@ late = STORED // 2
 faces = np.asarray(simulation.domain.faces)
 phi = np.asarray(potential(out)) / T_E
 profile = phi[late:].mean(axis=0)
-window = np.asarray(out.moments[-1] - out.moments[late]) / ((STORED - late) * steps // STORED)
+elapsed = float(out.steps[-1] - out.steps[late])          # the steps the window really spans
+window = np.asarray(out.moments[-1] - out.moments[late]) / elapsed
 n_e, n_i = window[0, 0] / DENSITY, window[1, 0] / DENSITY
 centre_phi = np.concatenate([[profile[0]], 0.5 * (profile[:-1] + profile[1:])])
 reference_e, reference_i = densities(np.minimum(centre_phi, 0.0), PHI_WALL, BEAM, MASS_RATIO)

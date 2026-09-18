@@ -191,7 +191,23 @@ long window is the difference of two of them divided by the number of steps betw
 That is a mean over every step rather than over the few the output keeps, and it needs
 no particle history at all, which is what makes it affordable: a run of a hundred
 thousand particles over three thousand steps cannot store its phase space, and does not
-have to. It deposits three moments per species per step and costs 16 % of a step measured
+have to.
+
+Take the number of steps from `Output.steps` rather than from the shape of the array:
+
+```{code-block} python
+:caption: the mean profile over the second half of a run
+
+late = len(out.t) // 2
+window = (out.moments[-1] - out.moments[late]) / (out.steps[-1] - out.steps[late])
+```
+
+A sum is stored *after* the chunk it ends, so the sums at stored steps $a$ and $b$ are
+`steps[b] - steps[a]` apart — the half-open window $(t_a, t_b]$ — and not one chunk more.
+Counting the chunks instead is off by one and reads a constant profile back at
+$(b-a-1)/(b-a)$ of itself: 3.3 % low over half of sixty stored steps, in the direction
+that makes a plasma look thinner than it is. `steps` is absolute, so the same expression
+holds across a restart. It deposits three moments per species per step and costs 16 % of a step measured
 at 120000 slots on a CPU, which is less than the passes suggest because a deposit is cheap
 beside the push.
 

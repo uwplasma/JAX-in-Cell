@@ -95,7 +95,12 @@ out = simulation.run(steps, seed=0, store_every=steps // stored, store_particles
 late = stored // 2                                  # average over the second half of the run
 faces = np.asarray(domain.faces)
 phi = np.asarray(potential(out)) / electron_temperature
-window = np.asarray(out.moments[-1] - out.moments[late]) / ((stored - late) * steps // stored)
+# a mean over a window is a difference of running sums over a difference of step counts.
+# `stored - late` is one interval too many: the sums are taken *after* their chunks, so the
+# last and the `late`-th are `stored - 1 - late` chunks apart, and dividing by one more read
+# a constant density back 3.3 % low
+elapsed = float(out.steps[-1] - out.steps[late])
+window = np.asarray(out.moments[-1] - out.moments[late]) / elapsed
 n_e, n_i = window[0, 0] / density, window[1, 0] / density
 flow = np.divide(window[1, 1], window[1, 0], out=np.zeros(cells), where=window[1, 0] > 0)
 measured = phi[late:, -1]

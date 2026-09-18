@@ -119,7 +119,8 @@ for angle in angles:
 
     late = stored // 2
     phi = np.asarray(potential(out))[late:].mean(axis=0) / electron_temperature
-    window = np.asarray(out.moments[-1] - out.moments[late]) / ((stored - late) * steps // stored)
+    elapsed = float(out.steps[-1] - out.steps[late])      # the steps the window really spans
+    window = np.asarray(out.moments[-1] - out.moments[late]) / elapsed
     # What the collector was struck by during the late window: one entry per crossing, made
     # when the crossing happened and at the velocity that carried the ion there. A snapshot of
     # the ions near the wall is a different and wrong thing -- it repeats each ion across

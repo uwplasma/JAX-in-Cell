@@ -769,6 +769,38 @@ def test_the_clock_is_absolute_and_a_run_split_in_two_is_the_run_taken_whole():
     assert np.allclose(np.asarray(rest.moments[-1]), np.asarray(whole.moments[-1]), rtol=1e-10, atol=0)
 
 
+def test_a_window_of_the_running_sums_is_a_difference_over_a_difference():
+    """A running sum is taken *after* the chunk it ends, so the sums at stored steps a and b are
+    `steps[b] - steps[a]` apart and not one chunk more. Dividing by one more read a constant
+    density back at 29/30 of itself, a 3.3 % bias in every density comparison of the sheath
+    examples and of the documentation figure, in the direction that makes a run look too thin.
+
+    A population that does not move gives the same profile at every step, so every window of it
+    -- the first interval, the last, one in the middle, one spanning a restart -- has to return
+    that profile exactly, whatever the stride."""
+    domain = box(cells=16, particle_bc="absorbing", field_bc="reflective")
+    # uncharged, so it feels no field and deposits none: its profile is the same at every step
+    frozen = Species("frozen", 400, 0.0, 1e-10, 1e-12, quiet=True)
+    sim = Simulation(domain, [frozen], Solver(model="electrostatic"))
+    out = sim.run(60, store_every=10, moments=True, store_particles=False)
+    profile = np.asarray(out.moments[0]) / float(out.steps[0])          # the first interval
+    assert np.all(profile[0, 0] > 0)
+    assert list(np.asarray(out.steps)) == [10, 20, 30, 40, 50, 60]
+    for a, b in ((0, 5), (2, 5), (4, 5), (0, 1), (1, 4)):
+        window = np.asarray(out.moments[b] - out.moments[a]) / float(out.steps[b] - out.steps[a])
+        assert np.allclose(window, profile, rtol=1e-12, atol=0)
+    # the off-by-one, stated so that it cannot come back unnoticed
+    stored, late = len(out.t), 3
+    wrong = np.asarray(out.moments[-1] - out.moments[late]) / ((stored - late) * 60 // stored)
+    assert np.allclose(wrong, profile * (stored - 1 - late) / (stored - late), rtol=1e-12, atol=0)
+    # and a window that spans a restart is the same window
+    first = sim.run(30, store_every=10, moments=True, store_particles=False)
+    rest = sim.run(30, store_every=10, moments=True, store_particles=False, state=first.state)
+    assert list(np.asarray(rest.steps)) == [40, 50, 60]
+    across = np.asarray(rest.moments[-1] - first.moments[0]) / float(rest.steps[-1] - first.steps[0])
+    assert np.allclose(across, profile, rtol=1e-12, atol=0)
+
+
 def test_the_streaming_moments_are_the_deposit_and_need_no_particle_history():
     """The running sums are the same profiles a deposit of the stored particles gives, and
     they are there when the particles are not, which is what makes a mean over every step
@@ -840,7 +872,7 @@ def test_a_maintained_sheath_reaches_the_kinetic_floating_potential():
     measured = float(jnp.mean(potential(out)[late, -1]))
     assert measured == pytest.approx(phi_wall, abs=0.08)
     assert float(out.wall.overflow[-1]) == 0.0
-    window = np.asarray(out.moments[-1] - out.moments[30]) / (30 * steps // 60)
+    window = np.asarray(out.moments[-1] - out.moments[30]) / float(out.steps[-1] - out.steps[30])
     n_e, n_i = window[0, 0] / DENSITY, window[1, 0] / DENSITY
     assert np.allclose(n_e[cells // 4:cells // 2], 1.0, atol=0.06)
     assert np.allclose(n_i[cells // 4:cells // 2], 1.0, atol=0.06)
