@@ -10,7 +10,7 @@ from jax import random
 from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, gauss_residual,
                        mass_electron, potential, elementary_charge as e_charge, speed_of_light as c)
 from jaxincell._core import apply_particle_bc
-from jaxincell._sources import crossing_flux, sample_crossing
+from jaxincell._sources import _flux_cdf, _flux_quantile, crossing_flux, sample_crossing
 from jaxincell.sheath import densities, floating_potential, hobbs_wesson, source_density
 
 SIGMA = np.sqrt(1.0 * e_charge / mass_electron)          # electron spread at T_e = 1 eV
@@ -27,7 +27,7 @@ def box(cells=32, length=None, steps_per_plasma_period=10.0, **domain):
 
 
 def maxwellian_source(emit, density=DENSITY, **kwargs):
-    return Source(density=density, vth=(np.sqrt(2) * SIGMA, 0, 0), emit=emit, **kwargs)
+    return Source(density=density, vth=(np.sqrt(2) * SIGMA,) * 3, emit=emit, **kwargs)
 
 
 # --- the crossing distribution -----------------------------------------------------------
@@ -46,34 +46,98 @@ def test_the_crossing_flux_is_the_closed_form_for_a_maxwellian_and_a_beam():
 
 def test_the_sampler_draws_the_flux_and_not_the_velocity_density():
     """A plane is crossed by fast particles more often, so the normal speed is Rayleigh:
-    <v_n> = sigma sqrt(pi/2), <v_n^2> = 2 sigma^2, twice the variance of the Maxwellian
-    it came from, while the tangential components keep <v_t^2> = sigma^2."""
-    v = np.asarray(sample_crossing(random.PRNGKey(0), maxwellian_source(8), 200000, 1.0))
+    <v_n> = sigma sqrt(pi/2), <v_n^2> = 2 sigma^2, twice the variance of the Maxwellian it
+    came from. The tangential components are not selected on and keep the spread their own
+    component of vth asks for, which is not the normal one."""
+    isotropic = maxwellian_source(8).replace(vth=(np.sqrt(2) * SIGMA,) * 3)
+    v = np.asarray(sample_crossing(random.PRNGKey(0), isotropic, 200000, 1.0))
     assert np.all(v[:, 0] > 0)
     assert v[:, 0].mean() / SIGMA == pytest.approx(np.sqrt(np.pi / 2), rel=3e-3)
     assert (v[:, 0] ** 2).mean() / SIGMA ** 2 == pytest.approx(2.0, rel=5e-3)
     assert (v[:, 1] ** 2).mean() / SIGMA ** 2 == pytest.approx(1.0, rel=5e-3)
     assert abs(v[:, 1].mean()) / SIGMA < 0.01
     # the right wall sends the same distribution the other way
-    left = np.asarray(sample_crossing(random.PRNGKey(0), maxwellian_source(8), 5000, -1.0))
+    left = np.asarray(sample_crossing(random.PRNGKey(0), isotropic, 5000, -1.0))
     assert np.all(left[:, 0] < 0)
 
 
-def test_a_cold_source_is_a_beam_and_a_warm_one_with_a_normal_drift_is_refused():
+def test_each_tangential_component_gets_the_spread_it_was_given():
+    """vth has three components and all three are used. A reservoir spread only along the
+    normal emits particles with no tangential motion at all, which in a magnetised sheath is
+    a different physical inflow from an isotropic one -- and was what every source in this
+    repository silently was, because the sampler used vth[0] for all three."""
+    source = maxwellian_source(8).replace(vth=(np.sqrt(2) * SIGMA, 0.7 * np.sqrt(2) * SIGMA, 0.0),
+                                          drift=(0.0, 1e4, -2e4))
+    v = np.asarray(sample_crossing(random.PRNGKey(3), source, 100000, 1.0))
+    assert v[:, 1].std() / SIGMA == pytest.approx(0.7, rel=1e-2)
+    assert v[:, 2].std() == 0.0
+    assert v[:, 1].mean() == pytest.approx(1e4, abs=0.02 * SIGMA)      # the tangential drift rides along
+    assert np.allclose(v[:, 2], -2e4)
+
+
+def test_a_reservoir_that_drifts_towards_the_plane_is_sampled_from_its_own_flux():
+    """p(v) ∝ v exp[-(v-u)^2/2 sigma^2] on v > 0 has no elementary inverse, so it is sampled
+    by inverting its distribution function. Shifting a Rayleigh sample by u is a different
+    distribution; the two agree only at u = 0. Checked against quadrature of p itself, and at
+    u = 0 against the closed form the Rayleigh branch uses."""
+    sigma = SIGMA
+    for ratio in (-1.0, 0.5, 2.0):
+        source = Source(density=DENSITY, vth=(np.sqrt(2) * sigma,) * 3, drift=(ratio * sigma, 0, 0),
+                        emit=4, model="drifting")
+        v = np.asarray(sample_crossing(random.PRNGKey(5), source, 100000, 1.0))[:, 0]
+        grid = np.linspace(0, max(ratio, 0) * sigma + 14 * sigma, 200001)
+        weight = grid * np.exp(-(grid - ratio * sigma) ** 2 / (2 * sigma ** 2))
+        norm = np.trapezoid(weight, grid)
+        assert np.all(v > 0)
+        assert v.mean() == pytest.approx(np.trapezoid(grid * weight, grid) / norm, rel=5e-3)
+        assert (v ** 2).mean() == pytest.approx(np.trapezoid(grid ** 2 * weight, grid) / norm, rel=8e-3)
+        # Gamma = n [u Phi(u/sigma) + sigma phi(u/sigma)] is the same integral, in closed form
+        assert float(crossing_flux(source)) == pytest.approx(        # 1e-6 is the quadrature's
+            DENSITY * norm / (np.sqrt(2 * np.pi) * sigma), rel=1e-6)   # error, not the formula's
+    # and a shifted Rayleigh is not it: at u = 2 sigma the means differ by more than a spread
+    shifted = SIGMA * np.sqrt(np.pi / 2) + 2 * sigma
+    assert abs(shifted - v.mean()) > 0.2 * sigma
+
+
+def test_the_quantile_of_the_drifting_flux_is_inverted_and_differentiated_exactly():
+    """The sampler inverts F(t, a) = p by bisection, which has derivative zero: a fixed
+    number of comparisons would report no sensitivity to the drift at all. The rule
+    differentiates the equation instead. Value against F, derivative against a central
+    difference of the bisection itself."""
+    p = jnp.linspace(0.005, 0.995, 41)
+    for a in (-2.0, 0.0, 0.7, 3.0):
+        assert np.allclose(np.asarray(_flux_cdf(_flux_quantile(p, a), a)), np.asarray(p), atol=1e-6, rtol=0)
+        step = 1e-4
+        difference = float((_flux_quantile(0.37, a + step) - _flux_quantile(0.37, a - step)) / (2 * step))
+        assert float(jax.grad(lambda drift: _flux_quantile(0.37, drift))(a)) == pytest.approx(
+            difference, rel=1e-6)
+    # at rest the quantile is the Rayleigh closed form the fast path uses
+    assert np.allclose(np.asarray(_flux_quantile(p, 0.0)), np.asarray(jnp.sqrt(-2 * jnp.log(1 - p))),
+                       rtol=1e-9, atol=0)
+
+
+def test_a_cold_beam_carries_its_drift_and_one_pointing_outwards_is_refused():
     beam = Source(density=DENSITY, vth=0.0, drift=(3e5, 1e5, 0), emit=4)
     v = np.asarray(sample_crossing(random.PRNGKey(0), beam, 16, 1.0))
     assert np.allclose(v[:, 0], 3e5) and np.allclose(v[:, 1], 1e5) and np.allclose(v[:, 2], 0.0)
-    with pytest.raises(ValueError, match="Maxwellian at rest or a cold beam"):
-        Source(density=DENSITY, vth=(1e6, 0, 0), drift=(1e5, 0, 0), emit=4)
+    assert float(crossing_flux(beam)) == pytest.approx(DENSITY * 3e5, rel=1e-12)
+    with pytest.raises(ValueError, match="needs a normal drift towards the box"):
+        Source(density=DENSITY, vth=0.0, drift=(-3e5, 0, 0), emit=4)
+    right = Source(density=DENSITY, vth=0.0, drift=(-3e5, 0, 0), emit=4, side="right")
+    assert float(crossing_flux(right)) == pytest.approx(DENSITY * 3e5, rel=1e-12)
+    assert np.allclose(np.asarray(sample_crossing(random.PRNGKey(0), right, 16, -1.0))[:, 0], -3e5)
 
 
-def test_whether_a_source_is_a_beam_is_decided_once_and_not_read_from_a_tracer():
-    """`beam` selects a branch, so it cannot be a traced leaf: inside jit every `vth` is a
+def test_which_crossing_distribution_a_source_is_gets_decided_once_and_not_read_from_a_tracer():
+    """`model` selects a branch, so it cannot be a traced leaf: inside jit every `vth` is a
     tracer, `vth != 0` is not a Python bool, and a Maxwellian source would sample a beam at
-    rest and emit particles that never move. It is fixed when the Source is built, and a
-    Source built from a tracer has to say which it is."""
+    rest and emit particles that never move. The same holds for the normal drift, which picks
+    between the Rayleigh closed form and the drifting quantile. Both are fixed when the Source
+    is built, and a Source built from a tracer has to say which it is."""
     warm = maxwellian_source(4)
-    assert warm.beam is False and Source(density=DENSITY, vth=0.0, drift=(1e5, 0, 0), emit=4).beam is True
+    assert warm.model == "maxwellian" and warm.beam is False
+    assert Source(density=DENSITY, vth=0.0, drift=(1e5, 0, 0), emit=4).model == "beam"
+    assert Source(density=DENSITY, vth=(1e6, 0, 0), drift=(1e5, 0, 0), emit=4).model == "drifting"
 
     def speeds(source):
         return sample_crossing(random.PRNGKey(0), source, 64, 1.0)[:, 0]
@@ -82,7 +146,9 @@ def test_whether_a_source_is_a_beam_is_decided_once_and_not_read_from_a_tracer()
     assert float(jnp.std(inside)) > 0.1 * SIGMA                       # a beam would have none
     assert np.allclose(np.asarray(inside), np.asarray(speeds(warm)))
     with pytest.raises(ValueError, match="traced vth"):
-        jax.jit(lambda vth: Source(density=DENSITY, vth=(vth, 0, 0), emit=4).beam)(1e6)
+        jax.jit(lambda vth: Source(density=DENSITY, vth=(vth, 0, 0), emit=4).model)(1e6)
+    with pytest.raises(ValueError, match="traced normal drift"):
+        jax.jit(lambda u: Source(density=DENSITY, vth=(1e6, 0, 0), drift=(u, 0, 0), emit=4).model)(1e5)
 
 
 # --- what the source puts in --------------------------------------------------------------
@@ -96,7 +162,7 @@ def test_the_emitted_weight_is_exactly_the_prescribed_flux_and_differentiable_in
     steps = 5
 
     def emitted(density, vth):
-        source = Source(density=density, vth=(vth, 0, 0), emit=7, beam=False)
+        source = Source(density=density, vth=(vth, 0, 0), emit=7, model="maxwellian")
         species = Species("electrons", 400, -1.0, mass_electron, 0.0, source=source)
         out = Simulation(domain, [species], Solver(model="electrostatic")).run(steps, store_particles=False)
         return out.wall.injected[-1, 0, 0]

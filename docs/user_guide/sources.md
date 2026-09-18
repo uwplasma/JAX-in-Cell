@@ -43,12 +43,36 @@ $\sigma\sqrt{\pi/2}$ and mean square $2\sigma^2$ — twice the variance of the
 distribution it came from. Half a Maxwellian is not the same thing, and a Maxwellian
 sampled and then cut at $v>0$ is a third.
 
-Two reservoirs are supported: a **Maxwellian at rest**, and a **cold beam**, every
-particle at the drift velocity. A drift along the normal together with a finite
-temperature is refused when the `Source` is built, because the crossing density of a
-drifting Maxwellian is proportional to $v\exp[-(v-u)^2/2\sigma^2]$ on $v>0$ and adding a
-drift to a Rayleigh sample is not a sample of it. A drift in the ignorable directions is
-free: the plane does not select on it.
+`vth` has three components and all three are used: the normal one sets the crossing
+distribution above, and the two tangential ones are drawn from their own Maxwellians,
+since the plane does not select on them. A tangential drift rides along untouched for the
+same reason. `vth=(v, 0, 0)` is therefore a reservoir with no tangential motion, which is
+a different inflow from an isotropic one — in a magnetised sheath, a very different one.
+
+The normal drift $u$ is where the three models differ, and which one a `Source` is gets
+decided once, when it is built, and kept as `model`:
+
+| `model` | reservoir | normal speed |
+|---|---|---|
+| `"beam"` | cold, `vth = 0` | every particle at $u$ |
+| `"maxwellian"` | warm, no normal drift | $\sigma\sqrt{-2\ln U}$, Rayleigh |
+| `"drifting"` | warm, drifting | the quantile of $p(v)\propto v e^{-(v-u)^2/2\sigma^2}$ |
+
+The third has no elementary inverse, so it is sampled by inverting its distribution
+function numerically. What is differentiated is not the inversion — a comparison has
+derivative zero, and a fixed number of bisections would report no sensitivity to $u$ at
+all — but the equation $F(v,u)=p$ itself, which is the implicit function theorem and is
+exact. Shifting a Rayleigh sample by $u$ is none of the three; it agrees with the drifting
+model only at $u=0$.
+
+The **sign** of $u$ is physical, not a magnitude: a reservoir drifting away from the plane
+still sends the tail of its distribution across, at the reduced flux
+$\Gamma = n[u\Phi(u/\sigma) + \sigma\varphi(u/\sigma)]$ with $u<0$, and a cold beam
+pointing away from the plane sends nothing and is refused rather than turned around.
+
+`model` is static because it selects a branch. Inside `jit` every leaf is a tracer, so
+`vth != 0` is a traced array and not a Python `True`; a `Source` built from a traced `vth`
+or a traced normal drift has to say which model it is.
 
 ## Weights, not counts
 

@@ -122,10 +122,10 @@ def simulation(r):
     reflectivity as the one thing that changes."""
     electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread, 0, 0),
                         active=capacity // 3, quiet=True, reflection=(0.0, r),
-                        source=Source(density=reservoir, vth=(np.sqrt(2) * spread, 0, 0), emit=emit, beam=False))
+                        source=Source(density=reservoir, vth=(np.sqrt(2) * spread,) * 3, emit=emit, model="maxwellian"))
     ions = Species("ions", capacity, 1.0, mass_ratio * mass_electron, density, 0.0, (beam_speed * spread, 0, 0),
                    active=capacity // 3, quiet=True,
-                   source=Source(density=density, vth=0.0, drift=(beam_speed * spread, 0, 0), emit=emit, beam=True))
+                   source=Source(density=density, vth=0.0, drift=(beam_speed * spread, 0, 0), emit=emit, model="beam"))
     return Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=external_B)
 
 

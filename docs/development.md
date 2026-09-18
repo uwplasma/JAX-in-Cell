@@ -282,11 +282,6 @@ before the code is written.
 * A **volumetric** source: ionisation of a neutral background, which is what a discharge
   needs and which the boundary reservoir of {doc}`user_guide/sources` is not. The pool of
   inactive particles it would emit into already exists.
-* A **drifting warm reservoir**. `Source` samples a Maxwellian at rest or a cold beam and
-  refuses the two together, because the crossing density of a drifting Maxwellian is
-  proportional to $v\exp[-(v-u)^2/2\sigma^2]$ on $v>0$ and adding a drift to a Rayleigh
-  sample is not a sample of it. An inverse-CDF sampler with a derivative taken from the
-  normalised distribution would lift the restriction.
 * A **source with the implicit scheme**, which is refused: it would emit a new population
   inside every Picard iteration. Emitting once per step, before the iteration, and holding
   the samples fixed across it is the obvious route.

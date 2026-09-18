@@ -91,7 +91,7 @@ def test_ions_derived_from_electrons_are_differentiable_in_the_electron_thermal_
 def _sourced(emit=2, capacity=64, active=None):
     """A source-fed species on an open plane, the smallest configuration a Source needs."""
     electrons = Species("electrons", capacity, -1.0, mass_electron, 1e14, (1e6, 0.0, 0.0), active=active,
-                        source=Source(density=1e14, vth=(1e6, 0.0, 0.0), emit=emit))
+                        source=Source(density=1e14, vth=(1e6,) * 3, emit=emit))
     return Simulation(Domain(length=1e-2, cells=16, particle_bc="absorbing", field_bc=("open", "absorbing")),
                       [electrons], Solver(model="electrostatic"))
 

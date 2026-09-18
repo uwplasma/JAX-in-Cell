@@ -76,7 +76,7 @@ domain = Domain(length=length, cells=cells, time_step=dt,
                 field_bc=("open", "absorbing"))          # the source plane imposes nothing; the collector floats
 electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread, 0, 0),
                     active=capacity // 4, quiet=True,
-                    source=Source(density=amplitude * density, vth=(np.sqrt(2) * spread, 0, 0), emit=emit))
+                    source=Source(density=amplitude * density, vth=(np.sqrt(2) * spread,) * 3, emit=emit))
 ions = Species("ions", capacity, 1.0, mass_ratio * mass_electron, density, 0.0, (beam_speed * spread, 0, 0),
                active=capacity // 4, quiet=True,
                source=Source(density=density, vth=0.0, drift=(beam_speed * spread, 0, 0), emit=emit))

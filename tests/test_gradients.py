@@ -67,10 +67,10 @@ def sheath(reflection, capacity=6000, emit=6, cells=24):
                  particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA, 0, 0),
                         active=capacity // 3, quiet=True, reflection=(0.0, reflection),
-                        source=Source(density=DENSITY, vth=(np.sqrt(2) * SIGMA, 0, 0), emit=emit, beam=False))
+                        source=Source(density=DENSITY, vth=(np.sqrt(2) * SIGMA,) * 3, emit=emit, model="maxwellian"))
     ions = Species("ions", capacity, 1.0, 400 * mass_electron, DENSITY, 0.0, (0.25 * SIGMA, 0, 0),
                    active=capacity // 3, quiet=True,
-                   source=Source(density=DENSITY, vth=0.0, drift=(0.25 * SIGMA, 0, 0), emit=emit, beam=True))
+                   source=Source(density=DENSITY, vth=0.0, drift=(0.25 * SIGMA, 0, 0), emit=emit, model="beam"))
     return Simulation(domain, [electrons, ions], Solver(model="electrostatic"))
 
 

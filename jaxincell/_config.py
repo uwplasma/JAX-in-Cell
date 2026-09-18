@@ -152,7 +152,7 @@ def _boundary_codes(value, name):
     return tuple(int(c) for c in codes)
 
 
-@pytree_dataclass(static=("side", "emit", "beam"))
+@pytree_dataclass(static=("side", "emit", "model"))
 class Source:
     """A maintained inflow of one species through one wall: a reservoir of plasma
     behind the plane that supplies a prescribed flux, independently of what leaves.
@@ -167,16 +167,21 @@ class Source:
     Args:
         density: Reservoir number density :math:`n_{\\rm in}`, :math:`\\mathrm{m^{-3}}`.
         vth: Thermal speed per component of the reservoir, :math:`\\sqrt{2k_BT/m}`, m/s,
-            given as :class:`Species` takes it. Zero makes a cold beam.
-        drift: Drift velocity of the reservoir, m/s. Its normal component must
-            vanish unless ``vth`` does: the drifting crossing distribution needs a
-            sampler that is not implemented, and a Rayleigh sample plus a drift is
-            not it.
+            given as :class:`Species` takes it. All three components are used: the normal
+            one sets the crossing distribution and the two tangential ones are drawn from
+            their own Maxwellians. Zero makes a cold beam.
+        drift: Drift velocity of the reservoir, m/s. The tangential components ride along
+            unchanged; the normal one is the drift of the reservoir towards or away from
+            the plane, and its **sign** is physical -- a reservoir drifting away still sends
+            some flux across, and a cold beam pointing away from the plane sends none and is
+            refused rather than reflected.
         side: ``"left"`` or ``"right"``, the wall the plasma enters through.
-        beam: Whether the reservoir is cold, so that the sampler draws a beam rather
-            than a Maxwellian. It is worked out from ``vth`` when the object is built
-            and is then static, because it selects a branch: read live from ``vth`` it
-            would be a traced value, and inside ``jit`` every source would look cold.
+        model: Which crossing distribution the sampler draws from: ``"beam"`` for a cold
+            reservoir, ``"maxwellian"`` for a Maxwellian with no normal drift, or
+            ``"drifting"`` for one with a normal drift. It is worked out from ``vth`` and
+            ``drift`` when the object is built and is then static, because it selects a
+            branch: read live from the leaves it would be a traced value, and inside
+            ``jit`` every source would take the same branch whatever it holds.
         emit: Particles emitted per step. They occupy the dead slots of the
             species, so the species needs enough of them: ``n`` must exceed
             ``emit`` times the longest residence time in steps.
@@ -193,7 +198,7 @@ class Source:
     drift: tuple = (0.0, 0.0, 0.0)
     side: str = "left"
     emit: int = 0
-    beam: object = None
+    model: object = None
     min_weight: float = 1e-3
 
     def __post_init__(self):
@@ -209,20 +214,43 @@ class Source:
                  f"a Source density cannot be negative, not {self.density!r}")
         _require(not _plain(self.min_weight) or 0 <= self.min_weight <= 1,
                  f"min_weight is a fraction of the emitted weight, in [0, 1], not {self.min_weight!r}")
-        warm = any(_plain(u) and u != 0 for u in self.vth)
-        if self.beam is None:
-            _require(warm or all(_plain(u) for u in self.vth),
-                     "a Source built from a traced vth must say whether it is a beam: pass beam=True or False")
-            object.__setattr__(self, "beam", not warm)
-        if warm and _plain(self.drift[0]) and self.drift[0] != 0:
-            raise ValueError("a Source is a Maxwellian at rest or a cold beam: the crossing distribution of a "
-                             "drifting Maxwellian, proportional to v exp[-(v-u)^2/2 sigma^2] on v > 0, has no "
-                             "sampler here. Give vth=0 for a beam, or drift=(0, u_y, u_z).")
+        if self.model is None:
+            object.__setattr__(self, "model", self._model_from_leaves())
+        _require(self.model in ("beam", "maxwellian", "drifting"),
+                 f"model is 'beam', 'maxwellian' or 'drifting', not {self.model!r}")
+        inward = 1.0 if self.side == "left" else -1.0
+        if self.model == "beam" and _plain(self.drift[0]):
+            _require(inward * self.drift[0] > 0,
+                     f"a cold beam entering through the {self.side} wall needs a normal drift towards the box, "
+                     f"which is {'positive' if inward > 0 else 'negative'} here, not {self.drift[0]!r}. A beam "
+                     "pointing away from the plane sends no flux across it.")
+
+    def _model_from_leaves(self):
+        """Which crossing distribution the leaves describe, decided once, at construction.
+
+        Both branches read leaves, so both have to be settled here: inside ``jit`` a
+        comparison against a leaf is a traced array and every source would take one branch
+        whatever it holds. A traced leaf whose branch matters therefore has to be named."""
+        if not all(_plain(u) for u in self.vth):
+            raise ValueError("a Source built from a traced vth must say which crossing distribution it is: "
+                             "pass model='beam', 'maxwellian' or 'drifting'")
+        if not any(u != 0 for u in self.vth):
+            return "beam"
+        if not _plain(self.drift[0]):
+            raise ValueError("a Source built from a traced normal drift must say which crossing distribution it "
+                             "is: pass model='maxwellian' for a reservoir at rest or model='drifting' for one "
+                             "that drifts towards or away from the plane")
+        return "drifting" if self.drift[0] != 0 else "maxwellian"
+
+    @property
+    def beam(self):
+        """Whether the reservoir is cold."""
+        return self.model == "beam"
 
     @property
     def sigma(self):
-        """Component spread :math:`\\sigma = v_{th}/\\sqrt2` of the reservoir."""
-        return jax.numpy.asarray(self.vth[0]) / jax.numpy.sqrt(2.0)
+        """The three component spreads :math:`\\sigma = v_{th}/\\sqrt2` of the reservoir."""
+        return jax.numpy.asarray(self.vth) / jax.numpy.sqrt(2.0)
 
 
 @pytree_dataclass(static=("cells", "particle_bc", "field_bc"))

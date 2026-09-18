@@ -90,10 +90,10 @@ for angle in angles:
                     particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread, 0, 0),
                         active=capacity // 4, quiet=True,
-                        source=Source(density=density, vth=(np.sqrt(2) * spread, 0, 0), emit=emit))
+                        source=Source(density=density, vth=(np.sqrt(2) * spread,) * 3, emit=emit))
     ions = Species("ions", capacity, 1.0, ion_mass, density, (np.sqrt(2) * ion_spread, 0, 0),
                    (sound_speed, 0, 0), active=capacity // 4, quiet=True,
-                   source=Source(density=density, vth=(np.sqrt(2) * ion_spread, 0, 0), emit=emit))
+                   source=Source(density=density, vth=(np.sqrt(2) * ion_spread,) * 3, emit=emit))
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=B).run(
         steps, seed=0, store_every=steps // stored, moments=True)
 
