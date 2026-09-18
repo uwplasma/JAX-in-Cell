@@ -41,8 +41,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import (Domain, Simulation, Solver, Source, Species, epsilon_0, mass_electron, potential,
-                       elementary_charge as e_charge)
+from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, epsilon_0, mass_electron,
+                       potential, elementary_charge as e_charge)
 
 # --- what to change ---------------------------------------------------------------------
 quick = "--quick" in sys.argv
@@ -55,9 +55,15 @@ gyro_over_debye = 8.0                   # rho_s / lambda_D, which sets B_0
 box_debye_lengths = 60.0
 cells = 96 if quick else 240
 steps_per_plasma_period = 10.0
-transits = 0.6 if quick else 4.0
-capacity = 10000 if quick else 100000
-emit = 10 if quick else 100
+transits = 0.15 if quick else 4.0
+# `Species.n` is a capacity and has to hold every particle alive at once, which is `emit`
+# times the residence time in steps. An ion entering at c_s takes a whole sound transit to
+# cross, 12000 steps here; an electron takes about a tenth of that, so the two want
+# different emission rates to end up with comparable numbers of markers in comparable pools.
+# The pool sizes below are measured, and the run refuses to report anything if one overflows.
+capacity = 30000 if quick else 80000
+emit_ions = 10 if quick else 5
+emit_electrons = 10 if quick else 40
 
 # --- the setup ----------------------------------------------------------------------------
 spread = np.sqrt(electron_temperature * e_charge / mass_electron)
@@ -78,9 +84,22 @@ print(f"m_i/m_e {mass_ratio:.0f}   T_i/T_e {temperature_ratio}   rho_s/lambda_D 
       f"rho_e/lambda_D {omega_pe / omega_ce:.3f}   L/rho_s {box_debye_lengths / gyro_over_debye:.1f}")
 print(f"dx/lambda_D {length / cells / debye:.2f}   omega_pe dt {omega_pe * dt:.2f}   "
       f"Omega_e dt {omega_ce * dt:.2f}   Omega_i dt {omega_ci * dt:.2e}   {steps} steps "
-      f"= {transits:.1f} sound transits\n")
+      f"= {transits:.2f} sound transits, one of which is {length / sound_speed / dt:.0f} steps")
+print(f"pools of {capacity} slots per species, {emit_electrons} electrons and {emit_ions} ions "
+      f"emitted a step\n")
+if quick:
+    print("--quick is a smoke preset: a fraction of a sound transit, so the sheath has not settled\n"
+          "and none of the numbers below is a measurement. It checks that every step of this script\n"
+          "runs and that the pools hold. The documentation quotes the full preset.\n")
 if omega_ce * dt > 0.3:
     print(f"WARNING: Omega_e dt = {omega_ce * dt:.2f}; the electron gyro-phase is under-resolved.\n")
+
+# What the collector is struck by, binned at the crossing. An ion falls through a few T_e of
+# sheath and arrives with that plus its thermal energy, so a ceiling of twenty is generous;
+# whatever passes it goes to the overflow bin and is reported rather than piled on the end.
+energy_ceiling = 20.0 * electron_temperature                            # eV
+impacts = Impacts(energy_max=energy_ceiling * e_charge, energy_bins=40, angle_bins=30)
+angle_centres = 0.5 * (np.asarray(impacts.angle_edges)[:-1] + np.asarray(impacts.angle_edges)[1:])
 
 results = {}
 for angle in angles:
@@ -90,29 +109,39 @@ for angle in angles:
                     particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread, 0, 0),
                         active=capacity // 4, quiet=True,
-                        source=Source(density=density, vth=(np.sqrt(2) * spread,) * 3, emit=emit))
+                        source=Source(density=density, vth=(np.sqrt(2) * spread,) * 3, emit=emit_electrons))
     ions = Species("ions", capacity, 1.0, ion_mass, density, (np.sqrt(2) * ion_spread, 0, 0),
                    (sound_speed, 0, 0), active=capacity // 4, quiet=True,
-                   source=Source(density=density, vth=(np.sqrt(2) * ion_spread,) * 3, emit=emit))
-    out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=B).run(
-        steps, seed=0, store_every=steps // stored, moments=True).validate()
+                   source=Source(density=density, vth=(np.sqrt(2) * ion_spread,) * 3, emit=emit_ions))
+    out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=B,
+                     impacts=impacts).run(steps, seed=0, store_every=steps // stored,
+                                          store_particles=False, moments=True).validate()
 
     late = stored // 2
     phi = np.asarray(potential(out))[late:].mean(axis=0) / electron_temperature
     window = np.asarray(out.moments[-1] - out.moments[late]) / ((stored - late) * steps // stored)
-    # ions that reached the collector during the late window, with the velocity they arrived at
-    x, v, w = (np.asarray(a)[late:, capacity:] for a in (out.x[..., 0], out.v, out.weight))
-    hit = (x > length / 2 - 2 * length / cells) & (w > 0)
-    normal, tangential = np.abs(v[..., 0][hit]), np.linalg.norm(v[..., 1:][hit], axis=-1)
-    energy = 0.5 * ion_mass * (normal ** 2 + tangential ** 2) / e_charge
+    # What the collector was struck by during the late window: one entry per crossing, made
+    # when the crossing happened and at the velocity that carried the ion there. A snapshot of
+    # the ions near the wall is a different and wrong thing -- it repeats each ion across
+    # frames, counts the ones on their way out, and weights by how many happen to be there
+    # rather than by how many arrived.
+    spectrum = np.asarray(out.wall.spectrum[-1, 1, 1] - out.wall.spectrum[late, 1, 1])
+    fluence = float(out.wall.arrived[-1, 1, 1] - out.wall.arrived[late, 1, 1])
+    mean_energy = float(out.wall.energy_in[-1, 1, 1] - out.wall.energy_in[late, 1, 1]) / fluence / e_charge
+    incidence = spectrum.sum(axis=0) / spectrum.sum()
     results[angle] = dict(phi=phi, n_e=window[0, 0] / density, n_i=window[1, 0] / density,
                           flow=np.divide(window[1, 1], window[1, 0], out=np.zeros(cells), where=window[1, 0] > 0),
-                          energy=energy, incidence=np.degrees(np.arctan2(tangential, normal)),
-                          weight=w[hit])
+                          energy=spectrum[:-1].sum(axis=1), incidence=incidence, fluence=fluence,
+                          above_range=spectrum[-1].sum() / spectrum.sum())
+    live = np.asarray(out.state.w) > 0
     wall_phi = float(np.asarray(potential(out))[late:, -1].mean()) / electron_temperature
+    print(f"    pool: {int(live[:capacity].sum())} electrons and {int(live[capacity:].sum())} ions "
+          f"live of {capacity} slots each")
     print(f"alpha {angle:4.0f} deg to the wall: wall potential {wall_phi:+.2f} T_e/e, "
-          f"{hit.sum()} ion impacts, mean energy {np.average(energy, weights=w[hit]):.2f} eV, "
-          f"mean incidence {np.average(results[angle]['incidence'], weights=w[hit]):.0f} deg from the normal")
+          f"ion fluence {fluence:.3e} m^-2, mean impact energy {mean_energy:.2f} eV, "
+          f"mean incidence {np.degrees((incidence * angle_centres).sum()):.0f} deg from the normal"
+          + (f"  [{results[angle]['above_range']:.1%} above {energy_ceiling:.0f} eV]"
+             if results[angle]["above_range"] > 0.01 else ""))
 
 normal_field = results[90.0]
 print(f"\nnormal incidence is the field-free case for the motion along x: its wall potential is "
@@ -132,13 +161,13 @@ axes[1].axhline(1.0, ls="--", color="k", lw=0.8)
 axes[1].set(xlabel=r"distance from the collector ($\lambda_D$)", ylabel=r"$v_{i,x}/c_s$",
             title=r"the normal ion flow, and $c_s$", xlim=(distance.max(), 0))
 axes[1].legend(frameon=False)
-bins = np.linspace(0, 90, 31)
 for angle in angles:
     r = results[angle]
-    axes[2].hist(r["incidence"], bins, weights=r["weight"], histtype="step",
-                 density=True, label=rf"$\alpha = {angle:.0f}^\circ$")
-axes[2].set(xlabel="ion incidence from the wall normal (deg)", ylabel="flux density (1/deg)",
-            title="what the wall is struck by")
+    axes[2].step(np.degrees(np.asarray(impacts.angle_edges)),
+                 np.append(r["incidence"], r["incidence"][-1]) / np.degrees(float(impacts.angle_edges[1])),
+                 where="post", label=rf"$\alpha = {angle:.0f}^\circ$")
+axes[2].set(xlabel="ion incidence from the wall normal (deg)", ylabel="fraction of the fluence (1/deg)",
+            title="what the wall is struck by", xlim=(0, 90))
 axes[2].legend(frameon=False)
 plt.tight_layout()
 plt.show()

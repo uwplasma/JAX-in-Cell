@@ -14,7 +14,7 @@ from jax.scipy.special import erfinv
 from ._collisions import collide, coulomb_logarithm
 from ._config import Collisions, Domain, Solver, Species, pytree_dataclass
 from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
-from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic,
+from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, s2_weights,
                     current_from_continuity, curl_B, curl_E, deposit, gather, half_step_fields, smooth,
                     to_centres, to_faces, wall_faces_E, with_ghosts, wrap_positions)
 from ._sources import check_sources, crossing_flux, inject
@@ -65,6 +65,12 @@ class Wall:
             sign is the direction the wall is pushed, so the left wall's x component is
             negative for a plasma pressing outwards on both sides.
         momentum_injected: Momentum a :class:`~jaxincell.Source` carried in, the same shape.
+        spectrum: Weight that arrived in each energy and incidence bin,
+            ``(species, side, energy_bins + 1, angle_bins)``, when
+            :class:`~jaxincell.Simulation` was given :class:`~jaxincell.Impacts`, and
+            ``None`` otherwise. The last energy bin is the overflow. Summing over the two
+            bin axes gives ``arrived`` exactly: every crossing is entered once, at the
+            velocity that carried it there.
         overflow: Largest live weight a source has overwritten, zero while the pool of
             dead slots holds. A positive value means the capacity ``Species.n`` is too
             small and particles were destroyed to make room.
@@ -77,6 +83,7 @@ class Wall:
     energy_injected: object
     momentum: object
     momentum_injected: object
+    spectrum: object
     overflow: object
 
     def charge(self, charge_per_particle):
@@ -264,6 +271,9 @@ class Simulation:
         collisions: Binary-collision model, or ``None``.
         external_E, external_B: Static external fields as arrays of shape
             ``(cells, 3)`` on the faces (E) and centres (B), or ``None``.
+        impacts: :class:`~jaxincell.Impacts` bins for the energy and incidence of what
+            reaches each wall, or ``None`` for no spectrum. It costs one scatter per
+            species per wall per step.
 
     The object is a JAX pytree: every physical parameter is a leaf, so
     ``jax.grad`` and ``jax.vmap`` apply to functions of it directly, and changing
@@ -275,6 +285,7 @@ class Simulation:
     collisions: object = None
     external_E: object = None
     external_B: object = None
+    impacts: object = None
 
     def __post_init__(self):
         object.__setattr__(self, "species", tuple(self.species))
@@ -480,7 +491,39 @@ class Simulation:
     def _empty_wall(self):
         zeros = jnp.zeros((len(self.species), 2))
         vectors = jnp.zeros((len(self.species), 2, 3))
-        return Wall(zeros, zeros, zeros, zeros, zeros, zeros, vectors, vectors, jnp.zeros(()))
+        bins = self.impacts
+        spectrum = None if bins is None else jnp.zeros((len(self.species), 2,
+                                                        bins.energy_bins + 1, bins.angle_bins))
+        return Wall(zeros, zeros, zeros, zeros, zeros, zeros, vectors, vectors, spectrum, jnp.zeros(()))
+
+    def _spectrum(self, wall, arrived, m, u_in):
+        """Add this step's crossings to the energy-incidence accumulator.
+
+        The energy is the kinetic energy of the segment on which the particle crossed and the
+        incidence is :math:`\\theta = \\arctan(|v_t|/v_n)` from the normal, both taken from the
+        velocity **before** the wall acted. Energies above ``Impacts.energy_max`` go to the
+        overflow bin rather than into the last resolved one, so a range that was too small
+        shows up instead of piling on the end."""
+        bins = self.impacts
+        if bins is None:
+            return wall.spectrum
+        energy = self._kinetic(m, u_in)
+        width = bins.energy_max / bins.energy_bins
+        level = jnp.clip(jnp.floor(energy / width).astype(jnp.int32), 0, bins.energy_bins)
+        rows = []
+        for i, ((start, n), sp) in enumerate(zip(self.blocks, self.species)):
+            block, block_level = slice(start, start + n), level[start:start + n]
+            sides = []
+            for side, inward in ((0, 1.0), (1, -1.0)):
+                normal = inward * -u_in[block, 0]          # towards that wall, positive on a crossing
+                tangential = jnp.sqrt(jnp.sum(u_in[block, 1:] ** 2, axis=1))
+                theta = jnp.arctan2(tangential, jnp.maximum(normal, 0.0))
+                index = jnp.clip((theta / (jnp.pi / 2 / bins.angle_bins)).astype(jnp.int32),
+                                 0, bins.angle_bins - 1)
+                sides.append(jnp.zeros((bins.energy_bins + 1, bins.angle_bins))
+                             .at[block_level, index].add(arrived[side, block]))
+            rows.append(jnp.stack(sides))
+        return wall.spectrum + jnp.stack(rows)
 
     def _kinetic(self, m, u):
         """Kinetic energy per unit weight of the carried ``u``, :math:`m|u|^2/(\\gamma+1)`.
@@ -502,7 +545,8 @@ class Simulation:
 
         arrived, kept = hits
         returned = arrived - kept
-        return wall.replace(arrived=wall.arrived + per_species(arrived),
+        return wall.replace(spectrum=self._spectrum(wall, arrived, m, u_in),
+                            arrived=wall.arrived + per_species(arrived),
                             collected=wall.collected + per_species(kept),
                             energy_in=wall.energy_in + per_species(arrived * self._kinetic(m, u_in)),
                             energy_out=wall.energy_out + per_species(returned * self._kinetic(m, u_out)),
@@ -571,16 +615,41 @@ class Simulation:
             return 0.0
         return jnp.sum(current_per_particle) / self.domain.length
 
-    def _electrode_field(self, wall):
+    def _overlap_charge(self, x, w):
+        """Charge of the parts of the live particle clouds that reach past the collector,
+        :math:`\\mathrm{C/m^2}`.
+
+        A cloud is one and a half cells wide, so it crosses the wall before its centre does,
+        and :func:`~jaxincell._core.deposit` drops the part outside the grid. That part is not
+        gone: it is charge the wall already sees, and it is reversible, because the particle
+        may still turn round. Left out of both the volume and the surface, it makes the total
+        charge of a particle crossing the wall swing between a half and one and a half of
+        itself, and the field inside jump by half a particle at the crossing. It is taken from
+        the same shape function and the same positions the deposit used, so the two partition
+        each particle exactly.
+        """
+        d = self.domain
+        index, weights = s2_weights(x[:, 0], d.grid[0], d.dx)
+        beyond = jnp.sum(jnp.where(index >= d.cells, weights, 0.0), axis=1)
+        charges = jnp.concatenate([jnp.full((sp.n,), sp.charge_si) for sp in self.species])
+        return jnp.sum(charges * w * beyond)
+
+    def _electrode_field(self, wall, overlap=0.0):
         """:math:`E_x` at the collector face, :math:`-\\sigma_w/\\epsilon_0`, from the charge it
-        has collected. It closes the Gauss solve of a box whose other wall is an open source
-        plane; with a symmetry plane opposite and nothing crossing it, the same number comes
-        out of global charge conservation instead."""
+        has collected and the part of the live clouds that reaches past it. It closes the Gauss
+        solve of a box whose other wall is an open source plane; with a symmetry plane opposite
+        and nothing crossing it, the same number comes out of global charge conservation instead.
+
+        Only this closure takes the overlap. The other absorbing closures fix their constant from
+        a potential difference rather than from a surface charge, and still lose the truncated
+        part; in a ten-Debye-length sheath that is 0.4 % of the electron charge and 0.6 % of the
+        ion charge, and 0.29 % of what the collector holds.
+        """
         if self.domain.field_bc != (4, 2):
             return 0.0
-        return -wall.charge([sp.charge_si for sp in self.species])[1] / epsilon_0
+        return -(wall.charge([sp.charge_si for sp in self.species])[1] + overlap) / epsilon_0
 
-    def _advance_fields(self, E, B, J, dt_half, rho, wall, electric_first):
+    def _advance_fields(self, E, B, J, dt_half, rho, wall, electric_first, overlap=0.0):
         """Half a step of the field equations.
 
         An electrostatic run solves :math:`\\partial_x E_x = \\rho/\\epsilon_0` for the field at
@@ -590,7 +659,7 @@ class Simulation:
         it. An electromagnetic run takes the symmetric half step of Maxwell's equations."""
         d, bc = self.domain, self.domain.field_bc
         if self.solver.electrostatic:
-            return E.at[:, 0].set(E_x_from_rho(rho, d.dx, bc, self._electrode_field(wall))), B
+            return E.at[:, 0].set(E_x_from_rho(rho, d.dx, bc, self._electrode_field(wall, overlap))), B
         E, B = half_step_fields(E, B, J, dt_half, d.dx, bc, electric_first)
         if self.solver.field_solver == "gauss" and not electric_first:
             E = E.at[:, 0].set(E_x_from_rho(rho, d.dx, bc))
@@ -679,7 +748,8 @@ class Simulation:
         else:
             x_integer = x
         rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
-        E = jnp.zeros((d.cells, 3)).at[:, 0].set(E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall)))
+        E = jnp.zeros((d.cells, 3)).at[:, 0].set(
+            E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall, self._overlap_charge(x_integer, w))))
         B = jnp.zeros((d.cells, 3))
         return State(E, B, x, u, w, qm, rho, key, jnp.zeros(()), jnp.zeros((), jnp.int32), wall, None), (m, q)
 
@@ -764,7 +834,8 @@ class Simulation:
         # state rather than deposited again from wrap(x^{n+1/2} - dt v/2), which is
         # the same positions, velocities and weights and so the same density.
         rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, self._current_closure(q * w * v[:, 0]), st.rho)
-        E, B = self._advance_fields(st.E, st.B, J1, dt / 2, rho_half, wall, electric_first=True)
+        E, B = self._advance_fields(st.E, st.B, J1, dt / 2, rho_half, wall, electric_first=True,
+                                    overlap=self._overlap_charge(x_half, w))
         # push with the fields at t^{n+1/2}
         u = self._accelerate(u, self._fields_at(x_half, E, B, rho_half), qm, dt)
         u = self._collide_momenta(k_collide, x_half, u, w, qm, m, dt)
@@ -783,7 +854,8 @@ class Simulation:
         # by the charge collected at the wall with no current to account for it, and the
         # discrete Gauss law would drift by that much every step.
         rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, self._current_closure(q * w * v[:, 0]), rho_half)
-        E, B = self._advance_fields(E, B, J2, dt / 2, rho_next, wall, electric_first=False)
+        E, B = self._advance_fields(E, B, J2, dt / 2, rho_next, wall, electric_first=False,
+                                    overlap=self._overlap_charge(x_next, w))
         totals = self._accumulate(st.moments, x_next, v, w)
         state = State(E, B, x_next_half, u, w, qm, rho_next, key, st.time + dt, st.steps + 1, wall, totals)
         return state, (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)

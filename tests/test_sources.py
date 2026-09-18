@@ -7,9 +7,10 @@ import numpy as np
 import pytest
 from jax import random
 
-from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, gauss_residual,
-                       mass_electron, potential, elementary_charge as e_charge, speed_of_light as c)
-from jaxincell._core import apply_particle_bc
+from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, bohm_edge, epsilon_0,
+                       gauss_residual, mass_electron, potential, elementary_charge as e_charge,
+                       speed_of_light as c)
+from jaxincell._core import apply_particle_bc, deposit
 from jaxincell._sources import _flux_cdf, _flux_quantile, crossing_flux, sample_crossing
 from jaxincell.sheath import densities, floating_potential, hobbs_wesson, source_density
 
@@ -329,6 +330,54 @@ def test_the_wall_ledger_counts_one_impact_exactly():
     assert float((arrived - kept)[1, 0]) * 0.5 * mass * (restitution * speed) ** 2 == pytest.approx(energy_out)
 
 
+def test_the_impact_spectrum_is_the_crossing_distribution_and_sums_to_the_fluence():
+    """An impact spectrum is a record of crossings, not a snapshot of who is near the wall.
+    A steady free-streaming reservoir delivers its own crossing distribution to the far wall,
+    so the spectrum has two closed forms to meet: a mean energy of 2 T_e for an isotropic
+    reservoir, and the cosine law, p(theta) = sin 2theta, for the incidence. Summing the
+    accumulator over its bins has to give back the fluence exactly, or an entry has been
+    counted twice or dropped."""
+    domain = box(cells=32, particle_bc="absorbing", field_bc="reflective")
+    bins = Impacts(energy_max=8 * e_charge, energy_bins=16, angle_bins=9)
+    species = Species("electrons", 20000, -1.0, mass_electron, 0.0,
+                      source=maxwellian_source(20, density=1e-10 * DENSITY))
+    out = Simulation(domain, [species], Solver(model="electrostatic"), impacts=bins).run(
+        1200, store_every=300, store_particles=False)
+    assert float(jnp.max(jnp.abs(out.E))) < 1e-4                  # the field is out of the way
+    spectrum = np.asarray(out.wall.spectrum)
+    window = spectrum[-1] - spectrum[-2]                          # the last quarter of the run
+    arrived = np.asarray(out.wall.arrived)
+    assert window[0, 1].sum() == pytest.approx(float(arrived[-1, 0, 1] - arrived[-2, 0, 1]), rel=1e-12)
+    assert window[0, 0].sum() == 0.0                              # nothing turns round to reach the source plane
+    right = window[0, 1]
+    assert right[-1].sum() / right.sum() < 0.01                   # 8 T_e is above almost everything
+    centres = (np.arange(16) + 0.5) * float(bins.energy_max) / 16
+    mean = (right[:-1].sum(axis=1) * centres).sum() / right[:-1].sum()
+    assert mean / e_charge == pytest.approx(2.0, rel=0.02)        # m(2 sigma_x^2 + sigma_y^2 + sigma_z^2)/2
+    edges = np.arange(10) * (np.pi / 2 / 9)
+    assert np.allclose(right.sum(axis=0) / right.sum(), np.diff(-0.5 * np.cos(2 * edges)), atol=0.01)
+    theta = 0.5 * (edges[:-1] + edges[1:])
+    assert np.degrees((right.sum(axis=0) / right.sum() * theta).sum()) == pytest.approx(45.0, abs=1.0)
+
+
+def test_a_spectrum_whose_range_is_too_small_says_so_in_its_overflow_bin():
+    """Everything above `energy_max` goes to one extra bin rather than into the last resolved
+    one, so a range that was chosen too small is visible instead of piling up on the end."""
+    domain = box(cells=16, particle_bc="absorbing", field_bc="reflective")
+    species = Species("electrons", 8000, -1.0, mass_electron, 0.0,
+                      source=maxwellian_source(20, density=1e-10 * DENSITY))
+    narrow = Impacts(energy_max=0.5 * e_charge, energy_bins=4)
+    wide = Impacts(energy_max=40 * e_charge, energy_bins=4)
+    fractions = []
+    for bins in (narrow, wide):
+        out = Simulation(domain, [species], Solver(model="electrostatic"), impacts=bins).run(
+            600, store_every=600, store_particles=False)
+        spectrum = np.asarray(out.wall.spectrum)[-1, 0, 1]
+        assert spectrum.sum() == pytest.approx(float(out.wall.arrived[-1, 0, 1]), rel=1e-12)
+        fractions.append(spectrum[-1].sum() / spectrum.sum())
+    assert fractions[0] > 0.5 and fractions[1] < 1e-3
+
+
 def test_the_wall_energy_of_a_relativistic_impact_is_the_relativistic_one():
     """m v^2/2 is not the kinetic energy of a particle at 0.9 c; (gamma - 1) m c^2 is, and
     it is three times larger. The ledger takes it from the carried momentum as
@@ -419,18 +468,55 @@ def test_a_reflecting_wall_would_hold_a_particle_for_ever_without_a_floor():
 
 # --- the electrical boundary -----------------------------------------------------------------
 
-def test_the_collector_field_is_the_charge_it_holds():
-    """E_x at the conductor face is -sigma_w/eps_0, from the charge the ledger says it has
-    collected, and that is what closes the Gauss solve when the plane opposite is an open
-    source plane and cannot impose anything."""
+def test_the_collector_field_is_the_charge_it_holds_and_the_clouds_reaching_past_it():
+    """E_x at the conductor face is -sigma_w/eps_0, and sigma_w is the charge the ledger says
+    the collector has taken **plus** the part of the live clouds that reaches past it. A cloud
+    is one and a half cells wide and so crosses the wall before its centre does; left out of
+    both the volume and the surface, that part is simply gone."""
     domain = box(cells=48, particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", 4000, -1.0, mass_electron, 0.0,
                         source=maxwellian_source(10, density=1e-3 * DENSITY))
     ions = Species("ions", 4000, 1.0, 400 * mass_electron, 0.0,
                    source=Source(density=1e-3 * DENSITY, vth=0.0, drift=(0.2 * SIGMA, 0, 0), emit=10))
-    out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(400, store_every=100)
-    sigma_w = np.asarray(out.wall.collected)[:, :, 1] @ np.array([-e_charge, e_charge])
-    assert np.allclose(np.asarray(out.E[:, -1, 0]), -sigma_w / epsilon_0, rtol=1e-10)
+    sim = Simulation(domain, [electrons, ions], Solver(model="electrostatic"))
+    out = sim.run(400, store_every=100)
+    collected = np.asarray(out.wall.collected)[:, :, 1] @ np.array([-e_charge, e_charge])
+    # from the integer-time positions the last deposit used, not the half-step ones the
+    # leapfrog carries in the state
+    overlap = float(sim._overlap_charge(out.x[-1], out.weight[-1]))
+    assert np.asarray(out.E[:, -1, 0])[-1] == pytest.approx(-(collected[-1] + overlap) / epsilon_0, rel=1e-10)
+    assert abs(overlap / collected[-1]) > 1e-4        # and it is not a rounding-sized correction
+
+
+def test_a_sheet_crossing_the_collector_takes_its_whole_charge_with_it():
+    """The deposited part and the part beyond the wall partition a particle exactly, at every
+    sub-cell offset, and the field inside does not notice the crossing. Without the second
+    part the two together swing between a half and one and a half of a particle, and the field
+    at an interior face jumps by half a particle's worth the moment the centre crosses."""
+    length, cells, dt = 1.0, 20, 1e-9
+    dx = length / cells
+    box_only = Domain(length=length, cells=cells, time_step=dt, particle_bc="absorbing",
+                      field_bc=("open", "absorbing"))
+    sheet = Species("sheet", 1, 1.0, 1e-10, 1.0 / e_charge,        # q w = 1 C/m^2, heavy and slow
+                    x=np.array([[-length / 2 + 0.2, 0.0, 0.0]]), v=np.array([[0.04 * dx / dt, 0.0, 0.0]]))
+    sim = Simulation(box_only, [sheet], Solver(model="electrostatic"))
+    # the two parts of one particle, at forty sub-cell offsets through the wall
+    for offset in np.linspace(-3.0, 0.0, 40):
+        x = jnp.array([[length / 2 + offset * dx, 0.0, 0.0]])
+        w = jnp.array([1.0 / e_charge])
+        volume = float(jnp.sum(deposit(x[:, 0], jnp.array([e_charge]) * w, box_only.grid[0], dx,
+                                       cells, box_only.particle_bc)) * dx)
+        assert volume + float(sim._overlap_charge(x, w)) == pytest.approx(1.0, rel=1e-12)
+    # and the field of the sheet at an interior face, as it approaches and crosses
+    # the leftmost face, which the sheet starts to the right of and never returns past: every
+    # charge in the box is between it and the collector, so its field is -1/eps_0 throughout
+    out = sim.run(460, store_every=1)
+    weight, field = np.asarray(out.weight)[:, 0], np.asarray(out.E)[:, 0, 0]
+    crossing = int(np.argmax(weight == 0))
+    assert 0 < crossing < len(weight) - 1                       # it really did cross, inside the run
+    assert field[0] == pytest.approx(-1.0 / epsilon_0, rel=1e-12)
+    assert np.ptp(field) < 1e-9 * abs(field[0])                 # half a particle would be 50 %
+    assert field[crossing] == pytest.approx(field[crossing - 1], rel=1e-12)
 
 
 def test_the_electrode_closure_and_a_symmetry_plane_agree_when_nothing_crosses():

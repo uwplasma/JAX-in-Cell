@@ -26,7 +26,7 @@ mass_electron = 9.1093837015e-31      # kg
 mass_proton = 1.67262192369e-27       # kg
 boltzmann_constant = 1.380649e-23     # J/K
 
-__all__ = ["Domain", "Species", "Solver", "Source", "Collisions", "BOUNDARIES"]
+__all__ = ["Domain", "Species", "Solver", "Source", "Collisions", "Impacts", "BOUNDARIES"]
 
 BOUNDARIES = {"periodic": 0, "reflective": 1, "absorbing": 2, "thermal": 3, "open": 4}
 
@@ -251,6 +251,49 @@ class Source:
     def sigma(self):
         """The three component spreads :math:`\\sigma = v_{th}/\\sqrt2` of the reservoir."""
         return jax.numpy.asarray(self.vth) / jax.numpy.sqrt(2.0)
+
+
+@pytree_dataclass(static=("energy_bins", "angle_bins"))
+class Impacts:
+    """Fixed bins for the energy and incidence of what reaches each wall.
+
+    A snapshot of the particles near a wall is not a spectrum of impacts: it repeats a
+    particle across frames, counts outgoing ones, and weights by how many happen to be
+    there rather than by how many crossed. This accumulates one entry per crossing, at the
+    moment of the crossing and at the velocity that carried the particle there, so summing
+    it back gives exactly the fluence ``Wall.arrived``.
+
+    Args:
+        energy_max: Top of the last resolved energy bin, in joules per particle. Everything
+            above it lands in one overflow bin, which is kept rather than clipped into the
+            last resolved bin, so a spectrum says when its range was too small.
+        energy_bins: Number of equal bins over :math:`[0, E_{\\max}]`. The accumulator has
+            one more, the overflow.
+        angle_bins: Number of equal bins of the incidence angle
+            :math:`\\theta = \\arctan(|v_t|/v_n)` over :math:`[0, \\pi/2]`, zero being normal
+            incidence. The angle is bounded, so it needs no overflow bin.
+    """
+    energy_max: float
+    energy_bins: int = 32
+    angle_bins: int = 18
+
+    def __post_init__(self):
+        if _template(self):
+            return
+        object.__setattr__(self, "energy_max", _float(self.energy_max))
+        _require(not _plain(self.energy_max) or self.energy_max > 0,
+                 f"energy_max is the top of the last resolved bin and must be positive, not {self.energy_max!r}")
+        _require(self.energy_bins >= 1 and self.angle_bins >= 1, "a spectrum needs at least one bin of each")
+
+    @property
+    def energy_edges(self):
+        """The ``energy_bins + 1`` edges of the resolved bins; the overflow bin is above the last."""
+        return jax.numpy.arange(self.energy_bins + 1) * (self.energy_max / self.energy_bins)
+
+    @property
+    def angle_edges(self):
+        """The ``angle_bins + 1`` edges of the incidence bins, radians."""
+        return jax.numpy.arange(self.angle_bins + 1) * (jax.numpy.pi / 2 / self.angle_bins)
 
 
 @pytree_dataclass(static=("cells", "particle_bc", "field_bc"))
