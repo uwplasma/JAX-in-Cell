@@ -57,6 +57,14 @@ theory module is justified if it removes duplicated theory from docs and example
 `_simulation.py` further needs a clearer dependency graph, not a smaller file. No plugin
 framework, no task engine, no class per boundary.
 
+Context, checked on 2026-09-18: an arXiv full-text search for "differentiable particle-in-cell"
+returns exactly one paper, this one (arXiv:2512.12160, still v1, no journal reference), and a
+GitHub topic sweep of particle-in-cell codes returns this repository as the only JAX entry. The
+nearest neighbour is `ergodicio/adept`, which has a 1D1V electrostatic `pic-1d` solver and, since
+2026-09-15, a WarpX wrapper that shells out to an external binary rather than differentiating it.
+That is the position this work has to be worth: the correctness of the claims matters more than
+the feature count.
+
 ## 2. Defect register
 
 Every row was re-checked against `research-release`. **confirmed** rows carry the check that
@@ -113,7 +121,7 @@ plainly for that reason.
 | U07 | confirmed by inspection | Energy, momentum, charge and balance histories are not in the general plot. | Restore configurable diagnostic panels separating closed invariants, open budgets and bare changes. |
 | U08 | to reproduce | Plot preprocessing can allocate very large histogram arrays and assumes evenly spaced stored times; save and show are coupled. | Bounded streaming frames, irregular schedules, independent save and show, keep the blitting. |
 | U09 | confirmed by inspection | `omega` always labels the axis `omega_pe`; `quiet` is ambiguous. | Explicit reference-frequency labels and `sampling='low_noise'`, with migration aliases that do not change physics. |
-| U10 | **confirmed (convention to re-check)** | `openpmd.py` sets `grid_global_offset=-L/2` with `position=0.0` for centres and `0.5` for faces. Under `x_i = offset + (i + position)*spacing` those are the left edge and the centre, half a cell left of the true locations. | Fix per the standard and test with an independent reader. Confirm the exact `position` semantics from the specification before changing. |
+| U10 | **confirmed** | The standard is `x_i = (gridGlobalOffset + (i + position)*gridSpacing)*gridUnitSI` with `position` in `[0,1)`, `0.0` at the lower corner of the element; openPMD-viewer, WarpX and PIConGPU all agree. `openpmd.py` sets `grid_global_offset=-L/2` with `position=0.0` for centres and `0.5` for faces -- **exactly backwards**. Centres belong at `0.5`. The stored faces are the *right* faces, `-L/2+(i+1)dx`, which is `position=1.0` and outside the allowed range. | Centres get `position=0.5`. For the right faces either shift that record's `grid_global_offset` to `-L/2+dx` with `position=0.0`, or re-index. Test with an independent reader. Note WarpX's default openPMD output writes `0.5` on every component because it cell-centres before writing, so it is **not** a usable reference for Yee staggering; PIConGPU is. |
 | U11 | confirmed by inspection | openPMD output is not a restart state and carries no source or wall context or readback example. | Native versioned restart and analysis archives plus an honest openPMD round trip. |
 | U12 | confirmed by inspection | Examples do not systematically save configuration, data, figures and provenance; documentation quotes numbers from different presets. | Provenance and controlled saves in every teaching template; regenerate documentation from the exact named preset. |
 | U13 | confirmed by inspection | PR #43's Weibel sets float32 while the comment says float64, stores large histories, and widens the unstable spectrum with no fitted linear benchmark. | Keep the engaging run; fix the precision contract and memory policy; add verified linear-mode measurements in the same script. |
@@ -157,9 +165,25 @@ nondifferentiable in the affected parameters until a validated estimator exists.
 
 - **Prescribed reservoir**: incoming characteristics set externally, outgoing particles leave;
   neither density nor flux is reset from collector losses.
-- **Schwager-Birdsall**: charge-balanced baseline injection plus the specified electron thermal
-  reflux. Confirm the prescription from the source before claiming it; the present thermal wall
-  alone is not it.
+- **Schwager-Birdsall**, now confirmed from the source and quotable. Schwager and Birdsall,
+  *Collector and source sheaths of a finite ion temperature plasma*, Phys. Fluids B **2**(5),
+  1057-1068 (1990), doi 10.1063/1.859279; the preprint UCB/ERL **M88/23** is freely readable at
+  <https://www2.eecs.berkeley.edu/Pubs/TechRpts/1988/ERL-88-23.pdf> and carries the full text.
+  The prescription is:
+  1. at `x=0`, inject **equal, steady ion and electron number fluxes**, each a **half-Maxwellian**
+     (`v>0` only) at its own source temperature, truncated at `6 v_th`;
+  2. an electron returning to `x=0` is **removed and re-injected with a velocity redrawn from that
+     half-Maxwellian** -- "refluxing". It is not specularly reflected. **Ions are not refluxed**;
+  3. refluxing is what enforces `E(x=0)=0`, by preventing charge accumulating at the source plane;
+  4. so the *emitted* electron flux exceeds the *injected* one by `exp(-psi_c)`, and the two must
+     be reported separately;
+  5. at `x=L` the collector absorbs everything and floats.
+
+  Their own control is worth copying: replacing refluxing by a hard-coded emitted flux ratio
+  `exp(psi_c)` reproduced the same potential profile and fluctuation level. Their **simulations**
+  use `m_i/m_e = 40 or 100`, not 1836 -- only the theory curves use 1836 -- with `L = 20-50
+  lambda_D`, about six grid points per Debye length, at least 400 particle electrons per Debye
+  length, and `dt ~ 0.05/omega_p`. The present thermal wall alone is not this model.
 
 A source normalisation derived to match a benchmark is a setup step. It must not become a hidden
 function of an optimisation control.
@@ -273,15 +297,27 @@ PR #43 builds a `tqdm` object inside the jitted `_run` and captures it in
 1. **The bar is trace-time state.** `_run` is `jax.jit`-ed, so its body runs once per
    compilation. The second call with the same static arguments reuses the compiled program and
    the already-closed bar. Two identical sequential runs do not both show a bar.
-2. **Callbacks are not guaranteed.** JAX documents that debug callbacks may be dropped,
-   duplicated or reordered by transformations; `ordered=True` buys ordering at the cost of
-   serialising the dispatch. Under `grad`, `vmap` or a user's own `jit`, behaviour is not the
-   plain one.
+2. **Callbacks are not guaranteed.** `jax.debug.callback`'s own docstring says the effect "could
+   be dropped, duplicated, or potentially reordered in the presence of higher-order primitives
+   and transformations". Four consequences that matter here, all documented:
+   - under `grad`, a debug callback **fires on the forward pass only**, so a bar inside a scan
+     that is later reverse-differentiated silently stops ticking on the backward pass;
+   - under `vmap` the callback is unrolled across the mapped axis, so one bar receives `B` times
+     its updates and runs to `B` times its total;
+   - `ordered=True` registers an effect that is ordered but **not shardable**, so it raises on
+     more than one device, where `io_callback(..., ordered=True)` would not;
+   - dispatch is asynchronous, so output can appear after the function has returned;
+     `jax.effects_barrier()` is needed, and `block_until_ready` is not enough.
 3. **It puts a side effect in the differentiated path**, which is exactly what the
    kernel/orchestration separation exists to prevent.
 
 `tqdm` itself is a second, smaller problem: PR #43 imports it unconditionally and it is not in
 `pyproject.toml`, so a clean install cannot import the package at all (U03).
+
+The packaged version of this approach, `jax-tqdm`, has the same shape and the same trouble: it
+avoids the closed-bar problem only by never capturing a bar, keying them instead in a module
+dictionary, and its ordering bug on multiple devices is open and unreleased for over a year. Note
+also that `jax.experimental.host_callback`, which older recipes use, was removed in JAX 0.8.0.
 
 ### 5.2 The mechanism to use
 
@@ -372,16 +408,49 @@ legacy names during migration, and reject conflicting pairs. Never warn from ins
 ### 8.1 Grazing incidence against GYRAZE (W8)
 
 Reference: Geraldini, Ewart, Brunner and Parra, *Characteristics of monotonic sheaths near a wall
-with grazing magnetic incidence*, arXiv:2508.09067, and the GYRAZE code. This is a grazing-angle,
-separated-scale kinetic model with finite electron gyro-orbits and a monotonic-potential assumption
--- not a Boltzmann-electron solver missing only kinetic electrons.
+with grazing magnetic incidence*, arXiv:2508.09067v1 (2025-08-12, 82 pp). Checked on 2026-09-18:
+still v1, no `journal_ref`, no publisher DOI, no Crossref record -- **treat it as unpublished**.
+The code is GYRAZE, <https://github.com/alessandrogeraldini/GYRAZE>, C, commit
+`bcc42e1450ca287cbb2d4e77fae8fe80f353e39f` (2025-10-02, HEAD of `main`, not a tag). Active work
+is on branch `pk/gkeyll_fixes`.
 
-First target: its figure 6, `M=3600`, `Z=1`, `bar_T_i/T_e=1`, `alpha=2.5 deg`,
+**GYRAZE has no licence file at all**, so it is legally all-rights-reserved. Run it as an
+external reference tool in its own directory and record its outputs; do not vendor, copy or
+derive from its source, and do not redistribute its data without the authors' permission.
+
+It is a grazing-angle, separated-scale kinetic model -- magnetic presheath of thickness `rho_S`
+and Debye sheath of thickness `lambda_D`, solved as asymptotically separate systems as
+`lambda_D/rho_S -> 0` -- with a monotonic-potential assumption. Electrons are gyrokinetic **in
+the Debye sheath** with finite `gamma = rho_e/lambda_D` retained; `gamma_ref = 0` reduces it to
+adiabatic Boltzmann electrons and the magnetic presheath alone, which is the 2019-paper regime.
+It is not a Boltzmann-electron solver missing only kinetic electrons.
+
+Its README states its own limits, and they bound what can be benchmarked: it "transitions to
+being very inaccurate at magnetic field angles of **5-8 degrees**", `tau` must stay **above about
+0.2**, and it converges only for monotonic potentials, failing below a critical angle that grows
+with `gamma`.
+
+First target: figure 6, `M=3600`, `Z=1`, `bar_T_i/T_e=1`, `alpha=2.5 deg`,
 `gamma=rho_e/lambda_{D,DS}=0.3`, zero net wall current. The `gamma=0.7` case sits at a critical
-boundary and is not the first validation. Use the paper's equations 133-137 for the incoming
-distributions. Generate reference numbers from the pinned author code or obtain them from the
-authors; do not digitise rendered figures, and do not vendor external code without checking its
-licence.
+boundary and is not the first validation. Any angle scan stays well below 5 degrees.
+
+Three traps found by inspecting the source rather than the documentation:
+
+- **`gammaflag` is documented after all.** `1` defines `gamma` at the Debye-sheath entrance, `0`
+  at the magnetic-presheath entrance, and the README says `0` is "ALWAYS the appropriate choice
+  for matching to a code outside of the magnetic presheath". Use `0`, and record both the flag
+  and the resulting definition in the manifest.
+- **The wall-potential sign differs between the printout and the file.** The code prints
+  `eφ_W/T_e = -0.5 v_cut^2` but stores `+0.5 v_cut^2` in `misc_output.txt`. The stored number is
+  a magnitude.
+- **The Python post-processor's column names do not match the C write order.** `misc_output.txt`
+  is written as net current, `0.5 v_cut^2`, `Q_e`, `sum Q_i`, `flux_e`, `sum flux_i`; the
+  post-processor unpacks the heat fluxes under names suggesting particle fluxes. Trust the C.
+
+Comparable outputs: `phi_n_MP.txt` and `phi_n_DS.txt` (`x, phi, n_i, n_e` on each scale),
+`Fi_W.txt` (the ion distribution at the wall, which the shipped post-processor turns into an
+energy-angle distribution), and `misc_output.txt`. Generate reference numbers by running the
+pinned commit or by asking the authors; do not digitise rendered figures.
 
 A benchmark manifest is mandatory and fails fast when incomplete: code commit and paper version;
 the selected case and the provenance and licence of the reference data; both coordinate
@@ -401,6 +470,29 @@ These parameters are not independent: varying `epsilon = lambda_D/rho_S` while h
 and the temperature ratio fixed is impossible. Any convergence sequence must say which dimensionless
 parameters move and regenerate the reference for them.
 
+**Three normalisation traps, each verified against the papers, and each enough on its own to
+invalidate a comparison:**
+
+1. **`rho_S` is the ion sound gyroradius, not the Bohm gyroradius.** The paper defines
+   `rho_S = sqrt(m_i(Z T_e + T_i))/(Z e B) = c_S/Omega_i`, while `rho_B = v_B/Omega_i` with
+   `v_B = sqrt(Z T_e/m_i)`. For `Z=1`, `rho_S/rho_B = sqrt(1+tau)`. **At the benchmark's
+   `tau = 1` they differ by `sqrt(2)`.** A PIC run normalising lengths to the cold-electron
+   `rho_B` and compared against a GYRAZE profile normalised to `rho_S` has every length wrong by
+   that factor. A third scale, the thermal `rho_i = sqrt(m_i T_i)/(ZeB)`, appears in the 2018
+   abstract; check which one a given figure axis uses.
+2. **The thermal-speed convention carries a factor of two.** The 2019 paper uses
+   `v_t,i = sqrt(2 T_i/m_i)`; this code uses `sqrt(T/m)`. Every velocity-space width differs by
+   `sqrt(2)` unless converted. The 2025 paper is not even self-consistent with the 2019 one on
+   this point, using `v_t,i = sqrt(bar_T_i/m_i)` in section 5.1.
+3. **`bar_T_i` is a width parameter, not a temperature.** The paper says so explicitly: the
+   ad-hoc distribution is non-Maxwellian and `bar_T_i` "is strictly not the ion temperature as
+   conventionally defined from a Maxwellian velocity distribution". So `tau = 1` in the ADHOC
+   runs means the width parameter equals `Z T_e`, **not** that the ions are a Maxwellian at
+   `T_i = T_e`. Injecting a genuine Maxwellian at `T_i = T_e` is a different problem.
+   Additionally the entrance distribution must satisfy the kinetic Chodura condition, which
+   forces `F_i(mu, Omega_i mu) = 0` -- no ions with zero parallel velocity at the presheath
+   entrance -- and a drifting Maxwellian generally violates it.
+
 Sequence: single-particle orbit and source-flux checks; the matched monotonic absorbing case with
 zero net collector current, stationary inventory, no source-position dependence, no overflow and
 closed balances; profile, flux, drop and impact-distribution comparison on common coordinates with
@@ -408,8 +500,17 @@ predeclared tolerances; then a scan **within** the reference's valid range.
 
 ### 8.2 Electron-field instability (W10)
 
-Reference: Beving, Hopkins and Baalrud, *Electron-field instability: excitation of electron plasma
-waves by an electric field*, Phys. Plasmas 30, 112105 (2023), doi 10.1063/5.0156041. Reported case:
+Reference, verified 2026-09-18: L. P. Beving, M. M. Hopkins and S. D. Baalrud, *Electron-field
+instability: excitation of electron plasma waves by an electric field*, Phys. Plasmas **30**(11),
+112105 (2023), doi 10.1063/5.0156041. The publisher page is paywalled; an open full text is at
+<https://www.osti.gov/pages/servlets/purl/2311492>. The instability excites electron plasma waves
+of wavelength `>~ 30 lambda_De` at a growth rate proportional to the field and, notably,
+**does not require a relative drift between electrons** -- which is precisely why the control in
+the next paragraph matters. The phrase does not appear in arXiv full text, so the paper is the
+only source; do not expect a preprint.
+
+The imposed field is **static and uniform**, so `Simulation(external_E=...)` already supports the
+driver and no time-dependent field hook is needed for this benchmark. Reported case:
 helium, `n=3e14 m^-3`, `T_e=3 eV`, `T_i=0.026 eV`, `E_0=-800 V/m`, `L=1200 lambda_D`, five cells per
 Debye length, 400 particles per cell per species, sixteen realisations. Verify every number and the
 thermal-speed convention against the publisher PDF before freezing the benchmark.
