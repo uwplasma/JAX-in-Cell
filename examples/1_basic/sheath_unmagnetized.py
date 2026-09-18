@@ -120,13 +120,44 @@ print(f"ion flow reaches c_s at {crossings} place(s)" +
       (f", {(length / 2 - float(edge)) / debye:.1f} Debye lengths from the wall" if crossings else
        ": the beam enters at Mach {:.1f}, already far above it".format(beam_speed * np.sqrt(mass_ratio))))
 
-# the densities against the local relation energy conservation gives, at the measured potential
-phi_profile = 0.5 * (phi[late:].mean(axis=0)[:-1] + phi[late:].mean(axis=0)[1:])      # at the cell centres
-phi_profile = np.concatenate([[phi[late:].mean(axis=0)[0]], phi_profile])
-reference_e, reference_i = densities(np.minimum(phi_profile, 0.0), phi_wall, beam_speed, mass_ratio)
-inside = slice(2, cells - 2)
+# The densities against the local relation energy conservation gives. Three things have to
+# line up for this to be a comparison at all:
+#
+#   * the potential has to be where the densities are. `potential(out)` is at the faces and a
+#     deposited moment is at the centres, half a cell apart, and the first centre is bounded by
+#     the left wall face, which is the zero of the gauge and is not stored;
+#   * the cutoff in n_e(phi) is the wall potential the run *reached*, while the amplitude n_e0
+#     is the reservoir it was *configured* with, chosen once from the predicted wall potential;
+#   * mean[n(phi)] is not n(mean[phi]) when phi fluctuates, and the left side is what the
+#     moments measure, so the reference is evaluated at every stored step and then averaged.
+#
+# The presheath sits a little *above* the source plane, so part of phi is positive. That is
+# inside the domain of both relations and is compared, not clipped: clipping it to zero was
+# worth several per cent and hid the disagreement rather than measuring it.
+phi_centres = np.asarray(potential(out, centres=True)) / electron_temperature
+measured_wall = float(measured.mean())
+# each frame is compared at its own wall potential, which is what turns an electron back at
+# that instant; the mean of the frames is a mean of sheaths, not the sheath of a mean
+reference = [densities(row, wall, beam_speed, mass_ratio, amplitude=amplitude)
+             for row, wall in zip(phi_centres[late:], phi[late:, -1])]
+reference_e = np.mean([r[0] for r in reference], axis=0)
+reference_i = np.mean([r[1] for r in reference], axis=0)
+inside = np.zeros(cells, bool)
+inside[2:cells - 2] = True
+mean_phi = phi_centres[late:].mean(axis=0)
+hump = int(np.argmax(mean_phi))                        # the potential maximum, if there is one
+falling = inside & (np.arange(cells) > hump)           # the monotonic stretch down to the collector
 print(f"densities against the kinetic relation n(phi): electrons {np.abs(n_e - reference_e)[inside].max():.3f}, "
       f"ions {np.abs(n_i - reference_i)[inside].max():.3f} at worst, in units of n_0")
+print(f"  at the wall potential each frame reached, with the configured source amplitude "
+      f"{amplitude:.4f} n_0, and with no clipping: {int((mean_phi > 0).sum())} of {cells} centres sit "
+      f"above the source plane, the highest at {mean_phi[hump]:+.4f} T_e/e")
+print(f"  over the fall from there to the collector, {int(falling.sum())} centres: electrons "
+      f"{np.abs(n_e - reference_e)[falling].max():.3f}, ions {np.abs(n_i - reference_i)[falling].max():.3f}")
+print("  the relation is local and assumes a monotonic drop from the plane, so the presheath hump is\n"
+      "  outside what it describes: it predicts a Boltzmann rise of "
+      f"{100 * (np.exp(mean_phi[hump]) - 1):.1f} % across the hump that the measured electron density\n"
+      "  does not show. That disagreement is a result, not a tolerance to widen.")
 
 # --- the figure ----------------------------------------------------------------------------
 distance = (length / 2 - faces) / debye

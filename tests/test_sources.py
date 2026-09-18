@@ -845,8 +845,29 @@ def test_the_kinetic_reference_solves_its_own_equations():
         assert n_e[1] == pytest.approx(0.5 * float(source_density(phi)) * np.exp(phi), rel=1e-12)
     assert float(floating_potential(0.2)) == pytest.approx(-0.7992615777938566, abs=1e-14)
     assert float(source_density(floating_potential(0.2))) == pytest.approx(1.114897194662092, rel=1e-14)
-    with pytest.raises(ValueError, match="beam_speed"):
-        floating_potential(0.5)
+    # the left side is 1 at phi = 0, not 1/2, so a root exists up to v_0 = sqrt(2/pi) = 0.7979.
+    # The bound had been half of that, and it refused beam speeds whose roots are perfectly good
+    for beam_speed, root in ((0.5, -0.13411679069319798), (0.7, -0.012507021188775884)):
+        phi = float(floating_potential(beam_speed))
+        assert phi == pytest.approx(root, abs=1e-14)
+        assert np.exp(phi) / (1 + float(jax.scipy.special.erf(np.sqrt(-phi)))) == pytest.approx(
+            np.sqrt(np.pi / 2) * beam_speed, rel=1e-7)
+    with pytest.raises(ValueError, match="sqrt\\(2/pi\\)"):
+        floating_potential(0.9)
+    # the relation has a domain, and asking outside it says so instead of clipping
+    with pytest.raises(ValueError, match="the kinetic relation holds"):
+        densities(-1.0, -0.8, 0.2, 1836.0)
+    with pytest.raises(ValueError, match="the kinetic relation holds"):
+        densities(40.0, -0.8, 0.2, 1836.0)
+    # a positive potential is inside it: the presheath of a maintained sheath sits above the
+    # source plane, and clipping it to zero was worth per cent in the density comparison
+    warm, _ = densities(0.05, -0.8, 0.2, 1836.0)
+    assert warm == pytest.approx(0.5 * float(source_density(-0.8)) * np.exp(0.05)
+                                 * (1 + float(jax.scipy.special.erf(np.sqrt(0.85)))), rel=1e-12)
+    # the amplitude and the cutoff are separate: one is what the run was configured with, the
+    # other what it reached
+    assert densities(0.0, -0.8, 0.2, 1836.0, amplitude=2.0)[0] == pytest.approx(
+        2.0 / float(source_density(-0.8)) * densities(0.0, -0.8, 0.2, 1836.0)[0], rel=1e-12)
     assert float(hobbs_wesson(1836.0)) == pytest.approx(0.5 * np.log(1836.0 / (2 * np.pi)), rel=1e-12)
     assert float(hobbs_wesson(400.0, 0.5)) == pytest.approx(float(hobbs_wesson(400.0)) - np.log(2), rel=1e-12)
 

@@ -115,7 +115,7 @@ def bohm_edge(position, flow, speed):
     return jnp.where(count > 0, position[i] + fraction * (position[i + 1] - position[i]), jnp.nan), count
 
 
-def potential(out):
+def potential(out, centres=False):
     """Electrostatic potential at the cell faces, the trapezoidal integral of the
     longitudinal field from the left wall,
     :math:`\\phi_{i+1/2} = -\\Delta x\\sum_{j\\le i} (E_{x,j-1/2} + E_{x,j+1/2})/2`.
@@ -127,7 +127,13 @@ def potential(out):
     :math:`E_{x,1/2} - \\Delta x\\,\\rho_0/\\epsilon_0`. The field solver closes two
     absorbing walls with the same rule, so between them the last entry, the potential of
     the right wall, is zero to round-off and the bulk floats above both. A periodic box
-    has no wall, so the mean is set to zero instead."""
+    has no wall, so the mean is set to zero instead.
+
+    ``centres=True`` gives it on ``Output.grid`` instead, the mean of the two faces bounding
+    each cell, which is where a density or a deposited moment lives. The left wall face, the
+    zero of the integral, is one of the two for the first cell, so that cell's value is half
+    the first stored face and not the face itself -- half a cell out and a factor of two in
+    the one place a sheath profile is steepest."""
     E = out.E[:, :, 0]
     if out.field_bc[0] == 0:
         left = E[:, -1]
@@ -137,6 +143,8 @@ def potential(out):
         left = E[:, 0] - out.dx * out.rho[:, 0] / epsilon_0
     faces = jnp.concatenate([left[:, None], E], axis=1)
     phi = -out.dx * jnp.cumsum(0.5 * (faces[:, :-1] + faces[:, 1:]), axis=1)
+    if centres:
+        phi = 0.5 * (jnp.concatenate([jnp.zeros_like(phi[:, :1]), phi[:, :-1]], axis=1) + phi)
     return phi - jnp.mean(phi, axis=1, keepdims=True) if out.field_bc[0] == 0 else phi
 
 

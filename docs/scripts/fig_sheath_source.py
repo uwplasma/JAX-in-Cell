@@ -43,9 +43,14 @@ profile = phi[late:].mean(axis=0)
 elapsed = float(out.steps[-1] - out.steps[late])          # the steps the window really spans
 window = np.asarray(out.moments[-1] - out.moments[late]) / elapsed
 n_e, n_i = window[0, 0] / DENSITY, window[1, 0] / DENSITY
-centre_phi = np.concatenate([[profile[0]], 0.5 * (profile[:-1] + profile[1:])])
-reference_e, reference_i = densities(np.minimum(centre_phi, 0.0), PHI_WALL, BEAM, MASS_RATIO)
+# the potential where the densities are, at the wall potential each frame reached, with the
+# amplitude the run was configured with, and with no clipping: see examples/1_basic for why
+centre_phi = np.asarray(potential(out, centres=True)) / T_E
 measured = phi[late:, -1]
+reference = [densities(row, wall, BEAM, MASS_RATIO, amplitude=AMPLITUDE)
+             for row, wall in zip(centre_phi[late:], measured)]
+reference_e = np.mean([r[0] for r in reference], axis=0)
+reference_i = np.mean([r[1] for r in reference], axis=0)
 collected = np.asarray(out.wall.collected)
 late_charge = collected[-1, :, 1] - collected[late, :, 1]
 

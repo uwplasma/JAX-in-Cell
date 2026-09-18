@@ -44,13 +44,21 @@ def floating_potential(beam_speed, iterations=80):
 
     .. math:: \\frac{\\exp\\phi_w}{1+\\operatorname{erf}\\sqrt{-\\phi_w}} = \\sqrt{\\pi/2}\\,v_0.
 
-    The left side falls monotonically from :math:`1/2` at :math:`\\phi_w=0` to zero, so a
-    bisection converges for any :math:`0<v_0<1/\\sqrt{2\\pi}`; the beam must still be fast
-    enough to reach the wall, :math:`v_0\\ge\\sqrt{1/(m_i/m_e)}`.
+    The left side falls monotonically from :math:`1` at :math:`\\phi_w=0` to zero, so a root
+    exists exactly when :math:`0 < \\sqrt{\\pi/2}\\,v_0 < 1`, that is
+    :math:`0 < v_0 < \\sqrt{2/\\pi} = 0.7979`, and a bisection converges for any of them.
+
+    That a root **exists** is not that the sheath is admissible. The beam has to be fast
+    enough to reach the wall at all, :math:`v_0 \\ge \\sqrt{1/(m_i/m_e)}`, and a beam entering
+    far above the sound speed has no presheath to speak of and no Bohm point, so the picture
+    behind the closed form is not the one a slow entrance gives. The bound below is the
+    algebraic one; admissibility is the caller's to check, and :func:`~jaxincell.bohm_edge`
+    is what says whether a run has an edge.
     """
     target = np.sqrt(np.pi / 2) * np.asarray(beam_speed, float)
-    if np.any(target <= 0) or np.any(target >= 0.5):
-        raise ValueError("a floating collector needs 0 < beam_speed < 1/sqrt(2 pi) = 0.3989 in units of sigma_e")
+    if np.any(target <= 0) or np.any(target >= 1.0):
+        raise ValueError("a floating collector needs 0 < beam_speed < sqrt(2/pi) = 0.7979 in units of "
+                         "sigma_e, which is where exp(phi)/[1 + erf(sqrt(-phi))] = sqrt(pi/2) v_0 has a root")
     low, high = np.full_like(target, -60.0), np.zeros_like(target)
     for _ in range(iterations):                       # 80 halvings take 60 to below 1e-16
         mid = 0.5 * (low + high)
@@ -69,7 +77,7 @@ def source_density(phi_wall):
     return 2.0 / (1 + _erfn(np.sqrt(-np.asarray(phi_wall, float))))
 
 
-def densities(phi, phi_wall, beam_speed, mass_ratio):
+def densities(phi, phi_wall, beam_speed, mass_ratio, amplitude=None):
     """Electron and ion densities where the potential is ``phi``, in units of the
     upstream density. Both follow from energy conservation alone, so this is a local
     relation a simulation can be tested against point by point, without knowing where
@@ -82,9 +90,31 @@ def densities(phi, phi_wall, beam_speed, mass_ratio):
     .. math:: n_e = \\tfrac12 n_{e0}e^{\\phi}\\,[1+\\operatorname{erf}\\sqrt{\\phi-\\phi_w}].
 
     The beam simply speeds up at fixed flux, :math:`n_i = v_0/\\sqrt{v_0^2-2\\phi/(m_i/m_e)}`.
+
+    ``phi_wall`` enters twice, and in a measurement the two are different numbers. The
+    **cutoff** :math:`\\sqrt{\\phi-\\phi_w}` is the wall potential the run actually reached,
+    because that is what turns an electron back. The **amplitude** :math:`n_{e0}` is the
+    reservoir the run was configured with, which was chosen once from a wall potential
+    predicted in advance and does not follow the run. Give the configured amplitude in
+    ``amplitude`` and the measured wall potential in ``phi_wall``; without it both are taken
+    from ``phi_wall``, which is the self-consistent solution rather than a measurement.
+
+    Domain: the electron relation needs :math:`\\phi \\ge \\phi_w` and the ion one
+    :math:`\\phi < \\tfrac12 v_0^2 (m_i/m_e)`, which at the parameters of the sheath examples
+    is :math:`\\phi < 36`. A presheath sitting a few hundredths above the source plane is well
+    inside that: **positive potentials are in the domain and are not to be clipped**, and
+    :class:`ValueError` is raised for the ones that are not.
     """
     phi, phi_wall = np.asarray(phi, float), np.asarray(phi_wall, float)
-    n_e = 0.5 * source_density(phi_wall) * np.exp(phi) * (1 + _erfn(np.sqrt(np.maximum(phi - phi_wall, 0.0))))
+    ceiling = 0.5 * beam_speed ** 2 * mass_ratio
+    if np.any(phi < phi_wall) or np.any(phi >= ceiling):
+        raise ValueError(f"the kinetic relation holds for {float(np.min(phi_wall)):.4f} <= phi < "
+                         f"{ceiling:.4f} in T_e/e, and it was asked for phi from "
+                         f"{float(np.min(phi)):.4f} to {float(np.max(phi)):.4f}. Outside it an electron "
+                         "has no turning point or the beam has stopped; quantify the excursion rather "
+                         "than clipping it back in.")
+    n_e0 = source_density(phi_wall) if amplitude is None else np.asarray(amplitude, float)
+    n_e = 0.5 * n_e0 * np.exp(phi) * (1 + _erfn(np.sqrt(phi - phi_wall)))
     return n_e, beam_speed / np.sqrt(beam_speed ** 2 - 2 * phi / mass_ratio)
 
 
