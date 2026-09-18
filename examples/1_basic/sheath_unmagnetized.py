@@ -92,7 +92,7 @@ out = simulation.run(steps, seed=0, store_every=steps // stored, store_particles
 
 # --- what came out -----------------------------------------------------------------------
 late = stored // 2                                  # average over the second half of the run
-faces = np.asarray(domain.grid) + domain.dx / 2
+faces = np.asarray(domain.faces)
 phi = np.asarray(potential(out)) / electron_temperature
 window = np.asarray(out.moments[-1] - out.moments[late]) / ((stored - late) * steps // stored)
 n_e, n_i = window[0, 0] / density, window[1, 0] / density

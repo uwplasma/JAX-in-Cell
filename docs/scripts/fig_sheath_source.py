@@ -37,7 +37,7 @@ steps = STORED * (int(TRANSITS * LENGTH / (BEAM * SIGMA) / DT) // STORED)
 simulation = sheath()
 out = simulation.run(steps, seed=0, store_every=steps // STORED, store_particles=False, moments=True)
 late = STORED // 2
-faces = np.asarray(simulation.domain.grid) + simulation.domain.dx / 2
+faces = np.asarray(simulation.domain.faces)
 phi = np.asarray(potential(out)) / T_E
 profile = phi[late:].mean(axis=0)
 window = np.asarray(out.moments[-1] - out.moments[late]) / ((STORED - late) * steps // STORED)

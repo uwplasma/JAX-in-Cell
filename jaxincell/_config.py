@@ -205,6 +205,10 @@ class Source:
             object.__setattr__(self, name, _components(getattr(self, name), name))
         _require(self.side in ("left", "right"), f"side is 'left' or 'right', not {self.side!r}")
         _require(self.emit >= 1, "a Source emits at least one particle per step")
+        _require(not _plain(self.density) or self.density >= 0,
+                 f"a Source density cannot be negative, not {self.density!r}")
+        _require(not _plain(self.min_weight) or 0 <= self.min_weight <= 1,
+                 f"min_weight is a fraction of the emitted weight, in [0, 1], not {self.min_weight!r}")
         warm = any(_plain(u) and u != 0 for u in self.vth)
         if self.beam is None:
             _require(warm or all(_plain(u) for u in self.vth),
@@ -278,6 +282,12 @@ class Domain:
         object.__setattr__(self, "particle_bc", _boundary_codes(self.particle_bc, "particle_bc"))
         object.__setattr__(self, "field_bc", _boundary_codes(self.field_bc, "field_bc"))
         _require(self.cells >= 4, "need at least four cells")
+        for name in ("length", "length_y", "length_z"):
+            value = getattr(self, name)
+            _require(not _plain(value) or value > 0, f"{name} must be positive, not {value!r}")
+        step = self.time_step if self.dt_over_dx_c is None else self.dt_over_dx_c
+        _require(not _plain(step) or step > 0,
+                 f"the time step must be positive, not {step!r}; a run goes forwards")
         for bc in (self.particle_bc, self.field_bc):
             _require((0 in bc) == (bc == (0, 0)), "a periodic wall needs a periodic partner")
         _require(3 not in self.field_bc, "a thermal wall re-emits particles; give the fields a reflective one")
@@ -304,9 +314,16 @@ class Domain:
 
     @property
     def grid(self):
-        """Cell centres :math:`x_i = -L/2 + (i + 1/2)\\Delta x`."""
+        """Cell centres :math:`x_i = -L/2 + (i + 1/2)\\Delta x`, where the densities and the
+        deposited moments live."""
         import jax.numpy as jnp
         return -self.length / 2 + (jnp.arange(self.cells) + 0.5) * self.dx
+
+    @property
+    def faces(self):
+        """The stored cell faces :math:`x_{i+1/2} = -L/2 + (i + 1)\\Delta x`, the right face of
+        each cell, where :math:`E_x` and the potential live. The left wall face is not stored."""
+        return self.grid + self.dx / 2
 
 
 @pytree_dataclass(static=("name", "n", "active", "plus_minus", "quiet", "random_positions"))
@@ -381,6 +398,9 @@ class Species:
         _require(0 <= self.active <= self.n, f"active must be between 0 and n = {self.n}, not {self.active}")
         for name in ("charge", "mass", "density", "perturbation_amplitude", "perturbation_mode"):
             object.__setattr__(self, name, _float(getattr(self, name)))
+        _require(not _plain(self.mass) or self.mass > 0, f"mass must be positive, not {self.mass!r}")
+        _require(not _plain(self.density) or self.density >= 0,
+                 f"density cannot be negative, not {self.density!r}")
         object.__setattr__(self, "reflection", _walls(self.reflection, "reflection"))
         for name in ("vth", "drift"):
             object.__setattr__(self, name, _components(getattr(self, name), name))

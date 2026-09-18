@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from jaxincell import Domain, Simulation, Solver, Species, diagnostics, load_toml
+from jaxincell import Collisions, Domain, Simulation, Solver, Source, Species, diagnostics, load_toml
 from jaxincell import mass_electron, mass_proton, speed_of_light as c
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -88,6 +88,14 @@ def test_ions_derived_from_electrons_are_differentiable_in_the_electron_thermal_
         Species.ions(n=4, density=1.0)
 
 
+def _sourced(emit=2, capacity=64, active=None):
+    """A source-fed species on an open plane, the smallest configuration a Source needs."""
+    electrons = Species("electrons", capacity, -1.0, mass_electron, 1e14, (1e6, 0.0, 0.0), active=active,
+                        source=Source(density=1e14, vth=(1e6, 0.0, 0.0), emit=emit))
+    return Simulation(Domain(length=1e-2, cells=16, particle_bc="absorbing", field_bc=("open", "absorbing")),
+                      [electrons], Solver(model="electrostatic"))
+
+
 @pytest.mark.parametrize("build, message", [
     (lambda: Species.electrons(n=0, density=1.0), "at least one particle"),
     (lambda: Species.electrons(n=4, density=1.0, x=np.zeros((3, 3))), "x must have shape"),
@@ -102,10 +110,42 @@ def test_ions_derived_from_electrons_are_differentiable_in_the_electron_thermal_
     (lambda: Solver(algorithm="leapfrog"), "algorithm is"),
     (lambda: Solver(field_solver="poisson"), "field_solver is"),
     (lambda: Solver(substeps=0), "at least one"),
+    (lambda: Domain(length=-1.0), "length must be positive"),
+    (lambda: Domain(length_y=0.0), "length_y must be positive"),
+    (lambda: Domain(time_step=-1e-12), "time step must be positive"),
+    (lambda: Domain(dt_over_dx_c=0.0), "time step must be positive"),
+    (lambda: Species("electrons", 4, -1.0, 0.0, 1.0), "mass must be positive"),
+    (lambda: Species("ions", 4, 1.0, -mass_proton, 1.0), "mass must be positive"),
+    (lambda: Species.electrons(n=4, density=-1.0), "density cannot be negative"),
+    (lambda: Source(density=-1.0, vth=1e6, emit=1), "Source density cannot be negative"),
+    (lambda: Source(density=1.0, vth=1e6, emit=1, min_weight=1.5), "min_weight is a fraction"),
+    (lambda: _sourced(emit=8, capacity=4), "into 4 slots"),
+    (lambda: Simulation(Domain(), [Species.electrons(n=4, density=1.0)],
+                        Solver(relativistic=True), Collisions(coulomb_log=10.0)), "not implemented"),
 ])
 def test_invalid_input_raises_a_value_error_that_python_O_keeps(build, message):
     with pytest.raises(ValueError, match=message):
         build()
+
+
+def test_the_three_coordinate_arrays_name_what_lives_on_them():
+    """Densities and deposited moments are on the centres, E_x and the potential on the
+    stored faces, which are the right face of each cell; the left wall face is not stored,
+    which is why the field solver takes it separately. Getting these two apart by half a cell
+    is the difference between a sheath profile that lines up with theory and one that does not,
+    so the arrays are published rather than rebuilt by hand at each call site."""
+    domain = Domain(length=2.0, cells=8)
+    centres, faces = np.asarray(domain.grid), np.asarray(domain.faces)
+    assert np.allclose(centres, -1.0 + (np.arange(8) + 0.5) * 0.25, rtol=0, atol=1e-15)
+    assert np.allclose(faces, -1.0 + (np.arange(8) + 1.0) * 0.25, rtol=0, atol=1e-15)
+    assert float(faces[-1]) == pytest.approx(1.0, abs=1e-15)          # the right wall is stored
+    assert float(faces[0] - centres[0]) == pytest.approx(0.125, abs=1e-15)
+    out = Simulation(domain, [Species.electrons(n=8, density=1e14, vth=(1e5, 0, 0), quiet=True)],
+                     Solver()).run(2)
+    assert np.allclose(np.asarray(out.grid), centres, rtol=0, atol=1e-15)
+    assert np.allclose(np.asarray(out.faces), faces, rtol=0, atol=1e-15)
+    assert np.allclose(np.asarray(out.walls), [-1.0, 1.0], rtol=0, atol=1e-15)
+    assert out.rho.shape[1] == out.grid.shape[0] == out.E.shape[1] == out.faces.shape[0]
 
 
 def test_tree_operations_stack_ensembles_and_build_in_axes():

@@ -55,7 +55,7 @@ x_i, v_i = quiet_start(particles, length, vth=(v_th_i, 0, 0))
 ions = Species("ions", particles, 1.0, mass_ratio * mass_electron, density, (v_th_i, 0, 0)).replace(x=x_i, v=v_i)
 
 late = slice(steps // 200, None)                                  # the second half of the stored steps
-distance = (length / 2 - np.asarray(domain.grid) - domain.dx / 2) / debye   # of each face from the conductor
+distance = (length / 2 - np.asarray(domain.faces)) / debye      # of each stored face from the conductor
 bins = np.linspace(-length / 2, length / 2, cells // 4 + 1)
 results = {}
 for name, (reflection, R_eff) in walls.items():

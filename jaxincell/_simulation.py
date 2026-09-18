@@ -72,9 +72,13 @@ class Wall:
 @pytree_dataclass(static=())
 class State:
     """Everything the time loop carries from one step to the next, and all that a
-    restart needs. ``run(..., state=out.state)`` continues from it: the absolute time,
-    the fields, the particles with their weights, the charge density the step begins
-    with, the random key and the wall ledger all go on unbroken.
+    restart needs. ``run(..., state=out.state)`` continues from it: the absolute time
+    and step count, the fields, the particles with their weights, the charge density the
+    step begins with, the random key and the wall ledger all go on unbroken.
+
+    ``time`` and ``steps`` are both absolute and both counted from the start of the first
+    run, not of this one. A cumulative diagnostic divides by a difference of them, never by
+    the length of an array.
 
     ``x`` is the half-step position of the leapfrog and ``u`` the momentum per unit
     mass of a relativistic run, or the velocity otherwise; the implicit scheme carries
@@ -90,6 +94,7 @@ class State:
     rho: object
     key: object
     time: object
+    steps: object
     wall: object
     moments: object
 
@@ -105,11 +110,18 @@ class Output:
     passed back to :meth:`Simulation.run` to continue; in a relativistic run it carries the
     momentum per unit mass :math:`\\gamma\\mathbf v` where ``v`` has the velocity.
 
-    ``t`` is absolute: a continued run goes on from the time its state had reached, so
-    the histories of a run split into chunks join without a shift. ``moments`` is the
-    history of the running sums of :meth:`Simulation.moments` when ``run(moments=True)``
-    asked for them, and ``None`` otherwise."""
+    ``t`` and ``steps`` are absolute: a continued run goes on from the time and the step
+    count its state had reached, so the histories of a run split into chunks join without a
+    shift, and the window between two stored states is a difference of them rather than a
+    count of array entries. ``moments`` is the history of the running sums of
+    :meth:`Simulation.moments` when ``run(moments=True)`` asked for them, and ``None``
+    otherwise.
+
+    ``grid``, ``faces`` and ``walls`` are the three coordinate arrays of the staggered grid.
+    Densities and deposited moments are on ``grid``; :math:`E_x` and the potential are on
+    ``faces``."""
     t: object
+    steps: object
     x: object
     v: object
     E: object
@@ -131,6 +143,18 @@ class Output:
     counts: tuple
     relativistic: bool
     field_bc: tuple
+
+    @property
+    def faces(self):
+        """The cell faces the staggered grid stores, :math:`x_{i+1/2} = -L/2 + (i+1)\\Delta x`:
+        the right face of each cell. The left wall face :math:`-L/2` is not among them, which is
+        why :func:`~jaxincell.potential` and the field solver take it separately."""
+        return self.grid + self.dx / 2
+
+    @property
+    def walls(self):
+        """The two wall faces, :math:`-L/2` and :math:`+L/2`."""
+        return jnp.stack([-self.length / 2, self.length / 2])
 
     def particles(self, name):
         """Positions and velocities ``(S, n, 3)`` of the species called ``name``."""
@@ -246,8 +270,19 @@ class Simulation:
     def _check_collisions(self):
         """The default Coulomb logarithm is taken from the lightest negatively charged species,
         so collisions without a given ``coulomb_log`` need one. Traced charges are skipped, as
-        in :meth:`_check_courant`, since their sign is not known until the program runs."""
-        if self.collisions is None or self.collisions.coulomb_log is not None:
+        in :meth:`_check_courant`, since their sign is not known until the program runs.
+
+        A relativistic pusher is refused outright: Takizuka and Abe pair particles by their
+        lab-frame relative velocity and rotate it through an angle whose variance is the
+        nonrelativistic Coulomb one, so the operator is not the relativistic binary collision
+        and combining the two would report a rate that belongs to neither."""
+        if self.collisions is None:
+            return
+        if self.solver.relativistic:
+            raise ValueError("Collisions() is the nonrelativistic Takizuka-Abe operator and "
+                             "Solver(relativistic=True) is the relativistic pusher; the combination is not "
+                             "implemented. Use one or the other.")
+        if self.collisions.coulomb_log is not None:
             return
         charges = [s.charge for s in self.species]
         if any(isinstance(q, jax.core.Tracer) for q in charges):
@@ -511,7 +546,13 @@ class Simulation:
                 if s.random_positions and not s.quiet:
                     x1 = random.uniform(k_x, (s.n,), minval=-L / 2, maxval=L / 2)
                 else:
-                    x1 = -L / 2 + (jnp.arange(s.n) % s.active + 0.5) * (L / s.active)
+                    # `active` is static, so `spread` is a Python int: at active = 0 every
+                    # slot is dead and its position is overwritten by the parking below, but
+                    # the expression is still traced and a division by zero would put an
+                    # infinity in the untaken branch of the weight's `where`, whose cotangent
+                    # is NaN. An empty start is a source-driven run's natural beginning.
+                    spread = max(s.active, 1)
+                    x1 = -L / 2 + (jnp.arange(s.n) % spread + 0.5) * (L / spread)
                 k = 2 * jnp.pi * s.perturbation_mode / L
                 x1 = x1 + s.perturbation_amplitude * jnp.sin(k * x1)
                 yz = (jnp.zeros((s.n, 2)) if s.quiet else
@@ -537,7 +578,7 @@ class Simulation:
                     v = v.at[:, 0].multiply(jnp.where(jnp.arange(s.n) % 2 == 0, 1.0, -1.0))
             xs.append(x)
             vs.append(v)
-            ws.append(jnp.where(jnp.arange(s.n) < s.active, s.density * L / s.active, 0.0))
+            ws.append(jnp.where(jnp.arange(s.n) < s.active, s.density * L / max(s.active, 1), 0.0))
             qs.append(jnp.full((s.n,), s.charge_si))
             ms.append(jnp.full((s.n,), s.mass))
         x, v = jnp.concatenate(xs), jnp.concatenate(vs)
@@ -571,7 +612,7 @@ class Simulation:
         rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
         E = jnp.zeros((d.cells, 3)).at[:, 0].set(E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall)))
         B = jnp.zeros((d.cells, 3))
-        return State(E, B, x, u, w, qm, rho, key, jnp.zeros(()), wall, None), (m, q)
+        return State(E, B, x, u, w, qm, rho, key, jnp.zeros(()), jnp.zeros((), jnp.int32), wall, None), (m, q)
 
     def _smooth(self, f):
         s = self.solver
@@ -674,7 +715,7 @@ class Simulation:
         rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, self._current_closure(q * w * v[:, 0]), rho_half)
         E, B = self._advance_fields(E, B, J2, dt / 2, rho_next, wall, electric_first=False)
         totals = self._accumulate(st.moments, x_next, v, w)
-        state = State(E, B, x_next_half, u, w, qm, rho_next, key, st.time + dt, wall, totals)
+        state = State(E, B, x_next_half, u, w, qm, rho_next, key, st.time + dt, st.steps + 1, wall, totals)
         return state, (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
     def _implicit_step(self, st, extra):
@@ -761,7 +802,7 @@ class Simulation:
         B_new = B - dt * curl_E(0.5 * (E + E_new), B, dx, bc)
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
         v = self._velocity(u)
-        return (State(E_new, B_new, x, u, w, qm, rho_next, key, st.time + dt, wall,
+        return (State(E_new, B_new, x, u, w, qm, rho_next, key, st.time + dt, st.steps + 1, wall,
                       self._accumulate(st.moments, x, v, w)),
                 (x, v, w, E_new, B_new, J, rho_next))
 
@@ -814,12 +855,13 @@ def _run(sim, steps, seed, store_every, store_particles, moments, state):
         (carry, (x, v, w, E, B, J, rho)), _ = lax.scan(advance, (carry, placeholder), None, length=store_every)
         if not store_particles:
             x = v = w = None
-        return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.moments)
+        return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.steps, carry.moments)
 
-    carry, (x, v, w, E, B, J, rho, wall, t, totals) = lax.scan(chunk, carry0, None, length=steps // store_every)
+    carry, (x, v, w, E, B, J, rho, wall, t, n, totals) = lax.scan(chunk, carry0, None,
+                                                                 length=steps // store_every)
     d = sim.domain
     m, q = extra
-    return Output(t=t, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,
+    return Output(t=t, steps=n, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,
                   length=d.length, charge=q, mass=m, weight=w, wall=wall, moments=totals,
                   species=jnp.concatenate([jnp.full((s.n,), i) for i, s in enumerate(sim.species)]),
                   state=carry, names=tuple(s.name for s in sim.species), counts=tuple(s.n for s in sim.species),

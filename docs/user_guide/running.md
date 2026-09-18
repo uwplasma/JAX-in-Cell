@@ -31,6 +31,27 @@ hotter = simulation.replace(species=(electrons.replace(vth=(2e6, 0, 0)), ions))
 output = hotter.run(1000, seed=0)     # no recompilation
 ```
 
+## Where a quantity lives
+
+The grid is staggered, and the output publishes both coordinate arrays rather than
+leaving each call site to rebuild one:
+
+| array | length | holds |
+|---|---|---|
+| `output.grid` | `cells` | cell centres $x_i = -L/2 + (i+\tfrac12)\Delta x$: `rho`, the deposited moments, $B$ |
+| `output.faces` | `cells` | the stored faces $x_{i+1/2} = -L/2 + (i+1)\Delta x$, the right face of each cell: $E$, the potential |
+| `output.walls` | 2 | the two wall faces, $\pm L/2$ |
+
+The left wall face $-L/2$ is not among `faces`, which is why
+{func}`~jaxincell.potential` and the field solver take its value separately.
+{class}`~jaxincell.Domain` carries `grid` and `faces` too, so a script can lay out its
+axes before it runs anything.
+
+`output.t` and `output.steps` are both absolute: they count from the beginning of the
+first run, not of this one, so a restart's histories join on without a shift and a mean
+over a window is a difference divided by a difference of `steps`, never by the length of
+an array.
+
 ## Memory
 
 The particle history is almost always the binding constraint, not speed. Its size is

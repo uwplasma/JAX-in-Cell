@@ -23,7 +23,7 @@ x_i, v_i = quiet_start(PARTICLES, LENGTH, vth=(V_I, 0, 0))
 ions = Species("ions", PARTICLES, 1.0, MASS_RATIO * mass_electron, DENSITY, (V_I, 0, 0)).replace(x=x_i, v=v_i)
 
 late = slice(STEPS // 200, None)
-distance = (LENGTH / 2 - np.asarray(domain.grid) - domain.dx / 2) / DEBYE
+distance = (LENGTH / 2 - np.asarray(domain.faces)) / DEBYE
 bins = np.linspace(-LENGTH / 2, LENGTH / 2, CELLS // 4 + 1)
 centres = (LENGTH / 2 - 0.5 * (bins[:-1] + bins[1:])) / DEBYE
 theory = 0.5 * np.log(MASS_RATIO / (2 * np.pi))

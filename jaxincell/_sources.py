@@ -139,6 +139,12 @@ def check_sources(species, solver, domain):
     if 0 in domain.particle_bc or 0 in domain.field_bc:
         raise ValueError("a Source needs walls: a periodic box has no plane to supply plasma through.")
     for s in species:
-        if s.source is not None and domain.particle_bc[0 if s.source.side == "left" else 1] != 2:
+        if s.source is None:
+            continue
+        if domain.particle_bc[0 if s.source.side == "left" else 1] != 2:
             raise ValueError(f"the {s.source.side} wall must be particle_bc='absorbing' for a Source on it: "
                              "a reservoir takes back whatever reaches it.")
+        if s.source.emit > s.n:
+            raise ValueError(f"species {s.name!r} emits {s.source.emit} particles a step into {s.n} slots. "
+                             "Species.n is the capacity of the pool, and it has to hold every particle alive "
+                             "at once: at least emit times the longest residence time in steps.")

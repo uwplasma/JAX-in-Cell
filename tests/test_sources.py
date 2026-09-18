@@ -173,6 +173,37 @@ def test_active_separates_the_initial_population_from_the_capacity():
         Species.electrons(n=10, active=11, density=DENSITY)
 
 
+def test_an_empty_start_is_safe_under_jit_grad_and_vmap():
+    """`active=0` is how a source-driven run naturally begins: an empty box that the
+    reservoir fills. Every slot is then dead, and the initial spacing and weight divide by
+    `active`. Both divisions sit in the untaken branch of a `where`, so a forward run
+    survives them -- but the cotangent of `where(False, inf, 0)` is NaN, and an empty start
+    is exactly the configuration an optimisation over a source would use."""
+    domain = box(cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
+
+    def field_energy(species_density, source_density):
+        species = Species("electrons", 200, -1.0, mass_electron, species_density, (SIGMA, 0, 0), active=0,
+                          source=maxwellian_source(4, density=source_density))
+        return jnp.sum(Simulation(domain, [species], Solver(model="electrostatic")).run(8).E ** 2)
+
+    state, _ = Simulation(domain, [Species("electrons", 200, -1.0, mass_electron, DENSITY, (SIGMA, 0, 0),
+                                           active=0, source=maxwellian_source(4))],
+                          Solver(model="electrostatic")).initial_state(random.PRNGKey(0))
+    assert float(jnp.sum(state.w)) == 0.0                      # nothing is alive at t = 0
+    assert np.all(np.isfinite(np.asarray(state.x)))
+    energy = float(field_energy(DENSITY, DENSITY))
+    assert np.isfinite(energy) and energy > 0                  # the source has filled some of the box
+    # an empty start does not depend on the species density, and says so with a zero
+    assert float(jax.grad(field_energy, argnums=0)(DENSITY, DENSITY)) == 0.0
+    slope = float(jax.grad(field_energy, argnums=1)(DENSITY, DENSITY))
+    assert np.isfinite(slope) and slope != 0.0
+    seeds = jax.vmap(lambda seed: jnp.sum(Simulation(
+        domain, [Species("electrons", 200, -1.0, mass_electron, DENSITY, (SIGMA, 0, 0), active=0,
+                         source=maxwellian_source(4))],
+        Solver(model="electrostatic")).run(8, seed=seed).E ** 2))(jnp.arange(3))
+    assert np.all(np.isfinite(np.asarray(seeds))) and np.all(np.asarray(seeds) > 0)
+
+
 # --- what the walls take out ----------------------------------------------------------------
 
 def test_the_wall_ledger_counts_one_impact_exactly():
@@ -369,6 +400,10 @@ def test_the_clock_is_absolute_and_a_run_split_in_two_is_the_run_taken_whole():
     rest = sim.run(80, store_every=40, moments=True, state=first.state)
     assert float(first.t[-1]) == pytest.approx(40 * domain.dt, rel=1e-12)
     assert np.allclose(np.asarray(rest.t), np.asarray(whole.t[1:]), rtol=1e-12)
+    # the step count is absolute too, so a cumulative window is a difference of counts and
+    # never the length of an array
+    assert list(np.asarray(whole.steps)) == [40, 80, 120]
+    assert list(np.asarray(first.steps)) == [40] and list(np.asarray(rest.steps)) == [80, 120]
     assert np.allclose(np.asarray(rest.E[-1]), np.asarray(whole.E[-1]), rtol=1e-12, atol=0)
     assert np.allclose(np.asarray(rest.state.w), np.asarray(whole.state.w), rtol=1e-12, atol=0)
     assert np.allclose(np.asarray(rest.wall.injected[-1]), np.asarray(whole.wall.injected[-1]), rtol=1e-12)

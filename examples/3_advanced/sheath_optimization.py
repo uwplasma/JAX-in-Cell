@@ -101,7 +101,7 @@ if oblique:
 
 # Two fixed Gaussian sensors, one in the plasma and one in the sheath, both well inside the
 # box and both of a fixed physical width, so that neither moves if the grid is refined.
-faces = np.asarray(domain.grid) + domain.dx / 2
+faces = np.asarray(domain.faces)
 
 
 def sensor(centre, width):
