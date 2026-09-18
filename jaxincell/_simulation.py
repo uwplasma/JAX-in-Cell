@@ -857,8 +857,8 @@ def _run(sim, steps, seed, store_every, store_particles, moments, state):
             x = v = w = None
         return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.steps, carry.moments)
 
-    carry, (x, v, w, E, B, J, rho, wall, t, n, totals) = lax.scan(chunk, carry0, None,
-                                                                 length=steps // store_every)
+    chunks = steps // store_every
+    carry, (x, v, w, E, B, J, rho, wall, t, n, totals) = lax.scan(chunk, carry0, None, length=chunks)
     d = sim.domain
     m, q = extra
     return Output(t=t, steps=n, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,
