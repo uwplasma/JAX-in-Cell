@@ -22,10 +22,10 @@
     },
     "fig_bump_on_tail.py": {
       "backend": "cpu",
-      "git": "22c63b7d8fd86e5036135a3d98a117f1bd79bad9-dirty",
+      "git": "254fafe45ef2603bdf09db47e53a4deab6c5f0d3-dirty",
       "jax": "0.11.1",
       "jax_enable_x64": true,
-      "jaxincell": "unknown",
+      "jaxincell": "0.2.dev131+g11f9c94b9",
       "numpy": "2.5.3",
       "platform": "Darwin arm64",
       "scipy": "1.18.1"
