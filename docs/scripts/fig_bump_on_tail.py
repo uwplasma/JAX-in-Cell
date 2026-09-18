@@ -8,7 +8,7 @@ from dispersion import electrostatic_epsilon, newton, plasma_frequency
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron,
                        elementary_charge as e_charge, speed_of_light as c)
 
-LENGTH, CELLS, MODE, STEPS = 1.0, 128, 5, 2000
+LENGTH, CELLS, MODE, STEPS = 1.0, 128, 5, 2400
 OMEGA_PE = 0.05 * c * CELLS / LENGTH
 DENSITY = OMEGA_PE ** 2 * epsilon_0 * mass_electron / e_charge ** 2
 BEAM_FRACTION, BEAM_DRIFT_OVER_VTH, BEAM_WIDTH = 0.03, 5.0, 0.7

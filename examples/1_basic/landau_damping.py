@@ -37,7 +37,7 @@ output = simulation.run(500, seed=0, store_particles=False)
 
 t = np.asarray(output.t) * omega_pe
 amplitude = np.abs(np.fft.rfft(np.asarray(output.E[:, :, 0]), axis=1)[:, 1]) / cells
-floor = amplitude[400:].mean()                        # discrete-particle noise
+floor = amplitude[int(0.8 * amplitude.size):].mean()   # discrete-particle noise, over the last fifth
 i = np.arange(1, t.size - 1)
 peaks = i[(amplitude[1:-1] > amplitude[:-2]) & (amplitude[1:-1] > amplitude[2:]) & (amplitude[1:-1] > 5 * floor)]
 gamma = np.polyfit(t[peaks], np.log(amplitude[peaks]), 1)[0]

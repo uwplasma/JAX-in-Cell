@@ -54,9 +54,11 @@ def fit(t, amplitude):
     return slope, 1 - np.var(residual) / np.var(np.log(amplitude[window]))
 
 
-# (a) several wavelengths in one box, nothing seeded: the cutoff sorts the modes
+# (a) several wavelengths in one box, nothing seeded: the cutoff sorts the modes.
+# The same setup as examples/2_intermediate/weibel.py, which the documentation says it is.
+CELLS_A, STEPS_A, N_A = 128, 4000, 40000
 length = 4.0 * 2 * np.pi / K_C
-output = simulate(length, cells=128, steps=4000, n=40000, store_every=40,
+output = simulate(length, cells=CELLS_A, steps=STEPS_A, n=N_A, store_every=40,
                   store_particles=True, quiet=False)
 t = np.asarray(output.t) * OMEGA_PE
 B_k = np.abs(np.fft.rfft(np.asarray(output.B[:, :, 1]), axis=1))
@@ -105,7 +107,7 @@ savefig(fig, "weibel")
 
 deviation = 100 * np.abs(measured[clean] - predicted[clean]) / predicted[clean]
 energy = np.asarray(diagnostics(output)["total"])
-record(weibel_anisotropy=RATIO, weibel_particles=40000, weibel_cells=128, weibel_steps=4000,
+record(weibel_anisotropy=RATIO, weibel_particles=N_A, weibel_cells=CELLS_A, weibel_steps=STEPS_A,
        weibel_courant=0.5, weibel_t_end=round(float(t[-1]), 0),
        weibel_kc_c_over_wpe=round(float(np.sqrt(RATIO - 1)), 3),
        weibel_seed_amplitude=1e-3,

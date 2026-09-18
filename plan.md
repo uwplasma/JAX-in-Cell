@@ -16,10 +16,28 @@ maintainer chooses the integration order. New commits are authored and committed
 `Rogerio Jorge <rogerio.jorge@ist.utl.pt>`, with no AI author or co-author trailers, and no
 existing human attribution is rewritten.
 
-What to take from PR #43: the larger Weibel domain and mode spectrum, the longer bump-on-tail
-and Landau runs, the bigger magnetised-sheath quick settings, and the intent of a progress
-meter. Each is ported with the corrections in this plan (U13 for Weibel's precision and memory,
-section 5 for the meter), not copied.
+What was taken from PR #43, and what was not. Each was measured before deciding, so the
+decisions below are results and not preferences.
+
+* **Weibel: not ported; deferred to W9 with a reason.** The enlargement was built and run --
+  twelve marginal wavelengths, 24 cells per wavelength, 12000 steps, 120000 particles, 75 s -- and
+  it destroys the only quantitative claim the example makes. See E02. What was kept is the
+  precision contract: the script said double precision was "what the conservation checks rely on"
+  and it has no conservation checks, so the comment now says what is true and what was measured,
+  that single precision gives the same gains to five digits and is 7 % faster.
+* **Bump-on-tail: ported.** 2000 to 2400 steps. The fit window is anchored on the peak, so the rate
+  is unchanged at 0.1370; the extra steps buy the plateau in the right-hand panel.
+* **Landau: not ported.** 500 to 800 steps makes the reproduction *worse*, from -0.1523 to -0.1433
+  against the kinetic -0.1533, and the reason is a defect in the example rather than in the step
+  count. See E01. The example's hard-coded `amplitude[400:]` was replaced by the relative window the
+  figure script and the test already use, which is the same index at 500 steps and no longer silently
+  tied to it.
+* **Magnetised-sheath quick settings: not ported.** Three angles, 128 cells, 1.6 transits and three
+  times the pool would take the CI example job from 23 s to about four and a half minutes, to improve
+  the statistics of a quantity S02 shows is not an impact spectrum at all. S16 already rules that
+  quick is a smoke preset; the third angle and the longer run are in the full preset already.
+  Revisit at W7, once the measurement is real.
+* **The progress meter** is not a port. Section 5 and W4.
 
 ### 0.1 What completion means
 
@@ -146,6 +164,13 @@ plainly for that reason.
 | U12 | confirmed by inspection | Examples do not systematically save configuration, data, figures and provenance; documentation quotes numbers from different presets. | Provenance and controlled saves in every teaching template; regenerate documentation from the exact named preset. |
 | U13 | confirmed by inspection | PR #43's Weibel sets float32 while the comment says float64, stores large histories, and widens the unstable spectrum with no fitted linear benchmark. | Keep the engaging run; fix the precision contract and memory policy; add verified linear-mode measurements in the same script. |
 | U14 | open | The requested numerical-comparison and output/restart examples do not exist. | Implement the inventory of section 6 without four copies of the PIC setup. |
+
+### 2.4 Found while porting PR #43
+
+| ID | Status | Finding | Required correction |
+|---|---|---|---|
+| E01 | **confirmed** | `landau_damping.py` estimates the noise floor from the last fifth of the run, which at 500 steps is still decaying: it returns 92.2 V/m where the floor is nearer 29. The `> 5 x floor` cut then keeps 5 maxima and the fit gives -0.1523 against the kinetic -0.1533, which looks like agreement. At 800 steps the same rule returns 29.3, admits 9 maxima of which four sit on the floor, and the fit degrades to -0.1433. `fig_landau_damping.py` and `test_landau_damping_matches_the_kinetic_root` use the same rule at the same 500 steps, so the three agree only because none of them was ever lengthened. | Measure the floor where the amplitude has stopped falling rather than in a fixed fraction of the run, and drop maxima at or below it, so the step count stops being load-bearing. Re-measure the example, the figure and the test together (W9). |
+| E02 | **confirmed** | The wider Weibel box breaks panel (a)'s threshold test, and no run length repairs it. In a box of twelve marginal wavelengths the low-`k` modes saturate the anisotropy before the modes near the cutoff have grown, and the nonlinear stage fills the whole spectrum: over 24 truncations from `t w_pe` = 16 to 321 the smallest gain below the cutoff exceeds the largest gain above it at four, none of them robust. Reading the same `k/k_c` values the present example uses (modes 3, 6, 9 against 12 to 24) it separates from 51 to 131 with a margin of 5.5 against 3.5, and fails again at 107; the four-wavelength box gives 9.11 against 4.09. Peak-over-initial gain does not repair it either: modes at `k/k_c` 1.25 and 1.42 peak at 8.6 and 12.3, above the unstable modes at 0.75 and 0.92, which peak at 7.7 and 8.0. | The threshold demonstration wants a narrow box, and the engaging nonlinear run wants a diagnostic that survives saturation. W9 gets both: keep the four-wavelength threshold test as it stands, and add the wide run with per-mode fitted linear rates against the kinetic root, which needs the dispersion solver that today lives only in `docs/scripts`. A gain ratio is not a growth rate once a mode has saturated. |
 
 ## 3. W2 contracts: sources, collectors, events
 

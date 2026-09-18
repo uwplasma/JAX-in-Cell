@@ -24,7 +24,7 @@ import numpy as np
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron,
                        elementary_charge as e_charge, speed_of_light as c)
 
-length, cells, mode, steps = 1.0, 128, 5, 2000
+length, cells, mode, steps = 1.0, 128, 5, 2400
 omega_pe = 0.05 * c * cells / length
 density = omega_pe ** 2 * epsilon_0 * mass_electron / e_charge ** 2
 beam_fraction, beam_drift_over_vth, beam_width = 0.03, 5.0, 0.7
