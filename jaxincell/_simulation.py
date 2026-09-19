@@ -14,6 +14,7 @@ from jax.scipy.special import erfinv
 from ._collisions import collide, coulomb_logarithm
 from ._config import Collisions, Domain, Solver, Species, pytree_dataclass
 from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
+from ._progress import reporter
 from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, s2_weights,
                     current_from_continuity, curl_B, curl_E, deposit, gather, half_step_fields, smooth,
                     to_centres, to_faces, wall_faces_E, with_ghosts, wrap_positions)
@@ -392,6 +393,14 @@ class Simulation:
 
     # -- derived quantities -------------------------------------------------------
     @property
+    def per_particle(self):
+        """The mass and the charge of every slot, which every step needs and which do not depend
+        on the state. Continuing from one therefore does not have to build a whole initial state
+        and throw it away, which at a hundred thousand slots is not free."""
+        return (jnp.concatenate([jnp.full((s.n,), s.mass) for s in self.species]),
+                jnp.concatenate([jnp.full((s.n,), s.charge_si) for s in self.species]))
+
+    @property
     def blocks(self):
         starts = np.cumsum([0] + [s.n for s in self.species])
         return tuple((int(a), int(s.n)) for a, s in zip(starts, self.species))
@@ -767,7 +776,7 @@ class Simulation:
     def initial_state(self, key):
         d = self.domain
         L, dx, dt = d.length, d.dx, d.dt
-        xs, vs, qs, ms, ws = [], [], [], [], []
+        xs, vs, ws = [], [], []
         for s in self.species:
             key, k_x, k_y, k_v = random.split(key, 4)
             if s.x is not None:
@@ -809,10 +818,8 @@ class Simulation:
             xs.append(x)
             vs.append(v)
             ws.append(jnp.where(jnp.arange(s.n) < s.active, s.density * L / max(s.active, 1), 0.0))
-            qs.append(jnp.full((s.n,), s.charge_si))
-            ms.append(jnp.full((s.n,), s.mass))
         x, v = jnp.concatenate(xs), jnp.concatenate(vs)
-        w, q, m = jnp.concatenate(ws), jnp.concatenate(qs), jnp.concatenate(ms)
+        w, (m, q) = jnp.concatenate(ws), self.per_particle
         u = self._momentum(v)
         v = self._velocity(u)
         qm = q / m
@@ -1065,7 +1072,8 @@ class Simulation:
                 (x, v, w, E_new, B_new, J, rho_next))
 
     # -- the run ---------------------------------------------------------------------------------
-    def run(self, steps, seed=0, store_every=1, store_particles=True, moments=False, state=None):
+    def run(self, steps, seed=0, store_every=1, store_particles=True, moments=False, state=None,
+            verbose=False):
         """Advance ``steps`` time steps and return an :class:`Output`.
 
         Args:
@@ -1086,6 +1094,13 @@ class Simulation:
                 into chunks is the run taken whole. The simulation it is passed to must
                 have the same grid, species layout and integrator; physical parameters
                 may differ, which is how an experiment changes a control part-way through.
+            verbose: Report progress to stderr while the run goes on: ``True`` for the
+                built-in meter, or anything to call with the number of steps finished and
+                the number there are (:func:`~jaxincell._progress.reporter`). The run is
+                then split into about twenty groups on the host and blocks once per group,
+                which costs about 1.5 % and leaves the arrays bit-for-bit what a silent run
+                gives. It turns itself off when anything is traced, so ``jax.jit``,
+                ``jax.grad`` and ``jax.vmap`` of a run are silent whatever is asked for.
         """
         if store_every < 1 or steps % store_every:
             raise ValueError(f"steps ({steps}) must be a multiple of store_every ({store_every}), "
@@ -1094,23 +1109,24 @@ class Simulation:
         if level not in (False, None, *self.MOMENT_LEVELS):
             raise ValueError(f"moments is False, True, or one of {', '.join(map(repr, self.MOMENT_LEVELS))}, "
                              f"not {moments!r}")
-        return _run(self, steps, seed, store_every, store_particles, level or None, state)
+        # a meter has nothing to report from inside a trace, and would put a side effect in the
+        # differentiated path; under jit, grad or vmap it turns itself off without being asked
+        traced = any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves((self, state, seed)))
+        meter = None if traced else reporter(verbose, steps)
+        return _run(self, steps, seed, store_every, store_particles, level or None, state, meter)
 
 
-@partial(jax.jit, static_argnames=("steps", "store_every", "store_particles", "moments"))
-def _run(sim, steps, seed, store_every, store_particles, moments, state):
-    key = random.PRNGKey(seed)
-    carry0, extra = sim.initial_state(key)
-    if state is not None:
-        carry0 = state
-    if moments:
-        carry0 = carry0.replace(moments=jnp.zeros((len(sim.species), sim.MOMENT_LEVELS[moments],
-                                                   sim.domain.cells))
-                                if carry0.moments is None else carry0.moments)
-    step = sim._explicit_step if sim.solver.algorithm == "explicit" else sim._implicit_step
-    step = partial(step, extra=extra)
+@partial(jax.jit, static_argnames=("chunks", "store_every", "store_particles"))
+def _advance(sim, carry, extra, chunks, store_every, store_particles):
+    """``chunks * store_every`` steps from ``carry``, keeping the state at the end of each chunk.
+
+    This is the whole loop, and it is the only compiled thing here. A run of one group is the
+    fused scan the code has always run; a run of several is the same program called several
+    times, which the state makes identical -- the guarantee a restart already rests on."""
+    step = partial(sim._explicit_step if sim.solver.algorithm == "explicit" else sim._implicit_step,
+                   extra=extra)
     # an output, overwritten before it is read
-    placeholder = (carry0.x, carry0.u, carry0.w, carry0.E, carry0.B, jnp.zeros_like(carry0.E), carry0.rho)
+    placeholder = (carry.x, carry.u, carry.w, carry.E, carry.B, jnp.zeros_like(carry.E), carry.rho)
 
     def advance(pair, _):
         return step(pair[0]), None
@@ -1124,15 +1140,54 @@ def _run(sim, steps, seed, store_every, store_particles, moments, state):
         return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.steps, carry.sigma,
                        carry.moments)
 
+    return lax.scan(chunk, carry, None, length=chunks)
+
+
+def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose):
+    """Drive :func:`_advance`, in one group or in several with a meter between them."""
+    carry, extra = sim.initial_state(random.PRNGKey(seed)) if state is None else (state, sim.per_particle)
+    if moments:
+        carry = carry.replace(moments=jnp.zeros((len(sim.species), sim.MOMENT_LEVELS[moments],
+                                                 sim.domain.cells))
+                              if carry.moments is None else carry.moments)
     chunks = steps // store_every
-    carry, (x, v, w, E, B, J, rho, wall, t, n, sigma, totals) = lax.scan(chunk, carry0, None, length=chunks)
-    d = sim.domain
-    m, q = extra
+    histories, done = [], 0
+    try:
+        for count in _groups(chunks, verbose):
+            carry, history = _advance(sim, carry, extra, count, store_every, store_particles)
+            histories.append(history)
+            if verbose is not None:
+                done += count * store_every
+                jax.block_until_ready(carry.E)             # the meter reports finished work
+                verbose(done, steps)
+    finally:
+        getattr(verbose, "close", lambda: None)()          # an interrupt leaves a usable terminal
+    x, v, w, E, B, J, rho, wall, t, n, sigma, totals = _join(histories)
+    d, (m, q) = sim.domain, extra
     return Output(t=t, steps=n, sigma=sigma, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,
                   length=d.length, charge=q, mass=m, weight=w, wall=wall, moments=totals,
                   species=jnp.concatenate([jnp.full((s.n,), i) for i, s in enumerate(sim.species)]),
                   state=carry, names=tuple(s.name for s in sim.species), counts=tuple(s.n for s in sim.species),
                   relativistic=sim.solver.relativistic, field_bc=d.field_bc)
+
+
+def _groups(chunks, verbose):
+    """How to split the chunks: one group when nothing is watching, and otherwise as few as give
+    about twenty updates -- a number of its own, not the snapshot schedule's, so that how often
+    progress is reported and how often a state is kept are independent choices."""
+    if verbose is None or chunks < 2:
+        return (chunks,)
+    count = min(20, chunks)
+    edges = [round(i * chunks / count) for i in range(count + 1)]
+    return tuple(b - a for a, b in zip(edges, edges[1:]) if b > a)
+
+
+def _join(histories):
+    """The groups' histories end to end, which for one group is that group's."""
+    if len(histories) == 1:
+        return histories[0]
+    return tuple(None if parts[0] is None else jax.tree.map(lambda *a: jnp.concatenate(a), *parts)
+                 for parts in zip(*histories))
 
 
 def load_toml(path):

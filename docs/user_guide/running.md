@@ -11,12 +11,48 @@ output = simulation.run(steps, seed=0, store_every=1, store_particles=True, stat
 | `store_every` | keep every n-th state |
 | `store_particles` | keep the particle histories, which are the bulk of the memory |
 | `state` | a previous `Output.state` to continue from |
+| `verbose` | report progress while the run goes on: `True`, or anything to call with `(done, total)` |
 
 The whole loop — initialisation, deposition, field solve, push, boundaries,
 diagnostics — is one `jax.jit`-compiled program built around `lax.scan`. The first
 call compiles, which takes a second or two; subsequent calls with the same
 `steps`, `store_every` and `store_particles` reuse it, even when the physical
 parameters change.
+
+## Saying how far it has got
+
+```python
+output = simulation.run(200000, verbose=True)
+```
+
+writes a line to stderr that is rewritten as the run goes — steps done, per cent, rate,
+elapsed and an estimate of what is left — and a fresh line each time when the stream is a
+log rather than a terminal.
+
+The meter is on the **host**, outside anything traced. The run is split into about twenty
+groups, each the same compiled program, and the state carries everything between them, so a
+verbose run is a silent run bit for bit; that is the same guarantee a restart rests on. It
+costs about 1.3 %, measured on a 2000-step run of 200000 particles. How often it reports is
+its own choice and not `store_every`'s.
+
+Putting a bar inside the loop with `jax.debug.callback` instead is the obvious thing and it
+does not work: `run` is `jit`-ed, so its body runs once per *compilation*, and a bar built
+there is trace-time state — a second identical call reuses the compiled program and the bar
+closed at the end of the first, and reports nothing. Beyond that a debug callback fires on
+the forward pass only under `grad`, is unrolled across the mapped axis under `vmap`, raises
+on more than one device when ordered, and dispatches asynchronously.
+
+`verbose` takes anything callable, which is how a `tqdm` bar goes in without `tqdm` becoming
+a dependency of this package:
+
+```python
+bar = tqdm.tqdm(total=steps)
+out = simulation.run(steps, verbose=lambda done, total: bar.update(done - bar.n))
+```
+
+Under `jax.jit`, `jax.grad` or `jax.vmap` the meter turns itself off without being asked:
+there is nothing to report from inside a trace, and a side effect has no business in the
+differentiated path.
 
 ## What is static and what is not
 

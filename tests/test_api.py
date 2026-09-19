@@ -75,7 +75,11 @@ def test_runs_are_reproducible_and_seeds_matter():
     else:
         assert np.allclose(np.asarray(a.x), np.asarray(b.x), rtol=1e-12, atol=1e-12 * sim.domain.length)
     assert not np.allclose(np.asarray(a.x), np.asarray(other.x), rtol=1e-6, atol=0)
-    assert a.x.shape == (20, 800, 3) and a.E.shape == (20, 16, 3) and float(a.t[0] / a.dt) == 1.0
+    assert a.x.shape == (20, 800, 3) and a.E.shape == (20, 16, 3)
+    # the first stored time is one step. `Output.dt` is worked out on the host and the clock
+    # inside the loop by XLA, from the same expression on the same numbers, so the two can differ
+    # in the last bit and comparing them for equality would be comparing evaluators
+    assert float(a.t[0] / a.dt) == pytest.approx(1.0, rel=1e-15, abs=0)
 
 
 @pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
@@ -121,6 +125,83 @@ def test_store_every_store_particles_and_restart():
     assert np.allclose(np.asarray(second.E[-1]), np.asarray(full.E[-1]), rtol=1e-10, atol=1e-10 * scale)
     light = sim.run(10, seed=2, store_particles=False)
     assert light.x is None and light.E.shape == (10, 16, 3)
+
+
+def test_a_progress_meter_reports_without_changing_the_run(capsys):
+    """A long run has to say how far it has got, and saying so must not change it.
+
+    The meter lives on the host, outside the traced region: the run is split into groups, each
+    the same compiled program, and the state makes a grouped run the ungrouped run. So a verbose
+    run is a silent run **bit for bit**, which is what the assertions below are. Building a bar
+    inside the jitted loop instead makes it trace-time state -- a second identical call reuses
+    the compiled program and the bar closed at the end of the first, and reports nothing.
+    """
+    import io
+
+    domain = Domain(length=1e-2, cells=16, dt_over_dx_c=1.0)
+    electrons = Species.electrons(n=2000, density=1e14, vth=(1e6, 0, 0), quiet=True)
+    ions = Species.ions(n=500, density=1e14, mass_ratio=1e9, vth=0.0, quiet=True)
+    sim = Simulation(domain, [electrons, ions], Solver())
+
+    silent = sim.run(60, seed=3, store_every=5)
+    seen = []
+    loud = sim.run(60, seed=3, store_every=5, verbose=lambda done, total: seen.append((done, total)))
+    for name in ("t", "steps", "x", "v", "E", "B", "rho", "sigma"):
+        assert np.array_equal(np.asarray(getattr(silent, name)), np.asarray(getattr(loud, name))), name
+    assert np.array_equal(np.asarray(silent.state.u), np.asarray(loud.state.u))
+    assert seen[-1] == (60, 60) and all(total == 60 for _, total in seen)
+    assert [done for done, _ in seen] == sorted(done for done, _ in seen)
+
+    # twice in a row, because a bar built at trace time would report only the first time
+    again = []
+    sim.run(60, seed=3, store_every=5, verbose=lambda done, total: again.append(done))
+    assert again == [done for done, _ in seen] and again
+
+    # the cadence is its own, not the snapshot schedule's: 200 chunks still give about twenty
+    ticks = []
+    sim.run(200, seed=3, store_every=1, verbose=lambda done, total: ticks.append(done))
+    assert 10 <= len(ticks) <= 25 and ticks[-1] == 200
+    dense = []
+    sim.run(200, seed=3, store_every=50, verbose=lambda done, total: dense.append(done))
+    assert dense == [50, 100, 150, 200]                 # four chunks cannot be split further
+
+    # tracing turns it off without being asked: no side effect goes in the differentiated path
+    quiet = []
+    watch = lambda done, total: quiet.append(done)      # noqa: E731
+    jax.jit(lambda vth: sim.replace(species=(electrons.replace(vth=(vth, 0, 0)), ions)).run(
+        20, seed=3, store_every=20, verbose=watch).E)(1e6).block_until_ready()
+    jax.grad(lambda vth: jnp.sum(sim.replace(species=(electrons.replace(vth=(vth, 0, 0)), ions)).run(
+        20, seed=3, store_every=20, store_particles=False, verbose=watch).E ** 2))(1e6)
+    jax.vmap(lambda s: sim.run(20, seed=s, store_every=20, store_particles=False,
+                               verbose=watch).E)(jnp.arange(3))
+    assert quiet == []
+
+    # what the built-in one writes, to a terminal and to a log
+    from jaxincell._progress import Progress, reporter
+
+    for interactive, ending in ((True, "   "), (False, "\n")):
+        stream = io.StringIO()
+        meter = Progress(100, stream=stream, interactive=interactive)
+        meter(0)                                        # nothing done yet, so no rate and no estimate
+        assert "--:--" in stream.getvalue()
+        meter(50)
+        assert stream.getvalue().endswith(ending) and "50/100 steps" in stream.getvalue()
+        assert ("\r" in stream.getvalue()) is interactive
+        meter(100)
+        assert stream.getvalue().count("\n") == (1 if interactive else 3)
+        meter.close()                                   # closing twice adds nothing
+        assert stream.getvalue().count("\n") == (1 if interactive else 3)
+    # an interrupted run ends its line
+    stream = io.StringIO()
+    meter = Progress(100, stream=stream, interactive=True)
+    meter(30)
+    meter.close()
+    assert stream.getvalue().endswith("\n")
+    assert reporter(False, 10) is None and reporter(None, 10) is None
+    assert isinstance(reporter(True, 10), Progress)
+    with pytest.raises(ValueError, match="something to call with"):
+        reporter("loudly", 10)
+    capsys.readouterr()
 
 
 def test_changing_a_physical_parameter_does_not_recompile():
