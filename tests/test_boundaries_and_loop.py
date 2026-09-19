@@ -316,8 +316,14 @@ def test_a_relativistic_particle_keeps_its_lorentz_factor_in_single_precision():
     step loses a fraction gamma^2 epsilon of gamma each time, which in single precision
     walked a particle at gamma = 1000 to 1423 in a thousand steps with no field. Carried,
     u does not change at all when there is no force, so the stored velocities are
-    identical from step to step and gamma is as exact as the start allows: to
-    gamma^2 epsilon/2, 0.5 % at gamma = 300 in single precision."""
+    **identical** from step to step -- which is the claim, and it is exact.
+
+    What gamma comes out as is a different matter and is not the code's to fix: a single
+    ulp of a single-precision velocity is worth 296.4 to 302.1 in gamma at gamma = 300,
+    because gamma depends on v/c through 1 - (v/c)^2 and that is a difference of two
+    numbers close to one. The bound below is that span, worked out here rather than
+    guessed -- a fixed 0.5 % is narrower than one representable step and passes or fails
+    with the rounding of the platform, which is what it did."""
     import json
     import os
     import subprocess
@@ -328,9 +334,13 @@ def test_a_relativistic_particle_keeps_its_lorentz_factor_in_single_precision():
     report = json.loads(result.stdout.strip().splitlines()[-1])
     assert report["dtype"] == "float32"
     for gamma, history in report["gammas"].items():
-        history = np.array(history)
-        assert np.ptp(history) == 0.0, (gamma, history)
-        assert history[0] == pytest.approx(float(gamma), rel=6e-3)
+        gamma, history = float(gamma), np.array(history)
+        assert np.ptp(history) == 0.0, (gamma, history)     # carried u does not drift at all
+        speed = np.float32(c * np.sqrt(1 - 1 / gamma ** 2))
+        span = sorted(1 / np.sqrt(1 - (np.float64(v) / c) ** 2)
+                      for v in (np.nextafter(speed, np.float32(0)), np.nextafter(speed, np.float32(c))))
+        assert span[0] <= history[0] <= span[1], (gamma, history[0], span)
+        assert span[1] / span[0] - 1 < 0.03                 # and that span is 2 % at gamma = 300
 
 
 def test_collisions_without_a_coulomb_logarithm_need_a_negative_species():
