@@ -9,7 +9,6 @@ library versions produced its numbers.
 """
 import inspect
 import json
-import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -69,32 +68,17 @@ def savefig(fig, name, colors=256):
     return path
 
 
-def _git_revision():
-    """The checked-out commit, marked ``-dirty`` when tracked files differ from it."""
-    try:
-        sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=HERE, capture_output=True, text=True,
-                             check=True).stdout.strip()
-        changed = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=HERE,
-                                 capture_output=True, text=True, check=True).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return "unknown"
-    return f"{sha}-dirty" if changed else sha
-
-
 def provenance():
     """What produced a set of numbers: the commit, the library versions, the
-    precision and the device."""
-    import jax
+    precision and the device. The package's own :func:`jaxincell.provenance` is the
+    source of all of it but scipy, which only these scripts use."""
     import jaxincell
     try:
         import scipy
         scipy_version = scipy.__version__
     except ImportError:
         scipy_version = "not installed"
-    return {"git": _git_revision(), "jaxincell": jaxincell.__version__, "jax": jax.__version__,
-            "numpy": np.__version__, "scipy": scipy_version,
-            "jax_enable_x64": bool(jax.config.read("jax_enable_x64")),
-            "backend": jax.default_backend(), "platform": f"{platform.system()} {platform.machine()}"}
+    return jaxincell.provenance(scipy=scipy_version)
 
 
 def record(**values):

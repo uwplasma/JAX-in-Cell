@@ -23,13 +23,46 @@ import dataclasses
 import jax.numpy as jnp
 import numpy as np
 
-__all__ = ["save_state", "load_state"]
+__all__ = ["save_state", "load_state", "provenance"]
 
 FORMAT = 1      #: Version of the archive layout, written into every file and checked on reading.
 
 
 def _fields(obj):
     return tuple(f.name for f in dataclasses.fields(obj))
+
+
+def provenance(**extra):
+    """What produced a number: the versions, the precision, the device and the commit.
+
+    A figure or a table without this is a number somebody has to reproduce from scratch to
+    check. It is a plain dictionary, so an example can write it beside its data as JSON, and it
+    takes whatever else the caller wants recorded -- the parameters of the run, usually.
+
+    ``git`` is the checked-out commit of the working directory, marked ``-dirty`` when tracked
+    files differ from it, and ``"unknown"`` outside a repository.
+    """
+    import platform
+    import subprocess
+    import sys
+
+    import jax
+
+    from . import __version__
+
+    def git():
+        try:
+            run = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
+            changed = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                                     capture_output=True, text=True, check=True).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return "unknown"
+        return run.stdout.strip() + ("-dirty" if changed else "")
+
+    return {"jaxincell": __version__, "jax": jax.__version__, "numpy": np.__version__,
+            "python": sys.version.split()[0], "platform": f"{platform.system()} {platform.machine()}",
+            "jax_enable_x64": bool(jax.config.read("jax_enable_x64")),
+            "backend": jax.default_backend(), "git": git(), **extra}
 
 
 def save_state(path, state, simulation=None):

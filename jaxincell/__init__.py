@@ -5,7 +5,7 @@ from ._config import (Collisions, Domain, Impacts, Solver, Source, Species, bolt
                       elementary_charge, epsilon_0, mass_electron, mass_proton, mu_0, speed_of_light)
 from ._diagnostics import (bohm_edge, charge_balance, diagnostics, dominant_frequency, energies,
                            gauss_residual, moment_profiles, potential, temperatures)
-from ._archive import load_state, save_state
+from ._archive import load_state, provenance, save_state
 from ._simulation import Output, Simulation, load_toml, quiet_start
 
 try:
@@ -14,7 +14,7 @@ except ImportError:  # a source tree that was never installed: version.py is wri
     __version__ = "unknown"
 
 __all__ = ["Simulation", "Output", "Domain", "Species", "Solver", "Source", "Collisions", "Impacts",
-           "load_toml", "save_state", "load_state",
+           "load_toml", "save_state", "load_state", "provenance",
            "quiet_start",
            "diagnostics", "energies", "gauss_residual", "charge_balance", "moment_profiles",
            "potential", "temperatures",

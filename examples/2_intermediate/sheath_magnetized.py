@@ -22,16 +22,32 @@ gyro-radii long and cells a fraction of a Debye length wide, so the separation o
 and it is printed below.
 
 The ions here have a finite temperature, unlike the cold beam of the unmagnetized
-example, and enter at the sound speed. There is no closed-form wall potential for this
-problem, so what is checked is what can be: the field-free limit, which must reproduce
-the unmagnetized run; normal incidence, which must not change the normal motion at all;
-and the ion impact energies and angles, which are what a wall actually feels.
+example, and enter **along the field** at the sound speed, which is Chodura's picture:
+the presheath turns them towards the wall, so what they enter with normal to it is
+`c_s sin(alpha)` and not `c_s`. The initial population and the reservoir are given the
+same distribution; they were not, and the box was filled with one and fed with another.
+
+There is no closed-form wall potential for this problem, so what is checked is what can
+be, and checked rather than asserted:
+
+* **normal incidence against a matched B = 0 control**, and against a second realisation
+  of the same physics. With B along x the Boris rotation leaves `v_x` alone exactly --
+  v x B has no x component when B has only one -- so the two runs start out identical to
+  1e-11 of the sheath drop. Over a whole run they are not: an external array takes a
+  different path through the gather than `None` does, so `E_x` differs in its last bit,
+  and a plasma with absorbing walls is chaotic. The comparison that means something is
+  therefore against the scatter between two seeds, which is what the script prints. This
+  used to be a sentence printed from the magnetised run itself, with no control at all.
+* **the ion impact energies and angles**, which are what a wall actually feels, binned at
+  the crossing rather than read off a snapshot of who is nearby.
 
 Run with `--quick` for a smaller, faster version.
 """
 
+import json
 import os
 import sys
+from pathlib import Path
 
 # Double precision is the default, and what the conservation checks rely on. Run with
 # JAX_ENABLE_X64=0, or change the "1" below, for single precision.
@@ -42,7 +58,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, epsilon_0, mass_electron,
-                       potential, elementary_charge as e_charge)
+                       potential, provenance, elementary_charge as e_charge)
 
 # --- what to change ---------------------------------------------------------------------
 quick = "--quick" in sys.argv
@@ -85,6 +101,8 @@ print(f"m_i/m_e {mass_ratio:.0f}   T_i/T_e {temperature_ratio}   rho_s/lambda_D 
 print(f"dx/lambda_D {length / cells / debye:.2f}   omega_pe dt {omega_pe * dt:.2f}   "
       f"Omega_e dt {omega_ce * dt:.2f}   Omega_i dt {omega_ci * dt:.2e}   {steps} steps "
       f"= {transits:.2f} sound transits, one of which is {length / sound_speed / dt:.0f} steps")
+print("ions enter along B at c_s, so their normal entrance speed is c_s sin(alpha): "
+      + ", ".join(f"{np.sin(np.radians(a)):.2f} c_s at {a:.0f} deg" for a in angles))
 print(f"pools of {capacity} slots per species, {emit_electrons} electrons and {emit_ions} ions "
       f"emitted a step\n")
 if quick:
@@ -101,21 +119,41 @@ energy_ceiling = 20.0 * electron_temperature                            # eV
 impacts = Impacts(energy_max=energy_ceiling * e_charge, energy_bins=40, angle_bins=30)
 angle_centres = 0.5 * (np.asarray(impacts.angle_edges)[:-1] + np.asarray(impacts.angle_edges)[1:])
 
+domain = Domain(length=length, cells=cells, time_step=dt,
+                particle_bc="absorbing", field_bc=("open", "absorbing"))
+
+
+def entrance(radians):
+    """Ion drift at the presheath entrance: the sound speed **along the field**.
+
+    Chodura's picture is that the ions arrive at the magnetic presheath streaming along B at
+    c_s, and the presheath turns them towards the wall; the normal component they enter with is
+    therefore c_s sin(alpha) and not c_s. The initial population and the reservoir are given the
+    same thing, which they were not: the initial ions drifted along x at c_s with no transverse
+    spread, while the reservoir was isotropic and at rest, so the box was filled with one
+    distribution and fed with another."""
+    return (sound_speed * np.sin(radians), 0.0, sound_speed * np.cos(radians))
+
+
+def run(B, drift, seed=0):
+    """The same plasma at whatever external field and entrance drift are given."""
+    electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread,) * 3,
+                        active=capacity // 4, sampling="quiet",
+                        source=Source(density=density, vth=(np.sqrt(2) * spread,) * 3, emit=emit_electrons))
+    ions = Species("ions", capacity, 1.0, ion_mass, density, (np.sqrt(2) * ion_spread,) * 3,
+                   drift, active=capacity // 4, sampling="quiet",
+                   source=Source(density=density, vth=(np.sqrt(2) * ion_spread,) * 3, drift=drift,
+                                 emit=emit_ions, model="drifting"))
+    return Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=B,
+                      impacts=impacts).run(steps, seed=seed, store_every=steps // stored,
+                                           store_particles=False, moments="flux").validate()
+
+
 results = {}
 for angle in angles:
     radians = np.radians(angle)
-    B = jnp.zeros((cells, 3)).at[:, 0].set(field * np.sin(radians)).at[:, 2].set(field * np.cos(radians))
-    domain = Domain(length=length, cells=cells, time_step=dt,
-                    particle_bc="absorbing", field_bc=("open", "absorbing"))
-    electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread, 0, 0),
-                        active=capacity // 4, sampling="quiet",
-                        source=Source(density=density, vth=(np.sqrt(2) * spread,) * 3, emit=emit_electrons))
-    ions = Species("ions", capacity, 1.0, ion_mass, density, (np.sqrt(2) * ion_spread, 0, 0),
-                   (sound_speed, 0, 0), active=capacity // 4, sampling="quiet",
-                   source=Source(density=density, vth=(np.sqrt(2) * ion_spread,) * 3, emit=emit_ions))
-    out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=B,
-                     impacts=impacts).run(steps, seed=0, store_every=steps // stored,
-                                          store_particles=False, moments="flux").validate()
+    out = run(jnp.zeros((cells, 3)).at[:, 0].set(field * np.sin(radians))
+              .at[:, 2].set(field * np.cos(radians)), entrance(radians))
 
     late = stored // 2
     phi = np.asarray(potential(out))[late:].mean(axis=0) / electron_temperature
@@ -144,9 +182,37 @@ for angle in angles:
           + (f"  [{results[angle]['above_range']:.1%} above {energy_ceiling:.0f} eV]"
              if results[angle]["above_range"] > 0.01 else ""))
 
+# Is normal incidence the field-free case? With B along x the Boris rotation leaves v_x exactly
+# alone -- v x B has no x component when B has only one -- so the motion the grid resolves, the
+# charge density and the potential ought to be the same numbers. They start out so: over a
+# fraction of a transit the two runs agree to 1e-11 of the sheath drop.
+#
+# Over a whole run they do not, and the reason is not the field. Giving the simulation an
+# external array takes a different path through the gather than leaving it None, so E_x differs
+# in its last bit; every wall absorption is a branch, and a plasma is chaotic, so a last-bit
+# difference grows. The honest control is therefore not "are they identical" but "do they differ
+# by more than two realisations of the same physics do", and that needs the second number below.
+field_free = run(None, entrance(np.radians(90.0)))
+another_seed = run(jnp.zeros((cells, 3)).at[:, 0].set(field), entrance(np.radians(90.0)), seed=1)
 normal_field = results[90.0]
-print(f"\nnormal incidence is the field-free case for the motion along x: its wall potential is "
-      f"{float(normal_field['phi'][-1]):+.2f} T_e/e, and the drop {np.ptp(normal_field['phi']):.2f} T_e/e.")
+
+
+def profile_of(out):
+    return np.asarray(potential(out))[stored // 2:].mean(axis=0) / electron_temperature
+
+
+free_phi, seeded_phi = profile_of(field_free), profile_of(another_seed)
+scale = float(np.ptp(normal_field["phi"]))
+gap = float(np.max(np.abs(normal_field["phi"] - free_phi)))
+scatter = float(np.max(np.abs(normal_field["phi"] - seeded_phi)))
+print("\nnormal incidence, against a matched B = 0 control and against a second realisation:")
+print(f"  B = 0 differs by at most        {gap:.3f} T_e/e, a relative {gap / scale:.1e}")
+print(f"  another seed differs by at most {scatter:.3f} T_e/e, a relative {scatter / scale:.1e}")
+print(f"  so the field-free claim holds to within{'' if gap <= 1.5 * scatter else ' MORE THAN'} "
+      f"the scatter between realisations ({gap / scatter:.2f} of it).")
+print(f"  Field-free wall potential {float(free_phi[-1]):+.3f} T_e/e, normal-incidence "
+      f"{float(normal_field['phi'][-1]):+.3f}, second seed {float(seeded_phi[-1]):+.3f}, "
+      f"drop {scale:.2f} T_e/e.")
 
 # --- the figure -------------------------------------------------------------------------------
 distance = (length / 2 - (np.asarray(np.arange(cells)) + 0.5) * length / cells + length / 2) / debye
@@ -171,4 +237,32 @@ axes[2].set(xlabel="ion incidence from the wall normal (deg)", ylabel="fraction 
             title="what the wall is struck by", xlim=(0, 90))
 axes[2].legend(frameon=False)
 plt.tight_layout()
+
+# --- the record --------------------------------------------------------------------------------
+# A figure is a picture of an answer; this is what the answer came from. Written beside wherever
+# the script was run, so that a number quoted anywhere can be traced to the run that produced it
+# and to the versions, the precision and the commit that produced that.
+folder = Path.cwd() / ("sheath_magnetized_quick" if quick else "sheath_magnetized")
+folder.mkdir(exist_ok=True)
+settings = dict(electron_temperature=electron_temperature, temperature_ratio=temperature_ratio,
+                density=density, mass_ratio=mass_ratio, angles=list(angles),
+                gyro_over_debye=gyro_over_debye, box_debye_lengths=box_debye_lengths, cells=cells,
+                steps_per_plasma_period=steps_per_plasma_period, transits=transits, steps=steps,
+                capacity=capacity, emit_electrons=emit_electrons, emit_ions=emit_ions,
+                entrance="c_s along B", quick=quick)
+summary = {f"{angle:.0f}": dict(wall_potential=float(results[angle]["phi"][-1]),
+                                fluence=float(results[angle]["fluence"]),
+                                above_energy_range=float(results[angle]["above_range"]),
+                                mean_incidence_deg=float(np.degrees(
+                                    (results[angle]["incidence"] * angle_centres).sum())))
+           for angle in angles}
+summary["field_free_control"] = dict(largest_difference=gap, seed_scatter=scatter,
+                                     over_a_drop_of=scale, ratio=gap / scatter)
+(folder / "run.json").write_text(json.dumps(provenance(example="sheath_magnetized", settings=settings,
+                                                       results=summary), indent=1))
+np.savez(folder / "profiles.npz", distance=distance,
+         **{f"{name}_{angle:.0f}": results[angle][name]
+            for angle in angles for name in ("phi", "n_e", "n_i", "flow", "energy", "incidence")})
+fig.savefig(folder / "figure.png", dpi=150)
+print(f"\nwrote {folder}/run.json, profiles.npz and figure.png")
 plt.show()
