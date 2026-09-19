@@ -15,10 +15,14 @@ compute it.
 
 **The experiment is deliberately short.** A plasma is prepared once at a fixed
 reflectivity, outside the differentiated calculation and therefore independent of `r`;
-the trial value is then applied and the response is watched for a few electron plasma
-periods. That is the time scale on which the electrons rearrange and the wall's charge
-follows, so it is the window the measurement lives in. It is also as long as the
-gradient can usefully be taken over, and the script measures why:
+the trial value is then applied and the response is watched for twenty-five steps at
+`omega_pe dt = 0.15`. That is `3.75` inverse plasma frequencies, which is **0.60 of an
+oscillation** and not four periods: the two are `2 pi` apart and the script prints both,
+because a window quoted in periods when it is inverse frequencies is six times longer
+than it sounds. It is the time scale on which the electrons rearrange and the wall's
+charge begins to follow, so it is the window the measurement lives in -- not a settled
+response, which is why the result is a response and not a steady state. It is also as
+long as the gradient can usefully be taken over, and the script measures why:
 
 * the reverse-mode gradient agrees with the forward-mode one to round-off, and with a
   central difference of the same realisation to nine digits, at every horizon. The
@@ -140,8 +144,9 @@ if quick:
     print("--quick is a smoke run: a sixth of the particles, a quarter of the preparation and three\n"
           "realisations instead of four. It checks that every step of this script executes and that\n"
           "the gradient is still the derivative of the calculation. It usually recovers the control\n"
-          "too, but to about 0.01 rather than 0.005, and the identifiability check below is what\n"
-          "says how far to trust it. The documentation quotes the full preset.\n")
+          "too, but with three noisy realisations and eight scan points the error bar below comes\n"
+          "out around 0.09 against the full preset's 0.02, which is that check doing its job.\n"
+          "The documentation quotes the full preset.\n")
 # The pool has to hold every particle alive at once, and an electron lives longest at the
 # largest reflectivity the optimiser may try. Checking the worst case here, once, on the
 # host, covers every trial inside the interval: the differentiated measurement below is
@@ -153,6 +158,8 @@ if worst.problems:
                      "r = %.2f, so no trial in it can be trusted. %s" % (bounds[1], worst.problems[0]))
 print("pool checked at r = %.2f, the longest electron lifetime the optimiser may ask for" % bounds[1])
 
+print("the response window is %d steps = %.2f / omega_pe = %.2f electron plasma oscillations"
+      % (window, window * omega_pe * dt, window * omega_pe * dt / (2 * np.pi)))
 print("preparing the baseline plasma at r = %.2f, %d steps, for %d training and %d held-out seeds"
       % (r_prepared, preparation, len(training_seeds), len(held_out_seeds)))
 prepared = {seed: jax.block_until_ready(simulation(r_prepared).run(preparation, seed=seed,
@@ -225,7 +232,15 @@ for i, name in enumerate(("plasma sensor", "sheath sensor")):
 print()
 
 # --- 3. bounded gradient descent with backtracking -------------------------------------------------
-r, history = r_start, []
+# Three named tolerances, and the loop says which one stopped it. "Stalled" is not
+# "converged": a backtracking line search that runs out of halvings has found no step that
+# lowers the loss, which may be a minimum or may be a gradient that is no longer informative
+# about the average. Every accepted point is evaluated and recorded, including the last, so
+# that the point returned is the best one the optimiser actually stood on.
+slope_tolerance = 1e-9                     # a projected gradient this small is a stationary point
+step_tolerance = 1e-4                      # a move smaller than this is below the scan's resolution
+objective_tolerance = 1e-6                 # a fall smaller than this, relative, is not progress
+r, history, outcome = r_start, [], "ran out of iterations"
 step_size = 0.02 / max(abs(float(value_and_grad(r_start)[1])), 1e-12)
 print("%4s %8s %12s %12s %10s" % ("iter", "r", "loss", "d loss/d r", "step"))
 for iteration in range(8 if quick else 20):
@@ -233,24 +248,34 @@ for iteration in range(8 if quick else 20):
     objective, slope = float(objective), float(slope)
     history.append((r, objective, slope))
     print("%4d %8.4f %12.6f %12.4f %10.2e" % (iteration, r, objective, slope, step_size))
-    if abs(slope) < 1e-9:
+    # the gradient projected onto the admissible interval: at a bound, a slope pushing outwards
+    # is not a direction the optimiser may take, and its size says nothing
+    projected = slope if bounds[0] < r < bounds[1] else min(slope, 0.0) if r <= bounds[0] else max(slope, 0.0)
+    if abs(projected) < slope_tolerance:
+        outcome = "converged: the projected gradient is below %.0e" % slope_tolerance
         break
-    trial, accepted = r, False
+    trial, value, accepted = r, objective, False
     for _ in range(14):                        # backtracking, so a gradient that is off in scale still works
         trial = float(np.clip(r - step_size * slope, *bounds))
-        if trial == r or float(value_and_grad(trial)[0]) < objective:
-            accepted = trial != r
+        value = objective if trial == r else float(value_and_grad(trial)[0])
+        if trial != r and value < objective:
+            accepted = True
             break
         step_size *= 0.5
     if not accepted:
-        print("     converged: no step along the gradient lowers the loss")
+        outcome = "stalled: no step along the gradient lowers the loss, after 14 halvings"
         break
-    if abs(trial - r) < 1e-4:                  # a move smaller than the control is known to
-        r = trial
-        print("     converged: the step is below the uncertainty of the control")
+    moved, fell = abs(trial - r), (objective - value) / max(abs(objective), 1e-30)
+    r, step_size = trial, step_size * 1.6
+    if moved < step_tolerance:
+        outcome = "converged: the step %.2e is below the %.0e the scan can resolve" % (moved, step_tolerance)
         break
-    step_size *= 1.6
-    r = trial
+    if fell < objective_tolerance:
+        outcome = "converged: the loss fell by %.1e, below %.0e" % (fell, objective_tolerance)
+        break
+objective, slope = value_and_grad(r)            # the point the loop ended on is a point it stood on
+history.append((r, float(objective), float(slope)))
+print("     %s" % outcome)
 
 r_final = history[min(range(len(history)), key=lambda i: history[i][1])][0]
 print("\nrecovered r = %.4f, reference %.4f, error %.4f" % (r_final, r_reference, abs(r_final - r_reference)))
@@ -270,15 +295,49 @@ for name, value in (("start", r_start), ("recovered", r_final), ("reference", r_
     print("  %-10s r = %.4f   training loss %10.5f   held-out loss %10.5f"
           % (name, value, float(value_and_grad(value)[0]), held_out_loss(value)))
 
-# a coarse scan of the held-out loss locates the minimum without a gradient at all, and its
-# distance from the reference is the uncertainty of the recovered control, not the optimiser's
-fine = np.linspace(*bounds, 7 if quick else 25)
-held_out_curve = np.array([held_out_loss(float(v)) for v in fine])
-held_out_best = float(fine[int(np.argmin(held_out_curve))])
-print("  the held-out loss is smallest at r = %.4f on a scan of %d points; the recovered value is "
-      "%.4f from it" % (held_out_best, len(fine), abs(r_final - held_out_best)))
-print("  uncertainty of the recovered control, from the held-out minimum: %.3f absolute in r"
-      % abs(held_out_best - r_reference))
+# A scan of the held-out loss locates the minimum without a gradient at all. Three things are
+# separate and were not: where the scan can put a minimum (its spacing), where the minimum
+# actually is (a parabola through the three lowest points, which the spacing does not limit),
+# and how far it moves between realisations (the only one of the three that is an uncertainty).
+# The grid is anchored on the reference, so that a scan that does not contain the answer cannot
+# report the distance to its nearest node as an error bar -- the earlier one had spacing 0.02
+# and no node at 0.35, so its "uncertainty 0.01" was the grid, every time it ran.
+spacing = (bounds[1] - bounds[0]) / (6 if quick else 24)
+fine = np.unique(np.clip(r_reference + spacing * np.arange(-24, 25), *bounds))
+
+
+def refined_minimum(curve, grid):
+    """Where a parabola through the lowest sample and its two neighbours has its vertex, which
+    is not restricted to the grid. At an end there is no parabola and the node is all there is."""
+    i = int(np.argmin(curve))
+    if i in (0, len(curve) - 1):
+        return float(grid[i])
+    left, middle, right = curve[i - 1:i + 2]
+    curvature = left - 2 * middle + right
+    if curvature <= 0:
+        return float(grid[i])
+    return float(grid[i] + 0.5 * (left - right) / curvature * (grid[i + 1] - grid[i]))
+
+
+def one_seed_loss(r, seed):
+    """The same mismatch on one held-out realisation, so that the scatter of the minimum over
+    realisations can be measured instead of assumed."""
+    return float(0.5 * jnp.sum(((measure_jit(r, prepared[seed]) - held_out_target) / scales) ** 2))
+
+
+curves = np.array([[one_seed_loss(float(v), seed) for v in fine] for seed in held_out_seeds])
+held_out_curve = curves.mean(axis=0)
+held_out_best = refined_minimum(held_out_curve, fine)
+per_seed = np.array([refined_minimum(row, fine) for row in curves])
+scatter = float(np.std(per_seed, ddof=1) / np.sqrt(len(per_seed)))
+print("  held-out scan: %d points spaced %.4f, anchored so that the reference is one of them"
+      % (len(fine), spacing))
+print("  its minimum, refined off the grid, is at r = %.4f; the recovered value is %.4f from it"
+      % (held_out_best, abs(r_final - held_out_best)))
+print("  per realisation the minimum sits at %s" % np.array2string(per_seed, precision=4))
+print("  so the control is recovered as %.4f +- %.4f (standard error over %d realisations) against "
+      "the reference %.4f" % (held_out_best, scatter, len(per_seed), r_reference))
+print("  which is %.1f standard errors out" % (abs(held_out_best - r_reference) / max(scatter, 1e-12)))
 
 # --- the figure -----------------------------------------------------------------------------------
 fig, axes = plt.subplots(1, 3, figsize=(12.5, 3.7))

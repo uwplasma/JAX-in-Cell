@@ -29,9 +29,12 @@ the forward problem, in {doc}`sheath_unmagnetized`.
 
 A plasma is prepared once at a fixed reflectivity, **outside** the differentiated
 calculation and therefore independent of $r$. The trial value is then applied and the
-response is watched for twenty-five steps, about four electron plasma periods: the time
-in which the electrons rearrange and the wall's charge follows. That is the window the
-measurement lives in, and it is also as long as the gradient can usefully be taken over.
+response is watched for twenty-five steps at $\omega_{pe}\Delta t = 0.15$, which is
+$3.75$ inverse plasma frequencies and so **0.60 of an oscillation**. The two differ by
+$2\pi$, and a window quoted in periods when it is inverse frequencies is six times longer
+than it sounds; the script prints both. It is the time in which the electrons rearrange
+and the wall's charge begins to follow — the beginning of the response, not a settled
+one — and it is as long as the gradient can usefully be taken over.
 
 The script measures why. At $r = 0.25$, from a state prepared over 1200 steps:
 
@@ -68,8 +71,8 @@ choose a step.
 
 The script prints an identifiability check before optimising: the response of each
 sensor over the admissible interval against the scatter between realisations. The plasma
-sensor comes out at a ratio of 0.3 and carries almost no information; the sheath sensor
-at 3.5 and carries it all. That is worth seeing rather than hiding, and it is what put
+sensor comes out at a ratio of 0.5 and carries almost no information; the sheath sensor
+at 13 and carries it all. That is worth seeing rather than hiding, and it is what put
 the sheath sensor where it is — a scan of positions gives 4.7 at 0.8 Debye lengths from
 the collector, 3.9 at 1.5, 2.9 at 2.5 and 0.9 at 6, and 1.5 is as close as a Gaussian of
 this width can sit without taking part of its reading from the cells the deposit
@@ -79,20 +82,40 @@ Starting at $r = 0.08$ with the answer at $r = 0.35$:
 
 | | $r$ | training loss | held-out loss |
 |---|---|---|---|
-| start | 0.0800 | 3.112 | 2.679 |
-| recovered | 0.3447 | 0.00053 | 0.00433 |
+| start | 0.0800 | 2.008 | 2.021 |
+| recovered | 0.3500 | 0.0000005 | 0.0000006 |
 | reference | 0.3500 | 0 | 0 |
 
-The control is recovered to 0.0053 absolute in nine iterations of projected gradient
-descent with backtracking, and the training loss falls by more than three orders of
-magnitude. A coarse scan of the held-out loss, which uses no gradient at all, puts its
-minimum at $r = 0.36$; the distance of that minimum from the reference, about 0.01, is
-the uncertainty of the recovered control rather than the optimiser's tolerance.
+The control is recovered to four decimal places in fourteen iterations of projected
+gradient descent with backtracking, and the training loss falls by more than six orders
+of magnitude. The loop stops on a criterion it names — the step fell below the $10^{-4}$
+the scan can resolve — and it evaluates and records the point it ends on, so the value
+returned is one it stood on rather than the last one it happened to have measured.
+
+That the optimiser lands on the answer is a property of this problem, not evidence that
+the answer is known to four decimals: the target is generated on the same realisations
+and the same protocol, so the minimum is exactly at the reference by construction. **How
+well the control is known** is a different question, and three things that were one are
+now separate:
+
+* the **scan's spacing**, 0.0200 over 26 points, anchored so that the reference is one of
+  them — the earlier grid had no node at $r = 0.35$, so the distance from its nearest node
+  was 0.01 whatever the run did, and that was being reported as the uncertainty;
+* the **minimum**, refined off the grid by a parabola through the three lowest samples,
+  which the spacing does not limit: $r = 0.3443$;
+* the **scatter between realisations**, which is the only one of the three that is an
+  uncertainty. Each held-out realisation has its own minimum — 0.3156, 0.3046, 0.3818,
+  0.3812 — so the control is recovered as $0.3443 \pm 0.0207$, a standard error over four
+  realisations, and the reference sits 0.3 of one away.
+
+The honest error bar is therefore twice the number the grid was reporting, and it is an
+error bar rather than a resolution.
 
 `--quick` is a smoke run: a sixth of the particles, a quarter of the preparation and
-three realisations instead of four, in about twelve seconds. It checks that the script
-executes and that the gradient is still the derivative of the calculation, and it usually
-recovers the control too, to about 0.01. The numbers above are the full preset's.
+three realisations instead of four, in about twenty seconds. It checks that the script
+executes and that the gradient is still the derivative of the calculation. With three
+noisy realisations and eight scan points its error bar is about $\pm 0.09$, which is the
+check doing its job. The numbers above are the full preset's, about five minutes.
 
 ## The same experiment in a magnetic field
 
