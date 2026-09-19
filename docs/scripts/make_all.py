@@ -34,6 +34,9 @@ SCRIPTS = [
     "fig_autodiff.py",
     "fig_scaling.py",
 ]
+# sheath_convergence.py is deliberately not in that list: it is twelve full sheath runs and takes
+# about half an hour, where everything above takes minutes. Name it on the command line to run it.
+
 
 if __name__ == "__main__":
     if os.environ.get("JAX_ENABLE_X64", "1").strip().lower() in ("0", "false", "f", "no", "n", "off"):

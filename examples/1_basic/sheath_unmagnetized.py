@@ -89,6 +89,11 @@ print(f"m_i/m_e {mass_ratio:.0f}   v_0/sigma_e {beam_speed}   Mach {beam_speed *
       f"omega_pe dt {omega_pe * dt:.2f}")
 print(f"{steps} steps = {transits:.0f} ion transits; {capacity} slots and {emit} emitted a step per species")
 print(f"reference wall potential {phi_wall:.5f} T_e/e, source amplitude {amplitude:.4f} n_0\n")
+if quick:
+    print("--quick is a smoke preset: 48 cells and one ion transit instead of 120 and six, so the\n"
+          "averages are noisier and the densities disagree with the kinetic relation by about four\n"
+          "times as much. It checks that every step of this script runs and that the pools hold.\n"
+          "The documentation quotes the full preset.\n")
 
 out = simulation.run(steps, seed=0, store_every=steps // stored, store_particles=False,
                      moments="flux").validate()     # a pool that overflowed invalidates everything below
@@ -156,10 +161,13 @@ print(f"  at the wall potential each frame reached, with the configured source a
       f"above the source plane, the highest at {mean_phi[hump]:+.4f} T_e/e")
 print(f"  over the fall from there to the collector, {int(falling.sum())} centres: electrons "
       f"{np.abs(n_e - reference_e)[falling].max():.3f}, ions {np.abs(n_i - reference_i)[falling].max():.3f}")
-print("  the relation is local and assumes a monotonic drop from the plane, so the presheath hump is\n"
-      "  outside what it describes: it predicts a Boltzmann rise of "
-      f"{100 * (np.exp(mean_phi[hump]) - 1):.1f} % across the hump that the measured electron density\n"
-      "  does not show. That disagreement is a result, not a tolerance to widen.")
+print(f"  the relation predicts a Boltzmann rise of {100 * (np.exp(mean_phi[hump]) - 1):.1f} % across "
+      "the hump that the measurement does not show, but that is not\n  where the disagreement is: "
+      f"{np.abs(n_e - reference_e)[falling].max():.3f} of the {np.abs(n_e - reference_e)[inside].max():.3f} "
+      "sits on the monotonic fall, which is exactly what the\n  relation describes. What the relation "
+      "is built on holds where it can be checked directly: a histogram of\n  the electrons puts the "
+      "wall cutoff where the relation puts it, and finds the orbits trapped on the\n  hump about four "
+      "fifths full rather than empty. The 2 % that is left is a result, not a\n  tolerance to widen.")
 
 # --- the figure ----------------------------------------------------------------------------
 distance = (length / 2 - faces) / debye

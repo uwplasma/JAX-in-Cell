@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from jax import random
 
-from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, epsilon_0, gauss_residual,
+from jaxincell import (Collisions, Domain, Simulation, Solver, Source, Species, diagnostics, epsilon_0, gauss_residual,
                        mass_electron, potential, quiet_start, temperatures, elementary_charge as e_charge,
                        speed_of_light as c)
 from jaxincell._collisions import collide
@@ -571,3 +571,72 @@ def test_a_floating_wall_holds_the_sheath_drop_of_hobbs_and_wesson():
         assert abs(drop - expected) < 0.15, (reflection, drop, expected)
         rho = np.asarray(out.rho)[late].mean(axis=0) / (density * e_charge)
         assert rho[-3:].mean() > 0.02 and abs(rho[: cells // 2].mean()) < 0.01
+
+
+def test_the_electrons_of_a_maintained_sheath_are_the_kinetic_mapping_of_the_source():
+    """The density relation of :mod:`jaxincell.sheath` is energy conservation and nothing
+    else: every electron at a point is one launched from the source plane, sped up or slowed
+    by the potential it fell through, and the ones the wall could absorb are gone. This
+    checks that on the electrons themselves rather than on the density they add up to.
+
+    Two things the relation is built on:
+
+    * **the wall cutoff.** An electron moving back from the collector cannot be faster than
+      sqrt(phi - phi_w) in thermal units, because a faster one had enough energy to reach the
+      wall and was collected there. Less than one per cent of the weight sits beyond it.
+    * **the trapped orbits.** Where the interior floats above the source plane -- it does,
+      because the beam's charge dominates there -- the relation counts orbits with
+      epsilon < phi, which are bound to the hump and connect to neither the source nor the
+      wall. A collisionless plasma fed only from the plane would leave them empty, and
+      emptying them changes the predicted density by a fifth. They come out about nine
+      tenths full, so the relation's assumption is the right one and the hump is not where
+      the residual disagreement of `sheath_unmagnetized.py` lives.
+
+    Deep in the sheath, where there are no trapped orbits at all, the measured density and
+    the relation agree to better than a per cent.
+    """
+    from jaxincell.sheath import densities, floating_potential, source_density
+    T_e, density, mass_ratio, beam = 1.0, 1e16, 400.0, 0.2
+    cells, capacity, emit, steps, stored = 48, 9000, 12, 600, 12
+    sigma = np.sqrt(T_e * e_charge / mass_electron)
+    omega_pe = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
+    debye, v_th = sigma / omega_pe, np.sqrt(2) * sigma
+    length = 10 * debye
+    amplitude = float(source_density(float(floating_potential(beam))))
+    domain = Domain(length=length, cells=cells, time_step=0.1 / omega_pe,
+                    particle_bc="absorbing", field_bc=("open", "absorbing"))
+    electrons = Species("electrons", capacity, -1.0, mass_electron, density, (v_th, 0, 0),
+                        active=capacity // 4, sampling="quiet",
+                        source=Source(density=amplitude * density, vth=(v_th,) * 3, emit=emit))
+    ions = Species("ions", capacity, 1.0, mass_ratio * mass_electron, density, 0.0, (beam * sigma, 0, 0),
+                   active=capacity // 4, sampling="quiet",
+                   source=Source(density=density, vth=0.0, drift=(beam * sigma, 0, 0), emit=emit))
+    out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(
+        steps, seed=0, store_every=steps // stored, store_particles=True, moments="flux").validate()
+
+    late = slice(stored // 2, None)
+    phi = np.asarray(potential(out, centres=True))[late] / T_e
+    wall = float(np.asarray(potential(out))[late, -1].mean() / T_e)
+    mean_phi = phi.mean(axis=0)
+    x = np.asarray(out.x)[late, :capacity, 0]
+    speed = np.asarray(out.v)[late, :capacity, 0] / v_th
+    weight = np.asarray(out.weight)[late, :capacity]
+    centres, width = np.asarray(out.grid), domain.dx
+    assert mean_phi.max() > 0, mean_phi.max()          # the interior floats above the source plane
+
+    for cell, trapped_is_full in ((int(np.argmax(mean_phi)), True), (cells - 5, False)):
+        local = float(mean_phi[cell])
+        slab = np.where(np.abs(x - centres[cell]) < 1.5 * width, weight, 0.0)
+        measured = slab.sum() / (3 * width * x.shape[0]) / density
+        energy = speed ** 2
+        beyond = float(slab[(speed < 0) & (energy > local - wall)].sum()) / float(slab.sum())
+        assert beyond < 0.01, (cell, beyond)           # the wall cutoff, on the particles
+        relation = float(densities(local, wall, beam, mass_ratio, amplitude=amplitude)[0])
+        # what the relation puts in the orbits bound to the hump, which nothing populates from
+        # the plane or the wall; below the plane there are none and the two predictions are one
+        bound = float(amplitude * np.exp(local) * jax.scipy.special.erf(np.sqrt(max(local, 0.0))))
+        held = float(slab[energy < max(local, 0.0)].sum()) / (3 * width * x.shape[0]) / density
+        if trapped_is_full:
+            assert bound > 0.2 * relation and held > 0.75 * bound, (bound, held, relation)
+        else:
+            assert bound == 0.0 and abs(measured / relation - 1) < 0.01, (measured, relation)

@@ -454,3 +454,45 @@ def test_a_time_step_can_be_given_in_seconds_or_as_a_courant_number():
     assert Domain().dt_over_dx_c == 1.0 and Domain().courant == 1.0        # exactly, not 1 + eps
     with pytest.raises(ValueError, match="not both"):
         Domain(dt_over_dx_c=1.0, time_step=1e-12)
+
+
+def test_provenance_records_what_produced_a_number_and_says_when_it_cannot(monkeypatch, tmp_path):
+    """A figure or a table without this is a number somebody has to reproduce from scratch to
+    check. It carries the versions, the precision, the device and the commit, and whatever else
+    the caller wants recorded; the examples write it beside their data as JSON.
+
+    The commit is the one thing that can fail. Inside a repository it is the checked-out one,
+    marked `-dirty` when tracked files differ from it; outside one, where `git rev-parse` exits
+    non-zero, the answer is "unknown" rather than an exception in the middle of a run that has
+    already finished.
+    """
+    import subprocess
+
+    from jaxincell import provenance
+
+    info = provenance(example="a name the caller chose", steps=10)
+    assert info["example"] == "a name the caller chose" and info["steps"] == 10
+    assert set(info) >= {"jaxincell", "jax", "numpy", "python", "platform", "jax_enable_x64",
+                         "backend", "git"}
+    assert info["jax_enable_x64"] is True                  # the tests run in double precision
+    assert info["git"] == "unknown" or len(info["git"].removesuffix("-dirty")) == 40
+
+    def clean(command, **kwargs):
+        text = "0123456789abcdef0123456789abcdef01234567\n" if "rev-parse" in command else ""
+        return subprocess.CompletedProcess(command, 0, stdout=text)
+
+    monkeypatch.setattr(subprocess, "run", clean)
+    assert provenance()["git"] == "0123456789abcdef0123456789abcdef01234567"
+
+    def dirty(command, **kwargs):
+        done = clean(command, **kwargs)
+        return done if "rev-parse" in command else subprocess.CompletedProcess(command, 0, stdout=" M a.py\n")
+
+    monkeypatch.setattr(subprocess, "run", dirty)
+    assert provenance()["git"].endswith("-dirty")
+
+    def missing(command, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    assert provenance()["git"] == "unknown"

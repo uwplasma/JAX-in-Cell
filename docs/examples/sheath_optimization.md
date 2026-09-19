@@ -45,11 +45,11 @@ The script measures why. At $r = 0.25$, from a state prepared over 1200 steps:
 | 100 steps | {{ gradient_modes_agree_100 }} | {{ gradient_best_mismatch_100 }} | {{ gradient_best_step_100 }} |
 
 The implementation is exact at every horizon: the two modes agree to round-off and both
-agree with a central difference of the same realisation to nine digits. What changes is
-the step size at which that agreement holds — $10^{-1}$ over five steps, $10^{-4}$ over
-twenty-five, $10^{-7}$ over a hundred — because every absorption at the wall is a branch
-of the program, and over a long window a change in $r$ of one part in a million already
-flips some.
+agree with a central difference of the same realisation to between eight and ten digits.
+What changes is the step size at which that agreement holds — $10^{-2}$ over five steps,
+$10^{-4}$ over twenty-five, $10^{-6}$ over a hundred — because every absorption at the
+wall is a branch of the program, and over a long window a change in $r$ of one part in a
+million already flips some.
 
 Past that the derivative of one realisation stops tracking the response of the average.
 Over 100 to 800 steps the gradient grows to between five and a hundred times the
@@ -73,10 +73,10 @@ The script prints an identifiability check before optimising: the response of ea
 sensor over the admissible interval against the scatter between realisations. The plasma
 sensor comes out at a ratio of 0.5 and carries almost no information; the sheath sensor
 at 13 and carries it all. That is worth seeing rather than hiding, and it is what put
-the sheath sensor where it is — a scan of positions gives 4.7 at 0.8 Debye lengths from
-the collector, 3.9 at 1.5, 2.9 at 2.5 and 0.9 at 6, and 1.5 is as close as a Gaussian of
-this width can sit without taking part of its reading from the cells the deposit
-truncates at the wall.
+the sheath sensor where it is — scanning the position over the same runs gives 16.1 at 0.8
+Debye lengths from the collector, 13.0 at 1.5, 9.1 at 2.5 and 1.9 at 6, and 1.5 is as
+close as a Gaussian of this width can sit without taking part of its reading from the
+cells the deposit truncates at the wall.
 
 Starting at $r = 0.08$ with the answer at $r = 0.35$, the script runs the same descent
 twice, against two targets that answer two different questions.
@@ -152,6 +152,9 @@ admissible interval falls from 13 times the scatter between realisations to 0.6,
 plasma sensor's from 0.5 to 0.0 — over the whole interval it does not move at all. The
 electrons are magnetised, $\rho_e/\lambda_D = 0.3$ here, so reflecting a fraction of the
 electron flux moves the sheath potential far less, while the noise does not fall with it.
+Moving the sensor does not get it back: the same position scan at 30 degrees gives 0.9 at
+0.8 Debye lengths, 0.6 at 1.5 and 0.3 at 2.5, against 16.1, 13.0 and 9.1 without the
+field.
 
 The inference then fails, and it is worth seeing what failure looks like. Against the
 independent target the optimiser walks to the upper bound and stops: $r = 0.5000$ against

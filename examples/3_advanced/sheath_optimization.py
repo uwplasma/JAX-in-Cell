@@ -25,10 +25,11 @@ response, which is why the result is a response and not a steady state. It is al
 long as the gradient can usefully be taken over, and the script measures why:
 
 * the reverse-mode gradient agrees with the forward-mode one to round-off, and with a
-  central difference of the same realisation to nine digits, at every horizon. The
-  implementation is exact.
+  central difference of the same realisation to between eight and ten digits, at every
+  horizon. The implementation is exact.
 * the step size at which the finite difference agrees shrinks as the window grows --
-  1e-1 over five steps, 1e-4 over twenty-five, 1e-7 over a hundred -- because every
+  1e-2 over five steps, 1e-4 over twenty-five, 1e-6 over a hundred, measured over the
+  three horizons in `docs/scripts/fig_sheath_source.py` -- because every
   absorption at the wall is a branch of the program, and over a long window a change in
   `r` of one part in a million already flips some. Past that the derivative of one
   realisation stops tracking the response of the average, which is the effect Chung,
@@ -121,11 +122,11 @@ def sensor(centre, width):
     return jnp.asarray(k / (k.sum() * domain.dx))
 
 
-# The sheath sensor sits where the response to the reflectivity is: a scan of positions puts
-# the response over the admissible interval at 3.9 times the scatter between realisations at
-# 1.5 Debye lengths from the collector, against 2.9 at 2.5 and 0.9 at 6. Closer still is
-# better again, but a Gaussian of this width centred inside two cloud half-widths of the wall
-# would take part of its reading from the cells the deposit truncates.
+# The sheath sensor sits where the response to the reflectivity is. Scanning the position over
+# the same runs puts the response over the admissible interval at 13.0 times the scatter between
+# realisations at 1.5 Debye lengths from the collector, against 16.1 at 0.8, 9.1 at 2.5 and 1.9
+# at 6. Closer still is better again, but a Gaussian of this width centred inside two cloud
+# half-widths of the wall would take part of its reading from the cells the deposit truncates.
 sensors = jnp.stack([sensor(-length / 2 + 3 * debye, 1.5 * debye), sensor(length / 2 - 1.5 * debye, 1.0 * debye)])
 
 

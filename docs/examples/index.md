@@ -11,8 +11,10 @@ cd JAX-in-Cell
 python examples/1_basic/two_stream.py
 ```
 
-The three sheath scripts take `--quick`, a smoke run of a few seconds with far fewer
-particles: it checks that they execute and reproduces the structure, with more noise.
+Three of them take `--quick`, a smoke run of between ten seconds and two minutes with far
+fewer particles: it checks that they execute and reproduces the structure, with more
+noise, and each says so when it starts so that a smoke run is not quoted as a
+measurement.
 
 ::::{grid} 1 2 2 2
 :gutter: 3

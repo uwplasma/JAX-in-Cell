@@ -77,6 +77,11 @@ transits = 0.15 if quick else 4.0
 # cross, 12000 steps here; an electron takes about a tenth of that, so the two want
 # different emission rates to end up with comparable numbers of markers in comparable pools.
 # The pool sizes below are measured, and the run refuses to report anything if one overflows.
+# For the record, PR #43 raised the quick preset to 128 cells, 1.6 sound transits, 30000 slots and
+# 30 emitted a step. That is 19200 steps in which an ion lives 12000, so it asks the pool to hold
+# about 360000 ions in the 30000 slots it was given: the run overflowed by an order of magnitude
+# and printed numbers anyway. Those settings are history rather than a target; what a pool can
+# hold is what sets the preset here.
 capacity = 30000 if quick else 80000
 emit_ions = 10 if quick else 5
 emit_electrons = 10 if quick else 40
