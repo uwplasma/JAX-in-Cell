@@ -336,6 +336,74 @@ def test_plot_builds_every_panel_and_writes_a_movie(tmp_path):
     assert movie.read_bytes()[4:8] == b"ftyp"        # an ISO base media file
 
 
+def test_the_plot_draws_the_particles_each_frame_has(tmp_path):
+    """Species membership is a property of a slot and does not change; being alive is a property
+    of a slot **at a step**, and that is the weight. Choosing the particles once, by the weight
+    at the last step, deleted from every frame the ones a wall had collected before the end --
+    a sheath movie showed the survivors -- and put the ones a source had not yet emitted into
+    the first frame, in a heap at their parking place.
+
+    Also here: an empty bin on a logarithmic scale is masked rather than given a count of one;
+    what falls outside the velocity range is reported rather than piled on the end bin; the
+    fields are drawn on the coordinates they live on; and saving and showing are independent."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from jaxincell import Source, plot
+    from jaxincell._plot import _Particles, _species_groups
+
+    sigma = 4.2e5
+    domain = Domain(length=1e-2, cells=32, dt_over_dx_c=40.0,
+                    particle_bc="absorbing", field_bc=("open", "absorbing"))
+    species = Species("electrons", 400, -1.0, mass_electron, 1e14, (sigma, 0, 0), active=200,
+                      sampling="quiet", source=Source(density=1e12, vth=(sigma,) * 3, emit=4))
+    out = Simulation(domain, [species], Solver(model="electrostatic")).run(40, seed=0, store_every=4)
+
+    particles = _Particles(out)
+    groups = _species_groups(out)
+    assert [name for name, _ in groups] == ["electrons"]
+    mask = groups[0][1]
+    assert int(mask.sum()) == 400                     # every slot, not the ones that survived
+    counted = [particles.live(mask, "x", i)[2].sum() for i in range(len(out.t))]
+    assert counted[0] > 0 and counted[-1] > 0
+    assert np.ptp(counted) > 0                        # the live weight really does change
+    # and the histogram of a frame carries that frame's weight, not the last frame's
+    for i in (0, len(out.t) - 1):
+        assert particles.phase_space(mask, "x", i, 3 * sigma, 16)[0].sum() == pytest.approx(
+            float(counted[i]), rel=1e-9, abs=0)
+
+    figure = plot(out, show=False, diagnostics=True)
+    titles = [ax.get_title() for ax in figure.axes if ax.get_title()]
+    assert any("conservation and residuals" == t for t in titles)     # the histories are there
+    images = [im for ax in figure.axes for im in ax.get_images()]
+    assert images and all(np.ma.is_masked(im.get_array()) or (im.get_array() > 0).all() for im in images)
+    assert all(im.get_array().min() > 0 for im in images)             # no bin was given a spare 1
+    plt.close(figure)
+
+    # the fields are drawn where they live: E on the faces, rho on the centres
+    from jaxincell._plot import _field_maps
+    for title, _, _, where in _field_maps(out):
+        want = np.asarray(out.faces if title.startswith("$E") else out.grid)
+        assert np.allclose(where, want, rtol=1e-12, atol=1e-12 * float(out.length)), title
+
+    # the time axis says what it was given, not always the plasma frequency
+    figure = plot(out, show=False, omega=1e9, omega_label=r"\Omega_i", diagnostics=False)
+    assert any(r"\Omega_i" in ax.get_ylabel() for ax in figure.axes)
+    assert not any(r"\omega_{pe}" in ax.get_ylabel() for ax in figure.axes)
+    plt.close(figure)
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is not installed")
+    shown = []
+    movie = tmp_path / "both.mp4"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(plt, "show", lambda *a, **k: shown.append(True))
+        figure = plot(out, save=str(movie), show=True, fps=5, diagnostics=False)
+    assert movie.stat().st_size > 1000 and shown == [True]     # both, not one or the other
+    figure.animation = None
+    plt.close(figure)
+
+
 def test_openpmd_export_round_trips():
     """The exported series carries one iteration per stored step, the meshes on
     the grids they live on, and one particle species per name."""
