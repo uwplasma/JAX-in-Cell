@@ -1,0 +1,53 @@
+# A beam on the tail of a Maxwellian drives a wave (the bump-on-tail instability).
+#
+#   jaxincell inputs/bump_on_tail.toml --no-plot --save bump
+#
+# Three per cent of the electrons sit five thermal widths up the tail. The wave they drive
+# grows where the slope of the distribution is positive and saturates by flattening it into a
+# plateau. examples/2_intermediate/bump_on_tail.py fits the growth rate and shows the plateau.
+
+[domain]
+length = 1.0
+cells = 128
+dt_over_dx_c = 1.0
+particle_bc = "periodic"
+field_bc = "periodic"
+
+[solver]
+filter_passes = 0
+
+[[species]]
+name = "bulk"
+n = 80000
+charge = -1
+mass = "electron"
+density = 1.121992e15
+vth = [1.221465e7, 0.0, 0.0]
+sampling = "quiet"
+perturbation_amplitude = 6.366198e-5
+perturbation_mode = 5
+
+[[species]]
+name = "beam"
+n = 40000
+charge = -1
+mass = "electron"
+density = 3.470079e13
+vth = [8.550252e6, 0.0, 0.0]
+drift = [6.107323e7, 0.0, 0.0]
+sampling = "quiet"
+
+[[species]]
+name = "ions"
+n = 10000
+charge = 1
+mass = "electron"
+mass_ratio = 1e9
+density = 1.156693e15
+vth = [0.0, 0.0, 0.0]
+sampling = "quiet"
+
+[run]
+steps = 2400
+seed = 0
+store_every = 16

@@ -1,0 +1,43 @@
+# A Langmuir wave at k lambda_D = 0.3, for the Bohm-Gross dispersion relation.
+#
+#   jaxincell inputs/langmuir_wave.toml --no-plot
+#
+# One seeded mode oscillates at omega^2 = omega_pe^2 + 3 k^2 v_th^2/2 and damps weakly at this
+# wavenumber. examples/1_basic/langmuir_wave.py scans k and draws the measured frequencies
+# against the kinetic root.
+
+[domain]
+length = 1.0
+cells = 32
+dt_over_dx_c = 1.0
+particle_bc = "periodic"
+field_bc = "periodic"
+
+[solver]
+filter_passes = 0
+
+[[species]]
+name = "electrons"
+n = 20000
+charge = -1
+mass = "electron"
+density = 7.229334e13
+vth = [3.238896e7, 0.0, 0.0]
+sampling = "quiet"
+perturbation_amplitude = 1.591549e-3
+perturbation_mode = 1
+
+[[species]]
+name = "ions"
+n = 5000
+charge = 1
+mass = "electron"
+mass_ratio = 1e9
+density = 7.229334e13
+vth = [0.0, 0.0, 0.0]
+sampling = "quiet"
+
+[run]
+steps = 1600
+seed = 0
+store_particles = false

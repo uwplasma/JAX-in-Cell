@@ -78,6 +78,16 @@ Debye lengths from the collector, 13.0 at 1.5, 9.1 at 2.5 and 1.9 at 6, and 1.5 
 close as a Gaussian of this width can sit without taking part of its reading from the
 cells the deposit truncates at the wall.
 
+```{figure} ../_static/figures/sheath_optimization.png
+:width: 100%
+:alt: The descent against both targets, the held-out scan and its per-realisation minima
+
+The example's own output at the full preset, written to `sheath_optimization/figure.png`
+beside `run.json` and `curves.npz`: the two descents, the held-out loss scanned over the
+admissible interval, and where each held-out realisation puts its own minimum. Reproduce it
+with `python examples/3_advanced/sheath_optimization.py`.
+```
+
 Starting at $r = 0.08$ with the answer at $r = 0.35$, the script runs the same descent
 twice, against two targets that answer two different questions.
 

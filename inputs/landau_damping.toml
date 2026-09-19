@@ -1,0 +1,47 @@
+# Landau damping of a Langmuir wave at k*lambda_D = 0.5.
+#
+#   jaxincell inputs/landau_damping.toml --no-plot
+#
+# A small-amplitude wave decays because the electrons travelling with it take energy from it,
+# with no collisions anywhere. The kinetic root of the dispersion relation is
+# omega = (1.4157 - 0.1533 i) omega_pe (Canosa 1973). Fit the decay of |E_k| to get it back;
+# examples/1_basic/landau_damping.py does the fit and draws it.
+#
+# The box holds one wavelength, so the seeded mode is k = 2 pi / L. omega_pe is chosen to give
+# omega_pe * dt = 0.05 at dt = dx / c, and the density follows from omega_pe.
+
+[domain]
+length = 1.0
+cells = 64
+dt_over_dx_c = 1.0
+particle_bc = "periodic"
+field_bc = "periodic"
+
+[solver]
+filter_passes = 0        # smoothing would damp the mode being measured
+
+[[species]]
+name = "electrons"
+n = 150000
+charge = -1
+mass = "electron"
+density = 2.891734e14    # omega_pe^2 eps_0 m_e / e^2, at omega_pe = 9.593359e8 rad/s
+vth = [1.079632e8, 0.0, 0.0]     # k lambda_D = 0.5
+sampling = "quiet"       # the noise floor sets how many e-foldings are measurable
+perturbation_amplitude = 1.591549e-3   # a displacement: a k = 0.01
+perturbation_mode = 1
+
+[[species]]
+name = "ions"
+n = 18750
+charge = 1
+mass = "electron"
+mass_ratio = 1e9         # an immobile neutralising background
+density = 2.891734e14
+vth = [0.0, 0.0, 0.0]
+sampling = "quiet"
+
+[run]
+steps = 500
+seed = 0
+store_particles = false

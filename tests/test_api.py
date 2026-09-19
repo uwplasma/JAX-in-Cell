@@ -764,3 +764,57 @@ def test_the_package_reports_an_unknown_version_from_a_bare_source_tree():
     with mock.patch.object(builtins, "__import__", refuse_version):
         exec(compile(source, jaxincell.__file__, "exec"), namespace)
     assert namespace["__version__"] == "unknown"
+
+
+def test_the_command_line_flags_override_the_file_and_save_what_the_run_produced(tmp_path, capsys):
+    """`--steps` and `--seed` are the two settings a run is repeated with, `--save` writes the
+    arrays and the provenance, `--movie` writes the animation and `--no-plot` is what a
+    headless machine needs. Each overrides the file rather than replacing it.
+
+    The energy drift is printed only when the run kept a particle history: `store_particles =
+    false` keeps the fields and drops the velocities, so there is no total energy to report,
+    and a command line that assumed one crashed on every file that asked for it.
+    """
+    import json
+
+    path = input_file(tmp_path / "input.toml", n=300, steps=40)
+    assert main([str(path), "--steps", "4", "--no-plot"]) == 0
+    printed = capsys.readouterr().out
+    assert "steps 4" in printed and "energy drift" in printed and "gauss residual" in printed
+
+    saved = tmp_path / "saved"
+    assert main([str(path), "--steps", "4", "--seed", "7", "--no-plot", "--save", str(saved)]) == 0
+    stored = np.load(saved / "fields.npz")
+    assert {"t", "E", "B", "rho", "grid", "faces", "steps"} <= set(stored.files)
+    assert stored["E"].shape[0] == 4 and "x" in stored.files
+    record = json.loads((saved / "run.json").read_text())
+    assert record["settings"]["seed"] == 7 and record["settings"]["steps"] == 4
+    assert record["results"]["steps"] == 4 and "energy_drift" in record["results"]
+    assert (saved / "input.toml").read_text() == pathlib.Path(path).read_text()   # the input, beside its output
+    assert record["jax_enable_x64"] is True and record["input"].endswith("input.toml")
+
+    # a run that keeps no particle history reports the Gauss residual and no energy drift,
+    # and its archive has the fields without the velocities
+    text = pathlib.Path(path).read_text().replace("[run]", "[run]\nstore_particles = false")
+    quiet = tmp_path / "quiet.toml"
+    quiet.write_text(text)
+    bare = tmp_path / "bare"
+    capsys.readouterr()                     # only what the quiet run prints
+    assert main([str(quiet), "--steps", "4", "--no-plot", "--save", str(bare)]) == 0
+    printed = capsys.readouterr().out
+    assert "gauss residual" in printed and "energy drift" not in printed
+    assert "x" not in np.load(bare / "fields.npz").files
+
+
+def test_every_input_file_is_one_the_loader_accepts():
+    """`inputs/` is the set of runs the command line ships with, and a file that no longer
+    loads is a broken example in the documentation. Nothing is ignored by the loader, so this
+    also catches a key that was renamed in the package and not in the file."""
+    from jaxincell import load_toml
+
+    files = sorted((ROOT / "inputs").glob("*.toml"))
+    assert len(files) >= 8, [f.name for f in files]
+    for path in files:
+        sim, run = load_toml(path)
+        assert sim.species and run.get("steps", 500) > 0, path.name
+        assert all(s.n >= 1 for s in sim.species), path.name

@@ -62,6 +62,17 @@ be, and measured rather than asserted:
   As the field grazes, the mean ion incidence moves away from the normal, which is the
   presheath turning the orbits.
 
+```{figure} ../_static/figures/sheath_magnetized.png
+:width: 100%
+:alt: Potential and densities at three field angles, the ion impact energy and incidence distributions, and the field-free control
+
+The example's own output at the full preset, written to `sheath_magnetized/figure.png`
+beside `run.json` and `profiles.npz`: the potential and densities at the three angles, the
+energy and incidence distributions of what strikes the collector, and the normal-incidence
+run against its field-free control. Reproduce it with
+`python examples/2_intermediate/sheath_magnetized.py`.
+```
+
 At $m_i/m_e = 400$, $T_i = T_e$, $\rho_s/\lambda_D = 8$, in a box of 60 Debye lengths,
 over four sound transits at 240 cells:
 
