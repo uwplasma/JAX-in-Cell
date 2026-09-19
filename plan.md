@@ -610,7 +610,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] **W2** sources and boundary physics: sampling, safe pools, charge/current/energy exchange, true impacts. *(S04's remaining half is the magnetised example's own entrance condition, a physics choice that belongs to W7.)*
 - [x] **W3** diagnostics and statistics: weighted moments, independent balances, correct windows, uncertainty. *(G04 and G09 stay open: they are the derivative support matrix of section 4.3, which is a claim to keep rather than a defect to fix, and S20 is a physics disagreement W7 has to settle.)*
 - [x] **W4** orchestration and progress: pure kernels, host-owned meter, one snapshot schedule, exact restart.
-- [ ] **W5** TOML/CLI and persistence: one resolver, native archives, openPMD round trip.
+- [x] **W5** TOML/CLI and persistence: one resolver, native archives, openPMD round trip. *(U09's axis label is W6, with the rest of the plotting.)*
 - [ ] **W6** plots and movies: evolving weighted populations, diagnostic histories, bounded memory, headless tests.
 - [ ] **W7** repair the four existing sheath and optimisation examples and their documentation.
 - [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension.
