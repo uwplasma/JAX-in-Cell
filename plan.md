@@ -603,9 +603,23 @@ cleanly, at `tau = 1` and `gammaflag = 0`:
 
 **The matched case is `M=900, tau=1, gamma=0.2, alpha=4 deg`**, with `alpha = 3` and `5 deg` as the
 scan inside the reference's range: 295 Debye lengths, 590 cells, `omega_pe dt = 0.05`, 1.8e6 steps a
-transit, about 6 hours a transit on this laptop and an overnight job on the office GPU. `M=400,
-alpha=5 deg` is the cheap rehearsal at 1.8 hours a transit, at the edge of the 5-8 degree range the
+transit. `M=400, alpha=5 deg` is the cheaper rehearsal, at the edge of the 5-8 degree range the
 README calls inaccurate, so it is a rehearsal and not a result.
+
+**And the marker floor is what actually sets the cost, not the particles per cell.** A species
+carries `emit` times its residence in steps, and `emit` cannot go below one marker per step. At
+`M=400, alpha=5 deg` an ion's residence is 465000 steps, so the pool holds **465000 ions whatever
+the particles-per-cell setting asks for** -- 100 a cell over 324 cells is 32000, and the run carries
+fourteen times that. Three transits is then 7e11 particle-steps, about 33 hours on this laptop and
+8 to 15 on one A4000. The matched case is worse by the same argument: a residence of 1.15e6 steps
+and 4.6e6 steps of run is 7e12 particle-steps, which is a hundred hours of GPU and was stopped
+rather than left running. The arithmetic above priced the box and the step count and missed this,
+which is the difference between a four-hour job and a four-day one.
+
+What that costs the benchmark: the rehearsal at `M=400, alpha=5 deg` is the one case that finishes,
+and it sits at the edge of the reference's own accuracy range. A matched comparison inside that
+range needs either a source that emits a marker every `k` steps, which this code does not have, or
+a machine-week. Say which of the two the comparison rests on.
 
 ### 8.2 Electron-field instability (W10)
 

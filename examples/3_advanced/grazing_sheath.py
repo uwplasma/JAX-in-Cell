@@ -40,6 +40,11 @@ Three presets, because the matched case is expensive:
   calls inaccurate, so it is a rehearsal.
 * `--matched`: `m_i/m_e = 900` at 4 degrees, inside that range, and an overnight run.
 
+`--markers=N` and `--transits=T` scale the cost of any of them: the first is the markers a
+cell holds, the second how many entrance-speed crossings of the box the run lasts, and the
+run says what it used. `--markers=40 --transits=2` is about a quarter of the default, which
+is a noisier first look at the same physics rather than a different problem.
+
 The cell is half a Debye length in all three, which resolves the sheath and the presheath
 but **not** the electron gyroradius, `rho_e = 0.2 lambda_D`. The finite-`rho_e` electron
 response is what the reference keeps in its Debye sheath, so the comparison there is
@@ -89,6 +94,12 @@ sheath_debye = 30.0 if quick else 60.0      # lambda_D of Debye sheath resolved
 cells_per_debye = 2.0                       # dx = 0.5 lambda_D, which does not resolve rho_e
 markers_per_cell = 60 if quick else 100
 transits = 2.0 if quick else 3.0            # entrance-speed crossings of the box
+# the two knobs that trade noise and settling against the run's cost, so that a first look
+# need not be a whole night: --markers=40 --transits=2 is about a quarter of the default
+for flag, name in (("--markers=", "markers_per_cell"), ("--transits=", "transits")):
+    given = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(flag)), None)
+    if given is not None:
+        globals()[name] = type(globals()[name])(given)
 reservoir_samples = 200000                  # velocities drawn once to stand for each reservoir
 
 # --- the scales, and the manifest they make ----------------------------------------------
