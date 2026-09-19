@@ -682,23 +682,23 @@ plots. Re-run dependent benchmarks after any underlying correction.
 
 ## 11. Acceptance checklist
 
-- [ ] Work is on `research-release`; `rj/additions-to-pr` untouched; no main writes, merges, force pushes or releases.
-- [ ] Every S/G/U row reproduced or marked resolved with evidence, then fixed with a test that fails on the old code.
-- [ ] Component-wise and drifting or field-aligned source sampling; supported-source contracts complete.
-- [ ] Source, cloud, collector, current and energy/momentum transfers derived and independently verified.
-- [ ] Event-based impact spectra and event-aware derivative checks; hard-count limitation retained.
-- [ ] Overflow invalidates a run; cutoff error measured; `active=0` safe.
-- [ ] Windows, coordinates, fluence-versus-current labels and statistical uncertainties corrected everywhere.
-- [ ] Pure JAX runner and host-owned progress both work; repeated-run, AD and restart tests pass; verbose equals silent.
-- [ ] One parameter vocabulary with a migration path; README parameter tutorial exists.
-- [ ] TOML/CLI covers every shipped workflow with strict validation.
-- [ ] Native archive and exact checkpoint work; openPMD read back independently.
-- [ ] Energy, charge and momentum panels restored with truthful open-system residuals; movies weight evolving populations.
-- [ ] Existing examples retained and corrected, with saved data and provenance.
+- [x] Work is on `research-release`; `rj/additions-to-pr` untouched; no main writes, merges, force pushes or releases. *(holds through W8; re-check at the end.)*
+- [ ] Every S/G/U row reproduced or marked resolved with evidence, then fixed with a test that fails on the old code. *(39 of 45; G04, G09, U13, U14, E01 and E02 remain, and belong to W9 and W12.)*
+- [x] Component-wise and drifting or field-aligned source sampling; supported-source contracts complete. *(W2, and W8's `model="sampled"` for a reservoir that is none of the closed forms.)*
+- [x] Source, cloud, collector, current and energy/momentum transfers derived and independently verified. *(W2; `charge_balance` is the independent check and found a defect in W2's own overlap accounting.)*
+- [x] Event-based impact spectra and event-aware derivative checks; hard-count limitation retained. *(W2's `Impacts` and `_at_impact`; G02 is the derivative check.)*
+- [x] Overflow invalidates a run; cutoff error measured; `active=0` safe. *(S09's `validate()`, S10's `Wall.truncated`, and a test that starts from an empty box.)*
+- [x] Windows, coordinates, fluence-versus-current labels and statistical uncertainties corrected everywhere. *(S01, U10, and the fluence and scatter reporting of W7's examples.)*
+- [x] Pure JAX runner and host-owned progress both work; repeated-run, AD and restart tests pass; verbose equals silent. *(W4.)*
+- [ ] One parameter vocabulary with a migration path; README parameter tutorial exists. *(U09 gave the vocabulary and the release notes the migration; the tutorial is W9's `parameters_and_sampling.py`.)*
+- [x] TOML/CLI covers every shipped workflow with strict validation. *(W5.)*
+- [x] Native archive and exact checkpoint work; openPMD read back independently. *(W5; a restart through a file is bit-identical to one through memory.)*
+- [x] Energy, charge and momentum panels restored with truthful open-system residuals; movies weight evolving populations. *(W6.)*
+- [ ] Existing examples retained and corrected, with saved data and provenance. *(the four sheath and optimisation examples in W7; the rest are W9's.)*
 - [ ] Matched GYRAZE case with real reference data, uncertainty, and a documented finite-ordering study.
 - [ ] Weibel linear growth verified mode by mode; PR #43's nonlinear preset ported and preserved.
 - [ ] Explicit/implicit, collisional/collisionless, filtered/unfiltered and relativistic comparisons demonstrated.
-- [ ] Independent-target sheath inference with real statistical uncertainty.
+- [x] Independent-target sheath inference with real statistical uncertainty. *(W7's G05: 0.3264 against 0.35 on a residual of 0.0512, and an error bar of +-0.0207 that is a scatter and not a grid.)*
 - [ ] Electron-field example with verified inputs, limiting controls and an honest interpretation.
 - [ ] Source-free implicit ES and collision time-centering done; optional algorithms have implement/defer evidence.
 - [ ] Fast suite and headless examples pass; scientific claims carry separate convergence evidence.
