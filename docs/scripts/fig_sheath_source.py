@@ -35,7 +35,7 @@ def sheath(cells=CELLS, capacity=CAPACITY, emit=EMIT, dt=DT, reflection=0.0):
 
 steps = STORED * (int(TRANSITS * LENGTH / (BEAM * SIGMA) / DT) // STORED)
 simulation = sheath()
-out = simulation.run(steps, seed=0, store_every=steps // STORED, store_particles=False, moments=True)
+out = simulation.run(steps, seed=0, store_every=steps // STORED, store_particles=False, moments="flux")
 late = STORED // 2
 faces = np.asarray(simulation.domain.faces)
 phi = np.asarray(potential(out)) / T_E

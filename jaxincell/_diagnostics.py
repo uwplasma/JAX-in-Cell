@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from ._config import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
 __all__ = ["bohm_edge", "charge_balance", "diagnostics", "dominant_frequency", "energies",
-           "gauss_residual", "potential", "temperatures"]
+           "gauss_residual", "moment_profiles", "potential", "temperatures"]
 
 
 def _blocks(out):
@@ -114,6 +114,58 @@ def charge_balance(out):
     charge = out.charge * (out.state.w if out.weight is None else out.weight)
     one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
     return jnp.abs((held - held[0]) - (put_in - put_in[0])) / _nonzero(one_sign)
+
+
+def moment_profiles(out, start=0, stop=-1):
+    """Density, mean velocity, pressure tensor and temperature tensor of each species, averaged
+    over the window that ends at stored step ``stop`` and begins at ``start``.
+
+    The window is half-open, :math:`(t_a, t_b]`: a running sum is stored after the chunk it
+    ends, so what separates two of them is ``Output.steps[stop] - Output.steps[start]`` and not
+    the number of stored entries between. Counting entries is off by one and reads a constant
+    profile back low.
+
+    What comes back depends on how many moments the run kept. ``run(moments="density")`` gives
+    the density; ``"flux"`` adds the mean velocity; ``"full"`` adds both tensors,
+
+    .. math::
+
+        P_{ij} = m\\,[\\langle n v_iv_j\\rangle - n u_iu_j], \\qquad T_{ij} = P_{ij}/n,
+
+    with the temperature in joules -- divide by the elementary charge for electronvolts. Both
+    are ``(species, 3, 3, cells)`` and symmetric by construction, because the six independent
+    second moments are what was deposited.
+
+    Empty cells have no velocity and no temperature; they come back as zero rather than as the
+    division that made them.
+    """
+    if out.moments is None:
+        raise ValueError("this run kept no moments: pass moments='density', 'flux' or 'full' to run()")
+    span = int(out.steps[stop]) - int(out.steps[start])
+    if span <= 0:
+        raise ValueError(f"a window has to span at least one step: stored steps {start} and {stop} are "
+                         f"{int(out.steps[start])} and {int(out.steps[stop])}, which is {span}")
+    window = (out.moments[stop] - out.moments[start]) / span
+    density = window[:, 0]
+    live = density > 0
+    result = {"density": density}
+    if window.shape[1] < 4:
+        return result
+    safe = jnp.where(live, density, 1.0)
+    velocity = jnp.where(live[:, None], window[:, 1:4] / safe[:, None], 0.0)
+    result["velocity"] = velocity
+    if window.shape[1] < 10:
+        return result
+    mass = jnp.stack([out.mass[block][0] for _, block in _blocks(out)])
+    order = {(0, 0): 4, (1, 1): 5, (2, 2): 6, (0, 1): 7, (0, 2): 8, (1, 2): 9}
+    second = jnp.stack([jnp.stack([window[:, order[min(i, j), max(i, j)]] for j in range(3)])
+                        for i in range(3)])                       # (3, 3, species, cells)
+    second = jnp.moveaxis(second, 2, 0)                           # (species, 3, 3, cells)
+    drift = velocity[:, :, None, :] * velocity[:, None, :, :]
+    pressure = mass[:, None, None, None] * (second - density[:, None, None, :] * drift)
+    result["pressure"] = jnp.where(live[:, None, None, :], pressure, 0.0)
+    result["temperature"] = jnp.where(live[:, None, None, :], pressure / safe[:, None, None, :], 0.0)
+    return result
 
 
 def bohm_edge(position, flow, speed):

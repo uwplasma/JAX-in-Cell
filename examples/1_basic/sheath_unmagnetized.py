@@ -89,7 +89,7 @@ print(f"{steps} steps = {transits:.0f} ion transits; {capacity} slots and {emit}
 print(f"reference wall potential {phi_wall:.5f} T_e/e, source amplitude {amplitude:.4f} n_0\n")
 
 out = simulation.run(steps, seed=0, store_every=steps // stored, store_particles=False,
-                     moments=True).validate()     # a pool that overflowed invalidates everything below
+                     moments="flux").validate()     # a pool that overflowed invalidates everything below
 
 # --- what came out -----------------------------------------------------------------------
 late = stored // 2                                  # average over the second half of the run

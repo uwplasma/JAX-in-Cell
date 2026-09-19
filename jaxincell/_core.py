@@ -18,9 +18,10 @@ import jax.numpy as jnp
 
 from ._config import epsilon_0, speed_of_light as c
 
-__all__ = ["s2_weights", "map_indices", "deposit", "PARITY", "PARK", "to_centres", "with_ghosts", "gather",
-           "current_from_continuity", "to_faces", "wall_faces_E", "curl_E", "curl_B", "half_step_fields",
-           "E_x_from_rho", "boris", "boris_relativistic", "apply_particle_bc", "wrap_positions", "smooth"]
+__all__ = ["s2_weights", "map_indices", "deposit", "PARITY", "PARK", "to_centres",
+           "with_ghosts", "gather", "current_from_continuity", "to_faces", "wall_faces_E", "curl_E",
+           "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic",
+           "apply_particle_bc", "wrap_positions", "smooth"]
 
 
 # --- shape function and boundary mapping ---------------------------------------

@@ -769,6 +769,48 @@ def test_the_clock_is_absolute_and_a_run_split_in_two_is_the_run_taken_whole():
     assert np.allclose(np.asarray(rest.moments[-1]), np.asarray(whole.moments[-1]), rtol=1e-10, atol=0)
 
 
+def test_the_ten_moments_give_a_temperature_tensor_without_a_particle_history():
+    """A pressure or a temperature *tensor* needs the six independent second moments, and having
+    them deposited is what makes both available from a run that stored no phase space at all.
+    A quiet anisotropic Maxwellian has a known one: T_ii = m sigma_i^2 with sigma = vth/sqrt(2),
+    and nothing off the diagonal.
+
+    How many rows to keep is a choice, because the second moments are not free -- 58 % of a step
+    against the first four's 20 %, measured -- so `run(moments=...)` takes the level."""
+    from jaxincell import moment_profiles
+
+    sigma = np.sqrt(2.0 * e_charge / mass_electron)                  # 2 eV along x
+    vth = (np.sqrt(2) * sigma, sigma, 0.0)                           # 2 eV, 1 eV, cold
+    domain = Domain(length=1e-2, cells=16, dt_over_dx_c=1.0)
+    electrons = Species.electrons(n=40000, density=DENSITY, vth=vth, quiet=True)
+    ions = Species.ions(n=4000, density=DENSITY, mass_ratio=1e9, vth=0.0, quiet=True)
+    sim = Simulation(domain, [electrons, ions], Solver(model="electrostatic"))
+    out = sim.run(20, store_every=5, moments="full")
+    assert out.moments.shape[1:] == (2, len(Simulation.MOMENTS), 16)
+
+    profiles = moment_profiles(out, 0, -1)
+    inside = slice(4, -4)
+    assert float(jnp.mean(profiles["density"][0][inside])) == pytest.approx(DENSITY, rel=1e-3, abs=0)
+    assert np.all(np.abs(np.asarray(profiles["velocity"])[0][:, inside]) < 0.02 * sigma)
+    kelvin = np.asarray(profiles["temperature"])[0][:, :, inside].mean(axis=2) / e_charge
+    assert np.allclose(np.diag(kelvin), [2.0, 1.0, 0.0], rtol=2e-3, atol=1e-3)
+    assert np.abs(kelvin - np.diag(np.diag(kelvin))).max() < 1e-3    # and nothing off the diagonal
+    assert np.allclose(kelvin, kelvin.T, rtol=0, atol=0)             # symmetric by construction
+    pressure = np.asarray(profiles["pressure"])[0][:, :, inside].mean(axis=2)
+    assert np.allclose(pressure, kelvin * e_charge * DENSITY, rtol=2e-3, atol=0)
+
+    # the cheaper levels give what they say and no more, and a level that does not exist is refused
+    assert sorted(moment_profiles(sim.run(20, store_every=5, moments="flux"))) == ["density", "velocity"]
+    assert sorted(moment_profiles(sim.run(20, store_every=5, moments="density"))) == ["density"]
+    assert sim.run(4, store_every=4, moments=False).moments is None
+    with pytest.raises(ValueError, match="moments is False"):
+        sim.run(4, moments="pressure")
+    with pytest.raises(ValueError, match="kept no moments"):
+        moment_profiles(sim.run(4, store_every=4))
+    with pytest.raises(ValueError, match="span at least one step"):
+        moment_profiles(out, 0, 0)
+
+
 def test_a_window_of_the_running_sums_is_a_difference_over_a_difference():
     """A running sum is taken *after* the chunk it ends, so the sums at stored steps a and b are
     `steps[b] - steps[a]` apart and not one chunk more. Dividing by one more read a constant

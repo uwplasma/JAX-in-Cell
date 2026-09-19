@@ -629,31 +629,50 @@ class Simulation:
         return x, u, w, qm, wall.replace(injected=injected, energy_injected=energy,
                                          momentum_injected=momentum, overflow=overflow)
 
-    def moments(self, x, v, w):
-        """Density, particle flux and kinetic energy density of each species on the grid,
-        ``(species, 3, cells)``, in :math:`\\mathrm{m^{-3}}`, :math:`\\mathrm{m^{-2}s^{-1}}`
-        and :math:`\\mathrm{J/m^3}`.
+    #: What each row of :meth:`Simulation.moments` holds, in order.
+    MOMENTS = ("n", "nvx", "nvy", "nvz", "nvxvx", "nvyvy", "nvzvz", "nvxvy", "nvxvz", "nvyvz")
+    #: How many of them each setting of ``run(moments=...)`` accumulates.
+    MOMENT_LEVELS = {"density": 1, "flux": 4, "full": 10}
 
-        They use the deposit's own shape function, so a profile lines up with the charge
-        density the field solver saw. ``run(moments=True)`` sums them over every step and
-        stores the running sum, which is how a mean over a long window is had without a
-        particle history: divide the difference of two stored sums by the number of steps
-        between them. It costs three passes over the particles per species per step.
+    def moments(self, x, v, w, rows=10):
+        """The ten velocity moments of each species on the grid, ``(species, 10, cells)``: the
+        density, the three fluxes and the six independent second moments, named in
+        :data:`MOMENTS`. The units are :math:`\\mathrm{m^{-3}}`, :math:`\\mathrm{m^{-2}s^{-1}}`
+        and :math:`\\mathrm{m^{-1}s^{-2}}`.
+
+        Ten is what a pressure or a temperature **tensor** needs, and having them here is what
+        makes those available without a particle history: :func:`~jaxincell.moment_profiles`
+        turns a window of the running sums into the density, the mean velocity and both tensors.
+        The first two rows are the density and the flux along the grid, which is why a profile
+        written before there were ten still reads the same.
+
+        They use the deposit's own shape function, so a profile lines up with the charge density
+        the field solver saw. ``run(moments=...)`` sums them over every step and stores the
+        running sum, which is how a mean over a long window is had without a particle history:
+        divide the difference of two stored sums by the difference of the step counts beside them.
+
+        How many rows is worth choosing, because the second moments are not free. Measured over
+        200 steps at 120000 slots on 256 cells, each in its own process: no moments 0.983 s, the
+        first four 1.176 s and all ten 1.550 s, so a density profile costs 20 % of a step and a
+        temperature tensor 58 %. What the extra rows spend is memory traffic, not deposits --
+        ten deposits are 0.71 ms against three at 0.42, while the six products
+        :math:`v_iv_j` are six more arrays the length of the particle list at every step.
         """
         d = self.domain
-        rows = []
-        for (start, n), sp in zip(self.blocks, self.species):
+        pairs = ((0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2))
+        out = []
+        for (start, n) in self.blocks:
             xs, vs, ws = x[start:start + n, 0], v[start:start + n], w[start:start + n]
 
             def density_of(amount, xs=xs):
                 return deposit(xs, amount, d.grid[0], d.dx, d.cells, d.particle_bc)
 
-            rows.append(jnp.stack([density_of(ws), density_of(ws * vs[:, 0]),
-                                   density_of(0.5 * sp.mass * ws * jnp.sum(vs ** 2, axis=1))]))
-        return jnp.stack(rows)
+            amounts = [ws] + [ws * vs[:, k] for k in range(3)] + [ws * vs[:, i] * vs[:, j] for i, j in pairs]
+            out.append(jnp.stack([density_of(a) for a in amounts[:rows]]))
+        return jnp.stack(out)
 
     def _accumulate(self, totals, x, v, w):
-        return None if totals is None else totals + self.moments(x, v, w)
+        return None if totals is None else totals + self.moments(x, v, w, totals.shape[1])
 
     def _current_closure(self, current_per_particle):
         """The constant of the continuity current for a closure that does not take a
@@ -1055,9 +1074,12 @@ class Simulation:
                 over seeds gives an ensemble with one compilation).
             store_every: Keep every ``store_every``-th state in the output.
             store_particles: Keep the particle histories (the bulk of the memory).
-            moments: Sum :meth:`moments` over every step and store the running sums, so
-                that a mean profile over a long window needs no particle history. It
-                costs three passes over the particles per species per step.
+            moments: Which velocity moments to sum over every step and store the running sums
+                of, so that a mean profile over a long window needs no particle history:
+                ``False``, ``"density"``, ``"flux"`` (the density and the three fluxes) or
+                ``"full"``, which is what ``True`` means and is the ten a pressure or
+                temperature tensor needs. They cost 20 % of a step for the first four and 58 %
+                for all ten, measured at 120000 slots on 256 cells.
             state: A previous :class:`State`, normally ``Output.state``, to continue
                 from. It carries the absolute time, the particles, the fields, the
                 random key, the source remainders and the wall ledger, so a run split
@@ -1068,7 +1090,11 @@ class Simulation:
         if store_every < 1 or steps % store_every:
             raise ValueError(f"steps ({steps}) must be a multiple of store_every ({store_every}), "
                              "which must be at least one")
-        return _run(self, steps, seed, store_every, store_particles, moments, state)
+        level = "full" if moments is True else moments
+        if level not in (False, None, *self.MOMENT_LEVELS):
+            raise ValueError(f"moments is False, True, or one of {', '.join(map(repr, self.MOMENT_LEVELS))}, "
+                             f"not {moments!r}")
+        return _run(self, steps, seed, store_every, store_particles, level or None, state)
 
 
 @partial(jax.jit, static_argnames=("steps", "store_every", "store_particles", "moments"))
@@ -1078,7 +1104,8 @@ def _run(sim, steps, seed, store_every, store_particles, moments, state):
     if state is not None:
         carry0 = state
     if moments:
-        carry0 = carry0.replace(moments=jnp.zeros((len(sim.species), 3, sim.domain.cells))
+        carry0 = carry0.replace(moments=jnp.zeros((len(sim.species), sim.MOMENT_LEVELS[moments],
+                                                   sim.domain.cells))
                                 if carry0.moments is None else carry0.moments)
     step = sim._explicit_step if sim.solver.algorithm == "explicit" else sim._implicit_step
     step = partial(step, extra=extra)

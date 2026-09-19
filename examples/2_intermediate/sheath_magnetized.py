@@ -115,7 +115,7 @@ for angle in angles:
                    source=Source(density=density, vth=(np.sqrt(2) * ion_spread,) * 3, emit=emit_ions))
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=B,
                      impacts=impacts).run(steps, seed=0, store_every=steps // stored,
-                                          store_particles=False, moments=True).validate()
+                                          store_particles=False, moments="flux").validate()
 
     late = stored // 2
     phi = np.asarray(potential(out))[late:].mean(axis=0) / electron_temperature
