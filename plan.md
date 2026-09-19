@@ -548,6 +548,65 @@ zero net collector current, stationary inventory, no source-position dependence,
 closed balances; profile, flux, drop and impact-distribution comparison on common coordinates with
 predeclared tolerances; then a scan **within** the reference's valid range.
 
+#### What the reference tool actually does (measured, W8)
+
+Cloned at the pinned commit into `~/local/GYRAZE-ref`, outside this repository, and built against
+Homebrew's GSL with `make -B PROFILE=release CFLAGS="-Wall -O3 -I/opt/homebrew/include"
+LDFLAGS="-O3 -L/opt/homebrew/lib -lgsl -lgslcblas -lm"`. **Figure 6 reproduces**: `ADHOC`,
+`alpha=2.5`, `gammaflag=0`, `gamma=0.3`, one species, `ni:ne=1`, `Ti:Te=1`, `mi:me=3600`,
+`set_current=1`, `jwall=0` converges in 43 iterations and 11 s to
+
+    (phi_DSE, phi_wall) = (-2.410640, -2.822029) T_e/e,  current = 8.8e-05
+
+with `misc_output.txt` holding `0.000088, 2.822029, 0.125713, 0.079472, 0.026509, 0.026597` in the
+C write order -- net current, `0.5 v_cut^2` (the wall potential's **magnitude**), `Q_e`, `sum Q_i`,
+`flux_e`, `sum flux_i`. The electron sheath heat transmission coefficient is 4.742 against the
+classical `2 + |phi|` of 4.822.
+
+Two more traps, found by running it rather than reading it:
+
+- **The far field of each profile file is not a profile.** `phi_n_DS.txt` and `phi_n_MP.txt` are
+  `x, phi, sum n_i, n_e` (checked in the C, not the post-processor), but one density column is
+  written as exactly `0.000000` beyond some index -- `n_e` past `x ~ 67 lambda_D` in the Debye
+  sheath, `sum n_i` past `x ~ 14 rho_s` in the presheath. That is an unfilled array, not a
+  density. Truncate every comparison where a column reaches exact zero at the far end.
+- **Convergence and exit status are different things, and `NaN` appears in both.** Every case,
+  including the one that exits cleanly, prints `NaN` for some intermediate diagnostics
+  (`momfluxinf`, `n_inf`, `dndphi`). Some parameter sets converge, print the wall potential, write
+  every output file, and then abort with SIGABRT -- `M=900, gamma=0.12` does. Gate the reference
+  set on the exit status, not on the last line of the log.
+
+#### The matched case has to move, and the arithmetic says where (W8)
+
+A full-orbit PIC run matched to figure 6 needs the whole magnetic presheath, `25 rho_S` deep with
+`rho_S/lambda_D = sqrt(M(1+tau)) gamma = 25.5`, plus the `83 lambda_D` Debye sheath: a box of 719
+Debye lengths. Ions enter it at `c_s sin(2.5 deg)`, and `Omega_e dt <= 0.25` caps the step at
+`omega_pe dt = 0.075`, so one ion transit is 9.3e6 steps. At 0.5 Debye lengths a cell and 100
+particles a cell that is **75 hours a transit** on this laptop, and the comparison needs two or
+three. Figure 6 is out of reach for full-orbit PIC, and saying so with the arithmetic is part of
+the benchmark rather than a failure of it.
+
+GYRAZE costs 11 s a case, so the reference moves instead. Scanning it for where it still converges
+cleanly, at `tau = 1` and `gammaflag = 0`:
+
+| `M` | `gamma` | 3 deg | 4 deg | 5 deg |
+|---|---|---|---|---|
+| 400 | 0.12 | converges, aborts | no convergence | converges, aborts |
+| 400 | 0.20 | crash in `densfinorb` | non-monotonic | **-1.5771, -1.6789** |
+| 400 | 0.30 | crash | non-monotonic | non-monotonic |
+| 900 | 0.12 | converges, aborts | converges, aborts | converges, aborts |
+| 900 | 0.20 | **-1.9585, -2.0724** | **-1.8830, -2.0837** | **-1.8060, -2.0940** |
+| 900 | 0.30 | **-1.9572, -2.0970** | **-1.8833, -2.1137** | **-1.8065, -2.1281** |
+
+(`(phi_DSE, phi_wall)` in `T_e/e` where it converges and exits.) The critical angle grows with
+`gamma` exactly as the README says, and `M=400` is mostly below it.
+
+**The matched case is `M=900, tau=1, gamma=0.2, alpha=4 deg`**, with `alpha = 3` and `5 deg` as the
+scan inside the reference's range: 295 Debye lengths, 590 cells, `omega_pe dt = 0.05`, 1.8e6 steps a
+transit, about 6 hours a transit on this laptop and an overnight job on the office GPU. `M=400,
+alpha=5 deg` is the cheap rehearsal at 1.8 hours a transit, at the edge of the 5-8 degree range the
+README calls inaccurate, so it is a rehearsal and not a result.
+
 ### 8.2 Electron-field instability (W10)
 
 Reference, verified 2026-09-18: L. P. Beving, M. M. Hopkins and S. D. Baalrud, *Electron-field
@@ -614,7 +673,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] **W4** orchestration and progress: pure kernels, host-owned meter, one snapshot schedule, exact restart.
 - [x] **W5** TOML/CLI and persistence: one resolver, native archives, openPMD round trip. *(U09's axis label is W6, with the rest of the plotting.)*
 - [x] **W6** plots and movies: evolving weighted populations, diagnostic histories, bounded memory, headless tests.
-- [ ] **W7** repair the four existing sheath and optimisation examples and their documentation.
+- [x] **W7** repair the four existing sheath and optimisation examples and their documentation. *(S15, S16, S04's second half, G05, U12 and S20 closed; every number on the four pages is from a run of the preset the page names, and the convergence table is a script.)*
 - [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension.
 - [ ] **W9** model-comparison and Weibel examples on the existing kernels and shared theory.
 - [ ] **W10** electron-field instability with its limiting controls.
