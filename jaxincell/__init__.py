@@ -33,14 +33,21 @@ def __getattr__(name):
 
 
 def main(argv=None):
-    """The ``jaxincell input.toml`` command: run the file, print the energy balance, show the animation."""
+    """The ``jaxincell input.toml`` command: run the file, print the energy balance, show the animation.
+
+    Everything ``[run]`` may hold is passed to :meth:`~jaxincell.Simulation.run`, so a file can
+    ask for the moments, the particle history or a quieter meter. A command-line run shows
+    progress unless the file says otherwise: it is the one place where somebody is watching.
+    """
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
         print("usage: jaxincell input.toml")
         return 1
     sim, run = load_toml(argv[0])
-    out = sim.run(int(run.get("steps", 500)), seed=int(run.get("seed", 0)),
-                  store_every=int(run.get("store_every", 1)))
+    settings = {key: value for key, value in run.items() if key != "plot"}
+    settings.setdefault("steps", 500)
+    settings.setdefault("verbose", True)
+    out = sim.run(**settings)
     d = diagnostics(out)
     total = d["total"]
     print(f"steps {out.t.shape[0]}  final time {float(out.t[-1]):.3e} s  "

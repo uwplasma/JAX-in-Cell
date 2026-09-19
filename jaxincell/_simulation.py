@@ -1,6 +1,7 @@
 """The simulation: initial state, the time loop, and the output."""
 from __future__ import annotations
 
+import dataclasses
 import os
 import warnings
 from functools import partial
@@ -12,7 +13,7 @@ from jax import lax, random
 from jax.scipy.special import erfinv
 
 from ._collisions import collide, coulomb_logarithm
-from ._config import Collisions, Domain, Solver, Species, pytree_dataclass
+from ._config import Collisions, Domain, Impacts, Solver, Source, Species, pytree_dataclass
 from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
 from ._progress import reporter
 from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, s2_weights,
@@ -32,7 +33,7 @@ _enable_double_precision(os.environ)
 
 _BETA2_MAX = 1 - 1e-5     # largest v^2/c^2 of a velocity entering a relativistic run; see Simulation._momentum
 
-__all__ = ["Simulation", "Output", "State", "Wall", "load_toml", "quiet_start"]
+__all__ = ["Simulation", "Output", "State", "Wall", "load_toml", "quiet_start", "RUN_KEYS"]
 
 
 @pytree_dataclass(static=())
@@ -1190,17 +1191,51 @@ def _join(histories):
                  for parts in zip(*histories))
 
 
+#: Keys ``[run]`` may hold: the arguments of :meth:`Simulation.run` that a file can give,
+#: and ``plot``, which the command line reads.
+RUN_KEYS = ("steps", "seed", "store_every", "store_particles", "moments", "verbose", "plot")
+
+
+def _only(where, given, allowed):
+    """Refuse a key nothing reads. A configuration that ignores what it does not recognise is
+    a configuration that runs something other than what it says, and a misspelling is then a
+    silent change of physics rather than an error."""
+    unknown = [key for key in given if key not in allowed]
+    if unknown:
+        raise ValueError(f"{where} has no {', '.join(map(repr, sorted(unknown)))}; it takes "
+                         f"{', '.join(sorted(allowed))}")
+    return given
+
+
+def _fields_of(cls):
+    return tuple(f.name for f in dataclasses.fields(cls))
+
+
 def load_toml(path):
     """Build a :class:`Simulation` and the run settings from a TOML file.
 
-    The file has ``[domain]``, ``[solver]`` and ``[[species]]`` tables whose keys
-    are the constructor arguments, an optional ``[collisions]`` table, and a
-    ``[run]`` table with ``steps``, ``seed`` and ``store_every``. Every species
-    gives ``mass``, as a number in kilograms or as ``"electron"`` or ``"proton"``,
+    Every table is a constructor: ``[domain]`` is :class:`~jaxincell.Domain`, ``[solver]``
+    :class:`~jaxincell.Solver`, each ``[[species]]`` a :class:`~jaxincell.Species`, its optional
+    ``[species.source]`` a :class:`~jaxincell.Source`, ``[collisions]``
+    :class:`~jaxincell.Collisions` and ``[impacts]`` :class:`~jaxincell.Impacts`. A ``[run]``
+    table holds the arguments of :meth:`Simulation.run` and ``plot``. A ``[external]`` table
+    gives uniform external fields, ``E`` and ``B`` as three components, broadcast over the grid.
+
+    Every species gives ``mass``, as a number in kilograms or as ``"electron"`` or ``"proton"``,
     optionally multiplied by ``mass_ratio``, and ``charge`` in units of e.
 
+    **Nothing is ignored.** A table or a key that nothing reads is an error, not a line that
+    quietly does not apply: a misspelled ``vth`` in a species is a different plasma, and finding
+    that out from the answer is worse than finding it out from the file.
+
+    Scans, optimisation and movie scripting are deliberately not here. Those are programs -- a
+    loop, an objective, a schedule -- and a configuration file that grows a control flow is a
+    worse programming language than the one it is written in. Build the `Simulation` from a file
+    and write the loop around it in Python.
+
     Raises:
-        ValueError: If a species has no ``mass`` or names an unknown one.
+        ValueError: If a species has no ``mass`` or names an unknown one, or if any table or key
+            is one nothing reads.
     """
     try:
         import tomllib
@@ -1208,14 +1243,36 @@ def load_toml(path):
         import tomli as tomllib
     with open(path, "rb") as f:
         raw = tomllib.load(f)
+    # every key first, before anything is built: a misspelling should be reported as a
+    # misspelling and not as whatever the half-built object goes on to complain about
+    _only(f"{path}", raw, ("domain", "solver", "species", "collisions", "impacts", "external", "run"))
+    _only("[domain]", raw.get("domain", {}), _fields_of(Domain))
+    _only("[solver]", raw.get("solver", {}), _fields_of(Solver))
+    _only("[collisions]", raw.get("collisions", {}), _fields_of(Collisions))
+    _only("[impacts]", raw.get("impacts", {}), _fields_of(Impacts))
+    _only("[external]", raw.get("external", {}), ("E", "B"))
+    _only("[run]", raw.get("run", {}), RUN_KEYS)
+    for entry in raw.get("species", []):
+        _only("a [[species]] table", entry, _fields_of(Species) + ("mass_ratio", "source"))
+        _only("a [species.source] table", entry.get("source", {}), _fields_of(Source))
+
     species, named = [], {"electron": mass_electron, "proton": mass_proton}
-    for s in raw.get("species", []):
-        s = dict(s)
-        mass = s.pop("mass", None)
+    for entry in raw.get("species", []):
+        entry = dict(entry)
+        mass = entry.pop("mass", None)
         if mass is None or (isinstance(mass, str) and mass not in named):
-            raise ValueError(f"species {s.get('name')!r} needs a mass: a number in kilograms, "
+            raise ValueError(f"species {entry.get('name')!r} needs a mass: a number in kilograms, "
                              f"or \"electron\" or \"proton\", not {mass!r}")
-        species.append(Species(mass=named.get(mass, mass) * s.pop("mass_ratio", 1.0), **s))
+        source = entry.pop("source", None)
+        if source is not None:
+            source = Source(**dict(source))
+        species.append(Species(mass=named.get(mass, mass) * entry.pop("mass_ratio", 1.0),
+                               source=source, **entry))
+    domain = Domain(**raw.get("domain", {}))
+    solver = Solver(**raw.get("solver", {}))
     collisions = Collisions(**raw["collisions"]) if "collisions" in raw else None
-    sim = Simulation(Domain(**raw.get("domain", {})), species, Solver(**raw.get("solver", {})), collisions)
+    impacts = Impacts(**raw["impacts"]) if "impacts" in raw else None
+    uniform = {f"external_{k}": jnp.broadcast_to(jnp.asarray(v, float), (domain.cells, 3))
+               for k, v in raw.get("external", {}).items()}
+    sim = Simulation(domain, species, solver, collisions, impacts=impacts, **uniform)
     return sim, raw.get("run", {})

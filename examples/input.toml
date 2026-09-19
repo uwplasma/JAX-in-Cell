@@ -1,6 +1,10 @@
 # Two-stream instability. Run it with:  jaxincell input.toml
-# Every table maps onto a constructor argument of the Python API:
-# [domain] -> Domain, [solver] -> Solver, [[species]] -> Species, [collisions] -> Collisions.
+#
+# Every table is a constructor: [domain] -> Domain, [solver] -> Solver, [[species]] -> Species,
+# [species.source] -> Source, [collisions] -> Collisions, [impacts] -> Impacts. [external] gives
+# uniform external fields as three components. [run] holds the arguments of Simulation.run and
+# `plot`. Nothing is ignored: a key nothing reads is an error, so a misspelling is caught here
+# and not in the answer.
 
 [domain]
 length = 0.01            # box length in metres, spanning [-L/2, L/2]
@@ -39,3 +43,4 @@ steps = 1200
 seed = 0
 store_every = 1
 plot = true
+verbose = true           # report progress while it runs; the command line does this by default

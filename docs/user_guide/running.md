@@ -166,13 +166,27 @@ A run can be written as TOML and started from the command line:
 jaxincell examples/input.toml
 ```
 
-The tables map onto the constructors: `[domain]` to {class}`~jaxincell.Domain`,
-`[solver]` to {class}`~jaxincell.Solver`, each `[[species]]` to a
-{class}`~jaxincell.Species`, `[collisions]` to {class}`~jaxincell.Collisions`, and
-`[run]` carries `steps`, `seed`, `store_every` and `plot`. Every species states its
-`mass`, by name or in kilograms, optionally times `mass_ratio`; a species without one,
-or with a name other than `"electron"` or `"proton"`, is a `ValueError` rather than a
-silent proton.
+Every table is a constructor: `[domain]` is {class}`~jaxincell.Domain`, `[solver]`
+{class}`~jaxincell.Solver`, each `[[species]]` a {class}`~jaxincell.Species` and its
+optional `[species.source]` a {class}`~jaxincell.Source`, `[collisions]`
+{class}`~jaxincell.Collisions` and `[impacts]` {class}`~jaxincell.Impacts`. `[external]`
+gives uniform external fields, `E` and `B` as three components broadcast over the grid.
+`[run]` holds the arguments of `run` — `steps`, `seed`, `store_every`,
+`store_particles`, `moments`, `verbose` — and `plot`, which the command line reads.
+Every species states its `mass`, by name or in kilograms, optionally times `mass_ratio`;
+a species without one, or with a name other than `"electron"` or `"proton"`, is a
+`ValueError` rather than a silent proton.
+
+**Nothing is ignored.** A table or a key that nothing reads is an error, checked before
+anything is built, so a misspelling is reported as a misspelling and not as whatever the
+half-built object goes on to complain about. A configuration that quietly drops what it
+does not recognise runs something other than what it says, and a misspelled `vth` is a
+different plasma.
+
+Scans, optimisation and movie scripting are deliberately absent. Those are programs — a
+loop, an objective, a schedule — and a configuration file that grows a control flow is a
+worse programming language than the one it is written in. Load the `Simulation` from a
+file and write the loop around it in Python.
 
 ```toml
 [domain]

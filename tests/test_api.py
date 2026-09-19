@@ -223,6 +223,73 @@ def test_toml_input_and_command_line(tmp_path):
     assert main([path]) == 0
 
 
+def test_a_configuration_file_reaches_the_whole_setup_and_ignores_nothing(tmp_path):
+    """A source, an external field and an impact spectrum are reachable from a file, and what
+    is not reachable is an error rather than a line that quietly does not apply.
+
+    A configuration that ignores what it does not recognise runs something other than what it
+    says: a misspelled `vth` is a different plasma, and finding that out from the answer is
+    worse than finding it out from the file."""
+    text = """
+[domain]
+length = 0.01
+cells = 16
+particle_bc = "absorbing"
+field_bc = ["open", "absorbing"]
+[solver]
+model = "electrostatic"
+[external]
+B = [1.0, 0.0, 0.5]
+[impacts]
+energy_max = 1.6e-18
+energy_bins = 8
+angle_bins = 9
+[[species]]
+name = "electrons"
+n = 2000
+charge = -1
+mass = "electron"
+density = 0.0
+[species.source]
+density = 1e14
+vth = [1e6, 1e6, 1e6]
+emit = 10
+[run]
+steps = 20
+store_every = 10
+moments = "flux"
+verbose = false
+"""
+    path = tmp_path / "full.toml"
+    path.write_text(text)
+    sim, run = load_toml(path)
+    assert sim.species[0].source.emit == 10 and sim.species[0].source.model == "maxwellian"
+    assert np.allclose(np.asarray(sim.external_B)[:, 2], 0.5, rtol=1e-12, atol=0)
+    assert sim.external_B.shape == (16, 3) and sim.external_E is None
+    assert sim.impacts.energy_bins == 8
+    assert run == {"steps": 20, "store_every": 10, "moments": "flux", "verbose": False}
+    out = sim.run(**run)
+    assert float(out.wall.injected[-1, 0, 0]) > 0 and out.wall.spectrum.shape[-2:] == (9, 9)
+
+    # and every table and every key is one something reads
+    for bad, message in (
+            ('[wibble]\nx = 1\n', "has no 'wibble'"),
+            ('[domain]\nlenght = 1.0\n', r"\[domain\] has no 'lenght'"),
+            ('[solver]\nalgorythm = "explicit"\n', r"\[solver\] has no 'algorythm'"),
+            ('[run]\nsteps = 2\nplott = true\n', r"\[run\] has no 'plott'"),
+            ('[collisions]\npares = []\n', r"\[collisions\] has no 'pares'"),
+            ('[impacts]\nenergy_max = 1.0\nbins = 4\n', r"\[impacts\] has no 'bins'"),
+            ('[external]\nC = [1, 2, 3]\n', r"\[external\] has no 'C'"),
+            ('[[species]]\nname = "e"\nn = 4\ncharge = -1\nmass = "electron"\ndensity = 1.0\nvthh = 1.0\n',
+             "has no 'vthh'"),
+            ('[[species]]\nname = "e"\nn = 4\ncharge = -1\nmass = "electron"\ndensity = 1.0\n'
+             '[species.source]\ndensity = 1.0\nvth = 1.0\nemit = 1\nrate = 2\n', "has no 'rate'"),
+    ):
+        (tmp_path / "bad.toml").write_text(bad)
+        with pytest.raises(ValueError, match=message):
+            load_toml(tmp_path / "bad.toml")
+
+
 def test_diagnostics_keys_and_species_views():
     """The per-species energies and the species views select the same particles: the
     electron energy recomputed from the view is the one the diagnostics report, and
