@@ -79,9 +79,11 @@ late_step = steps // 200
 late = slice(late_step, None)                                     # the second half of the stored steps
 distance = (length / 2 - np.asarray(domain.faces)) / debye      # of each stored face from the conductor
 centres = (length / 2 - np.asarray(domain.grid)) / debye        # where the deposited moments are
-# Four binomial passes on the deposited sources. Measured on the absorbing wall below, they are
-# worth 1.3 % of the sheath drop -- 3.05 T_e/e against 3.01 with none -- which is the size of the
-# agreement being claimed, so it is a choice and not a detail.
+# Four binomial passes on the deposited sources. Measured on the absorbing wall below, they move
+# the sheath drop by 1.6 % -- 2.106 T_e/e against 2.072 with none -- and the whole plasma-to-wall
+# potential by the same, 3.051 against 3.013. That is the size of the agreement being claimed, so
+# the passes are a choice and not a detail. They also move the measured edge, 9.00 lambda_D
+# against 8.72.
 solver = Solver(model="electrostatic", filter_passes=4)
 results = {}
 for name, (reflection, R_eff) in walls.items():

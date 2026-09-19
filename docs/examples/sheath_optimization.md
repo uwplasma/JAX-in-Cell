@@ -78,24 +78,38 @@ the collector, 3.9 at 1.5, 2.9 at 2.5 and 0.9 at 6, and 1.5 is as close as a Gau
 this width can sit without taking part of its reading from the cells the deposit
 truncates at the wall.
 
-Starting at $r = 0.08$ with the answer at $r = 0.35$:
+Starting at $r = 0.08$ with the answer at $r = 0.35$, the script runs the same descent
+twice, against two targets that answer two different questions.
+
+The **self-test** fits a target built on the same four realisations and the same
+protocol. Its minimum is exactly at the reference by construction, so what it tests is
+the differentiated chain end to end — the source, the wall, the electrode closure, the
+gradient — and not the ability to infer anything. It recovers $r = 0.3500$ in fourteen
+iterations of projected gradient descent with backtracking, with the loss falling from
+2.008 by more than six orders of magnitude.
+
+The **inference** fits a target measured on six further realisations the optimiser never
+sees. Nothing in it is zero by construction. It stops after ten iterations at
+$r = 0.3264$, an error of 0.0236, on a residual loss of 0.0512 — the noise it could not
+fit. That number, and the error bar below, are the inference; the four decimal places
+above are the self-test.
 
 | | $r$ | training loss | held-out loss |
 |---|---|---|---|
-| start | 0.0800 | 2.008 | 2.021 |
-| recovered | 0.3500 | 0.0000005 | 0.0000006 |
+| start | 0.0800 | 2.00814 | 2.02135 |
+| self-test | 0.3500 | 0.00000 | 0.00000 |
+| inference | 0.3264 | 0.01495 | 0.01511 |
 | reference | 0.3500 | 0 | 0 |
 
-The control is recovered to four decimal places in fourteen iterations of projected
-gradient descent with backtracking, and the training loss falls by more than six orders
-of magnitude. The loop stops on a criterion it names — the step fell below the $10^{-4}$
-the scan can resolve — and it evaluates and records the point it ends on, so the value
-returned is one it stood on rather than the last one it happened to have measured.
+Both loss columns are measured against the paired target, which is why the inference's
+row is not zero there: a hundredth of a scatter unit is what fitting data the optimiser
+did not generate costs.
 
-That the optimiser lands on the answer is a property of this problem, not evidence that
-the answer is known to four decimals: the target is generated on the same realisations
-and the same protocol, so the minimum is exactly at the reference by construction. **How
-well the control is known** is a different question, and three things that were one are
+Either descent stops on a criterion it names — here, both times, the step fell below the
+$10^{-4}$ the scan can resolve — and evaluates and records the point it ends on, so the
+value returned is one it stood on rather than the last one it happened to have measured.
+
+**How well the control is known** is a third question, and three things that were one are
 now separate:
 
 * the **scan's spacing**, 0.0200 over 26 points, anchored so that the reference is one of
@@ -109,30 +123,43 @@ now separate:
   realisations, and the reference sits 0.3 of one away.
 
 The honest error bar is therefore twice the number the grid was reporting, and it is an
-error bar rather than a resolution.
+error bar rather than a resolution. The self-test's value sits 0.0056 from that minimum
+and the inferred one 0.0179, so both land inside it, which is the most that four short
+held-out realisations support.
 
 `--quick` is a smoke run: a sixth of the particles, a quarter of the preparation and
-three realisations instead of four, in about twenty seconds. It checks that the script
-executes and that the gradient is still the derivative of the calculation. With three
-noisy realisations and eight scan points its error bar is about $\pm 0.09$, which is the
-check doing its job. The numbers above are the full preset's, about five minutes.
+three realisations instead of four, in about forty seconds. It checks that the script
+executes and that the gradient is still the derivative of the calculation. Both descents
+run out of their eight iterations rather than converging, the inference lands at
+$r = 0.44$, and with three noisy realisations and eight scan points the error bar is
+$\pm 0.09$ against the full preset's $\pm 0.02$. That is the check doing its job; the
+numbers above are the full preset's, about ten minutes.
 
 ## The same experiment in a magnetic field
 
 `--oblique` adds a uniform field 30 degrees to the wall at $\rho_s/\lambda_D = 6$. One
-array is passed to the same `Simulation` and nothing else in the script changes. The
-gradient stays exact — forward against reverse to $3\times10^{-15}$, and a central
-difference agrees to $1.5\times10^{-8}$ at $h = 10^{-5}$ — and the control is recovered.
+array is passed to the same `Simulation` and nothing else in the script changes; the run
+writes its own `sheath_optimization_oblique/` folder, so the two experiments are two
+records rather than one overwriting the other.
 
-What changes is how much the measurement can resolve. The sheath sensor's response over
-the interval falls from 3.5 times the scatter between realisations to 0.5, and moving the
-sensor does not recover it: a scan at 30 degrees gives 1.5 at 0.8 Debye lengths, 1.1 at
-1.5 and 0.6 at 2.5, against 4.7, 3.9 and 2.9 without the field. The electrons are
-magnetised, $\rho_e/\lambda_D = 0.3$ here, so reflecting a fraction of the electron flux
-moves the sheath potential about three times less while the noise does not fall. The
-target is generated on the same realisations, so the inverse problem is still exactly
-solvable and the optimiser solves it; with independent data the same experiment would
-place the control about three times less well, and the held-out scan says so.
+The gradient stays exact: forward against reverse to $1\times10^{-14}$, and a central
+difference of the same realisation agrees to $2\times10^{-10}$ at $h = 10^{-4}$. The
+self-test recovers $r = 0.3500$ as before, because its target is still zero at the
+reference by construction.
+
+What the field takes away is the measurement. The sheath sensor's response over the
+admissible interval falls from 13 times the scatter between realisations to 0.6, and the
+plasma sensor's from 0.5 to 0.0 — over the whole interval it does not move at all. The
+electrons are magnetised, $\rho_e/\lambda_D = 0.3$ here, so reflecting a fraction of the
+electron flux moves the sheath potential far less, while the noise does not fall with it.
+
+The inference then fails, and it is worth seeing what failure looks like. Against the
+independent target the optimiser walks to the upper bound and stops: $r = 0.5000$ against
+a reference of 0.35, on a residual of 0.33. The held-out scan agrees that there is
+nothing there to find — its minimum is $0.3327 \pm 0.1131$, an error bar five times the
+field-free one, and the four per-realisation minima are 0.02, 0.34, 0.50 and 0.50, two of
+them pinned at a bound. A self-test that still passes beside an inference that does not is
+the distinction the two targets exist to draw.
 
 ## What this is and is not
 
@@ -143,6 +170,6 @@ finite-time response calibration rather than the derivative of an asymptotic flo
 state.
 
 ```bash
-python examples/3_advanced/sheath_optimization.py            # about fifteen minutes
-python examples/3_advanced/sheath_optimization.py --quick    # about three minutes
+python examples/3_advanced/sheath_optimization.py            # about ten minutes
+python examples/3_advanced/sheath_optimization.py --quick    # about forty seconds
 ```

@@ -33,8 +33,10 @@ that equation at v_0 = 0.2 is -0.79926, which is what is used here. Run with
 `--quick` for a smaller, faster version that shows the same structure with more noise.
 """
 
+import json
 import os
 import sys
+from pathlib import Path
 
 # Double precision is the default, and what the conservation checks rely on. Run with
 # JAX_ENABLE_X64=0, or change the "1" below, for single precision.
@@ -44,7 +46,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, mass_electron,
-                       potential, elementary_charge as e_charge)
+                       potential, provenance, elementary_charge as e_charge)
 from jaxincell.sheath import densities, floating_potential, source_density
 
 # --- what to change ------------------------------------------------------------------
@@ -185,4 +187,27 @@ axes[2].axvspan(time[late], time[-1], color="0.9", zorder=0)
 axes[2].set(xlabel=r"$\omega_{pe} t$", ylabel=r"$e\phi_{\rm wall}/T_e$",
             title="the collector charges and then floats")
 plt.tight_layout()
+
+# --- the record --------------------------------------------------------------------------------
+# A figure is a picture of an answer; this is what the answer came from, and what produced that.
+folder = Path.cwd() / ("sheath_unmagnetized_quick" if quick else "sheath_unmagnetized")
+folder.mkdir(exist_ok=True)
+settings = dict(electron_temperature=electron_temperature, density=density, mass_ratio=mass_ratio,
+                beam_speed=beam_speed, box_debye_lengths=box_debye_lengths, cells=cells,
+                steps_per_plasma_period=steps_per_plasma_period, transits=transits, steps=steps,
+                capacity=capacity, emit=emit, source_amplitude=float(amplitude), quick=quick)
+summary = dict(wall_potential=float(measured.mean()),
+               wall_potential_standard_error=float(measured.std() / np.sqrt(len(measured))),
+               reference_wall_potential=float(phi_wall),
+               density_error_electrons=float(np.abs(n_e - reference_e)[inside].max()),
+               density_error_ions=float(np.abs(n_i - reference_i)[inside].max()),
+               presheath_maximum=float(mean_phi[hump]),
+               centres_above_the_source_plane=int((mean_phi > 0).sum()),
+               overflow=float(out.overflow[-1]))
+(folder / "run.json").write_text(json.dumps(provenance(example="sheath_unmagnetized", settings=settings,
+                                                       results=summary), indent=1))
+np.savez(folder / "profiles.npz", faces=faces, centres_phi=mean_phi, n_e=n_e, n_i=n_i,
+         reference_e=reference_e, reference_i=reference_i, flow=flow)
+fig.savefig(folder / "figure.png", dpi=150)
+print(f"\nwrote {folder}/run.json, profiles.npz and figure.png")
 plt.show()

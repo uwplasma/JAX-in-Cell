@@ -13,15 +13,19 @@ reaches it. Its left wall is thermal: what reaches it comes back with a fresh ve
 from a Maxwellian at the starting temperature, as it would from the plasma behind, which
 is the source boundary of the classic source-collector simulations {cite}`schwager1990`.
 The run is repeated for three conductors: one that collects every electron, one that
-returns half of each electron, and one that returns the slow electrons.
+returns half of each electron, and one that returns the slow electrons. A fourth run
+replaces the thermal wall with a reservoir, as the control for what that boundary costs.
 
 A thermal wall keeps the electrons that reach the conductor Maxwellian, which is what the
 Hobbs-Wesson formula needs, but it returns only what reaches it and so cannot replace
-what the conductor takes: the plasma drains slowly, and the run is stopped after about
-one ion transit for that reason. {doc}`sheath_unmagnetized` puts a reservoir there
-instead, which holds the plasma up indefinitely and reaches a steady state that can be
-compared with a closed-form wall potential rather than with a formula for the drop
-across the sheath alone.
+what the conductor takes. The plasma drains, and the script measures the draining rather
+than mentioning it: over the one ion transit the run lasts it loses 41.5 per cent of its
+ions, against 4.8 per cent for the same box, the same resolution and the same collector
+with a reservoir on the left. The sheath drops below are therefore measured on a plasma
+that is going away, which is what a thermal wall between a collector and nothing does.
+{doc}`sheath_unmagnetized` is the example built on the reservoir: it holds the plasma up
+indefinitely and reaches a steady state that can be compared with a closed-form wall
+potential rather than with a formula for the drop across the sheath alone.
 
 ```{figure} ../_static/figures/sheath.png
 :width: 100%
@@ -64,10 +68,14 @@ from one bin width to the next.
 **The same flux average gives the same sheath.** The two reflecting walls return quite
 different electrons, one half of every electron and the other the slow ones through
 $R(v) = e^{-v^2/2\sigma^2}$, but both have $R_{\rm eff} = 1/2$, the flux average of
-{doc}`wall_reflection`, and they hold the same sheath. For the velocity-dependent law the
-average is taken over the electrons that clear the barrier, at the wall. In a
-collisionless sheath they still form a half-Maxwellian at the plasma temperature, so the
-flux average of a Maxwellian is exactly the one that counts
+{doc}`wall_reflection`, and they hold the same sheath. That reflectivity is **measured**,
+from the weight the collector kept against the weight that reached it, and it is the
+measured value that goes into the formula: the ledger gives 0.000 and 0.500 against the
+0.0 and 0.5 the two laws are meant to have, so what is compared is what the wall did
+against what the theory says, and not two things that were both assumed. For the
+velocity-dependent law the average is taken over the electrons that clear the barrier, at
+the wall. In a collisionless sheath they still form a half-Maxwellian at the plasma
+temperature, so the flux average of a Maxwellian is exactly the one that counts
 ({doc}`../numerics/boundaries`).
 
 ## Why a thermal wall
@@ -80,7 +88,10 @@ longer shifts it by $\ln 2$, since the electrons left to reflect are the slow on
 thermal wall is the simplest remedy. Every electron the sheath turns back is redrawn at
 the other end from the Maxwellian, so the distribution arriving at the conductor stays
 complete. The plasma still drains, and {{ sheath_ions_left_percent }} per cent of the ions
-remain at the end, but its temperature holds.
+remain at the end, but its temperature holds. The reservoir run is the other end of that
+trade: it does not drain, and it does not hold the arriving electrons Maxwellian by
+construction either, so what it is compared against is the closed form for the whole wall
+potential and not the formula for the sheath drop alone.
 
 Two absorbing walls are still the right model for a plasma between two electrodes, which
 are then short-circuited conductors at one potential ({doc}`../numerics/boundaries`).
@@ -91,15 +102,19 @@ are then short-circuited conductors at one potential ({doc}`../numerics/boundari
 python examples/2_intermediate/sheath_reflection.py
 ```
 
-About a minute for the three runs, each with 30 000 particles per species, on
+About four minutes for the four runs, each with 30 000 particles per species, on
 {{ sheath_cells }} cells over
 {{ sheath_box_debye }} Debye lengths for {{ sheath_steps }} steps, roughly one ion
 transit. The mass ratio is reduced to {{ sheath_mass_ratio }} for exactly that reason:
-the ion transit sets the cost, and it grows as $\sqrt{m_i/m_e}$.
+the ion transit sets the cost, and it grows as $\sqrt{m_i/m_e}$. The run writes a
+`sheath_reflection/` folder beside it: the settings, the results and the versions that
+produced them in `run.json`, the profiles behind the figure in `profiles.npz`, and the
+figure.
 
-The figure and the numbers on this page come from `docs/scripts/fig_sheath.py`, which runs
-the same three walls with 40 000 particles per species, {{ sheath_particles }} in all, to
-lower the noise in the averaged potential.
+The figure and the substituted numbers on this page come from `docs/scripts/fig_sheath.py`,
+which runs the same three walls at the same preset — {{ sheath_particles }} particles in
+all — so that the page and the example are one experiment rather than two that look
+alike.
 
 The run is electrostatic, so the time step follows $\omega_{pe}\Delta t = 0.2$ rather
 than the light-wave limit. That is safe only while nothing excites the transverse

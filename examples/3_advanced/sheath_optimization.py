@@ -43,8 +43,10 @@ experiment in a magnetic field 30 degrees to the wall: one array added to the sa
 `Simulation`, and nothing else in the script changes.
 """
 
+import json
 import os
 import sys
+from pathlib import Path
 
 # Double precision is the default. The finite-difference checks below are chosen for it.
 os.environ.setdefault("JAX_ENABLE_X64", "1")
@@ -55,6 +57,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from jaxincell import (Domain, Simulation, Solver, Source, Species, epsilon_0, mass_electron, potential,
+                       provenance,
                        elementary_charge as e_charge)
 from jaxincell.sheath import floating_potential, source_density
 
@@ -78,6 +81,11 @@ r_start = 0.08                             # where it starts, well away from it
 bounds = (0.02, 0.50)                      # admissible interval, away from the limiting branches
 training_seeds = (0, 1, 2) if quick else (0, 1, 2, 3)       # fixed across every call and line search
 held_out_seeds = (10, 11, 12) if quick else (10, 11, 12, 13)   # never used to choose a step
+# A third set, used for neither. The target built on the training realisations is exactly zero at
+# the reference by construction, which makes the recovery below a test of the differentiated chain
+# and not an inference; a target measured on realisations the optimiser never touches is an
+# inference, and its residual at the optimum is not zero because it should not be.
+target_seeds = (20, 21, 22) if quick else (20, 21, 22, 23, 24, 25)
 field_angle = 30.0                         # degrees to the wall plane, with --oblique
 gyro_over_debye = 6.0                      # rho_s/lambda_D, which sets B_0, with --oblique
 
@@ -165,7 +173,7 @@ print("preparing the baseline plasma at r = %.2f, %d steps, for %d training and 
 prepared = {seed: jax.block_until_ready(simulation(r_prepared).run(preparation, seed=seed,
                                                                    store_every=preparation,
                                                                    store_particles=False).validate().state)
-            for seed in training_seeds + held_out_seeds}
+            for seed in training_seeds + held_out_seeds + target_seeds}
 
 measure_jit = jax.jit(measure)
 
@@ -183,22 +191,35 @@ scales = jnp.maximum(scatter, 1e-6)
 
 target = jax.block_until_ready(readings(r_reference, training_seeds))
 held_out_target = jax.block_until_ready(readings(r_reference, held_out_seeds))
+independent = jax.block_until_ready(readings(r_reference, target_seeds))
 print("target at r = %.2f: %s on the training realisations, %s on the held-out ones"
       % (r_reference, np.array2string(np.asarray(target), precision=5),
          np.array2string(np.asarray(held_out_target), precision=5)))
+print("an independent target on %d realisations the optimiser never sees: %s"
+      % (len(target_seeds), np.array2string(np.asarray(independent), precision=5)))
 print("measurement scales (the scatter between realisations): %s\n"
       % np.array2string(np.asarray(scales), precision=5))
 
 
 def loss(r):
-    """Half the squared mismatch of the mean measurement, in units of its own scatter. The
-    target is generated on the same realisations and the same protocol, so this problem has
-    an exact answer and the recovery below is a test of the whole differentiated chain. What
-    it does not test is generalisation, which is what the held-out realisations are for."""
+    """Half the squared mismatch of the mean measurement, in units of its own scatter, against
+    the target built on the **same** realisations. That makes the minimum exactly zero at the
+    reference by construction, so what the recovery tests is the differentiated chain -- the
+    source, the wall, the electrode closure, the gradient -- and not the ability to infer
+    anything. It is a paired-realisation self-test and is labelled as one."""
     return 0.5 * jnp.sum(((readings(r, training_seeds) - target) / scales) ** 2)
 
 
+def inference(r):
+    """The same mismatch against a target measured on realisations the optimiser never touches.
+    Nothing here is zero by construction: what is recovered is an estimate, its residual at the
+    optimum is the noise it could not fit, and the two together are what an inverse problem on
+    a noisy simulation actually looks like."""
+    return 0.5 * jnp.sum(((readings(r, training_seeds) - independent) / scales) ** 2)
+
+
 value_and_grad = jax.jit(jax.value_and_grad(loss))
+inference_value_and_grad = jax.jit(jax.value_and_grad(inference))
 
 # --- 1. is the gradient the derivative of the calculation? ---------------------------------------
 print("the gradient of one realisation, against forward mode and against finite differences")
@@ -232,53 +253,80 @@ for i, name in enumerate(("plasma sensor", "sheath sensor")):
 print()
 
 # --- 3. bounded gradient descent with backtracking -------------------------------------------------
-# Three named tolerances, and the loop says which one stopped it. "Stalled" is not
-# "converged": a backtracking line search that runs out of halvings has found no step that
-# lowers the loss, which may be a minimum or may be a gradient that is no longer informative
-# about the average. Every accepted point is evaluated and recorded, including the last, so
-# that the point returned is the best one the optimiser actually stood on.
+# Three named tolerances, and the loop says which one stopped it. "Stalled" is not "converged":
+# a backtracking line search that runs out of halvings has found no step that lowers the loss,
+# which may be a minimum or may be a gradient that is no longer informative about the average.
+# Every accepted point is evaluated and recorded, including the last, so that the point returned
+# is the best one the optimiser actually stood on.
 slope_tolerance = 1e-9                     # a projected gradient this small is a stationary point
 step_tolerance = 1e-4                      # a move smaller than this is below the scan's resolution
 objective_tolerance = 1e-6                 # a fall smaller than this, relative, is not progress
-r, history, outcome = r_start, [], "ran out of iterations"
-step_size = 0.02 / max(abs(float(value_and_grad(r_start)[1])), 1e-12)
-print("%4s %8s %12s %12s %10s" % ("iter", "r", "loss", "d loss/d r", "step"))
-for iteration in range(8 if quick else 20):
-    objective, slope = value_and_grad(r)
-    objective, slope = float(objective), float(slope)
-    history.append((r, objective, slope))
-    print("%4d %8.4f %12.6f %12.4f %10.2e" % (iteration, r, objective, slope, step_size))
-    # the gradient projected onto the admissible interval: at a bound, a slope pushing outwards
-    # is not a direction the optimiser may take, and its size says nothing
-    projected = slope if bounds[0] < r < bounds[1] else min(slope, 0.0) if r <= bounds[0] else max(slope, 0.0)
-    if abs(projected) < slope_tolerance:
-        outcome = "converged: the projected gradient is below %.0e" % slope_tolerance
-        break
-    trial, value, accepted = r, objective, False
-    for _ in range(14):                        # backtracking, so a gradient that is off in scale still works
-        trial = float(np.clip(r - step_size * slope, *bounds))
-        value = objective if trial == r else float(value_and_grad(trial)[0])
-        if trial != r and value < objective:
-            accepted = True
-            break
-        step_size *= 0.5
-    if not accepted:
-        outcome = "stalled: no step along the gradient lowers the loss, after 14 halvings"
-        break
-    moved, fell = abs(trial - r), (objective - value) / max(abs(objective), 1e-30)
-    r, step_size = trial, step_size * 1.6
-    if moved < step_tolerance:
-        outcome = "converged: the step %.2e is below the %.0e the scan can resolve" % (moved, step_tolerance)
-        break
-    if fell < objective_tolerance:
-        outcome = "converged: the loss fell by %.1e, below %.0e" % (fell, objective_tolerance)
-        break
-objective, slope = value_and_grad(r)            # the point the loop ended on is a point it stood on
-history.append((r, float(objective), float(slope)))
-print("     %s" % outcome)
 
+
+def descend(objective_and_gradient, iterations):
+    """Bounded gradient descent with backtracking. Returns every point it stood on and why it
+    stopped."""
+    r, history, outcome = r_start, [], "ran out of iterations"
+    step_size = 0.02 / max(abs(float(objective_and_gradient(r_start)[1])), 1e-12)
+    print("%4s %8s %12s %12s %10s" % ("iter", "r", "loss", "d loss/d r", "step"))
+    for iteration in range(iterations):
+        objective, slope = objective_and_gradient(r)
+        objective, slope = float(objective), float(slope)
+        history.append((r, objective, slope))
+        print("%4d %8.4f %12.6f %12.4f %10.2e" % (iteration, r, objective, slope, step_size))
+        # the gradient projected onto the admissible interval: at a bound, a slope pushing
+        # outwards is not a direction the optimiser may take, and its size says nothing
+        projected = (slope if bounds[0] < r < bounds[1]
+                     else min(slope, 0.0) if r <= bounds[0] else max(slope, 0.0))
+        if abs(projected) < slope_tolerance:
+            outcome = "converged: the projected gradient is below %.0e" % slope_tolerance
+            break
+        trial, value, accepted = r, objective, False
+        for _ in range(14):                    # so that a gradient off in scale still works
+            trial = float(np.clip(r - step_size * slope, *bounds))
+            value = objective if trial == r else float(objective_and_gradient(trial)[0])
+            if trial != r and value < objective:
+                accepted = True
+                break
+            step_size *= 0.5
+        if not accepted:
+            outcome = "stalled: no step along the gradient lowers the loss, after 14 halvings"
+            break
+        moved, fell = abs(trial - r), (objective - value) / max(abs(objective), 1e-30)
+        r, step_size = trial, step_size * 1.6
+        if moved < step_tolerance:
+            outcome = "converged: the step %.2e is below the %.0e the scan can resolve" % (
+                moved, step_tolerance)
+            break
+        if fell < objective_tolerance:
+            outcome = "converged: the loss fell by %.1e, below %.0e" % (fell, objective_tolerance)
+            break
+    objective, slope = objective_and_gradient(r)   # the point it ended on is a point it stood on
+    history.append((r, float(objective), float(slope)))
+    print("     %s" % outcome)
+    return history, outcome
+
+
+iterations = 8 if quick else 20
+print("against the paired target, which is exactly zero at the reference by construction:")
+history, outcome = descend(value_and_grad, iterations)
 r_final = history[min(range(len(history)), key=lambda i: history[i][1])][0]
 print("\nrecovered r = %.4f, reference %.4f, error %.4f" % (r_final, r_reference, abs(r_final - r_reference)))
+print("That the error is this small is a property of the problem, not knowledge about r: the\n"
+      "target was generated on these realisations and this protocol, so the minimum is at the\n"
+      "reference by construction. What it tests is the differentiated chain, end to end.\n")
+
+print("against the independent target, measured on %d realisations the optimiser never sees:"
+      % len(target_seeds))
+independent_history, independent_outcome = descend(inference_value_and_grad, iterations)
+r_inferred = independent_history[min(range(len(independent_history)),
+                                     key=lambda i: independent_history[i][1])][0]
+print("\ninferred r = %.4f, reference %.4f, error %.4f, residual loss %.5f"
+      % (r_inferred, r_reference, abs(r_inferred - r_reference),
+         min(h[1] for h in independent_history)))
+print("The residual is the noise the model could not fit, and it is not zero because nothing\n"
+      "made it so. That number and the error bar below are the inference; the line above is the\n"
+      "self-test.\n")
 
 # --- 4. held-out validation, on realisations the optimiser never saw ------------------------------
 
@@ -291,7 +339,8 @@ def held_out_loss(r):
 
 
 print("\nheld-out validation")
-for name, value in (("start", r_start), ("recovered", r_final), ("reference", r_reference)):
+for name, value in (("start", r_start), ("recovered", r_final), ("inferred", r_inferred),
+                    ("reference", r_reference)):
     print("  %-10s r = %.4f   training loss %10.5f   held-out loss %10.5f"
           % (name, value, float(value_and_grad(value)[0]), held_out_loss(value)))
 
@@ -332,8 +381,9 @@ per_seed = np.array([refined_minimum(row, fine) for row in curves])
 scatter = float(np.std(per_seed, ddof=1) / np.sqrt(len(per_seed)))
 print("  held-out scan: %d points spaced %.4f, anchored so that the reference is one of them"
       % (len(fine), spacing))
-print("  its minimum, refined off the grid, is at r = %.4f; the recovered value is %.4f from it"
-      % (held_out_best, abs(r_final - held_out_best)))
+print("  its minimum, refined off the grid, is at r = %.4f; the recovered value is %.4f from it "
+      "and the inferred one %.4f"
+      % (held_out_best, abs(r_final - held_out_best), abs(r_inferred - held_out_best)))
 print("  per realisation the minimum sits at %s" % np.array2string(per_seed, precision=4))
 print("  so the control is recovered as %.4f +- %.4f (standard error over %d realisations) against "
       "the reference %.4f" % (held_out_best, scatter, len(per_seed), r_reference))
@@ -363,4 +413,31 @@ axes[2].set(xscale="log", yscale="log", xlabel="finite-difference step $h$",
             ylabel=r"$|{\rm FD}/{\rm AD} - 1|$", title="the gradient against finite differences")
 axes[2].legend(frameon=False)
 plt.tight_layout()
+
+# --- the record --------------------------------------------------------------------------------
+# One name per variant: --oblique is a different experiment and would otherwise overwrite
+# the record of the run it is meant to be compared with.
+folder = Path.cwd() / ("sheath_optimization" + ("_oblique" if oblique else "")
+                       + ("_quick" if quick else ""))
+folder.mkdir(exist_ok=True)
+settings = dict(electron_temperature=electron_temperature, density=density, mass_ratio=mass_ratio,
+                beam_speed=beam_speed, box_debye_lengths=box_debye_lengths, cells=cells,
+                capacity=capacity, emit=emit, preparation=preparation, window=window,
+                window_over_omega_pe=window * omega_pe * dt, r_prepared=r_prepared,
+                r_reference=r_reference, r_start=r_start, bounds=list(bounds),
+                training_seeds=list(training_seeds), held_out_seeds=list(held_out_seeds),
+                target_seeds=list(target_seeds), oblique=oblique, quick=quick)
+summary = dict(self_test_recovered=r_final, self_test_outcome=outcome,
+               inferred=r_inferred, inference_outcome=independent_outcome,
+               inference_residual=float(min(h[1] for h in independent_history)),
+               held_out_minimum=held_out_best, held_out_scatter=scatter,
+               per_seed_minima=[float(v) for v in per_seed],
+               reverse_forward_mismatch=abs(forward / reverse - 1),
+               best_finite_difference=float(min(abs(d / reverse - 1) for d in differences)))
+(folder / "run.json").write_text(json.dumps(provenance(example="sheath_optimization", settings=settings,
+                                                       results=summary), indent=1))
+np.savez(folder / "curves.npz", fine=fine, held_out_curve=held_out_curve, per_seed_curves=curves,
+         history=np.array(history), independent_history=np.array(independent_history))
+fig.savefig(folder / "figure.png", dpi=150)
+print(f"\nwrote {folder}/run.json, curves.npz and figure.png")
 plt.show()
