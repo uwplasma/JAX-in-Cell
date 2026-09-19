@@ -20,9 +20,9 @@ REFERENCE = 4.0e7
 
 def build(drift, n=8000):
     electrons = Species.electrons(n=n, density=DENSITY, vth=(0.05 * c, 0, 0), drift=(drift, 0, 0),
-                                  plus_minus=True, quiet=True, perturbation_amplitude=5e-7,
+                                  plus_minus=True, sampling="quiet", perturbation_amplitude=5e-7,
                                   perturbation_mode=1)
-    ions = Species.ions(n=n, density=DENSITY, electrons=electrons, quiet=True)
+    ions = Species.ions(n=n, density=DENSITY, electrons=electrons, sampling="quiet")
     return Simulation(Domain(length=LENGTH, cells=CELLS, dt_over_dx_c=4.5), [electrons, ions],
                       Solver(filter_passes=0))
 

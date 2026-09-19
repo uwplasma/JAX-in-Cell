@@ -35,8 +35,8 @@ ERRORS = {"energy_error": "energy", "momentum_error": "momentum", "gauss_residua
 
 def run(algorithm, walls):
     electrons = Species.electrons(n=4000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(5e7, 0, 0),
-                                  plus_minus=True, quiet=True, perturbation_amplitude=5e-7, perturbation_mode=1)
-    ions = Species.ions(n=4000, density=4.37e17, electrons=electrons, quiet=True)
+                                  plus_minus=True, sampling="quiet", perturbation_amplitude=5e-7, perturbation_mode=1)
+    ions = Species.ions(n=4000, density=4.37e17, electrons=electrons, sampling="quiet")
     domain = Domain(length=0.01, cells=64, dt_over_dx_c=4.5, particle_bc=walls, field_bc=walls)
     start = time.perf_counter()
     output = Simulation(domain, [electrons, ions], Solver(algorithm=algorithm)).run(400, seed=3)

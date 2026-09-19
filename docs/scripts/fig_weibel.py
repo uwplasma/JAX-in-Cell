@@ -22,7 +22,9 @@ def theory(k):
 
 
 def simulate(length, cells, steps, n=20000, seed_amplitude=0.0, seed_mode=1, store_every=10,
-             store_particles=False, quiet=True):
+             store_particles=False, sampling="quiet"):
+    # `sampling` here is the velocities' own: "quiet" takes them from the quadrature, anything
+    # else redraws them at random, which is what leaves a noise floor for the survey to grow from
     """A bi-Maxwellian, optionally with a coherent transverse current
     v_z += d v_thz sin(k x) that seeds one magnetic mode.
 
@@ -31,11 +33,11 @@ def simulate(length, cells, steps, n=20000, seed_amplitude=0.0, seed_mode=1, sto
     out of, so the survey of the cutoff uses random velocities instead.
     """
     x, v = quiet_start(n, length, vth=VTH)
-    if not quiet:
+    if sampling != "quiet":
         v = np.random.default_rng(0).standard_normal((n, 3)) * np.asarray(VTH) / np.sqrt(2)
     v[:, 2] += seed_amplitude * VTH[2] * np.sin(2 * np.pi * seed_mode * x[:, 0] / length)
     electrons = Species.electrons(n=n, density=DENSITY, vth=VTH).replace(x=x, v=v)
-    ions = Species.ions(n=n // 4, density=DENSITY, mass_ratio=1e6, vth=(0, 0, 0), quiet=True)
+    ions = Species.ions(n=n // 4, density=DENSITY, mass_ratio=1e6, vth=(0, 0, 0), sampling="quiet")
     return Simulation(Domain(length=length, cells=cells, dt_over_dx_c=0.5), [electrons, ions],
                       Solver(filter_passes=0)).run(steps, seed=0, store_every=store_every,
                                                    store_particles=store_particles)
@@ -59,7 +61,7 @@ def fit(t, amplitude):
 CELLS_A, STEPS_A, N_A = 128, 4000, 40000
 length = 4.0 * 2 * np.pi / K_C
 output = simulate(length, cells=CELLS_A, steps=STEPS_A, n=N_A, store_every=40,
-                  store_particles=True, quiet=False)
+                  store_particles=True, sampling="random")
 t = np.asarray(output.t) * OMEGA_PE
 B_k = np.abs(np.fft.rfft(np.asarray(output.B[:, :, 1]), axis=1))
 modes = np.arange(1, 9)

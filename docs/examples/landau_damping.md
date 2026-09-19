@@ -32,7 +32,7 @@ rate. It reaches {{ landau_gamma_measured }} and {{ landau_omega_measured }}.
 
 The wave has to be followed over three e-foldings before it disappears into the
 discrete-particle noise. A random start puts that floor two e-foldings down, which is
-not enough to fit anything. `quiet=True` places the velocities at the quantiles of the
+not enough to fit anything. `sampling="quiet"` places the velocities at the quantiles of the
 Maxwellian and drops the floor by orders of magnitude; that plus
 {{ landau_particles }} particles is what makes the measurement possible. See
 {doc}`../numerics/initialization`.

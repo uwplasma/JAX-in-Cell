@@ -243,7 +243,7 @@ def quiet_start(n, length, vth=(0.0, 0.0, 0.0), drift=(0.0, 0.0, 0.0)):
     """Positions and velocities of a quiet start, as plain arrays.
 
     Equally spaced positions and velocities at the quantiles of a bit-reversed
-    (van der Corput) sequence, which is what ``Species(quiet=True)`` uses. It is
+    (van der Corput) sequence, which is what ``Species(sampling="quiet")`` uses. It is
     exposed because custom initial conditions are often a quiet start plus a
     coherent seed -- a transverse current for the Weibel instability, say -- and
     building that by hand otherwise means reproducing the sampling.
@@ -783,7 +783,7 @@ class Simulation:
             if s.x is not None:
                 x = jnp.asarray(s.x)
             else:
-                if s.random_positions and not s.quiet:
+                if s.sampling == "random":
                     x1 = random.uniform(k_x, (s.n,), minval=-L / 2, maxval=L / 2)
                 else:
                     # `active` is static, so `spread` is a Python int: at active = 0 every
@@ -795,13 +795,13 @@ class Simulation:
                     x1 = -L / 2 + (jnp.arange(s.n) % spread + 0.5) * (L / spread)
                 k = 2 * jnp.pi * s.perturbation_mode / L
                 x1 = x1 + s.perturbation_amplitude * jnp.sin(k * x1)
-                yz = (jnp.zeros((s.n, 2)) if s.quiet else
+                yz = (jnp.zeros((s.n, 2)) if s.sampling == "quiet" else
                       random.uniform(k_y, (s.n, 2), minval=-0.5, maxval=0.5) * jnp.array([d.length_y, d.length_z]))
                 x = jnp.concatenate([x1[:, None], yz], axis=1)
             if s.v is not None:
                 v = jnp.asarray(s.v)
             else:
-                if s.quiet:
+                if s.sampling == "quiet":
                     # With plus_minus the two beams are alternate particles, and the base-2
                     # van der Corput value is below one half exactly when the index is even,
                     # which would hand each beam one half of the Maxwellian. Drawing n/2

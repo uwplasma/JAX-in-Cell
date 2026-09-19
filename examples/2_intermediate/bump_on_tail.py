@@ -31,12 +31,12 @@ beam_fraction, beam_drift_over_vth, beam_width = 0.03, 5.0, 0.7
 v_th = omega_pe * length / (2 * np.pi * mode * beam_drift_over_vth)
 beam_drift, beam_vth = beam_drift_over_vth * v_th, beam_width * v_th
 
-bulk = Species.electrons(n=80000, density=(1 - beam_fraction) * density, vth=(v_th, 0, 0), quiet=True,
+bulk = Species.electrons(n=80000, density=(1 - beam_fraction) * density, vth=(v_th, 0, 0), sampling="quiet",
                          name="bulk", perturbation_mode=mode,
                          perturbation_amplitude=2e-3 * length / (2 * np.pi * mode))
-beam = Species.electrons(n=40000, density=beam_fraction * density, vth=(beam_vth, 0, 0), quiet=True,
+beam = Species.electrons(n=40000, density=beam_fraction * density, vth=(beam_vth, 0, 0), sampling="quiet",
                          drift=(beam_drift, 0, 0), name="beam")
-ions = Species.ions(n=10000, density=density, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
+ions = Species.ions(n=10000, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
 simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [bulk, beam, ions],
                         Solver(filter_passes=0))
 output = simulation.run(steps, seed=0, store_every=16)

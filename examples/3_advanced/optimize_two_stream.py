@@ -36,9 +36,9 @@ def amplification(drift):
     constant while the mode grows exponentially. Fixing the time rather than
     fitting a window keeps the objective a smooth function of the drift."""
     electrons = Species.electrons(n=8000, density=density, vth=(0.05 * c, 0, 0), drift=(drift, 0, 0),
-                                  plus_minus=True, quiet=True, perturbation_amplitude=5e-7,
+                                  plus_minus=True, sampling="quiet", perturbation_amplitude=5e-7,
                                   perturbation_mode=1)
-    ions = Species.ions(n=8000, density=density, electrons=electrons, quiet=True)
+    ions = Species.ions(n=8000, density=density, electrons=electrons, sampling="quiet")
     out = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=4.5), [electrons, ions],
                      Solver(filter_passes=0)).run(step, seed=3, store_particles=False)
     return jnp.log(jnp.abs(jnp.fft.rfft(out.E[:, :, 0], axis=1)[-1, 1]))

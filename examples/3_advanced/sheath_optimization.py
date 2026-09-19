@@ -125,10 +125,10 @@ def simulation(r):
     """The same public setup as the physical sheath examples, with the collector's electron
     reflectivity as the one thing that changes."""
     electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread, 0, 0),
-                        active=capacity // 3, quiet=True, reflection=(0.0, r),
+                        active=capacity // 3, sampling="quiet", reflection=(0.0, r),
                         source=Source(density=reservoir, vth=(np.sqrt(2) * spread,) * 3, emit=emit, model="maxwellian"))
     ions = Species("ions", capacity, 1.0, mass_ratio * mass_electron, density, 0.0, (beam_speed * spread, 0, 0),
-                   active=capacity // 3, quiet=True,
+                   active=capacity // 3, sampling="quiet",
                    source=Source(density=density, vth=0.0, drift=(beam_speed * spread, 0, 0), emit=emit, model="beam"))
     return Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=external_B)
 

@@ -12,9 +12,9 @@ STEPS, COURANT = 400, 4.5
 
 def run(walls="periodic", **solver):
     electrons = Species.electrons(n=4000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(5e7, 0, 0),
-                                  plus_minus=True, quiet=True, perturbation_amplitude=5e-7,
+                                  plus_minus=True, sampling="quiet", perturbation_amplitude=5e-7,
                                   perturbation_mode=1)
-    ions = Species.ions(n=4000, density=4.37e17, electrons=electrons, quiet=True)
+    ions = Species.ions(n=4000, density=4.37e17, electrons=electrons, sampling="quiet")
     domain = Domain(length=0.01, cells=64, dt_over_dx_c=COURANT, particle_bc=walls, field_bc=walls)
     simulation = Simulation(domain, [electrons, ions], Solver(**solver))
     out = simulation.run(STEPS, seed=3)
@@ -57,9 +57,9 @@ for wall, particle_bc, field_bc, reflection in (
         ("periodic", "periodic", "periodic", 0.0), ("reflective", "reflective", "reflective", 0.0),
         ("absorbing", "absorbing", "absorbing", 0.0), ("reflecting", "absorbing", "absorbing", 0.5),
         ("thermal", ("thermal", "absorbing"), ("reflective", "absorbing"), 0.0)):
-    e = Species.electrons(n=2000, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), quiet=True,
+    e = Species.electrons(n=2000, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), sampling="quiet",
                           reflection=reflection)
-    i = Species.ions(n=2000, density=1e17, electrons=e, quiet=True)
+    i = Species.ions(n=2000, density=1e17, electrons=e, sampling="quiet")
     domain = Domain(length=1e-2, cells=32, dt_over_dx_c=1.0, particle_bc=particle_bc, field_bc=field_bc)
     for suffix, solver in (("", Solver(filter_passes=2, filter_strides=(1, 2))), ("_implicit", Solver("implicit"))):
         out = Simulation(domain, [e, i], solver).run(120, seed=0)

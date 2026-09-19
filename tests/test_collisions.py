@@ -170,8 +170,8 @@ def test_default_coulomb_logarithm_comes_from_the_electrons_wherever_they_are_li
     """`Collisions()` takes ln(Lambda) at the density and temperature of the lightest
     negatively charged species, not of whichever species comes first; the temperature
     is m v_th^2 / 2 of the largest thermal-speed component."""
-    electrons = Species.electrons(n=400, density=1e20, vth=(2e6, 2e6, 1e6), quiet=True)
-    ions = Species.ions(n=400, density=1e20, electrons=electrons, temperature_ratio=0.01, quiet=True)
+    electrons = Species.electrons(n=400, density=1e20, vth=(2e6, 2e6, 1e6), sampling="quiet")
+    ions = Species.ions(n=400, density=1e20, electrons=electrons, temperature_ratio=0.01, sampling="quiet")
     domain = Domain(length=1e-4, cells=4, dt_over_dx_c=1.0)
     ln_lambda = float(coulomb_logarithm(1e20, mass_electron * 2e6 ** 2 / 2 / e_charge))
     explicit = Simulation(domain, [ions, electrons], Solver(), Collisions(coulomb_log=ln_lambda)).run(5, seed=0)

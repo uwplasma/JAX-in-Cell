@@ -108,10 +108,10 @@ for angle in angles:
     domain = Domain(length=length, cells=cells, time_step=dt,
                     particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread, 0, 0),
-                        active=capacity // 4, quiet=True,
+                        active=capacity // 4, sampling="quiet",
                         source=Source(density=density, vth=(np.sqrt(2) * spread,) * 3, emit=emit_electrons))
     ions = Species("ions", capacity, 1.0, ion_mass, density, (np.sqrt(2) * ion_spread, 0, 0),
-                   (sound_speed, 0, 0), active=capacity // 4, quiet=True,
+                   (sound_speed, 0, 0), active=capacity // 4, sampling="quiet",
                    source=Source(density=density, vth=(np.sqrt(2) * ion_spread,) * 3, emit=emit_ions))
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=B,
                      impacts=impacts).run(steps, seed=0, store_every=steps // stored,

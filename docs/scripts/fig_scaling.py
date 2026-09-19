@@ -15,9 +15,9 @@ STEPS = 200
 def timed(particles, cells, algorithm="explicit", repeats=3):
     """Seconds per step per particle, excluding compilation."""
     electrons = Species.electrons(n=particles, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(5e7, 0, 0),
-                                  plus_minus=True, quiet=True, perturbation_amplitude=5e-7,
+                                  plus_minus=True, sampling="quiet", perturbation_amplitude=5e-7,
                                   perturbation_mode=1)
-    ions = Species.ions(n=particles, density=4.37e17, electrons=electrons, quiet=True)
+    ions = Species.ions(n=particles, density=4.37e17, electrons=electrons, sampling="quiet")
     simulation = Simulation(Domain(length=0.01, cells=cells, dt_over_dx_c=4.5), [electrons, ions],
                             Solver(algorithm=algorithm, filter_passes=2 if algorithm == "explicit" else 0))
 

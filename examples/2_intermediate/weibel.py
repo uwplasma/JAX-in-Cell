@@ -34,7 +34,7 @@ vth = (0.02 * c, 0.0, 0.02 * c * np.sqrt(ratio))
 x, _ = quiet_start(n, length, vth=vth)
 v = np.random.default_rng(0).standard_normal((n, 3)) * np.asarray(vth) / np.sqrt(2)
 electrons = Species.electrons(n=n, density=density, vth=vth).replace(x=x, v=v)
-ions = Species.ions(n=n // 4, density=density, mass_ratio=1e6, vth=(0, 0, 0), quiet=True)
+ions = Species.ions(n=n // 4, density=density, mass_ratio=1e6, vth=(0, 0, 0), sampling="quiet")
 simulation = Simulation(Domain(length=length, cells=128, dt_over_dx_c=0.5), [electrons, ions],
                         Solver(filter_passes=0))
 output = simulation.run(4000, seed=0, store_every=40, store_particles=False)

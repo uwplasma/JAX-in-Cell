@@ -141,7 +141,7 @@ per cent agreement with kinetic theory across the unstable range.
 
 * `drift`, to move along the growth-rate curve.
 * `n`, to watch the noise floor fall as $1/\sqrt N$.
-* `quiet=True`, to watch it fall much faster.
+* `sampling="quiet"`, to watch it fall much faster.
 * `Solver(algorithm="implicit")`, to see the energy error drop to round-off.
 * `cells`, to see the finite-grid instability appear when $\Delta x$ passes
   $\lambda_D$.

@@ -48,7 +48,7 @@ animation. Uncomment the last line to write an MP4 instead.
 
 * Change `drift` and watch the growth rate move along the curve of
   {doc}`../numerics/verification`.
-* Set `quiet=True` on the electrons: the noise floor drops by orders of magnitude and
+* Set `sampling="quiet"` on the electrons: the noise floor drops by orders of magnitude and
   the linear phase becomes long enough to fit properly.
 * Switch to `Solver(algorithm="implicit")` and watch the energy error fall to
   round-off.

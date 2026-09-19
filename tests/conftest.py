@@ -69,8 +69,8 @@ def electron_plasma(n, length, cells, omega_pe_dt, vth_over_c, mode=1.0, amplitu
     k = 2 * np.pi * mode / length
     electrons = Species.electrons(n=n, density=n_e, vth=(vth_over_c * c, 0.0, 0.0), drift=(drift, 0.0, 0.0),
                                   perturbation_amplitude=amplitude_k / k, perturbation_mode=mode,
-                                  plus_minus=plus_minus, quiet=True)
-    ions = Species.ions(n=n // 4, density=n_e, mass_ratio=1e9, vth=(0.0, 0.0, 0.0), quiet=True)
+                                  plus_minus=plus_minus, sampling="quiet")
+    ions = Species.ions(n=n // 4, density=n_e, mass_ratio=1e9, vth=(0.0, 0.0, 0.0), sampling="quiet")
     return Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [electrons, ions],
                       Solver(filter_passes=0)), omega_pe
 

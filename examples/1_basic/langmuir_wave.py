@@ -49,8 +49,8 @@ print("k lambda_D   measured   kinetic x grid   deviation   Bohm-Gross x grid")
 measured = []
 for kld, kinetic in KINETIC.items():
     electrons = Species.electrons(n=20000, density=density, vth=(kld / k * np.sqrt(2) * omega_pe, 0, 0),
-                                  quiet=True, perturbation_amplitude=seed_ak / k, perturbation_mode=1)
-    ions = Species.ions(n=5000, density=density, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
+                                  sampling="quiet", perturbation_amplitude=seed_ak / k, perturbation_mode=1)
+    ions = Species.ions(n=5000, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
     out = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [electrons, ions],
                      Solver(filter_passes=0)).run(steps, seed=0, store_particles=False)
     t = np.asarray(out.t) * omega_pe

@@ -53,10 +53,10 @@ length, cells = 1.0, 32
 density = 1e15
 omega_pe = np.sqrt(density * e ** 2 / (epsilon_0 * mass_electron))
 
-electrons = Species.electrons(n=20000, density=density, vth=(1e5, 0, 0), quiet=True,
+electrons = Species.electrons(n=20000, density=density, vth=(1e5, 0, 0), sampling="quiet",
                               perturbation_amplitude=1e-3 * length / (2 * np.pi),
                               perturbation_mode=1)
-ions = Species.ions(n=5000, density=density, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
+ions = Species.ions(n=5000, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
 
 simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0),
                         [electrons, ions], Solver())

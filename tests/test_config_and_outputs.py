@@ -23,7 +23,7 @@ def _wall_objective(right):
     """Field energy of a short run whose electrons stream into two absorbing walls,
     the left one following ``_law`` and the right one returning ``right``."""
     electrons = Species.electrons(n=200, density=1e15, vth=(1e6, 0.0, 0.0), drift=(2e6, 0.0, 0.0),
-                                  quiet=True, reflection=(_law, right))
+                                  sampling="quiet", reflection=(_law, right))
     domain = Domain(length=1e-3, cells=16, dt_over_dx_c=40.0, particle_bc="absorbing", field_bc="absorbing")
     return jnp.mean(Simulation(domain, [electrons], Solver()).run(20, seed=0).E[:, :, 0] ** 2)
 
@@ -142,7 +142,7 @@ def test_the_three_coordinate_arrays_name_what_lives_on_them():
     assert np.allclose(faces, -1.0 + (np.arange(8) + 1.0) * 0.25, rtol=0, atol=1e-15)
     assert float(faces[-1]) == pytest.approx(1.0, abs=1e-15)          # the right wall is stored
     assert float(faces[0] - centres[0]) == pytest.approx(0.125, abs=1e-15)
-    out = Simulation(domain, [Species.electrons(n=8, density=1e14, vth=(1e5, 0, 0), quiet=True)],
+    out = Simulation(domain, [Species.electrons(n=8, density=1e14, vth=(1e5, 0, 0), sampling="quiet")],
                      Solver()).run(2)
     assert np.allclose(np.asarray(out.grid), centres, rtol=0, atol=1e-15)
     assert np.allclose(np.asarray(out.faces), faces, rtol=0, atol=1e-15)
@@ -159,7 +159,7 @@ def test_the_three_coordinate_arrays_name_what_lives_on_them():
     assert not np.allclose(at_centres[:, 0], at_faces[:, 0], rtol=1e-3, atol=0)
     # at a wall the face to the left of the first cell is the wall itself, the zero of the gauge
     walled = Simulation(domain.replace(particle_bc="absorbing", field_bc="absorbing"),
-                        [Species.electrons(n=8, density=1e14, vth=(1e5, 0, 0), quiet=True)],
+                        [Species.electrons(n=8, density=1e14, vth=(1e5, 0, 0), sampling="quiet")],
                         Solver()).run(2)
     assert np.allclose(np.asarray(potential(walled, centres=True))[:, 0],
                        0.5 * np.asarray(potential(walled))[:, 0], rtol=1e-12, atol=0)
@@ -259,8 +259,8 @@ def test_the_charge_balance_is_independent_of_the_gauss_residual(walls):
 
     field = "reflective" if walls == "thermal" else walls
     domain = Domain(length=1e-2, cells=16, particle_bc=walls, field_bc=field)
-    electrons = Species.electrons(n=400, density=1e14, vth=(1e6, 0, 0), quiet=True)
-    ions = Species.ions(n=100, density=1e14, mass_ratio=1e9, vth=0.0, quiet=True)
+    electrons = Species.electrons(n=400, density=1e14, vth=(1e6, 0, 0), sampling="quiet")
+    ions = Species.ions(n=100, density=1e14, mass_ratio=1e9, vth=0.0, sampling="quiet")
     out = Simulation(domain, [electrons, ions], Solver()).run(40, seed=0, store_every=10)
     clean_charge = np.asarray(charge_balance(out))
     clean_gauss = np.asarray(gauss_residual(out))

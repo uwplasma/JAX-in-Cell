@@ -10,7 +10,7 @@ differentiated through.
 By default positions are equally spaced,
 $x_p = -L/2 + (p + \tfrac12)L/N$, which is the lowest-noise choice for a uniform
 plasma: the deposited density is uniform to round-off, whereas random placement leaves
-a $1/\sqrt{N}$ density fluctuation in every mode. Set `random_positions=True` for
+a $1/\sqrt{N}$ density fluctuation in every mode. Set `sampling="random"` for
 uniform random placement when the noise itself is the object of study.
 
 The perturbation is a displacement rather than a density change,
@@ -42,7 +42,7 @@ $\lambda_D = v_{th}/(\sqrt2\,\omega_p)$. `drift` adds $u$ per component.
 standard deviation $v_{th}/\sqrt2$ using the run's PRNG key, so `seed` changes the
 realisation.
 
-**Quiet start** (`quiet=True`). The velocity of particle $p$ is placed at a quantile
+**Quiet start** (`sampling="quiet"`). The velocity of particle $p$ is placed at a quantile
 of the Maxwellian,
 
 ```{math}

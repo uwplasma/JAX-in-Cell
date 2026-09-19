@@ -275,7 +275,7 @@ def test_a_reflective_box_gathers_like_the_periodic_box_twice_as_long_with_the_i
 
 def lone_electron(drift, relativistic, length=1e-2):
     """One electron in a periodic box, so tenuous that its own field changes nothing."""
-    electrons = Species.electrons(n=1, density=1.0, drift=drift, quiet=True)
+    electrons = Species.electrons(n=1, density=1.0, drift=drift, sampling="quiet")
     return Simulation(Domain(length=length, cells=8), [electrons], Solver(relativistic=relativistic))
 
 
@@ -303,7 +303,7 @@ from jaxincell import Domain, Simulation, Solver, Species, speed_of_light as c
 gammas = {}
 for gamma in (100.0, 300.0):
     speed = c * np.sqrt(1 - 1 / gamma ** 2)
-    electrons = Species.electrons(n=1, density=1.0, drift=(speed, 0.0, 0.0), quiet=True)
+    electrons = Species.electrons(n=1, density=1.0, drift=(speed, 0.0, 0.0), sampling="quiet")
     sim = Simulation(Domain(length=1e-2, cells=8, dt_over_dx_c=0.5), [electrons], Solver(relativistic=True))
     v = np.asarray(sim.run(1000, seed=0, store_every=100).v[:, 0, 0], dtype=np.float64)
     gammas[gamma] = list(1 / np.sqrt(1 - (v / c) ** 2))

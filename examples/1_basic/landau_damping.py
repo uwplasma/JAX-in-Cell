@@ -28,9 +28,9 @@ omega_pe = 0.05 * c * cells / length                 # gives omega_pe * dt = 0.0
 density = omega_pe ** 2 * epsilon_0 * mass_electron / e_charge ** 2
 v_th = k_lambda_d / k * np.sqrt(2) * omega_pe
 
-electrons = Species.electrons(n=150000, density=density, vth=(v_th, 0, 0), quiet=True,
+electrons = Species.electrons(n=150000, density=density, vth=(v_th, 0, 0), sampling="quiet",
                               perturbation_amplitude=0.01 / k, perturbation_mode=1)
-ions = Species.ions(n=150000 // 8, density=density, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
+ions = Species.ions(n=150000 // 8, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
 simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [electrons, ions],
                         Solver(filter_passes=0))
 output = simulation.run(500, seed=0, store_particles=False)

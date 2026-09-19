@@ -15,10 +15,10 @@ DENSITY = OMEGA_PE ** 2 * epsilon_0 * mass_electron / e_charge ** 2
 
 
 def run(k_lambda_d, particles=PARTICLES, seed_ak=SEED_AK, steps=500):
-    electrons = Species.electrons(n=particles, density=DENSITY, quiet=True,
+    electrons = Species.electrons(n=particles, density=DENSITY, sampling="quiet",
                                   vth=(k_lambda_d / K * np.sqrt(2) * OMEGA_PE, 0, 0),
                                   perturbation_amplitude=seed_ak / K, perturbation_mode=1)
-    ions = Species.ions(n=particles // 8, density=DENSITY, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
+    ions = Species.ions(n=particles // 8, density=DENSITY, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
     out = Simulation(Domain(length=LENGTH, cells=CELLS, dt_over_dx_c=1.0), [electrons, ions],
                      Solver(filter_passes=0)).run(steps, seed=0, store_particles=False)
     amplitude = np.abs(np.fft.rfft(np.asarray(out.E[:, :, 0]), axis=1)[:, 1]) / CELLS

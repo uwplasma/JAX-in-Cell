@@ -397,7 +397,7 @@ class Domain:
         return self.grid + self.dx / 2
 
 
-@pytree_dataclass(static=("name", "n", "active", "plus_minus", "quiet", "random_positions"))
+@pytree_dataclass(static=("name", "n", "active", "plus_minus", "sampling"))
 class Species:
     """One population of pseudo-particles.
 
@@ -428,9 +428,16 @@ class Species:
         perturbation_mode: Mode number :math:`m` of that displacement.
         plus_minus: Negate the x velocity of every second particle, which turns
             one drifting population into two counter-streaming beams.
-        quiet: Quiet start: equally spaced positions and velocities at the
-            quantiles of the Maxwellian, ordered by a bit-reversed sequence.
-        random_positions: Uniformly random positions instead of equally spaced.
+        sampling: How the initial phase space is drawn. Three states, and they were two
+            booleans, ``quiet`` and ``random_positions``, of which one combination -- both
+            true -- silently meant the first:
+
+            * ``"quiet"``, the quiet start: equally spaced positions and velocities at the
+              quantiles of the Maxwellian, ordered by a bit-reversed sequence, which is what
+              makes the discrete-particle noise low enough to follow a Landau decay over
+              three e-foldings;
+            * ``"lattice"``, the default: equally spaced positions and random velocities;
+            * ``"random"``: uniformly random positions and random velocities.
         x, v: Optional arrays of shape ``(n, 3)`` that replace the generated
             phase space.
         source: A :class:`Source` that maintains this species through one wall,
@@ -454,8 +461,7 @@ class Species:
     perturbation_mode: float = 0.0
     active: object = None
     plus_minus: bool = False
-    quiet: bool = False
-    random_positions: bool = False
+    sampling: str = "lattice"
     x: object = None
     v: object = None
     source: object = None
@@ -465,6 +471,8 @@ class Species:
         if _template(self):
             return
         _require(self.n > 0, "a species needs at least one particle")
+        _require(self.sampling in ("quiet", "lattice", "random"),
+                 f"sampling is 'quiet', 'lattice' or 'random', not {self.sampling!r}")
         object.__setattr__(self, "active", self.n if self.active is None else int(self.active))
         _require(0 <= self.active <= self.n, f"active must be between 0 and n = {self.n}, not {self.active}")
         for name in ("charge", "mass", "density", "perturbation_amplitude", "perturbation_mode"):

@@ -36,12 +36,12 @@ def theory(mode):
     return (root.real / OMEGA_PE, root.imag / OMEGA_PE) if root is not None else (np.nan, np.nan)
 
 
-bulk = Species.electrons(n=80000, density=(1 - BEAM_FRACTION) * DENSITY, vth=(V_TH, 0, 0), quiet=True,
+bulk = Species.electrons(n=80000, density=(1 - BEAM_FRACTION) * DENSITY, vth=(V_TH, 0, 0), sampling="quiet",
                          name="bulk", perturbation_mode=MODE,
                          perturbation_amplitude=SEED_AK * LENGTH / (2 * np.pi * MODE))
-beam = Species.electrons(n=40000, density=BEAM_FRACTION * DENSITY, vth=(BEAM_VTH, 0, 0), quiet=True,
+beam = Species.electrons(n=40000, density=BEAM_FRACTION * DENSITY, vth=(BEAM_VTH, 0, 0), sampling="quiet",
                          drift=(BEAM_DRIFT, 0, 0), name="beam")
-ions = Species.ions(n=10000, density=DENSITY, mass_ratio=1e9, vth=(0, 0, 0), quiet=True)
+ions = Species.ions(n=10000, density=DENSITY, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
 output = Simulation(Domain(length=LENGTH, cells=CELLS, dt_over_dx_c=1.0), [bulk, beam, ions],
                     Solver(filter_passes=0)).run(STEPS, seed=0, store_every=16)
 

@@ -24,11 +24,11 @@ def sheath(cells=CELLS, capacity=CAPACITY, emit=EMIT, dt=DT, reflection=0.0):
     domain = Domain(length=LENGTH, cells=cells, dt_over_dx_c=dt * c / (LENGTH / cells),
                     particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA, 0, 0),
-                        active=capacity // 4, quiet=True, reflection=(0.0, reflection),
+                        active=capacity // 4, sampling="quiet", reflection=(0.0, reflection),
                         source=Source(density=AMPLITUDE * DENSITY, vth=(np.sqrt(2) * SIGMA,) * 3,
                                       emit=emit, model="maxwellian"))
     ions = Species("ions", capacity, 1.0, MASS_RATIO * mass_electron, DENSITY, 0.0, (BEAM * SIGMA, 0, 0),
-                   active=capacity // 4, quiet=True,
+                   active=capacity // 4, sampling="quiet",
                    source=Source(density=DENSITY, vth=0.0, drift=(BEAM * SIGMA, 0, 0), emit=emit, model="beam"))
     return Simulation(domain, [electrons, ions], Solver(model="electrostatic"))
 

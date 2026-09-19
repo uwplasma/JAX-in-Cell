@@ -10,8 +10,8 @@ LENGTH, STEPS = 1e-2, 400
 
 def run(kind):
     electrons = Species.electrons(n=4000, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0),
-                                  quiet=True)
-    ions = Species.ions(n=4000, density=1e17, electrons=electrons, quiet=True).replace(drift=(0.05 * c, 0, 0))
+                                  sampling="quiet")
+    ions = Species.ions(n=4000, density=1e17, electrons=electrons, sampling="quiet").replace(drift=(0.05 * c, 0, 0))
     domain = Domain(length=LENGTH, cells=64, dt_over_dx_c=1.0, particle_bc=kind, field_bc=kind)
     return Simulation(domain, [electrons, ions], Solver(filter_passes=0)).run(STEPS, seed=0)
 

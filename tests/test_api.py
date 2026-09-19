@@ -139,8 +139,8 @@ def test_a_progress_meter_reports_without_changing_the_run(capsys):
     import io
 
     domain = Domain(length=1e-2, cells=16, dt_over_dx_c=1.0)
-    electrons = Species.electrons(n=2000, density=1e14, vth=(1e6, 0, 0), quiet=True)
-    ions = Species.ions(n=500, density=1e14, mass_ratio=1e9, vth=0.0, quiet=True)
+    electrons = Species.electrons(n=2000, density=1e14, vth=(1e6, 0, 0), sampling="quiet")
+    ions = Species.ions(n=500, density=1e14, mass_ratio=1e9, vth=0.0, sampling="quiet")
     sim = Simulation(domain, [electrons, ions], Solver())
 
     silent = sim.run(60, seed=3, store_every=5)
@@ -432,7 +432,7 @@ def test_plasma_frequency_and_debye_length_by_species_name():
 
 
 def test_random_positions_and_a_scalar_thermal_speed():
-    """`random_positions` places particles uniformly instead of on a lattice, and
+    """`sampling="random"` places particles uniformly instead of on a lattice, and
     a bare number for vth or drift is taken as the x component."""
     assert Species.electrons(n=10, density=1e17, vth=2e6).vth == (2e6, 0.0, 0.0)
     assert Species.electrons(n=10, density=1e17, drift=3e6).drift == (3e6, 0.0, 0.0)
@@ -440,8 +440,8 @@ def test_random_positions_and_a_scalar_thermal_speed():
     # cold, so that the half-step displacement does not disturb the spacing
     domain = Domain(length=0.01, cells=16)
     spread = {}
-    for name, random_positions in (("random", True), ("lattice", False)):
-        species = Species.electrons(n=1000, density=1e17, random_positions=random_positions)
+    for name in ("random", "lattice"):
+        species = Species.electrons(n=1000, density=1e17, sampling=name)
         sim = Simulation(domain, [species], Solver())
         x = sim.initial_state(jax.random.PRNGKey(0))[0].x
         spacing = np.diff(np.sort(np.asarray(x[:, 0])))
@@ -465,8 +465,8 @@ def test_collisions_default_to_every_pair_and_the_formulary_logarithm():
     """`Collisions()` with no arguments collides every combination and takes the
     Coulomb logarithm from the lightest negatively charged species, rather than needing
     either spelled out."""
-    electrons = Species.electrons(n=800, density=1e20, vth=(2e6, 2e6, 2e6), quiet=True)
-    ions = Species.ions(n=800, density=1e20, electrons=electrons, quiet=True)
+    electrons = Species.electrons(n=800, density=1e20, vth=(2e6, 2e6, 2e6), sampling="quiet")
+    ions = Species.ions(n=800, density=1e20, electrons=electrons, sampling="quiet")
     domain = Domain(length=1e-4, cells=8, dt_over_dx_c=1.0)
     quiet = Simulation(domain, [electrons, ions], Solver()).run(20, seed=0)
     collided = Simulation(domain, [electrons, ions], Solver(),
