@@ -1,76 +1,54 @@
-# External fields and sources
+# External fields
 
-## External fields
-
-A static external electric or magnetic field can be added to the self-consistent
-fields felt by the particles. It is supplied as an array with one row per cell in the
-`external_field_parameters` section:
+`Simulation(..., external_E=..., external_B=...)` adds static fields that are gathered
+at the particles along with the self-consistent ones and never evolve.
 
 ```python
 import numpy as np
+from jaxincell import Simulation
 
-G = 70
-B_external = np.zeros((G, 3))
-B_external[:, 0] = 0.1          # 0.1 T along x, uniform
-
-parameters["external_field_parameters"] = {
-    "external_magnetic_field": {"B": B_external},
-    # "external_electric_field": {"E": E_external},   # same shape, V/m
-}
+B = np.zeros((domain.cells, 3))
+B[:, 0] = 0.05                                 # 50 mT along x, uniform
+simulation = Simulation(domain, [electrons, ions], solver, external_B=B)
 ```
 
-The arrays have shape `(number_grid_points, 3)` and are interpreted on the same
-staggered locations as the self-consistent fields (electric field at cell faces,
-magnetic field at cell centres). They are constant in time, are added to $\mathbf E$
-and $\mathbf B$ before the fields are interpolated to the particles, and do not enter
-Maxwell's equations. The external field energies are reported separately by
-{func}`jaxincell.diagnostics`. The arrays are stored in single precision.
+Both are arrays of shape `(cells, 3)` or `None`. They sit on the same grids as the
+self-consistent fields: `external_E` on the cell faces, `external_B` on the cell
+centres ({doc}`../numerics/discretization`).
 
-```{warning}
-The scalar parameters `external_electric_field_amplitude`,
-`external_electric_field_wavenumber`, `external_magnetic_field_amplitude`,
-`external_magnetic_field_wavenumber`, `external_electric_field_function` and
-`external_magnetic_field_function` are accepted and validated, but on the `main`
-branch they do not create a field. The electric-field amplitude only appears in the
-`print_info` summary as the normalised field strength
-$-q_e E_0 \lambda_D / k_B T_e$. Use the array form above to apply an external field.
+## Why they are arrays
+
+An amplitude and a wavenumber would cover a sinusoid and nothing else. An array covers
+a sinusoid, a mirror field, a measured profile, a gradient, a localised pulse:
+
+```python
+x = np.asarray(domain.grid)
+B = np.zeros((domain.cells, 3))
+B[:, 0] = B0 * (1 + 0.3 * np.cos(2 * np.pi * x / domain.length))   # a magnetic mirror
 ```
 
-| parameter | default | effect on `main` |
-|---|---|---|
-| `external_electric_field` | absent | `{"E": array}` adds the array to $\mathbf E$ at every step. |
-| `external_magnetic_field` | absent | `{"B": array}` adds the array to $\mathbf B$ at every step. |
-| `external_electric_field_amplitude` | `0.0` | Printed only. |
-| `external_electric_field_wavenumber` | `0.0` | None. |
-| `external_magnetic_field_amplitude` | `0.0` | None. |
-| `external_magnetic_field_wavenumber` | `0.0` | None. |
-| `external_electric_field_function` | `None` | None. |
-| `external_magnetic_field_function` | `None` | None. |
+They are pytree leaves, so they can be differentiated with respect to — optimising a
+coil profile against a confinement diagnostic needs nothing beyond `jax.grad`.
 
-None of these are differentiable inputs.
+## $B_x$ is the interesting one
 
-A uniform magnetic field along $x$ is the simplest way to study magnetised plasma
-waves: particles gyrate in the $y$-$z$ plane while the fields remain functions of $x$
-only. Keep $c\,\Delta t/\Delta x \le 1$ in that case, because the transverse currents
-excite electromagnetic waves, and resolve the gyration with
-$\Omega_c \Delta t \ll 1$, where $\Omega_c = |q| B / m$.
+In one dimension $\nabla\times\mathbf B$ has no $x$ component, so $B_x$ cannot evolve:
+it is exactly the field the code cannot generate itself and therefore the one worth
+imposing. A uniform $B_x$ magnetises the plasma, gives the particles a gyration in the
+$y$-$z$ plane at $\Omega_c = qB_x/m$, and opens up the magnetised wave physics —
+upper-hybrid oscillations, Bernstein modes, cyclotron damping.
 
-## Sources
+Resolve the gyration: the Boris rotation needs $\Omega_c\Delta t \lesssim 0.3$ for a
+few per cent accuracy, and $\Omega_c\Delta t < 2$ to stay stable at all.
 
-The `source_parameters` section describes particle injection: which populations are
-sourced, how often, at what rate, where in the box and with what velocity.
+```python
+from jaxincell import elementary_charge, mass_electron
+print(elementary_charge * 0.05 / mass_electron * domain.dt)   # Omega_c dt
+```
 
-| parameter | default |
-|---|---|
-| `source_term_active` | `0` |
-| `source_species` | `1` |
-| `how_often_source_should_produce_quasiparticles` | `20` |
-| `source_particles_per_second` | `1e16` |
-| `location_of_source` | `0` (`0` centre, `1` left, `2` right, `3` whole box) |
-| `width_of_source` | `1` |
-| `injection_speed_x`, `injection_speed_y`, `injection_speed_z` | `1e7`, `0`, `0` |
+## Time-dependent fields
 
-The section is validated (lengths of the per-source tuples must match
-`source_species`) and copied into the output, but no code path on `main` creates
-particles from it. The implementation lives on the `ds/source_particles` branch of the
-repository. Leave the section out, or keep `source_term_active = 0`.
+There is no hook for one. A field that has to vary in time is a physical field, and the
+honest way to put it in is as a current or a charge — a driven antenna as a species, an
+imposed wave as an initial condition on $\mathbf E$ and $\mathbf B$ through the
+restart state ({doc}`running`).

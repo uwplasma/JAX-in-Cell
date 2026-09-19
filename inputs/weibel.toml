@@ -1,0 +1,47 @@
+# The Weibel instability: a temperature anisotropy grows a magnetic field.
+#
+#   jaxincell inputs/weibel.toml --no-plot --movie weibel.mp4
+#
+# Electrons twenty-five times hotter across the grid than along it are unstable to transverse
+# magnetic perturbations. Modes below k c = sqrt(T_perp/T_par - 1) omega_pe grow; the box holds
+# four marginal wavelengths, so four modes fit inside the unstable band and the longest grows
+# fastest. examples/2_intermediate/weibel.py fits each mode against the kinetic dispersion
+# relation in docs/scripts/dispersion.py.
+#
+# Here the instability grows out of the discrete-particle noise: the script seeds it instead,
+# which is the difference between a demonstration and a measurement.
+
+[domain]
+length = 8.621114e-1     # four marginal wavelengths
+cells = 128
+dt_over_dx_c = 0.5       # light waves matter here, so the Courant number does too
+particle_bc = "periodic"
+field_bc = "periodic"
+
+[solver]
+filter_passes = 0
+
+[[species]]
+name = "electrons"
+n = 40000
+charge = -1
+mass = "electron"
+density = 1e15
+vth = [5.995849e6, 0.0, 2.997925e7]  # T_z/T_x = 25
+sampling = "random"      # a quiet start in x would seed nothing to grow
+
+[[species]]
+name = "ions"
+n = 10000
+charge = 1
+mass = "electron"
+mass_ratio = 1e6
+density = 1e15
+vth = [0.0, 0.0, 0.0]
+sampling = "quiet"
+
+[run]
+steps = 4000
+seed = 0
+store_every = 40
+store_particles = false

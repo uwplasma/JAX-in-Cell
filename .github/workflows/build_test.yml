@@ -1,5 +1,5 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+# Lint, run the test suite with the coverage gate on every supported Python, and run the
+# fastest examples. Also called by pypi_publish.yml, so nothing is published untested.
 
 name: Build and Test
 
@@ -8,6 +8,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_call:
 
 permissions:
   contents: read
@@ -18,7 +19,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        python-version: [ '3.9', '3.10', '3.11', '3.12']
+        python-version: [ '3.10', '3.11', '3.12', '3.13']
     name: Python ${{ matrix.python-version }} Test
     steps:
     - uses: actions/checkout@v4
@@ -26,33 +27,66 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        cache: pip
+        cache-dependency-path: pyproject.toml
     - name: Install jaxincell
       run: |
         python -m pip install --upgrade pip
-        pip install .
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pytest coverage pytest-cov
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        # editable, so that coverage reports paths inside the repository rather
+        # than inside site-packages, which codecov cannot map back to the diff
+        pip install -e ".[dev]"
     - name: Check installed package import outside source tree
       run: |
         cd /tmp
-        python -c "import jaxincell; import jaxincell._parameters; from jaxincell import Simulation"
+        python -c "from jaxincell import Domain, Species, Solver, Simulation, diagnostics, plot"
     - name: Lint with flake8
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      # the configuration, line length and complexity included, is in .flake8
+      run: flake8 . --count --show-source --statistics
 
     - name: Run tests with coverage
+      # fail_under = 100 and branch coverage are set in pyproject.toml
       run: |
-        pytest --cov-branch --cov-report=xml --cov=jaxincell
+        pytest --cov=jaxincell --cov-report=xml --cov-report=term --durations=10
 
     - name: Upload coverage reports to Codecov
-      if: matrix.python-version == '3.12'
+      if: matrix.python-version == '3.12' && github.event_name != 'release'
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         slug: uwplasma/JAX-in-Cell
+
+  examples:
+    # The tests exercise the package; this checks that the scripts people copy from
+    # still run against it. These take a couple of minutes together on a CPU runner, the
+    # three sheath scripts in the smaller preset their `--quick` flag selects; the rest
+    # (bump-on-tail, Weibel, two-stream, the full sheath presets) take minutes each and
+    # are left to the documentation build of the figures.
+    runs-on: ubuntu-22.04
+    name: Examples
+    env:
+      MPLBACKEND: Agg
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: pip
+        cache-dependency-path: pyproject.toml
+    - name: Install jaxincell
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+    - name: Run the fastest examples
+      run: |
+        for script in 2_intermediate/collisions 2_intermediate/wall_reflection \
+                      3_advanced/conservation 1_basic/langmuir_wave; do
+          echo "::group::examples/$script.py"
+          python "examples/$script.py"
+          echo "::endgroup::"
+        done
+        for script in 1_basic/sheath_unmagnetized 2_intermediate/sheath_magnetized \
+                      3_advanced/sheath_optimization; do
+          echo "::group::examples/$script.py --quick"
+          python "examples/$script.py" --quick
+          echo "::endgroup::"
+        done

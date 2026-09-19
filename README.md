@@ -26,18 +26,31 @@ velocity components under the Lorentz force, and advances the electric and magne
 fields on a staggered (Yee) grid with Maxwell's equations. It provides
 
 * an explicit leapfrog integrator with the Boris pusher (non-relativistic or
-  relativistic), a charge-conserving current deposit and a compensated digital filter;
+  relativistic), a charge-conserving current deposit that keeps the discrete Gauss law
+  satisfied to round-off, and a compensated digital filter;
 * an implicit Crank-Nicolson integrator solved by Picard iteration, which conserves
-  energy to round-off and has no light-wave time-step limit;
-* electromagnetic or electrostatic (Gauss's law by FFT) field solvers;
+  both energy and charge to round-off and has no time-step limit;
+* binary Coulomb collisions (Takizuka-Abe), verified against the Fokker-Planck
+  relaxation rates;
 * periodic, reflective and absorbing boundaries, chosen separately for particles and
-  fields;
-* any number of electron and ion populations, each with its own density, drift,
-  temperature anisotropy and seed;
-* gradients of any output with respect to the physical inputs through `jax.grad`,
-  and re-execution with new inputs without recompilation.
+  fields, with a radiating condition on the fields and absorbing walls treated as
+  short-circuited conductors, so that a plasma against them forms a sheath;
+* any number of species, each with its own density, drift, temperature anisotropy,
+  seed and, if needed, a hand-built phase space;
+* gradients of any output with respect to any physical input through `jax.grad`, and
+  re-execution with new inputs without recompilation.
 
 Everything runs as one XLA program on whatever device JAX finds.
+
+Every rate quoted in the documentation is checked against a closed-form or linear
+kinetic result rather than against another simulation. At kλ<sub>D</sub> = 0.5 the
+Landau damping rate is within 0.7 % of the kinetic root and the frequency within
+0.8 %. The two-stream growth rate is within 2.8 % on average and 6.0 % at worst over
+seven drifts spanning the unstable range. The Weibel growth rate is within 6.0 % on
+average and 9.2 % at worst over the five of seven seeded wavenumbers that grow cleanly
+enough to fit. The worst of the four collisional relaxation rates is within 2.5 % of
+Fokker-Planck theory. See
+[verification](https://jax-in-cell.readthedocs.io/en/latest/numerics/verification.html).
 
 ## Install
 
@@ -54,57 +67,126 @@ pip install -e .
 ```
 
 For a GPU, install the matching JAX wheel first (for example `pip install -U "jax[cuda12]"`).
-The package enables 64-bit floating point in JAX when imported.
+
+### Precision
+
+Runs are in double precision unless `JAX_ENABLE_X64=0` is set before JAX is imported.
+Every script in `examples/` sets the variable at its top, so its precision is written in
+the script and can be switched from the shell:
+
+```bash
+JAX_ENABLE_X64=0 python examples/1_basic/two_stream.py
+```
+
+Single precision reproduces the growth rates, frequencies and sheath of the examples;
+what it gives up is conservation to round-off. It is not automatically faster: on a CPU
+the two cost about the same, and on the RTX A4000 we tested a single-precision run was
+many times slower, because of how CUDA scatters in float32
+([performance](https://jax-in-cell.readthedocs.io/en/latest/user_guide/performance.html)).
 
 ## Run
 
-From the command line, with the built-in defaults or a TOML file:
+From the command line, with a TOML file:
 
 ```bash
-jaxincell
 jaxincell examples/input.toml
 ```
 
-From Python:
+From Python. Four objects describe a simulation and one method runs it:
 
 ```python
-from jaxincell import Simulation, load_parameters, diagnostics, plot
+from jaxincell import Domain, Simulation, Solver, Species, diagnostics, plot, speed_of_light as c
 
-parameters = load_parameters("examples/input.toml")   # or a nested dictionary
-sim = Simulation(parameters)
-output = sim.run()          # compiled on the first call
-diagnostics(output)         # energies, species split, dominant frequency
-plot(output)                # animated fields, distributions and phase space
+electrons = Species.electrons(n=10000, density=4.37e17, vth=(0.05 * c, 0, 0),
+                              drift=(6e7, 0, 0), plus_minus=True,
+                              perturbation_amplitude=5e-7, perturbation_mode=1)
+ions = Species.ions(n=10000, density=4.37e17, electrons=electrons)
+
+simulation = Simulation(Domain(length=0.01, cells=64, dt_over_dx_c=4.5),
+                        [electrons, ions], Solver(filter_passes=2))
+
+output = simulation.run(1000, seed=0)   # compiled on the first call
+diagnostics(output)                     # energies, momentum, Gauss residual, temperatures
+plot(output)                            # animated fields, distributions and phase space
 ```
 
-The output is a dictionary of arrays: particle positions and velocities, fields,
-charge and current densities at every step, plus the derived quantities.
-
-Differentiable inputs can be changed at run time and differentiated:
+`Domain`, `Species`, `Solver` and `Simulation` are frozen dataclasses registered as
+JAX pytrees. Physical quantities are leaves, so they can be changed without
+recompiling and differentiated with respect to; structural settings are static.
 
 ```python
-from jax import grad
-import jax.numpy as jnp
+import jax, jax.numpy as jnp
 
-def mean_field(drift_speed):
-    out = sim.run({"electrons": {"electrons0": {"drift_speed_x": drift_speed}}})
-    return jnp.mean(out["electric_field"][:, :, 0])
-
-grad(mean_field)(6e7)
+gradient = jax.grad(lambda s: jnp.sum(s.run(200, seed=0).E ** 2))(simulation)
+print(gradient.species[0].drift, gradient.domain.length)
 ```
 
-## Examples
+`jax.grad` differentiates the initial sampling, the deposition, the field solve, the
+Boris rotation and the boundary conditions — the whole run, with no adjoint to write
+and no finite differences anywhere.
 
-The `examples/` directory contains scripts for the two-stream instability, Landau
-damping, Langmuir waves, the bump-on-tail instability with several populations, the
-Weibel instability, a gradient check against finite differences, an optimisation over
-an input parameter, an inverse problem solved with forward-mode derivatives, and a
-timing study. Each is described in the
-[documentation](https://jax-in-cell.readthedocs.io/en/latest/examples/index.html).
+## What you can do
 
-<p align="center">
-    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/two_stream.png" width="90%" alt="Two-stream instability: field energy, growth rate against drift speed, and phase space">
-</p>
+Every figure is the output of one script in `examples/`, and every script reproduces a
+result the code does not itself compute. Where there is a TOML file, the same run needs no
+Python: `jaxincell inputs/<file>.toml`.
+
+<table>
+<tr>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/two_stream.png" alt="Two-stream instability"></td>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/landau_damping.png" alt="Landau damping"></td>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/bump_on_tail.png" alt="Bump-on-tail instability"></td>
+</tr>
+<tr>
+<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/two_stream.html">Two-stream instability</a></b><br>
+growth rate and saturation against Buneman (1959)<br>
+<code>1_basic/two_stream.py</code> · <code>inputs/two_stream.toml</code></td>
+<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/landau_damping.html">Landau damping</a></b><br>
+collisionless decay against the kinetic root<br>
+<code>1_basic/landau_damping.py</code> · <code>inputs/landau_damping.toml</code></td>
+<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/bump_on_tail.html">Bump on tail</a></b><br>
+beam-driven growth and the quasilinear plateau<br>
+<code>2_intermediate/bump_on_tail.py</code> · <code>inputs/bump_on_tail.toml</code></td>
+</tr>
+<tr>
+<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/weibel.png" alt="Weibel instability"></td>
+<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_source.png" alt="A maintained sheath"></td>
+<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_magnetized.png" alt="A sheath in an oblique magnetic field"></td>
+</tr>
+<tr>
+<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/weibel.html">Weibel instability</a></b><br>
+a magnetic field grown from a temperature anisotropy<br>
+<code>2_intermediate/weibel.py</code> · <code>inputs/weibel.toml</code></td>
+<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_unmagnetized.html">Maintained sheath</a></b><br>
+floating potential and densities against kinetic theory<br>
+<code>1_basic/sheath_unmagnetized.py</code> · <code>inputs/sheath_unmagnetized.toml</code></td>
+<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_magnetized.html">Oblique magnetic field</a></b><br>
+impact energies and angles the wall feels<br>
+<code>2_intermediate/sheath_magnetized.py</code> · <code>inputs/sheath_magnetized.toml</code></td>
+</tr>
+<tr>
+<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/autodiff.png" alt="Gradients through the whole solver"></td>
+<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_optimization.png" alt="A wall's reflectivity recovered from its sheath"></td>
+<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/conservation.png" alt="Explicit against implicit conservation"></td>
+</tr>
+<tr>
+<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html">Gradients</a></b><br>
+reverse mode against forward mode and finite differences<br>
+<code>3_advanced/optimize_two_stream.py</code></td>
+<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_optimization.html">An inverse problem</a></b><br>
+a wall's reflectivity recovered from the sheath it holds<br>
+<code>3_advanced/sheath_optimization.py</code></td>
+<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html">Explicit against implicit</a></b><br>
+energy and charge conservation, and what each costs<br>
+<code>3_advanced/conservation.py</code> · <code>inputs/conservation_implicit.toml</code></td>
+</tr>
+</table>
+
+Also in `examples/`: the Bohm-Gross dispersion relation scanned in `k`, Coulomb collisions
+against the Fokker-Planck rates, a partly reflecting wall returning the flux average of its
+law, the Hobbs-Wesson sheath drop, and a grazing-incidence sheath set up to be compared with
+the gyrokinetic code GYRAZE. `examples/README.md` lists what each teaches and how long it
+takes; the [documentation](https://jax-in-cell.readthedocs.io/en/latest/examples/index.html) derives what each one measures.
 
 Bump-on-tail instability with periodic (left) and reflective (right) walls:
 
@@ -113,37 +195,75 @@ Bump-on-tail instability with periodic (left) and reflective (right) walls:
 <td><video src="https://github.com/user-attachments/assets/9f33bac8-319e-4aba-91fb-befc64bca70e" controls width="100%"></video></td>
 </tr></table>
 
+## Run one from a file
+
+`inputs/` holds a TOML file for each of the runs above. Every table in it is a constructor
+and nothing is ignored, so a misspelled key is an error in the file rather than a surprise in
+the answer:
+
+```bash
+jaxincell inputs/two_stream.toml                                  # run and animate
+jaxincell inputs/landau_damping.toml --no-plot                    # headless
+jaxincell inputs/weibel.toml --save weibel --movie weibel.mp4     # arrays, provenance, video
+```
+
+`--save DIR` writes `fields.npz`, a `run.json` with the settings and the versions, precision,
+device and commit that produced them, and a copy of the input file. `--steps` and `--seed`
+override the file; `--plot`/`--no-plot` override its plotting. Scans and optimisation are not
+in the file format on purpose: those are programs, and `load_toml` hands you the `Simulation`
+to write them around.
+
 ## Documentation
 
 The [documentation](https://jax-in-cell.readthedocs.io/) contains a tutorial, a
-user guide with every input parameter and output key, a description of the numerical
-methods (grid, shape functions, Boris and Crank-Nicolson schemes, deposition,
-filtering, boundaries, stability limits), comparisons with linear theory, the examples,
-and the API reference. To build it locally:
+user guide covering every argument and output field, a description of the numerical
+methods with their derivations (the Yee grid, shape functions, the charge-conserving
+deposit, the Boris and Crank-Nicolson schemes, collisions, filtering, boundaries,
+stability limits), the verification against linear kinetic theory, the examples, and
+the API reference. To build it locally:
 
 ```bash
-pip install -r docs/requirements.txt
+pip install -e ".[docs]"
 sphinx-build -W -b html docs docs/_build/html
 ```
+
+The figures and every number the text quotes are regenerated with
+`python docs/scripts/make_all.py`.
 
 ## Testing
 
 ```bash
-pip install pytest pytest-cov
-pytest
+pip install -e ".[dev]"
+pytest -q
 ```
 
-The test suite runs on every pull request for Python 3.9 to 3.12, together with a
-build of the documentation.
+270 tests, about eight minutes, covering every statement and branch. They
+are physics tests rather than regression tests: closed-form rates and frequencies,
+conservation laws, exact results for the kernels, and the behaviour of the interface.
+They run on Python 3.10 to 3.13 on every pull request, together with a build of the
+documentation.
 
 ## Contributing and citing
 
 Bug reports and feature requests go to the
 [issue tracker](https://github.com/uwplasma/JAX-in-Cell/issues), questions to the
 [discussions](https://github.com/uwplasma/JAX-in-Cell/discussions), and code through
-pull requests; see [CONTRIBUTING.md](CONTRIBUTING.md). If you use JAX-in-Cell in
-your work, please cite it using the `CITATION.cff` file (GitHub shows it under
-"Cite this repository").
+pull requests, as the
+[development guide](https://jax-in-cell.readthedocs.io/en/latest/development.html)
+describes. If you use JAX-in-Cell in your work, please cite it, together with JAX and
+the papers of the methods you rely on, listed in the
+[references](https://jax-in-cell.readthedocs.io/en/latest/numerics/index.html#references).
+[`CITATION.cff`](CITATION.cff) is the same entry in the form GitHub's "Cite this
+repository" reads:
+
+```bibtex
+@software{jaxincell,
+  author = {Ma, Longyu and Jorge, Rogerio and Lu, Hongke and Tran, Aaron and Woolford, Christopher},
+  title  = {{JAX-in-Cell}: a differentiable particle-in-cell code for plasma physics},
+  year   = {2025},
+  url    = {https://github.com/uwplasma/JAX-in-Cell}
+}
+```
 
 ## Acknowledgements
 

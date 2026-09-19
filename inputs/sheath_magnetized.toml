@@ -1,0 +1,71 @@
+# The same maintained sheath in a magnetic field oblique to the wall.
+#
+#   jaxincell inputs/sheath_magnetized.toml --no-plot --save sheath_b
+#
+# B lies 30 degrees to the wall plane, B = B0 (sin a, 0, cos a). Only the x component is
+# resolved by the grid, so the ions still reach the wall along the normal, but between
+# collisions with nothing they follow the field: where the ion gyro-radius is large compared
+# with the Debye length the transition has two layers, a magnetic presheath and the Debye
+# sheath inside it. examples/2_intermediate/sheath_magnetized.py reports the impact energies
+# and angles the wall feels, and examples/3_advanced/grazing_sheath.py compares the grazing
+# limit with GYRAZE.
+#
+# m_i/m_e = 400, rho_s/lambda_D = 8, box 60 lambda_D, ions entering along B at c_s.
+
+[domain]
+length = 4.460365e-3     # 60 lambda_D
+cells = 96
+time_step = 1.772591e-11 # omega_pe dt = 0.1
+particle_bc = "absorbing"
+field_bc = ["open", "absorbing"]
+
+[solver]
+model = "electrostatic"
+
+[external]
+B = [4.009407e-2, 0.0, 6.944497e-2]  # B0 = 0.0802 T at 30 degrees to the wall plane
+
+[impacts]
+energy_max = 3.204e-18   # 20 eV, and what passes it goes to the overflow bin
+energy_bins = 40
+angle_bins = 30
+
+[[species]]
+name = "electrons"
+n = 30000
+charge = -1
+mass = "electron"
+density = 1e16
+vth = [5.930970e5, 5.930970e5, 5.930970e5]
+active = 7500
+sampling = "quiet"
+
+[species.source]
+density = 1e16
+vth = [5.930970e5, 5.930970e5, 5.930970e5]
+emit = 10
+
+[[species]]
+name = "ions"
+n = 30000
+charge = 1
+mass = "electron"
+mass_ratio = 400
+density = 1e16
+vth = [2.096914e4, 2.096914e4, 2.096914e4]
+drift = [1.048457e4, 0.0, 1.815981e4]        # c_s along B: c_s sin(a) normal to the wall
+active = 7500
+sampling = "quiet"
+
+[species.source]
+density = 1e16
+vth = [2.096914e4, 2.096914e4, 2.096914e4]
+drift = [1.048457e4, 0.0, 1.815981e4]
+emit = 10
+
+[run]
+steps = 1800
+seed = 0
+store_every = 45
+store_particles = false
+moments = "flux"

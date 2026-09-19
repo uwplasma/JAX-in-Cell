@@ -1,41 +1,133 @@
 # Examples
 
-The `examples/` directory of the repository contains runnable scripts and input files.
-Each page below shows the script, explains the physics it sets up and shows the result
-as produced by the documentation build scripts under `docs/scripts/`.
+Every script in `examples/` runs on its own and reproduces a result the code does not
+itself compute, rather than making a picture for its own sake. They are in three
+directories by how much of the code they use, not by how interesting they are, and
+`examples/README.md` lists what each teaches and how long it takes.
+
+```bash
+git clone https://github.com/uwplasma/JAX-in-Cell
+cd JAX-in-Cell
+python examples/1_basic/two_stream.py
+```
+
+Three of them take `--quick`, a smoke run of between ten seconds and two minutes with far
+fewer particles: it checks that they execute and reproduces the structure, with more
+noise, and each says so when it starts so that a smoke run is not quoted as a
+measurement.
+
+::::{grid} 1 2 2 2
+:gutter: 3
+
+:::{grid-item-card} Two-stream instability
+:link: two_stream
+:link-type: doc
+`two_stream.py` — growth, saturation and the phase-space vortex. Buneman 1959.
+:::
+
+:::{grid-item-card} Landau damping
+:link: landau_damping
+:link-type: doc
+`landau_damping.py` — the damping rate and frequency at $k\lambda_D=0.5$. Landau 1946.
+:::
+
+:::{grid-item-card} Langmuir waves
+:link: langmuir_wave
+:link-type: doc
+`langmuir_wave.py` — the Bohm-Gross dispersion relation, scanned in $k$.
+:::
+
+:::{grid-item-card} A maintained sheath
+:link: sheath_unmagnetized
+:link-type: doc
+`sheath_unmagnetized.py` — a source-to-collector sheath against the kinetic floating
+potential, in closed form.
+:::
+
+:::{grid-item-card} An oblique magnetic field
+:link: sheath_magnetized
+:link-type: doc
+`sheath_magnetized.py` — the magnetic presheath, and what the wall is struck by.
+:::
+
+:::{grid-item-card} Recovering a wall's reflectivity
+:link: sheath_optimization
+:link-type: doc
+`sheath_optimization.py` — an inverse problem solved with the gradient of the whole
+calculation, and the horizon over which that gradient is useful.
+:::
+
+:::{grid-item-card} Bump-on-tail
+:link: bump_on_tail
+:link-type: doc
+`bump_on_tail.py` — a beam-driven instability and the quasilinear plateau.
+:::
+
+:::{grid-item-card} Weibel instability
+:link: weibel
+:link-type: doc
+`weibel.py` — a temperature anisotropy driving magnetic modes. Weibel 1959.
+:::
+
+:::{grid-item-card} Conservation laws
+:link: conservation
+:link-type: doc
+`conservation.py` — energy, momentum and charge in both schemes, periodic and between absorbing walls.
+:::
+
+:::{grid-item-card} Collisions
+:link: collisions
+:link-type: doc
+`collisions.py` — the Takizuka-Abe operator against the Fokker-Planck rates.
+:::
+
+:::{grid-item-card} Wall reflection
+:link: wall_reflection
+:link-type: doc
+`wall_reflection.py` — a wall returns the flux average of its reflection law.
+:::
+
+:::{grid-item-card} A wall that reflects electrons
+:link: sheath_reflection
+:link-type: doc
+`sheath_reflection.py` — the Bohm criterion and the sheath drop of Hobbs and Wesson, with and without reflection.
+:::
+
+:::{grid-item-card} Optimisation
+:link: optimize_two_stream
+:link-type: doc
+`optimize_two_stream.py` — gradient ascent through the whole solver finds the fastest beam.
+:::
+
+::::
 
 ```{toctree}
-:maxdepth: 1
+:hidden:
 
 two_stream
 landau_damping
 langmuir_wave
+sheath_unmagnetized
 bump_on_tail
 weibel
-energy_conservation
-autodiff
-optimisation
-inference
-scaling
+collisions
+wall_reflection
+sheath_magnetized
+sheath_reflection
+conservation
+optimize_two_stream
+sheath_optimization
 ```
 
-| script | what it shows | run time on a laptop CPU |
-|---|---|---|
-| `two-stream_instability.py`, `input.toml` | two counter-streaming beams, the default configuration | seconds |
-| `Landau_damping.py` | damping of a Langmuir wave in a warm plasma | seconds |
-| `Langmuir_wave.py` | plasma oscillations at the plasma frequency | seconds |
-| `bump-on-tail.py`, `bump-on-tail.toml` | four populations, a weak beam on a Maxwellian, explicit or implicit | tens of seconds |
-| `Weibel_instability.py` | magnetic field generation from a temperature anisotropy | tens of seconds |
-| `auto-differentiability.py` | gradient of a diagnostic with respect to the drift speed, against finite differences | a minute |
-| `optimize_two_stream_saturation.py` | minimise the saturated field energy over the ion temperature | minutes |
-| `inference_two_stream.py` | recover the drift speed from the growth rate with forward-mode derivatives | minutes |
-| `scaling_energy_time.py` | run time and energy error against resolution | minutes |
-
-Run any of them from the repository root, for example
+There is also `input.toml`, which runs the two-stream case from the command line:
 
 ```bash
-python examples/Landau_damping.py
+jaxincell examples/input.toml
 ```
 
-The scripts open matplotlib windows; set the environment variable `MPLBACKEND=Agg`
-to run them without a display.
+The scripts that produce the figures in this documentation live in `docs/scripts/` and
+record the numbers the pages quote in `measurements.json`; see
+{doc}`../numerics/verification`. Each example page names the script its figure and
+numbers come from. Most of those scripts run exactly the example's setup, some adding a
+scan around it. Two do not: the two-stream figure uses a quiet start at another drift, so
+that its growth rate can be fitted, and the sheath figure uses more particles.
