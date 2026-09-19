@@ -123,6 +123,26 @@ second = simulation.run(1000, seed=2, state=first.state)
 The result is bit-identical to a single 2000-step run. This is how to keep the memory
 bounded on a long run: process or write each chunk, then discard it.
 
+A state lives in memory, and a long campaign is a sequence of processes, so it can be
+written out and read back:
+
+```python
+save_state("checkpoint.npz", first.state, simulation)
+second = simulation.run(1000, seed=2, state=load_state("checkpoint.npz", simulation))
+```
+
+and the result is still bit-identical. The archive is named and versioned — one array per
+field of `State` and of the `Wall` ledger inside it, under the names they have in the code
+— and nothing in it is executed on reading. Passing the simulation checks that the archive
+and the run are the same shape, which a restart into a different one is not; a state that
+does not match is refused rather than left to fail somewhere later.
+
+That is not what {func}`~jaxincell.openpmd.write_openpmd` is for. openPMD carries what an
+analysis tool reads, the fields and the particles at the steps that were stored, and it is
+not enough to carry on from: no random key, no wall ledger, no source bookkeeping, no charge
+density at the step the loop is about to begin, and positions at integer times where the
+explicit loop carries half-step ones. The two files answer different questions.
+
 ## Ensembles
 
 `seed` is traced, so `jax.vmap` over it produces an ensemble from a single compiled

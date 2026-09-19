@@ -284,8 +284,21 @@ def test_openpmd_export_round_trips():
         iteration = series.iterations[4]
         assert float(iteration.time) == pytest.approx(float(out.t[4]))
         assert set(iteration.meshes) == {"E", "B", "J", "rho"}
-        assert iteration.meshes["E"]["x"].position == [0.5]     # faces
-        assert iteration.meshes["B"]["x"].position == [0.0]     # centres
+        # where the standard says each component sits, worked out from the attributes the file
+        # carries and nothing else: x_i = (gridGlobalOffset + (i + position) * gridSpacing)
+        # * gridUnitSI, with position in [0, 1) from the lower corner of the cell. A centre is
+        # therefore 0.5 and not 0.0; this was written the other way round, which put the centres
+        # on the left faces and the faces on the centres, a whole cell apart.
+        cells = out.E.shape[1]
+        for name, want in (("B", np.asarray(out.grid)), ("rho", np.asarray(out.grid)),
+                           ("E", np.asarray(out.faces)), ("J", np.asarray(out.faces))):
+            mesh = iteration.meshes[name]
+            component = mesh["x"] if name in ("E", "B", "J") else mesh[io.Record_Component.SCALAR]
+            offset, spacing = mesh.grid_global_offset[0], mesh.grid_spacing[0]
+            where = (offset + (np.arange(cells) + component.position[0]) * spacing) * mesh.grid_unit_SI
+            # a face sits at x = 0 in this box, so the tolerance needs a length to be relative to
+            assert np.allclose(where, want, rtol=1e-12, atol=1e-12 * float(out.length)), name
+            assert 0.0 <= component.position[0] < 1.0, name
         assert set(iteration.particles) == set(out.names)
         electrons = iteration.particles["electrons"]
         position = electrons["position"]["x"].load_chunk()

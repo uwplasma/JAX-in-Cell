@@ -281,6 +281,58 @@ def test_the_charge_balance_is_independent_of_the_gauss_residual(walls):
     assert np.allclose(np.asarray(charge_balance(tilted)), clean_charge, rtol=1e-12, atol=0)
 
 
+def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
+    """`Output.state` continues a run exactly; it lives in memory, and a long campaign is a
+    sequence of processes. The archive is that state by name and by version: one array per field,
+    nothing executed on reading, and what a run did not keep is absent rather than zero.
+
+    It is checked the way a restart is: against the run it was cut out of."""
+    import numpy as np
+
+    from jaxincell import load_state, save_state
+    from jaxincell._archive import FORMAT
+
+    domain = Domain(length=1e-2, cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
+    species = Species("electrons", 2000, -1.0, mass_electron, 0.0,
+                      source=Source(density=1e14, vth=(1e6,) * 3, emit=10))
+    sim = Simulation(domain, [species], Solver(model="electrostatic"))
+    whole = sim.run(60, store_every=20, moments="flux")
+    first = sim.run(20, store_every=20, moments="flux")
+
+    path = save_state(tmp_path / "checkpoint", first.state, sim)
+    assert path.endswith(".npz")
+    rest = sim.run(40, store_every=20, moments="flux", state=load_state(path, sim))
+    for name in ("t", "E", "B", "rho", "sigma", "x", "v"):
+        assert np.array_equal(np.asarray(getattr(rest, name)),
+                              np.asarray(getattr(whole, name)[1:])), name
+    assert np.array_equal(np.asarray(rest.wall.arrived), np.asarray(whole.wall.arrived[1:]))
+    assert np.array_equal(np.asarray(rest.moments[-1]), np.asarray(whole.moments[-1]))
+    assert list(np.asarray(rest.steps)) == [40, 60]
+
+    # what a run did not keep is absent rather than zero, and comes back as None
+    bare = sim.run(20, store_every=20)
+    assert load_state(save_state(tmp_path / "bare", bare.state)).moments is None
+
+    # a state restored into a differently shaped run is refused, not left to fail later
+    smaller = Species("electrons", 1000, -1.0, mass_electron, 0.0,
+                      source=Source(density=1e14, vth=(1e6,) * 3, emit=10))
+    other = Simulation(domain, [smaller], Solver(model="electrostatic"))
+    with pytest.raises(ValueError, match="differently shaped run"):
+        load_state(path, other)
+    with pytest.raises(ValueError, match="differently shaped run"):
+        load_state(path, Simulation(domain.replace(cells=32), [species], Solver(model="electrostatic")))
+
+    # an archive of another format is refused rather than half read, and so is one that is not
+    # a state at all
+    stored = dict(np.load(path))
+    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(FORMAT + 1)})
+    with pytest.raises(ValueError, match=f"format {FORMAT}"):
+        load_state(tmp_path / "future.npz")
+    np.savez(tmp_path / "partial.npz", **{k: v for k, v in stored.items() if k != "rho"})
+    with pytest.raises(ValueError, match="not a state archive"):
+        load_state(tmp_path / "partial.npz")
+
+
 def test_per_species_diagnostics_are_the_masked_sums():
     """Energies and temperatures slice each species' block of particles; they
     agree to round-off with sums masked by ``out.species``."""

@@ -35,6 +35,10 @@ start with an underscore; the numerical kernels are documented too, because the
 
 .. autofunction:: jaxincell.plot
 
+.. autofunction:: jaxincell.save_state
+
+.. autofunction:: jaxincell.load_state
+
 .. autofunction:: jaxincell.openpmd.write_openpmd
 ```
 

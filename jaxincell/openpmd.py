@@ -5,9 +5,25 @@ One group-based series, one iteration per exported stored step ``s`` (``time = o
 
 Layout:
     Meshes ``E``, ``B``, ``J`` (components ``x``/``y``/``z``) and the scalar ``rho`` on the 1D
-    Cartesian grid: ``axis_labels=["x"]``, ``grid_spacing=[dx]``, ``grid_global_offset=[-length/2]``;
-    ``E`` and ``J`` sit on cell faces (component ``position=[0.5]``), ``B`` and ``rho`` on centres
-    (``position=[0.0]``). Particles: one species per ``out.names`` with the vector records
+    Cartesian grid: ``axis_labels=["x"]``, ``grid_spacing=[dx]``, ``grid_unit_SI=1``.
+
+    The standard places a component at
+    :math:`x_i = (\\mathrm{gridGlobalOffset} + (i + \\mathrm{position})\\,\\mathrm{gridSpacing})
+    \\times\\mathrm{gridUnitSI}`, with ``position`` in :math:`[0,1)` measured from the **lower
+    corner** of the cell. So a cell centre is ``position=0.5``, not ``0.0``; ``0.0`` is the left
+    face. ``B`` and ``rho`` live on the centres and are written with ``grid_global_offset =
+    [-length/2]`` and ``position=[0.5]``. ``E`` and ``J`` live on the faces this code stores,
+    which are the **right** face of each cell, :math:`-L/2 + (i+1)\\Delta x`; that is
+    ``position=1.0``, which the standard does not allow, so their offset is shifted a cell
+    instead: ``grid_global_offset = [-length/2 + dx]`` with ``position=[0.0]``. Both records then
+    read back at the coordinates the code puts them at, by the formula above and nothing else.
+
+    (This was the wrong way round: centres at ``0.0`` and faces at ``0.5``, which put every
+    quantity half a cell from where it belongs and the two of them a whole cell apart. Note that
+    WarpX's default openPMD output writes ``0.5`` on every component because it cell-centres
+    before writing, so it is not a reference for staggering; PIConGPU is.)
+
+    Particles: one species per ``out.names`` with the vector records
     ``position`` and ``momentum`` and the scalar ``weighting`` per particle, and ``positionOffset``
     (zero), ``charge`` and ``mass`` (of one physical particle) as constant records; skipped when
     ``out.x is None``. The momentum is the one the pusher advances: ``m * gamma * v`` for a
@@ -26,7 +42,7 @@ __all__ = ["write_openpmd"]
 _DIMS = {"E": dict(L=1, M=1, T=-3, I=-1), "B": dict(M=1, T=-2, I=-1), "J": dict(L=-2, I=1),
          "rho": dict(L=-3, T=1, I=1), "position": dict(L=1), "positionOffset": dict(L=1),
          "momentum": dict(L=1, M=1, T=-1), "weighting": {}, "charge": dict(T=1, I=1), "mass": dict(M=1)}
-_FACES = ("E", "J")  # records on cell faces (in-cell position 0.5); B and rho are on centres (0.0)
+_FACES = ("E", "J")  # on the right face of each cell; B and rho are on the centres
 
 
 def _describe(io, record, name, particle=False):
@@ -58,10 +74,14 @@ def _write_meshes(io, it, out, s, keep):
     for name in ("E", "B", "J", "rho"):
         data, mesh = np.asarray(getattr(out, name)[s], dtype=np.float64), it.meshes[name]
         mesh.geometry, mesh.axis_labels, mesh.grid_unit_SI = io.Geometry.cartesian, ["x"], 1.0
-        mesh.grid_spacing, mesh.grid_global_offset = [float(out.dx)], [-0.5 * float(out.length)]
+        # x_i = (offset + (i + position) * spacing); position is in [0, 1) from the lower corner,
+        # so a centre is 0.5 and the right face of cell i is the lower corner of cell i + 1
+        faces = name in _FACES
+        mesh.grid_spacing = [float(out.dx)]
+        mesh.grid_global_offset = [-0.5 * float(out.length) + (float(out.dx) if faces else 0.0)]
         _describe(io, mesh, name)
         for label, column in zip("xyz", data.T) if data.ndim == 2 else [(io.Record_Component.SCALAR, data)]:
-            mesh[label].position = [0.5 if name in _FACES else 0.0]
+            mesh[label].position = [0.0 if faces else 0.5]
             _store(io, mesh[label], column, keep)
 
 
