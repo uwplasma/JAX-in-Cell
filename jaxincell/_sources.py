@@ -67,10 +67,21 @@ def crossing_flux(source):
     the plane, :math:`u<0`, still sends the tail of its distribution across, and
     :math:`|u|` in its place would turn that trickle into a full beam.
     """
+    if source.model == "sampled":
+        return source.density * jnp.mean(_crossing_speed(source))
     sigma, u = source.sigma[0], _inward(source) * source.drift[0]
     if source.model == "beam":
         return source.density * u
     return source.density * (sigma * _normal_pdf(u / sigma) + u * _normal_cdf(u / sigma))
+
+
+def _crossing_speed(source):
+    """The inward normal speed of each stored sample, zero for the ones going the other way.
+
+    A reservoir given as samples is the distribution behind the plane, so the flux it sends
+    across is :math:`n\\langle v_n\\rangle_+` over that distribution, and the samples that
+    cross are drawn in proportion to the same weight."""
+    return jnp.maximum(_inward(source) * jnp.asarray(source.samples)[:, 0], 0.0)
 
 
 def _flux_norm(a):
@@ -141,7 +152,18 @@ def sample_crossing(key, source, n, inward):
 
     Shifting a Rayleigh sample by the drift is none of these: the two agree only at
     :math:`u=0`.
+
+    ``model="sampled"`` is the fourth and is not a form at all: the reservoir is given as
+    velocities, and one of them is drawn whole, in proportion to its inward normal
+    component. The three components keep whatever correlation they were given, which is
+    the point -- a distribution that is Maxwellian in neither the normal nor the
+    tangential direction, such as the entrance condition of a magnetised presheath, is
+    not a product of three one-dimensional draws.
     """
+    if source.model == "sampled":
+        weights = _crossing_speed(source)
+        drawn = random.choice(key, weights.shape[0], (n,), p=weights / jnp.sum(weights))
+        return jnp.asarray(source.samples)[drawn]
     sigma, drift = source.sigma, jnp.asarray(source.drift)
     tangential = jnp.array([0.0, 1.0, 1.0]) * drift          # the drift the plane does not select on
     if source.model == "beam":

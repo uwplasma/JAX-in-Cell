@@ -74,6 +74,34 @@ pointing away from the plane sends nothing and is refused rather than turned aro
 `vth != 0` is a traced array and not a Python `True`; a `Source` built from a traced `vth`
 or a traced normal drift has to say which model it is.
 
+## A reservoir that is not a formula
+
+Some inflows are none of those three. The entrance condition of a magnetised presheath is
+$F \propto v_\parallel^2\exp(-v_\parallel^2/2 - v_\perp^2/2)$ along a field that meets
+the wall at a few degrees {cite}`geraldini2019`: the $v_\parallel^2$ is the kinetic
+Chodura condition, which empties the distribution at zero parallel velocity, and the field
+angle mixes the parallel and perpendicular directions into every Cartesian component.
+Neither the hole nor the correlation survives being written as one normal distribution
+across the plane and two along it.
+
+`samples` takes that distribution as velocities instead:
+
+```python
+Source(density=n, samples=v, emit=120)     # v is (k, 3), the reservoir's own velocities
+```
+
+They are the distribution **behind** the plane, not the flux across it. The sampler
+weights them by their inward normal component, which is what makes a fast particle cross
+more often, and never draws one going the other way; the flux is
+$\Gamma = n\langle v_n\rangle_+$ over the same samples, so the two cannot disagree.
+`vth` and `drift` are then unused, `model` comes out as `"sampled"`, and $k$ sets the
+resolution of the inflow: the flux and the moments it reproduces carry the Monte Carlo
+error of the sample it was given, a few parts in a thousand at $k = 10^5$.
+
+It is data rather than a model, so the emitted weight is differentiable in `density` and
+not in the samples. What the samples are is the caller's business — another code's output,
+a measurement, or a distribution with no closed form — which is the point.
+
 ## Weights, not counts
 
 Each step emits a fixed number `emit` of particles carrying the continuous weight

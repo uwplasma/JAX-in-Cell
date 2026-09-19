@@ -988,3 +988,97 @@ def test_an_ensemble_of_reservoirs_is_one_vmap_and_one_compilation():
 
     assert np.allclose(np.asarray(jax.vmap(from_source, in_axes=(axes,))(stacked)),
                        np.asarray(together), rtol=1e-12)
+
+
+def test_a_reservoir_given_as_samples_crosses_the_plane_like_the_closed_form_it_was_drawn_from():
+    """`model="sampled"` is the reservoir handed over as velocities instead of as a formula,
+    for a distribution that is none of the three closed forms -- one another code computed,
+    or one that was measured. What it has to get right is the same thing the closed forms
+    do: the flux is `n <v_n>_+` over the distribution **behind** the plane, and what crosses
+    is drawn in proportion to the inward normal component, not uniformly.
+
+    Checked against the Maxwellian it is given, where both are known: the flux, the mean
+    and mean square of the crossing normal speed (`sqrt(pi/2)` and `2` in units of sigma),
+    and the tangential components, which the plane does not select on.
+    """
+    rng = np.random.default_rng(0)
+    velocities = SIGMA * rng.standard_normal((200000, 3))
+    sampled = Source(density=DENSITY, samples=velocities, emit=4)
+    closed = maxwellian_source(4)
+    assert sampled.model == "sampled"                     # inferred from the samples alone
+    # the Monte Carlo error of <v_n>_+ over 200000 samples is a few parts in a thousand
+    assert float(crossing_flux(sampled)) == pytest.approx(float(crossing_flux(closed)), rel=0.02)
+
+    drawn = np.asarray(sample_crossing(random.PRNGKey(0), sampled, 200000, 1.0))
+    assert drawn[:, 0].mean() / SIGMA == pytest.approx(np.sqrt(np.pi / 2), rel=0.02)
+    assert (drawn[:, 0] ** 2).mean() / SIGMA ** 2 == pytest.approx(2.0, rel=0.03)
+    assert abs(drawn[:, 1].mean()) < 0.02 * SIGMA and (drawn[:, 1] ** 2).mean() == pytest.approx(
+        SIGMA ** 2, rel=0.03)
+    assert (drawn[:, 0] > 0).all()                        # nothing that was going the other way
+
+    # the same samples at the right wall: the flux is the same by symmetry and every
+    # particle enters travelling the other way
+    right = Source(density=DENSITY, samples=velocities, emit=4, side="right")
+    assert float(crossing_flux(right)) == pytest.approx(float(crossing_flux(sampled)), rel=0.02)
+    assert (np.asarray(sample_crossing(random.PRNGKey(0), right, 1000, -1.0))[:, 0] < 0).all()
+
+
+def test_samples_carry_the_correlations_that_three_one_dimensional_draws_cannot():
+    """The reason for the model. The entrance condition of a magnetised presheath is
+    `F ~ v_par^2 exp(-v_par^2/2 - v_perp^2/2)` along a field at a grazing angle to the wall
+    (Geraldini, Parra and Militello 2019): the `v_par^2` is the kinetic Chodura condition,
+    which empties the distribution at zero parallel velocity, and the field angle mixes the
+    parallel and perpendicular directions into every Cartesian component. Neither survives
+    being written as a normal distribution times two tangential ones.
+
+    The parallel speed is drawn as the speed of a three-dimensional normal vector, whose
+    density is exactly `v^2 exp(-v^2/2)`. Under a tenth of a per cent of it lies below
+    `0.1`, where a Maxwellian puts eight per cent, and the two Cartesian components the
+    field tilts are anticorrelated, because this distribution is narrower along the field
+    than across it.
+    """
+    rng = np.random.default_rng(1)
+    angle = np.radians(4.0)
+    direction = np.array([np.sin(angle), 0.0, np.cos(angle)])
+    across = np.array([np.cos(angle), 0.0, -np.sin(angle)])
+    parallel = np.sqrt(rng.chisquare(3, 200000))              # density v^2 exp(-v^2/2)
+    perpendicular = rng.standard_normal((parallel.size, 2))
+    velocities = SIGMA * (parallel[:, None] * direction + perpendicular[:, 0:1] * across
+                          + perpendicular[:, 1:2] * np.array([0.0, 1.0, 0.0]))
+    source = Source(density=DENSITY, samples=velocities, emit=4)
+    drawn = np.asarray(sample_crossing(random.PRNGKey(0), source, 200000, 1.0))
+
+    along = drawn @ direction / SIGMA
+    assert (along < 0.1).mean() < 1e-3                        # the Chodura hole survives the draw
+    assert (np.abs(perpendicular[:, 0]) < 0.1).mean() > 0.07  # where a Maxwellian has its peak
+    # what the draw has to reproduce is the reservoir weighted by its own inward normal
+    # component, so the reference is that weighted distribution and not an unweighted moment
+    weight = np.maximum(velocities[:, 0], 0.0)
+
+    def weighted(a, b):
+        mean_a, mean_b = np.average(a, weights=weight), np.average(b, weights=weight)
+        cov = np.average((a - mean_a) * (b - mean_b), weights=weight)
+        return cov / np.sqrt(np.average((a - mean_a) ** 2, weights=weight)
+                             * np.average((b - mean_b) ** 2, weights=weight))
+
+    correlation = np.corrcoef(drawn[:, 0], drawn[:, 2])[0, 1]
+    assert correlation < -0.02                                # narrower along the field than across
+    assert correlation == pytest.approx(weighted(velocities[:, 0], velocities[:, 2]), abs=0.01)
+    assert drawn[:, 0].mean() == pytest.approx(np.average(velocities[:, 0], weights=weight), rel=0.01)
+    # and the flux is the reservoir's own, not what a Maxwellian of the same spread sends
+    assert float(crossing_flux(source)) == pytest.approx(
+        DENSITY * np.maximum(velocities[:, 0], 0).mean(), rel=1e-12)
+
+
+def test_a_sampled_reservoir_is_refused_when_it_is_not_one():
+    """`samples` and `model="sampled"` are the same statement, so one without the other is
+    a mistake, and the shape is the reservoir's velocities and nothing else."""
+    rng = np.random.default_rng(2)
+    with pytest.raises(ValueError, match="shape"):
+        Source(density=DENSITY, samples=rng.standard_normal((10, 2)), emit=4)
+    with pytest.raises(ValueError, match="shape"):
+        Source(density=DENSITY, samples=rng.standard_normal(10), emit=4)
+    with pytest.raises(ValueError, match="needs them"):
+        Source(density=DENSITY, vth=(SIGMA,) * 3, model="sampled", emit=4)
+    with pytest.raises(ValueError, match="needs them"):
+        Source(density=DENSITY, samples=rng.standard_normal((10, 3)), model="maxwellian", emit=4)

@@ -177,11 +177,20 @@ class Source:
             refused rather than reflected.
         side: ``"left"`` or ``"right"``, the wall the plasma enters through.
         model: Which crossing distribution the sampler draws from: ``"beam"`` for a cold
-            reservoir, ``"maxwellian"`` for a Maxwellian with no normal drift, or
-            ``"drifting"`` for one with a normal drift. It is worked out from ``vth`` and
-            ``drift`` when the object is built and is then static, because it selects a
+            reservoir, ``"maxwellian"`` for a Maxwellian with no normal drift,
+            ``"drifting"`` for one with a normal drift, or ``"sampled"`` for a reservoir
+            given as ``samples``. It is worked out from ``vth``, ``drift`` and ``samples``
+            when the object is built and is then static, because it selects a
             branch: read live from the leaves it would be a traced value, and inside
             ``jit`` every source would take the same branch whatever it holds.
+        samples: Velocities of the reservoir itself, ``(k, 3)`` in m/s, for a distribution
+            that is none of the three closed forms -- one computed by another code, or
+            measured. They are the distribution **behind** the plane, not the flux across
+            it: the sampler weights them by their inward normal component, which is what
+            makes fast particles cross more often, and ignores those that do not cross.
+            ``density`` is still the reservoir's density, and the flux follows from the two.
+            ``vth`` and ``drift`` are then unused. It is data rather than a model, so the
+            emitted weight is differentiable in ``density`` and not in the samples.
         emit: Particles emitted per step. They occupy the dead slots of the
             species, so the species needs enough of them: ``n`` must exceed
             ``emit`` times the longest residence time in steps.
@@ -200,6 +209,7 @@ class Source:
     emit: int = 0
     model: object = None
     min_weight: float = 1e-3
+    samples: object = None
 
     def __post_init__(self):
         if _template(self):
@@ -214,10 +224,20 @@ class Source:
                  f"a Source density cannot be negative, not {self.density!r}")
         _require(not _plain(self.min_weight) or 0 <= self.min_weight <= 1,
                  f"min_weight is a fraction of the emitted weight, in [0, 1], not {self.min_weight!r}")
+        if self.samples is not None:
+            object.__setattr__(self, "samples", jax.numpy.asarray(self.samples))
+            _require(jax.numpy.ndim(self.samples) == 2 and jax.numpy.shape(self.samples)[-1] == 3
+                     and jax.numpy.shape(self.samples)[0] >= 1,
+                     "Source samples are the reservoir's velocities, of shape (k, 3), not "
+                     f"{jax.numpy.shape(self.samples)}")
         if self.model is None:
-            object.__setattr__(self, "model", self._model_from_leaves())
-        _require(self.model in ("beam", "maxwellian", "drifting"),
-                 f"model is 'beam', 'maxwellian' or 'drifting', not {self.model!r}")
+            object.__setattr__(self, "model", "sampled" if self.samples is not None
+                               else self._model_from_leaves())
+        _require(self.model in ("beam", "maxwellian", "drifting", "sampled"),
+                 f"model is 'beam', 'maxwellian', 'drifting' or 'sampled', not {self.model!r}")
+        _require((self.model == "sampled") == (self.samples is not None),
+                 "model='sampled' is the one that draws from samples, and the one that needs them: "
+                 f"model is {self.model!r} and samples are {'given' if self.samples is not None else 'not'}")
         inward = 1.0 if self.side == "left" else -1.0
         if self.model == "beam" and _plain(self.drift[0]):
             _require(inward * self.drift[0] > 0,
