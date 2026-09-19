@@ -57,6 +57,13 @@ potential, in closed form.
 calculation, and the horizon over which that gradient is useful.
 :::
 
+:::{grid-item-card} A sheath at grazing incidence
+:link: grazing_sheath
+:link-type: doc
+`grazing_sheath.py` — the magnetic presheath and the Debye sheath, set up to be compared
+with the gyrokinetic code GYRAZE.
+:::
+
 :::{grid-item-card} Bump-on-tail
 :link: bump_on_tail
 :link-type: doc
@@ -117,6 +124,7 @@ sheath_reflection
 conservation
 optimize_two_stream
 sheath_optimization
+grazing_sheath
 ```
 
 There is also `input.toml`, which runs the two-stream case from the command line:
