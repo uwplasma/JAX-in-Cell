@@ -20,12 +20,12 @@ from the wall normal, as a fraction of the fluence per degree, one histogram per
 ## What is measured against what
 
 At $m_i/m_e = 400$, $T_i = T_e$, $\rho_s/\lambda_D = 8$, in a box of 60 Debye lengths, over
-four sound transits at 240 cells:
+four sound transits at 240 cells (the full preset, 21 minutes on one RTX A4000):
 
 | $\alpha$ to the wall | wall potential | ion fluence (m$^{-2}$) | mean impact energy | mean incidence from the normal | fluence ratio to $90^\circ$ | $\sin\alpha$ |
 |---|---|---|---|---|---|---|
-| $90^\circ$ | $-1.94\,T_e/e$ | $9.67\times10^{13}$ | 4.70 eV | $25^\circ$ | 1 | 1.00 |
-| $30^\circ$ | $-2.11\,T_e/e$ | $4.93\times10^{13}$ | 4.83 eV | $39^\circ$ | 0.51 | 0.50 |
+| $90^\circ$ | $-1.91\,T_e/e$ | $9.67\times10^{13}$ | 4.69 eV | $25^\circ$ | 1 | 1.00 |
+| $30^\circ$ | $-2.13\,T_e/e$ | $4.93\times10^{13}$ | 4.83 eV | $39^\circ$ | 0.51 | 0.50 |
 | $15^\circ$ | $-2.07\,T_e/e$ | $2.61\times10^{13}$ | 4.71 eV | $52^\circ$ | 0.27 | 0.26 |
 
 * **The fluence is the entrance condition, arriving.** The ratios to normal incidence match
@@ -35,13 +35,13 @@ four sound transits at 240 cells:
   the mean impact energy barely moves, because it is the sheath drop that sets it and that
   is much the same at all three angles.
 * **This run does not resolve a trend in the wall potential with angle.** The three differ
-  by about one realisation scatter — 0.17 and 0.13 $T_e/e$ against the 0.137 that two seeds
+  by about one realisation scatter — 0.22 and 0.16 $T_e/e$ against the 0.165 that two seeds
   of the same physics give — and three angles of one realisation each cannot resolve more.
   The potentials are measured from the source plane, so they include the presheath and are
   not the drop across the Debye sheath alone.
 * **The field-free control comes out as it should.** The $B = 0$ run and the $90^\circ$ one
-  differ by at most $0.079\,T_e/e$ over a drop of $1.87$, which is 0.58 of the realisation
-  scatter of $0.137$. It is not round-off: an external field array takes a different path
+  differ by at most $0.037\,T_e/e$ over a drop of $1.85$, which is 0.23 of the realisation
+  scatter of $0.165$. It is not round-off: an external field array takes a different path
   through the gather than `None` does, so $E_x$ differs in its last bit and a plasma
   between absorbing walls amplifies that. Saying so needs the second seed, which is why the
   script runs it.

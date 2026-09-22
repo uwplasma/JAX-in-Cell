@@ -71,12 +71,21 @@ reach:
 | step cap, to resolve the electron gyro-phase | $\omega_{pe}\Delta t = 0.075$ |
 | one ion transit | $9.3\times10^6$ steps |
 
-The marker count is worse than the step count. A species carries `emit` times its residence
-in steps and `emit` cannot go below one marker a step, so at $m_i/m_e = 400$ and $5°$ —
-where an ion's residence is 465 000 steps — the pool holds **465 000 ions whatever the
-particles-per-cell setting asks for**. Three transits is then $7\times10^{11}$
-particle-steps, and the matched case at $m_i/m_e = 900$ and $4°$ works out at a hundred
-GPU-hours on the same argument.
+The marker count is worse than the step count. A species carries `emit/every` times its
+residence in steps, and an ion stays 465 000 steps at $m_i/m_e = 400$ and $5°$. The ions are
+therefore emitted once every $k = \text{residence}/\text{markers}$ steps
+(`Source(every=k)`): the pool is then the markers asked for, each carrying $k$ steps of flux
+and placed where its orbit has taken it, which moves the stream by
+$\Delta x/\text{markers per cell}$ a window. Electrons stay at $k = 1$, their gyro-angle
+being a quarter radian a step.
+
+| case | ion $k$ | pool | particle-steps, three transits | laptop | one A4000 |
+|---|---|---|---|---|---|
+| rehearsal, $m_i/m_e = 400$, $5°$ | 14 | $6.3\times10^4$ | $8.8\times10^{10}$ | 4 h | 1–2 h, estimated |
+| matched, $m_i/m_e = 900$, $4°$ | 27 | $9.1\times10^4$ | $3.1\times10^{11}$ | 15 h | 3.5–7 h, estimated |
+
+`--every=1` is the control that the result does not depend on $k$; with $k = 1$ the same two
+cases cost 33 and 194 laptop hours.
 
 That is the asymptotic limit doing its job rather than a failure of the run, and it is why
 the example has three presets: a smoke run that says it is not grazing, a rehearsal at

@@ -762,7 +762,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [ ] **W9** model-comparison and Weibel examples on the existing kernels and shared theory.
 - [ ] **W10** electron-field instability with its limiting controls.
 - [ ] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering.
-- [ ] **W12** convergence, performance, documentation, review packet.
+- [ ] **W12** convergence, performance, documentation, review packet. *(Documentation part started: every figure in one style, set in the package as `jaxincell.style()`/`figure()`; README benchmarks grouped as 1D1V, 1D2V and 1D3V with the agreement against each reference; example and user-guide pages led by their figure and a measured-against-reference table, prose kept to the numerics pages; movies written for the web by `docs/scripts/movies.py`, 0.1-0.5 MB each, to be embedded once uploaded as PR attachments, since GitHub plays no video stored in the repository. Open: convergence and device-coverage evidence.)*
 
 ## 11. Acceptance checklist
 

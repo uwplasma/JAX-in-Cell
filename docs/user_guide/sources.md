@@ -33,7 +33,8 @@ out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(3
 | `vth` | thermal speed per component of the reservoir; zero makes a cold beam | `(0.0, 0.0, 0.0)` |
 | `drift` | drift velocity of the reservoir, m/s | `(0.0, 0.0, 0.0)` |
 | `side` | `"left"` or `"right"`, the wall the plasma enters through | `"left"` |
-| `emit` | particles emitted per step | `0` |
+| `emit` | particles emitted per emission | `0` |
+| `every` | emit once every this many steps, each particle carrying that many steps of flux; keep $v\,k\Delta t$ small against a cell and $\lvert\Omega\rvert k\Delta t$ below about 0.25 | `1` |
 | `model` | which crossing distribution the sampler draws from; decided when the object is built | `None` |
 | `min_weight` | fraction of the emitted weight at or below which a wall keeps the remainder instead of reflecting again | `1e-3` |
 | `samples` | velocities of the reservoir itself, `(k, 3)` in m/s | `None` |
