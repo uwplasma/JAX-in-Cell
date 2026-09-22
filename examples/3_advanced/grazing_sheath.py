@@ -75,7 +75,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.special import erf
 
-from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, epsilon_0, mass_electron,
+from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, epsilon_0, figure, mass_electron,
                        potential, provenance, elementary_charge as e_charge)
 
 # --- what to change ---------------------------------------------------------------------
@@ -275,7 +275,7 @@ if reference is not None:
           f"{comparison['their_wall_potential']:+.3f} against this run's {wall_potential:+.3f}")
 
 # --- the figure and the record -----------------------------------------------------------
-fig, axes = plt.subplots(1, 3, figsize=(12, 3.4))
+fig, axes = figure(3)
 axes[0].plot(centres / gyro_radius, np.interp(centres, faces + domain.length / 2, profile), color="C0")
 axes[0].set(xlabel=r"$x/\rho_s$ from the entrance plane", ylabel=r"$e\phi/T_e$", title="the potential")
 axes[1].plot(centres / gyro_radius, n_i, label=r"$n_i$")
@@ -283,7 +283,7 @@ axes[1].plot(centres / gyro_radius, n_e, label=r"$n_e$")
 axes[1].set(xlabel=r"$x/\rho_s$", ylabel=r"$n/n_0$", title="densities")
 axes[1].legend(frameon=False)
 axes[2].plot(centres / gyro_radius, flow, color="C2")
-axes[2].axhline(1.0, color="0.6", lw=0.8)
+axes[2].axhline(1.0, color="0.6", lw=2)
 axes[2].set(xlabel=r"$x/\rho_s$", ylabel=r"$\langle v_x\rangle/c_s$", title="ion flow towards the wall")
 plt.tight_layout()
 
@@ -307,6 +307,6 @@ results = dict(wall_potential=wall_potential, flow_at_the_wall=float(flow[-1]),
                                                        results=results), indent=1))
 np.savez(folder / "profiles.npz", centres=centres, faces=faces, phi=profile, n_e=n_e, n_i=n_i,
          flow=flow, spectrum=spectrum, energies=energies, angles=angles)
-fig.savefig(folder / "figure.png", dpi=150)
+fig.savefig(folder / "figure.png")
 print(f"\nwrote {folder}/run.json, profiles.npz and figure.png")
 plt.show()

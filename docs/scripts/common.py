@@ -17,6 +17,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
+from jaxincell import figure, style                     # noqa: F401  (re-exported to the scripts)
+from jaxincell._plot import PANEL
+
 matplotlib.use("Agg")
 
 HERE = Path(__file__).resolve().parent
@@ -29,17 +32,8 @@ COLORS = {"blue": "#0072B2", "orange": "#E69F00", "green": "#009E73", "vermillio
           "purple": "#CC79A7", "sky": "#56B4E9", "black": "#000000", "grey": "#7F7F7F"}
 C_ELECTRONS = C_EXPLICIT = COLORS["blue"]
 C_IONS, C_IMPLICIT, C_THEORY, C_FIT = COLORS["orange"], COLORS["vermillion"], COLORS["black"], COLORS["green"]
-SINGLE, WIDE = (6.0, 3.6), (7.4, 3.4)
-
-plt.rcParams.update({
-    "font.size": 9.5, "axes.titlesize": 10, "axes.labelsize": 9.5, "legend.fontsize": 8.5,
-    "xtick.labelsize": 8.5, "ytick.labelsize": 8.5, "axes.grid": True, "grid.color": "#D9D9D9",
-    "grid.linewidth": 0.5, "grid.linestyle": "-", "axes.axisbelow": True,
-    "axes.spines.top": False, "axes.spines.right": False, "axes.linewidth": 0.7,
-    "lines.linewidth": 1.5, "legend.frameon": False, "figure.dpi": 100, "savefig.dpi": 200,
-    "savefig.bbox": "tight", "savefig.pad_inches": 0.03, "figure.facecolor": "white",
-    "mathtext.fontset": "dejavusans",
-})
+SINGLE, WIDE = PANEL, (2 * PANEL[0], PANEL[1])
+style()
 
 
 def savefig(fig, name, colors=256):
@@ -102,8 +96,8 @@ def record(**values):
     MEASUREMENTS.write_text(json.dumps(dict(sorted(data.items())), indent=2, sort_keys=True) + "\n")
 
 
-def panel_label(ax, text, x=-0.14, y=1.04):
-    ax.text(x, y, text, transform=ax.transAxes, fontsize=10.5, fontweight="bold",
+def panel_label(ax, text, x=-0.16, y=1.02):
+    ax.text(x, y, f"({text})", transform=ax.transAxes, fontsize=22, fontweight="bold",
             va="bottom", ha="left")
 
 

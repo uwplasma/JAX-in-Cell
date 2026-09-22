@@ -1,8 +1,7 @@
 """Two-stream instability: growth and saturation, the electron phase space, and
 a scan of the growth rate against the kinetic dispersion relation."""
-import matplotlib.pyplot as plt
 import numpy as np
-from common import (C_ELECTRONS, C_FIT, C_THEORY, SINGLE, WIDE, maxwellian_populations, panel_label,
+from common import (C_ELECTRONS, C_FIT, C_THEORY, figure, maxwellian_populations, panel_label,
                     phase_space_hist, record, savefig)
 from dispersion import electrostatic_epsilon, purely_growing_roots
 
@@ -56,7 +55,7 @@ output = simulation.run(900, seed=0, store_every=2)
 t, amplitude, fit = measure(output)
 gamma_theory = theory(DRIFT)
 
-fig, axes = plt.subplots(1, 2, figsize=WIDE)
+fig, axes = figure(2)
 axes[0].semilogy(t, amplitude, color=C_ELECTRONS, label=r"$|E_{k=1}(t)|$")
 span = np.linspace(fit["t0"], fit["t1"], 2)
 axes[0].semilogy(span, np.exp(fit["intercept"] + fit["gamma"] * span), "--", color=C_FIT,
@@ -88,12 +87,12 @@ for drift in drifts:
 measured, predicted = np.array(measured), np.array(predicted)
 
 fine = np.linspace(2.0e7, 6.2e7, 22)
-fig, ax = plt.subplots(figsize=SINGLE)
+fig, ax = figure()
 ax.plot(2 * np.pi / LENGTH * fine / OMEGA_PE, [theory(d) for d in fine], "-", color=C_THEORY,
         label="kinetic theory")
 ax.plot(2 * np.pi / LENGTH * drifts / OMEGA_PE, measured, "o", color=C_ELECTRONS, label="JAX-in-Cell")
-ax.axvline(1.0, color="0.7", lw=0.8)
-ax.text(1.01, 0.05, "cold-beam cutoff", rotation=90, fontsize=7.5, color="0.4", transform=ax.get_xaxis_transform())
+ax.axvline(1.0, color="0.7", lw=2)
+ax.text(1.01, 0.05, "cold-beam cutoff", rotation=90, color="0.4", transform=ax.get_xaxis_transform())
 ax.set(xlabel=r"$k v_0/\omega_{pe}$", ylabel=r"$\gamma/\omega_{pe}$", title="growth rate of the seeded mode")
 ax.legend()
 fig.tight_layout()

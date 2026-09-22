@@ -1,8 +1,7 @@
 """Landau damping at k lambda_D = 0.5 and the Bohm-Gross dispersion relation."""
-import matplotlib.pyplot as plt
 import numpy as np
-from common import (C_ELECTRONS, C_FIT, C_THEORY, WIDE, maxima, panel_label,
-                    rate_and_frequency, record, savefig)
+from common import (C_ELECTRONS, C_FIT, C_THEORY, figure, maxima, panel_label, rate_and_frequency, record,
+                    savefig)
 from dispersion import landau_root
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron,
@@ -30,15 +29,15 @@ floor = amplitude[int(0.8 * amplitude.size):].mean()
 gamma, omega, peaks = rate_and_frequency(t, amplitude, above=5 * floor)
 root = landau_root(0.5)
 
-fig, axes = plt.subplots(1, 2, figsize=WIDE)
-axes[0].semilogy(t, amplitude, color=C_ELECTRONS, lw=1.0, label=r"$|E_{k}(t)|$")
-axes[0].semilogy(t[peaks], amplitude[peaks], "o", ms=4, color=C_FIT, label="maxima used")
+fig, axes = figure(2)
+axes[0].semilogy(t, amplitude, color=C_ELECTRONS, lw=2, label=r"$|E_{k}(t)|$")
+axes[0].semilogy(t[peaks], amplitude[peaks], "o", ms=9, color=C_FIT, label="maxima used")
 span = np.linspace(t[peaks][0], t[peaks][-1], 2)
 axes[0].semilogy(span, np.exp(np.polyval(np.polyfit(t[peaks], np.log(amplitude[peaks]), 1), span)),
                  "--", color=C_FIT, label=fr"fit: $\gamma={gamma:.4f}\,\omega_{{pe}}$")
 axes[0].semilogy(span, amplitude[peaks][0] * np.exp(root.imag * (span - span[0])), ":", color=C_THEORY,
                  label=fr"kinetic: $\gamma={root.imag:.4f}\,\omega_{{pe}}$")
-axes[0].axhline(floor, color="0.6", lw=0.8, label="noise floor")
+axes[0].axhline(floor, color="0.6", lw=2, label="noise floor")
 axes[0].set(xlabel=r"$t\,\omega_{pe}$", ylabel=r"$|E_k|$ (V/m)",
             title=r"Landau damping, $k\lambda_D=0.5$", ylim=(0.3 * floor, 3 * amplitude.max()))
 axes[0].legend(loc="lower left", ncol=2)

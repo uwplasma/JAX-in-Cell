@@ -10,7 +10,38 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import LogNorm
 
-__all__ = ["plot"]
+__all__ = ["plot", "figure", "style"]
+
+PANEL = (9.0, 7.0)                      # one panel of a figure, in inches
+
+# A heavy frame, ticks turned inward on all four sides, and type large enough to read
+# when the figure is scaled to the width of a page or a slide.
+_STYLE = {
+    "font.size": 20, "axes.titlesize": 20, "axes.labelsize": 24, "legend.fontsize": 18,
+    "xtick.labelsize": 24, "ytick.labelsize": 24, "axes.grid": False,
+    "axes.spines.top": True, "axes.spines.right": True, "axes.linewidth": 3.0,
+    "xtick.direction": "in", "ytick.direction": "in", "xtick.top": True, "ytick.right": True,
+    "xtick.major.width": 3.0, "ytick.major.width": 3.0, "xtick.major.size": 7.0, "ytick.major.size": 7.0,
+    "xtick.minor.width": 2.0, "ytick.minor.width": 2.0, "xtick.minor.size": 5.0, "ytick.minor.size": 5.0,
+    "xtick.minor.visible": True, "ytick.minor.visible": True,
+    "lines.linewidth": 3.0, "lines.markersize": 9.0, "legend.frameon": False,
+    "savefig.dpi": 110, "savefig.bbox": "tight", "savefig.pad_inches": 0.05,
+    "figure.facecolor": "white", "mathtext.fontset": "dejavusans",
+}
+
+
+def style():
+    """Apply the package's figure style to matplotlib."""
+    plt.rcParams.update(_STYLE)
+
+
+def figure(ncols=1, nrows=1, aspect=None, **kwargs):
+    """``ncols`` by ``nrows`` panels of :data:`PANEL` inches each, in :func:`style`;
+    ``aspect`` gives a flatter panel, as a fraction of the panel width."""
+    style()
+    height = PANEL[0] * aspect if aspect else PANEL[1]
+    return plt.subplots(nrows, ncols, figsize=(ncols * PANEL[0], nrows * height), **kwargs)
+
 
 _AXIS = {"x": 0, "y": 1, "z": 2}
 
@@ -60,8 +91,10 @@ def _write_movie(fig, update, animated, frames, path, fps):
         width, height = canvas.get_width_height()
         command = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
                    "-s", f"{width}x{height}", "-r", str(fps), "-i", "-", "-an", "-c:v", "libx264",
-                   "-preset", "ultrafast", "-crf", "28", "-pix_fmt", "yuv420p",
-                   "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(path)]
+                   # flat-colour plots compress far better tuned for animation; faststart puts the index
+                   # first, so a browser plays the file before it has finished downloading
+                   "-preset", "slow", "-tune", "animation", "-crf", "30", "-pix_fmt", "yuv420p",
+                   "-movflags", "+faststart", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(path)]
         with tempfile.TemporaryFile() as log:
             try:
                 ffmpeg = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=log)
@@ -254,10 +287,11 @@ def _draw_diagnostics(ax, out, times, tlabel):
     if "energy_error" in report:
         curves.insert(0, ("energy error", np.asarray(report["energy_error"], float)))
         curves.insert(1, ("momentum error", np.asarray(report["momentum_error"], float)))
-    floor = np.finfo(float).tiny
+    floor = 1e-17           # below double-precision round-off; an exact zero would drag the axis to 1e-308
     for name, values in curves:
         ax.semilogy(times, np.maximum(np.abs(values), floor), lw=1.2, label=name)
-    ax.legend(frameon=False, fontsize=7)
+    ax.set_ylim(bottom=floor / 2)
+    ax.legend(frameon=False, fontsize=9)
     ax.set(xlabel=tlabel, ylabel="relative", title="conservation and residuals")
 
 

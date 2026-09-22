@@ -3,7 +3,7 @@ wavelengths, and the growth rate against the transverse kinetic dispersion
 relation from single-mode runs."""
 import matplotlib.pyplot as plt
 import numpy as np
-from common import C_ELECTRONS, C_THEORY, WIDE, panel_label, record, savefig
+from common import C_ELECTRONS, C_THEORY, figure, panel_label, record, savefig
 from dispersion import plasma_frequency, purely_growing_roots, weibel_dispersion
 
 from jaxincell import (Domain, Simulation, Solver, Species, diagnostics, mass_electron, quiet_start,
@@ -32,7 +32,7 @@ def simulate(length, cells, steps, n=20000, seed_amplitude=0.0, seed_mode=1, sto
     many e-foldings, but it leaves no noise floor for the unseeded modes to grow
     out of, so the survey of the cutoff uses random velocities instead.
     """
-    x, v = quiet_start(n, length, vth=VTH)
+    x, v = (np.array(a) for a in quiet_start(n, length, vth=VTH))   # writable: the seed goes in below
     if sampling != "quiet":
         v = np.random.default_rng(0).standard_normal((n, 3)) * np.asarray(VTH) / np.sqrt(2)
     v[:, 2] += seed_amplitude * VTH[2] * np.sin(2 * np.pi * seed_mode * x[:, 0] / length)
@@ -69,14 +69,14 @@ modes = np.arange(1, 9)
 gain = B_k[-1, modes] / np.median(B_k[:5, modes], axis=0)
 unstable = 2 * np.pi * modes / length < K_C
 
-fig, axes = plt.subplots(1, 2, figsize=WIDE)
+fig, axes = figure(2)
 for mode in modes:
     k = 2 * np.pi * mode / length
     axes[0].semilogy(t, B_k[:, mode], color=plt.cm.viridis(0.1 + 0.8 * mode / 8),
-                     ls="-" if k < K_C else ":", lw=1.2, label=fr"$k/k_c={k / K_C:.2f}$")
+                     ls="-" if k < K_C else ":", lw=2, label=fr"$k/k_c={k / K_C:.2f}$")
 axes[0].set(xlabel=r"$t\,\omega_{pe}$", ylabel=r"$|B_{y,k}|$ (T)",
             title="unseeded: solid below the cutoff, dotted above")
-axes[0].legend(ncol=2, fontsize=7)
+axes[0].legend(ncol=2)
 panel_label(axes[0], "a")
 
 # (b) one wavelength per box, one mode seeded: the rate can be measured
@@ -98,8 +98,8 @@ axes[1].plot(fine, [theory(f * K_C) for f in fine], "-", color=C_THEORY, label="
 axes[1].plot(fractions[clean], measured[clean], "o", color=C_ELECTRONS, label="JAX-in-Cell")
 axes[1].plot(fractions[~clean], measured[~clean], "o", mfc="none", color=C_ELECTRONS,
              label=r"$R^2<0.85$, excluded")
-axes[1].axvline(1.0, color="0.7", lw=0.8)
-axes[1].text(1.02, 0.55, r"$k_c c=\omega_{pe}\sqrt{T_z/T_x-1}$", rotation=90, fontsize=7.5,
+axes[1].axvline(1.0, color="0.7", lw=2)
+axes[1].text(1.02, 0.05, r"$k_c c=\omega_{pe}\sqrt{T_z/T_x-1}$", rotation=90, va="bottom",
              color="0.4", transform=axes[1].get_xaxis_transform())
 axes[1].set(xlabel=r"$k/k_c$", ylabel=r"$\gamma/\omega_{pe}$", title="seeded single-mode runs")
 axes[1].legend()

@@ -56,7 +56,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, mass_electron,
+from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, figure, mass_electron,
                        potential, provenance, quiet_start, elementary_charge as e_charge)
 
 T_e, density, mass_ratio, particles, cells = 1.0, 1e16, 400.0, 30000, 120
@@ -145,7 +145,7 @@ print(f"\nthe same box with a reservoir instead of a thermal wall: ions left "
 print("The sheath drops above are therefore measured on a plasma that is going away, which is what\n"
       "a thermal wall between a collector and nothing does. That is the reason Source exists.")
 
-fig, axes = plt.subplots(1, 4, figsize=(16, 3.6))
+fig, axes = figure(4)
 for name, r in results.items():
     line, = axes[0].plot(distance, r["profile"], label=name)
     axes[0].plot(r["edge"], r["sheath"], "o", color=line.get_color())
@@ -155,7 +155,7 @@ axes[0].legend(frameon=False)
 
 axes[1].plot(centres, results["absorbing"]["flow"], label=r"ion flow $v_i/c_s$")
 axes[1].plot(distance, 10 * results["absorbing"]["rho"], label=r"$10\,\rho/en_0$")
-axes[1].axhline(1.0, ls="--", color="k", lw=0.8)
+axes[1].axhline(1.0, ls="--", color="k", lw=2)
 axes[1].set(xlabel=r"distance from the wall ($\lambda_D$)", xlim=(0, 30),
             title="the charge builds where the ions reach $c_s$")
 axes[1].legend(frameon=False)
@@ -191,6 +191,6 @@ summary["maintained_drained"] = float(maintained_content[-1] / maintained_conten
 np.savez(folder / "profiles.npz", distance=distance, centres=centres,
          **{f"{k}_{name.replace(' ', '_')}": np.asarray(r[k])
             for name, r in results.items() for k in ("profile", "flow", "rho", "content")})
-fig.savefig(folder / "figure.png", dpi=150)
+fig.savefig(folder / "figure.png")
 print(f"wrote {folder}/run.json, profiles.npz and figure.png")
 plt.show()

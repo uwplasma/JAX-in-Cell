@@ -57,7 +57,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import (Domain, Simulation, Solver, Source, Species, epsilon_0, mass_electron, potential,
+from jaxincell import (Domain, Simulation, Solver, Source, Species, epsilon_0, figure, mass_electron, potential,
                        provenance,
                        elementary_charge as e_charge)
 from jaxincell.sheath import floating_potential, source_density
@@ -391,11 +391,13 @@ print("  so the control is recovered as %.4f +- %.4f (standard error over %d rea
 print("  which is %.1f standard errors out" % (abs(held_out_best - r_reference) / max(scatter, 1e-12)))
 
 # --- the figure -----------------------------------------------------------------------------------
-fig, axes = plt.subplots(1, 3, figsize=(12.5, 3.7))
+fig, axes = figure(3)
 r_history, losses, slopes = np.array(history).T
 axes[0].semilogy(losses, "o-")
 axes[0].set(xlabel="iteration", ylabel="training loss", title="bounded gradient descent")
 twin = axes[0].twinx()
+axes[0].tick_params(which="both", right=False)       # each vertical axis keeps its own side
+twin.tick_params(which="both", left=False)
 twin.plot(r_history, "s--", color="C1")
 twin.axhline(r_reference, ls=":", color="k")
 twin.set_ylabel("r", color="C1")
@@ -439,6 +441,6 @@ summary = dict(self_test_recovered=r_final, self_test_outcome=outcome,
                                                        results=summary), indent=1))
 np.savez(folder / "curves.npz", fine=fine, held_out_curve=held_out_curve, per_seed_curves=curves,
          history=np.array(history), independent_history=np.array(independent_history))
-fig.savefig(folder / "figure.png", dpi=150)
+fig.savefig(folder / "figure.png")
 print(f"\nwrote {folder}/run.json, curves.npz and figure.png")
 plt.show()

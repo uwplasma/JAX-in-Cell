@@ -3,10 +3,8 @@ import platform
 import time
 
 import jax
-import matplotlib.pyplot as plt
 import numpy as np
-from common import C_ELECTRONS, C_IONS, WIDE, panel_label, record, savefig
-
+from common import C_ELECTRONS, C_IONS, figure, panel_label, record, savefig
 from jaxincell import Domain, Simulation, Solver, Species, speed_of_light as c
 
 STEPS = 200
@@ -41,7 +39,7 @@ per_grid = np.array([timed(20000, g)[1] for g in grids])
 for n, value in zip(counts, per_particle):
     print(f"  {2 * n:7d} particles: {1e9 * value:6.1f} ns per particle per step")
 
-fig, axes = plt.subplots(1, 2, figsize=WIDE)
+fig, axes = figure(2)
 axes[0].loglog(2 * counts, 1e9 * per_particle, "o-", color=C_ELECTRONS, label="explicit")
 axes[0].loglog(2 * counts, 1e9 * implicit, "s-", color=C_IONS, label="implicit, 8 Picard, unfiltered")
 axes[0].set(xlabel="pseudo-particles", ylabel="ns per particle per step",

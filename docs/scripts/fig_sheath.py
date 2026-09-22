@@ -1,8 +1,7 @@
 """The edge of a plasma against a floating wall, with and without electron reflection."""
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import numpy as np
-from common import COLORS, C_THEORY, panel_label, record, savefig
+from common import COLORS, C_THEORY, figure, panel_label, record, savefig
 
 from jaxincell import (Domain, Simulation, Solver, Species, bohm_edge, epsilon_0, mass_electron,
                        potential, quiet_start, elementary_charge as e_charge, speed_of_light as c)
@@ -57,10 +56,10 @@ for name, (reflection, R_eff, color) in WALLS.items():
     print(f"  {name:22s} edge {edge:4.1f} lambda_D ({count} crossing), R_eff {measured_R:.3f}, "
           f"sheath drop {results[name]['sheath']:.2f} (Hobbs-Wesson {results[name]['expected']:.2f})")
 
-fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.4))
+fig, axes = figure(3)
 for name, r in results.items():
     axes[0].plot(distance, r["profile"], color=r["color"], label=name)
-    axes[0].plot(r["edge"], r["sheath"], "o", color=r["color"], ms=4)
+    axes[0].plot(r["edge"], r["sheath"], "o", color=r["color"], ms=9)
 axes[0].set(xlabel=r"distance from the wall ($\lambda_D$)", ylabel=r"$(\phi-\phi_{wall})/T_e$", xlim=(0, 30),
             title="the sheath, and where ions reach $c_s$")
 axes[0].legend(loc="lower right")
@@ -69,7 +68,7 @@ panel_label(axes[0], "a")
 r = results["absorbing"]
 axes[1].plot(centres, r["flow"], color=COLORS["orange"], label=r"ion flow $v_i/c_s$")
 axes[1].plot(distance, 10 * r["rho"], color=COLORS["blue"], label=r"$10\,\rho/en_0$")
-axes[1].axhline(1.0, ls="--", color=C_THEORY, lw=0.8)
+axes[1].axhline(1.0, ls="--", color=C_THEORY, lw=2)
 axes[1].set(xlabel=r"distance from the wall ($\lambda_D$)", xlim=(0, 30),
             title="the charge builds where ions reach $c_s$")
 axes[1].legend(loc="upper right")

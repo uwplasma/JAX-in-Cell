@@ -1,8 +1,7 @@
 """Bump-on-tail instability: the growth of the resonant mode against kinetic
 theory, and the quasilinear plateau it leaves behind."""
-import matplotlib.pyplot as plt
 import numpy as np
-from common import C_ELECTRONS, C_FIT, C_IONS, C_THEORY, WIDE, panel_label, record, savefig
+from common import C_ELECTRONS, C_FIT, C_IONS, C_THEORY, figure, panel_label, record, savefig
 from dispersion import electrostatic_epsilon, newton, plasma_frequency
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron,
@@ -54,7 +53,7 @@ window = ((amplitude > 1.2 * amplitude[:20].max()) & (amplitude < 0.3 * amplitud
 slope, intercept = np.polyfit(t[window], np.log(amplitude[window]), 1)
 omega_theory, gamma_theory = theory(MODE)
 
-fig, axes = plt.subplots(1, 2, figsize=WIDE)
+fig, axes = figure(2)
 axes[0].semilogy(t, amplitude, color=C_ELECTRONS, label=fr"$|E_{{k={MODE}}}(t)|$")
 span = np.linspace(t[window][0], t[window][-1], 2)
 axes[0].semilogy(span, np.exp(intercept + slope * span), "--", color=C_FIT,
@@ -72,7 +71,7 @@ for step, style, label in ((0, "--", "initial"), (-1, "-", "final")):
     counts, _ = np.histogram(np.asarray(output.v[step, electrons, 0]), edges, density=True)
     axes[1].semilogy(centres / V_TH, counts, style, color=C_ELECTRONS if step else C_IONS, label=label)
 phase_velocity = omega_theory * OMEGA_PE / (2 * np.pi * MODE / LENGTH) / V_TH
-axes[1].axvline(phase_velocity, color="0.5", lw=1.0, ls="-.",
+axes[1].axvline(phase_velocity, color="0.5", lw=2, ls="-.",
                 label=fr"$v_\varphi$ of mode {MODE}")
 axes[1].set(xlabel=r"$v_x/v_{th}$", ylabel=r"$f(v_x)$", title="the bump flattens into a plateau",
             ylim=(1e-9, None))

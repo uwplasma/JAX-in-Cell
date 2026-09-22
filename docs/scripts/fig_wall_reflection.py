@@ -1,8 +1,7 @@
 """What a partly reflecting wall sends back: the flux average of its reflection law."""
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import numpy as np
-from common import C_ELECTRONS, C_IONS, C_THEORY, panel_label, record, savefig
+from common import C_ELECTRONS, C_IONS, C_THEORY, figure, panel_label, record, savefig
 
 from jaxincell import Domain, Simulation, Solver, Species, quiet_start
 
@@ -28,7 +27,7 @@ for u in WIDTHS * SIGMA:
 returned, energy, flux = np.array(returned), np.array(energy), WIDTHS ** 2 / (WIDTHS ** 2 + 1)
 print(f"  returned {returned.round(4)} against the flux average {flux.round(4)}")
 
-fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.2))
+fig, axes = figure(3)
 fine = np.linspace(0.1, 4.5, 200)
 axes[0].plot(fine, fine ** 2 / (fine ** 2 + 1), color=C_THEORY, label=r"flux average $u^2/(u^2+\sigma^2)$")
 axes[0].plot(fine, fine / np.sqrt(fine ** 2 + 1), ":", color=C_THEORY, label="distribution average")

@@ -19,16 +19,17 @@ __all__ = ["Simulation", "Output", "Domain", "Species", "Solver", "Source", "Col
            "diagnostics", "energies", "gauss_residual", "charge_balance", "moment_profiles",
            "potential", "temperatures",
            "bohm_edge",
-           "dominant_frequency", "plot",
+           "dominant_frequency", "plot", "figure", "style",
            "epsilon_0", "mu_0", "speed_of_light", "elementary_charge", "mass_electron",
            "mass_proton", "boltzmann_constant"]
 
 
 def __getattr__(name):
-    """``plot`` imports matplotlib on first use, which would otherwise be a third of the import time."""
-    if name == "plot":
-        from ._plot import plot
-        return plot
+    """``plot``, ``figure`` and ``style`` import matplotlib on first use, which would otherwise be a
+    third of the import time."""
+    if name in ("plot", "figure", "style"):
+        from . import _plot
+        return getattr(_plot, name)
     raise AttributeError(f"module 'jaxincell' has no attribute {name!r}")
 
 

@@ -4,9 +4,8 @@ import time
 
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import numpy as np
-from common import C_ELECTRONS, C_THEORY, WIDE, maxwellian_populations, panel_label, record, savefig
+from common import C_ELECTRONS, C_THEORY, figure, maxwellian_populations, panel_label, record, savefig
 from dispersion import electrostatic_epsilon, purely_growing_roots
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron,
@@ -63,12 +62,12 @@ print(f"  reverse mode {gradient:.6e} per (m/s); best central difference "
       f"{differences[np.argmin(relative)]:.6e} at h = {steps[np.argmin(relative)]:.0e} "
       f"(relative error {relative.min():.1e})")
 
-fig, axes = plt.subplots(1, 2, figsize=WIDE)
+fig, axes = figure(2)
 axes[0].loglog(steps, relative, "o-", color=C_ELECTRONS)
 axes[0].set(xlabel=r"central-difference step $h$ (m/s)", ylabel=r"$|\,\mathrm{FD}/\nabla_\mathrm{AD}-1|$",
             title="one gradient, checked against differences")
-axes[0].text(0.04, 0.9, "round-off\ndominates", transform=axes[0].transAxes, fontsize=7.5, color="0.4")
-axes[0].text(0.72, 0.9, "truncation\ndominates", transform=axes[0].transAxes, fontsize=7.5, color="0.4")
+axes[0].text(0.04, 0.9, "round-off\ndominates", transform=axes[0].transAxes, color="0.4")
+axes[0].text(0.72, 0.9, "truncation\ndominates", transform=axes[0].transAxes, color="0.4")
 panel_label(axes[0], "a")
 
 drift, history = 2.5e7, []
@@ -80,7 +79,7 @@ drifts, objectives = np.array(history).T
 
 scan = np.linspace(2.4e7, 6.0e7, 19)
 axes[1].plot(K * scan / OMEGA_PE, [float(evaluate(d)) for d in scan], "-", color="0.6", label="scan")
-axes[1].plot(K * drifts / OMEGA_PE, objectives, "o-", ms=4, color=C_ELECTRONS, label="gradient ascent")
+axes[1].plot(K * drifts / OMEGA_PE, objectives, "o-", ms=9, color=C_ELECTRONS, label="gradient ascent")
 
 
 def kinetic_rate(drift):

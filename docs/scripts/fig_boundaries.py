@@ -1,8 +1,6 @@
 """What the three wall types do to a drifting plasma."""
-import matplotlib.pyplot as plt
 import numpy as np
-from common import C_ELECTRONS, record, savefig
-
+from common import C_ELECTRONS, figure, record, savefig
 from jaxincell import Domain, Simulation, Solver, Species, diagnostics, speed_of_light as c
 
 LENGTH, STEPS = 1e-2, 400
@@ -19,7 +17,7 @@ def run(kind):
 kinds = ("periodic", "reflective", "absorbing")
 outputs = {kind: run(kind) for kind in kinds}
 
-fig, axes = plt.subplots(1, 3, figsize=(9.6, 3.2), sharey=True)
+fig, axes = figure(3, sharey=True)
 for ax, kind in zip(axes, kinds):
     out = outputs[kind]
     x, v = out.particles("electrons")
@@ -29,10 +27,10 @@ for ax, kind in zip(axes, kinds):
     ax.set(xlabel="$x/L$", title=kind, xlim=(-0.55, 0.55))
     ax.grid(False)
     kept = 100 * alive.mean()
-    ax.text(0.03, 0.94, f"{kept:.0f}% of the electrons remain", transform=ax.transAxes, fontsize=8,
+    ax.text(0.03, 0.94, f"{kept:.0f}% of the electrons remain", transform=ax.transAxes,
             va="top")
 axes[0].set_ylabel(r"$v_x$ (m/s)")
-fig.suptitle(r"electron phase space after 400 steps of a plasma drifting to the right", fontsize=10)
+fig.suptitle(r"electron phase space after 400 steps of a plasma drifting to the right")
 fig.tight_layout()
 savefig(fig, "boundaries")
 

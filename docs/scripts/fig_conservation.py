@@ -1,10 +1,8 @@
 """Conservation of energy, momentum and charge by the two schemes, in the setup of
 examples/conservation.py: the energy error as the Picard iteration converges, the momentum,
 and the discrete Gauss law in a periodic box, between absorbing walls and at every wall."""
-import matplotlib.pyplot as plt
 import numpy as np
-from common import C_EXPLICIT, C_IMPLICIT, panel_label, record, savefig
-
+from common import C_EXPLICIT, C_IMPLICIT, figure, panel_label, record, savefig
 from jaxincell import Domain, Simulation, Solver, Species, diagnostics, speed_of_light as c
 
 STEPS, COURANT = 400, 4.5
@@ -30,7 +28,7 @@ implicit = {n: run(algorithm="implicit", picard_iterations=n)[2] for n in (1, 2,
 walled = {scheme: run("absorbing", algorithm=scheme)[2] for scheme in ("explicit", "implicit")}
 t = np.asarray(explicit.t) * float(simulation.plasma_frequency())
 
-fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.4))
+fig, axes = figure(3)
 axes[0].semilogy(t, np.asarray(d_explicit["energy_error"]) + 1e-17, color=C_EXPLICIT, label="explicit (Boris leapfrog)")
 for n, d in implicit.items():
     axes[0].semilogy(t, np.asarray(d["energy_error"]) + 1e-17, color=C_IMPLICIT, alpha=0.3 + 0.7 * np.log2(n) / 3,
@@ -46,7 +44,7 @@ axes[1].set(ylabel=r"$|P(t)-P(0)|\,/\,\sum_p |p_p(0)|$", title="momentum")
 axes[2].set(ylabel=r"$\max_i|\nabla\!\cdot\!E-\rho/\epsilon_0|\,/\,(en/\epsilon_0)$", title="charge (Gauss law)")
 for ax, label in zip(axes, "abc"):
     ax.set_xlabel(r"$t\,\omega_{pe}$")
-    ax.legend(fontsize=7)
+    ax.legend(fontsize=14)
     panel_label(ax, label)
 fig.tight_layout()
 savefig(fig, "conservation")

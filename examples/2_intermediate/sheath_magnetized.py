@@ -57,7 +57,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, epsilon_0, mass_electron,
+from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, epsilon_0, figure, mass_electron,
                        potential, provenance, elementary_charge as e_charge)
 
 # --- what to change ---------------------------------------------------------------------
@@ -221,7 +221,7 @@ print(f"  Field-free wall potential {float(free_phi[-1]):+.3f} T_e/e, normal-inc
 
 # --- the figure -------------------------------------------------------------------------------
 distance = (length / 2 - (np.asarray(np.arange(cells)) + 0.5) * length / cells + length / 2) / debye
-fig, axes = plt.subplots(1, 3, figsize=(12.5, 3.7))
+fig, axes = figure(3)
 for angle in angles:
     r = results[angle]
     axes[0].plot(distance, r["phi"], label=rf"$\alpha = {angle:.0f}^\circ$")
@@ -229,7 +229,7 @@ for angle in angles:
 axes[0].set(xlabel=r"distance from the collector ($\lambda_D$)", ylabel=r"$e\phi/T_e$",
             title="the potential, at three field angles", xlim=(distance.max(), 0))
 axes[0].legend(frameon=False)
-axes[1].axhline(1.0, ls="--", color="k", lw=0.8)
+axes[1].axhline(1.0, ls="--", color="k", lw=2)
 axes[1].set(xlabel=r"distance from the collector ($\lambda_D$)", ylabel=r"$v_{i,x}/c_s$",
             title=r"the normal ion flow, and $c_s$", xlim=(distance.max(), 0))
 axes[1].legend(frameon=False)
@@ -268,6 +268,6 @@ summary["field_free_control"] = dict(largest_difference=gap, seed_scatter=scatte
 np.savez(folder / "profiles.npz", distance=distance,
          **{f"{name}_{angle:.0f}": results[angle][name]
             for angle in angles for name in ("phi", "n_e", "n_i", "flow", "energy", "incidence")})
-fig.savefig(folder / "figure.png", dpi=150)
+fig.savefig(folder / "figure.png")
 print(f"\nwrote {folder}/run.json, profiles.npz and figure.png")
 plt.show()

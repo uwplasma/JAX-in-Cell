@@ -45,7 +45,7 @@ os.environ.setdefault("JAX_ENABLE_X64", "1")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, mass_electron,
+from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, figure, mass_electron,
                        potential, provenance, elementary_charge as e_charge)
 from jaxincell.sheath import densities, floating_potential, source_density
 
@@ -171,9 +171,9 @@ print(f"  the relation predicts a Boltzmann rise of {100 * (np.exp(mean_phi[hump
 
 # --- the figure ----------------------------------------------------------------------------
 distance = (length / 2 - faces) / debye
-fig, axes = plt.subplots(1, 3, figsize=(12.5, 3.7))
+fig, axes = figure(3)
 axes[0].plot(distance, phi[late:].mean(axis=0), label="measured")
-axes[0].axhline(phi_wall, ls="--", color="k", lw=0.9, label="kinetic reference")
+axes[0].axhline(phi_wall, ls="--", color="k", lw=2, label="kinetic reference")
 axes[0].plot(0.0, measured.mean(), "o", color="C0")
 axes[0].set(xlabel=r"distance from the collector ($\lambda_D$)", ylabel=r"$e\phi/T_e$",
             title="the sheath potential", xlim=(distance.max(), 0))
@@ -182,15 +182,15 @@ axes[0].legend(frameon=False)
 centres = (length / 2 - np.asarray(domain.grid)) / debye
 axes[1].plot(centres, n_e, label=r"$n_e$")
 axes[1].plot(centres, n_i, label=r"$n_i$")
-axes[1].plot(centres, reference_e, "k--", lw=0.9, label=r"$n(\phi)$, kinetic")
-axes[1].plot(centres, reference_i, "k--", lw=0.9)
+axes[1].plot(centres, reference_e, "k--", lw=2, label=r"$n(\phi)$, kinetic")
+axes[1].plot(centres, reference_i, "k--", lw=2)
 axes[1].set(xlabel=r"distance from the collector ($\lambda_D$)", ylabel=r"$n/n_0$", ylim=(0, 1.3),
             title="the electrons are pushed out, the beam is not", xlim=(centres.max(), 0))
 axes[1].legend(frameon=False)
 
 time = np.asarray(out.t) * omega_pe
 axes[2].plot(time, phi[:, -1])
-axes[2].axhline(phi_wall, ls="--", color="k", lw=0.9)
+axes[2].axhline(phi_wall, ls="--", color="k", lw=2)
 axes[2].axvspan(time[late], time[-1], color="0.9", zorder=0)
 axes[2].set(xlabel=r"$\omega_{pe} t$", ylabel=r"$e\phi_{\rm wall}/T_e$",
             title="the collector charges and then floats")
@@ -216,6 +216,6 @@ summary = dict(wall_potential=float(measured.mean()),
                                                        results=summary), indent=1))
 np.savez(folder / "profiles.npz", faces=faces, centres_phi=mean_phi, n_e=n_e, n_i=n_i,
          reference_e=reference_e, reference_i=reference_i, flow=flow)
-fig.savefig(folder / "figure.png", dpi=150)
+fig.savefig(folder / "figure.png")
 print(f"\nwrote {folder}/run.json, profiles.npz and figure.png")
 plt.show()

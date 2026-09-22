@@ -1,8 +1,7 @@
 """Coulomb collisions against the Fokker-Planck relaxation rates."""
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import numpy as np
-from common import C_ELECTRONS, C_IONS, C_THEORY, WIDE, panel_label, record, savefig
+from common import C_ELECTRONS, C_IONS, C_THEORY, figure, panel_label, record, savefig
 from jax import random
 
 from jaxincell import epsilon_0, mass_electron, elementary_charge as e_charge
@@ -32,7 +31,7 @@ def beam(mass_ratio, steps=40):
     return (np.array(column) for column in zip(*history))
 
 
-fig, axes = plt.subplots(1, 2, figsize=WIDE)
+fig, axes = figure(2)
 rates = {}
 for mass_ratio, colour, label in ((1.0, C_ELECTRONS, r"$m_b = m_a$"), (100.0, C_IONS, r"$m_b = 100\,m_a$")):
     t, v_parallel, v_perp2 = beam(mass_ratio)
@@ -41,11 +40,11 @@ for mass_ratio, colour, label in ((1.0, C_ELECTRONS, r"$m_b = m_a$"), (100.0, C_
     rates[mass_ratio] = (nu_slow / ((1 + 1 / mass_ratio) * NU_0), nu_perp / (2 * NU_0))
     print(f"  m_b/m_a {mass_ratio:5.0f}: nu_slow/theory {rates[mass_ratio][0]:.3f}, "
           f"nu_perp/theory {rates[mass_ratio][1]:.3f}")
-    axes[0].plot(t * NU_0, v_parallel / V_BEAM, "o", ms=3, color=colour, label=label)
-    axes[0].plot(t * NU_0, np.exp(-(1 + 1 / mass_ratio) * NU_0 * t), "-", color=C_THEORY, lw=1.0)
-    axes[1].plot(t * NU_0, v_perp2 / V_BEAM ** 2, "o", ms=3, color=colour, label=label)
-axes[1].plot(t * NU_0, 2 * NU_0 * t, "-", color=C_THEORY, lw=1.0, label=r"$\nu_\perp t$")
-axes[0].plot([], [], "-", color=C_THEORY, lw=1.0, label=r"$e^{-\nu_s t}$")
+    axes[0].plot(t * NU_0, v_parallel / V_BEAM, "o", ms=9, color=colour, label=label)
+    axes[0].plot(t * NU_0, np.exp(-(1 + 1 / mass_ratio) * NU_0 * t), "-", color=C_THEORY, lw=2)
+    axes[1].plot(t * NU_0, v_perp2 / V_BEAM ** 2, "o", ms=9, color=colour, label=label)
+axes[1].plot(t * NU_0, 2 * NU_0 * t, "-", color=C_THEORY, lw=2, label=r"$\nu_\perp t$")
+axes[0].plot([], [], "-", color=C_THEORY, lw=2, label=r"$e^{-\nu_s t}$")
 axes[0].set(xlabel=r"$t\,\nu_0$", ylabel=r"$\langle v_x\rangle/v_{beam}$", title="slowing down")
 axes[0].legend()
 panel_label(axes[0], "a")
