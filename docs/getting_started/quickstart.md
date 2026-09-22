@@ -1,5 +1,8 @@
 # Getting started
 
+Install, then three short runs: a Langmuir wave, the two-stream instability, and a
+gradient through the whole solver.
+
 ```{toctree}
 :hidden:
 
@@ -13,36 +16,35 @@ pip install jaxincell                     # or, from source:
 git clone https://github.com/uwplasma/JAX-in-Cell && cd JAX-in-Cell && pip install -e .
 ```
 
-Python 3.10 or newer is required (CI tests 3.10 to 3.13 on Linux). The dependencies
-are `jax`, `matplotlib`, and `tomli` on Python 3.10, which has no `tomllib`. The
-version is derived by `setuptools_scm` from the git tags, so a source install reports
-the last release plus the number of commits since.
+| | |
+|---|---|
+| Python | 3.10 or newer; CI tests 3.10 to 3.13 on Linux |
+| dependencies | `jax`, `matplotlib`, and `tomli` on Python 3.10, which has no `tomllib` |
+| version | derived by `setuptools_scm` from the git tags, so a source install reports the last release plus the commits since |
 
-`pip` installs the CPU build of JAX. For a GPU, install the JAX wheel that matches your
-CUDA or ROCm stack first, following the
-[JAX installation instructions](https://docs.jax.dev/en/latest/installation.html), for
-example `pip install -U "jax[cuda12]"`. Nothing in the package is device specific;
-`jax.devices()` shows where it runs.
+| extra | what it adds |
+|---|---|
+| `openpmd` | `openpmd-api`, to write openPMD |
+| `docs` | Sphinx, and scipy for the figure scripts |
+| `dev` | `pytest`, `pytest-cov`, `flake8` and `openpmd-api` ({doc}`../development`) |
 
-Importing the package enables 64-bit floating point in JAX unless the environment
-variable `JAX_ENABLE_X64` is already set, which is how a run chooses single precision;
-the setting applies to the whole Python process.
-
-The extras are `openpmd` (`openpmd-api`, to write openPMD), `docs` (Sphinx, and scipy
-for the figure scripts) and `dev` (`pytest`, `pytest-cov`, `flake8` and `openpmd-api`,
-see {doc}`../development`). Saving an animation to MP4 with
-{func}`jaxincell.plot` needs `ffmpeg` on the `PATH`. To check the install:
+* **GPU**: `pip` installs the CPU build of JAX. Install the JAX wheel matching your CUDA
+  or ROCm stack first, following the
+  [JAX installation instructions](https://docs.jax.dev/en/latest/installation.html) — for
+  example `pip install -U "jax[cuda12]"`. Nothing in the package is device specific.
+* **Precision**: importing the package enables 64-bit floating point in JAX unless
+  `JAX_ENABLE_X64` is already set, which is how a run chooses single precision. The
+  setting applies to the whole Python process.
+* **Movies**: saving an animation to MP4 with {func}`jaxincell.plot` needs `ffmpeg` on the
+  `PATH`.
 
 ```bash
 python -c "import jaxincell, jax; print(jaxincell.__file__, jax.devices())"
 ```
 
-Five minutes, three runs.
-
 ## A Langmuir wave
 
-The simplest plasma experiment: displace the electrons a little and watch them
-oscillate at the plasma frequency.
+Displace the electrons a little and watch them oscillate at the plasma frequency.
 
 ```python
 import numpy as np
@@ -66,13 +68,15 @@ d = diagnostics(output)
 print(f"omega measured / omega_pe = {float(d['dominant_frequency']) / omega_pe:.3f}")
 ```
 
-It should print a number within a couple of per cent of one (0.997 on our machine). The
-run covers about sixty plasma periods, so the Fourier transform behind
-`dominant_frequency` resolves the frequency to 1.7 per cent; a run of only a few periods
-cannot tell $\omega_{pe}$ apart from its neighbouring frequency bins. At this temperature
-the thermal correction $\omega^2 = \omega_{pe}^2(1 + 3k^2\lambda_D^2)$ is negligible,
-$k\lambda_D \approx 3\times10^{-4}$; the `langmuir_wave.py` example measures the
-dispersion relation where it is not.
+It should print a number within a couple of per cent of one (0.997 on our machine).
+
+* The run covers about sixty plasma periods, so the Fourier transform behind
+  `dominant_frequency` resolves the frequency to 1.7 per cent. A run of only a few periods
+  cannot tell $\omega_{pe}$ apart from its neighbouring frequency bins.
+* At this temperature the thermal correction
+  $\omega^2 = \omega_{pe}^2(1 + 3k^2\lambda_D^2)$ is negligible,
+  $k\lambda_D \approx 3\times10^{-4}$. {doc}`../examples/langmuir_wave` measures the
+  dispersion relation where it is not.
 
 ## The two-stream instability
 
@@ -96,15 +100,17 @@ print(f"energy drift {abs(float(energy['total'][-1] / energy['total'][0]) - 1):.
 plot(output, omega=float(simulation.plasma_frequency()))
 ```
 
-`plus_minus=True` turns one drifting population into two counter-streaming beams of
-half the density each. `dt_over_dx_c=4.5` is above the light-wave Courant limit, which
-is safe here because nothing excites the transverse fields — see
-{doc}`../numerics/stability`.
+* `plus_minus=True` turns one drifting population into two counter-streaming beams of half
+  the density each.
+* `dt_over_dx_c=4.5` is above the light-wave Courant limit, which is safe here because
+  nothing excites the transverse fields — see {doc}`../numerics/stability`.
+
+{doc}`first_simulation` takes this run apart parameter by parameter.
 
 ## A gradient
 
-The point of building this on JAX. Differentiate a diagnostic with respect to a
-physical parameter, through the whole time loop:
+Differentiate a diagnostic with respect to a physical parameter, through the whole time
+loop:
 
 ```python
 import jax, jax.numpy as jnp
@@ -126,13 +132,13 @@ solve, the Boris rotation and the boundary conditions.
 jaxincell examples/input.toml
 ```
 
-run from a clone of the repository, runs the same two-stream case from a TOML
-description, prints the energy drift and the Gauss-law residual, and shows the
-animation. Without a file, `jaxincell` prints its usage.
+Run from a clone of the repository, this runs the same two-stream case from a TOML
+description, prints the energy drift and the Gauss-law residual, and shows the animation.
+Without a file, `jaxincell` prints its usage.
 
 ## Next
 
-* {doc}`first_simulation` walks through one run in detail, parameter by parameter.
-* {doc}`../user_guide/index` documents every argument.
-* {doc}`../numerics/index` explains what the code computes and why.
-* {doc}`../examples/index` has runnable scripts for each of the standard problems.
+* {doc}`first_simulation` — one run in detail, parameter by parameter.
+* {doc}`../user_guide/index` — every argument.
+* {doc}`../numerics/index` — what the code computes, and why.
+* {doc}`../examples/index` — runnable scripts for each of the standard problems.

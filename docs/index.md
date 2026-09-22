@@ -76,41 +76,41 @@ is produced.
 
 ## What the code does
 
-JAX-in-Cell advances charged pseudo-particles in one spatial dimension and three
-velocity components under the Lorentz force, and advances the electric and magnetic
-fields on a staggered grid with Maxwell's equations. Charge and current are deposited
-with a quadratic spline, the current deposit satisfies the discrete continuity
-equation, and an optional compensated binomial filter removes short-wavelength noise. Binary
-Coulomb collisions are available through the Takizuka-Abe operator.
+JAX-in-Cell advances charged pseudo-particles in one spatial dimension and three velocity
+components under the Lorentz force, and advances the electric and magnetic fields on a
+staggered grid with Maxwell's equations.
 
-Two time integrators are available: an explicit leapfrog scheme with the Boris pusher
-(non-relativistic or relativistic) and an implicit Crank-Nicolson scheme solved by Picard
-iteration, which conserves energy to round-off and has no light-wave time-step limit.
-Boundaries can be periodic, reflective, absorbing or thermal, chosen separately for
-particles and fields, and an absorbing wall can return part of each particle by a law in
-its impact speed. Any number of electron and ion populations can be defined, each with its own
-density, drift, temperature anisotropy and seed.
+| | |
+|---|---|
+| deposition | quadratic spline; the current deposit satisfies the discrete continuity equation |
+| filtering | optional compensated binomial filter, to remove short-wavelength noise |
+| collisions | binary Coulomb, through the Takizuka-Abe operator |
+| integrators | explicit leapfrog with the Boris pusher (non-relativistic or relativistic), and implicit Crank-Nicolson solved by Picard iteration |
+| boundaries | periodic, reflective, absorbing or thermal, chosen separately for particles and fields |
+| species | any number of electron and ion populations, each with its own density, drift, temperature anisotropy and seed |
 
-Because the entire simulation is a pure JAX function, it can be differentiated with
-`jax.grad` with respect to physical inputs such as drift speeds, temperatures,
-perturbation amplitudes, external field profiles or the full initial phase space. The
-{doc}`user_guide/differentiation` page shows how, and
-{doc}`examples/optimize_two_stream` solves an inverse problem whose answer is known from
-linear theory.
+* The implicit scheme conserves energy to round-off and has no light-wave time-step limit.
+* An absorbing wall can return part of each particle by a law in its impact speed.
+* Because the entire simulation is a pure JAX function, `jax.grad` differentiates it with
+  respect to drift speeds, temperatures, perturbation amplitudes, external field profiles
+  or the full initial phase space. See {doc}`user_guide/differentiation`, and
+  {doc}`examples/optimize_two_stream` for an inverse problem whose answer is known from
+  linear theory.
 
-Every rate and frequency quoted in this documentation is measured against a
-closed-form or linear kinetic result, not against another simulation. At
-$k\lambda_D = 0.5$ the Landau damping rate is within
-{{ landau_gamma_deviation_percent }} per cent of the kinetic root and the frequency
-within {{ landau_omega_deviation_percent }} per cent. The two-stream growth rate is
-within {{ two_stream_scan_mean_deviation_percent }} per cent on average and
-{{ two_stream_scan_max_deviation_percent }} per cent at worst across the unstable range.
-The Weibel rate is within {{ weibel_mean_deviation_percent }} per cent on average and
-{{ weibel_max_deviation_percent }} per cent at worst over the
-{{ weibel_modes_compared }} of {{ weibel_modes_run }} seeded runs that grow cleanly.
-The worst of the four collisional relaxation rates is within
-{{ collisions_max_deviation_percent }} per cent of Fokker-Planck theory.
-{doc}`numerics/verification` collects them.
+## What it is checked against
+
+Every rate and frequency quoted in this documentation is measured against a closed-form or
+linear kinetic result, not against another simulation.
+
+| case | reference | agreement |
+|---|---|---|
+| Landau damping rate at $k\lambda_D = 0.5$ | kinetic root | {{ landau_gamma_deviation_percent }} % |
+| Landau frequency at $k\lambda_D = 0.5$ | kinetic root | {{ landau_omega_deviation_percent }} % |
+| two-stream growth rate, across the unstable range | kinetic root | {{ two_stream_scan_mean_deviation_percent }} % mean, {{ two_stream_scan_max_deviation_percent }} % worst |
+| Weibel growth rate, {{ weibel_modes_compared }} of {{ weibel_modes_run }} seeded runs that grow cleanly | transverse kinetic root | {{ weibel_mean_deviation_percent }} % mean, {{ weibel_max_deviation_percent }} % worst |
+| the four collisional relaxation rates | Fokker-Planck | {{ collisions_max_deviation_percent }} % at worst |
+
+{doc}`numerics/verification` collects them; {doc}`examples/index` runs them.
 
 ## Quick look
 

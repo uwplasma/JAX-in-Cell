@@ -32,14 +32,15 @@ coil profile against a confinement diagnostic needs nothing beyond `jax.grad`.
 
 ## $B_x$ is the interesting one
 
-In one dimension $\nabla\times\mathbf B$ has no $x$ component, so $B_x$ cannot evolve:
-it is exactly the field the code cannot generate itself and therefore the one worth
-imposing. A uniform $B_x$ magnetises the plasma, gives the particles a gyration in the
-$y$-$z$ plane at $\Omega_c = qB_x/m$, and opens up the magnetised wave physics —
-upper-hybrid oscillations, Bernstein modes, cyclotron damping.
+In one dimension $\nabla\times\mathbf B$ has no $x$ component, so $B_x$ cannot evolve: it
+is exactly the field the code cannot generate itself, and therefore the one worth imposing.
 
-Resolve the gyration: the Boris rotation needs $\Omega_c\Delta t \lesssim 0.3$ for a
-few per cent accuracy, and $\Omega_c\Delta t < 2$ to stay stable at all.
+* A uniform $B_x$ magnetises the plasma and gives the particles a gyration in the $y$-$z$
+  plane at $\Omega_c = qB_x/m$, opening up upper-hybrid oscillations, Bernstein modes and
+  cyclotron damping.
+* Resolve that gyration: the Boris rotation needs $\Omega_c\Delta t \lesssim 0.3$ for a few
+  per cent accuracy, and $\Omega_c\Delta t < 2$ to stay stable at all.
+* {doc}`../examples/sheath_magnetized` is a worked case with the field oblique to a wall.
 
 ```python
 from jaxincell import elementary_charge, mass_electron

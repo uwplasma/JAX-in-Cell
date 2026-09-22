@@ -1,9 +1,8 @@
 # Examples
 
 Every script in `examples/` runs on its own and reproduces a result the code does not
-itself compute, rather than making a picture for its own sake. They are in three
-directories by how much of the code they use, not by how interesting they are, and
-`examples/README.md` lists what each teaches and how long it takes.
+itself compute. They are grouped below by velocity dimensionality; the directory a script
+sits in (`1_basic`, `2_intermediate`, `3_advanced`) says how much of the code it uses.
 
 ```bash
 git clone https://github.com/uwplasma/JAX-in-Cell
@@ -11,131 +10,71 @@ cd JAX-in-Cell
 python examples/1_basic/two_stream.py
 ```
 
-Three of them take `--quick`, a smoke run of between ten seconds and two minutes with far
-fewer particles: it checks that they execute and reproduces the structure, with more
-noise, and each says so when it starts so that a smoke run is not quoted as a
-measurement.
+Where an input file is listed the run needs no Python: `jaxincell inputs/<file>.toml`.
+Four scripts — `sheath_unmagnetized.py`, `sheath_magnetized.py`, `sheath_optimization.py`
+and `grazing_sheath.py` — take `--quick`, a smoke run of ten seconds to two minutes with
+far fewer particles. It reproduces the structure with more noise, and each says so when it
+starts, so that a smoke run is not quoted as a measurement.
 
-::::{grid} 1 2 2 2
-:gutter: 3
+## 1D1V: electrostatic, one velocity component
 
-:::{grid-item-card} Two-stream instability
-:link: two_stream
-:link-type: doc
-`two_stream.py` — growth, saturation and the phase-space vortex. Buneman 1959.
-:::
+| case | what it shows | script | input file |
+|---|---|---|---|
+| {doc}`landau_damping` | a wave damped without collisions, at $k\lambda_D = 0.5$ | `1_basic/landau_damping.py` | `landau_damping.toml` |
+| {doc}`langmuir_wave` | the kinetic dispersion relation scanned in $k$ | `1_basic/langmuir_wave.py` | `langmuir_wave.toml` |
+| {doc}`two_stream` | growth, saturation and the phase-space vortex | `1_basic/two_stream.py` | `two_stream.toml` |
+| {doc}`bump_on_tail` | a beam-driven wave and the quasilinear plateau | `2_intermediate/bump_on_tail.py` | `bump_on_tail.toml` |
+| {doc}`wall_reflection` | a wall returns the flux average of its reflection law | `2_intermediate/wall_reflection.py` | — |
+| {doc}`conservation` | energy, momentum and charge in both schemes | `3_advanced/conservation.py` | `conservation_implicit.toml` |
+| {doc}`optimize_two_stream` | gradient ascent through the solver finds the fastest beam | `3_advanced/optimize_two_stream.py` | — |
 
-:::{grid-item-card} Landau damping
-:link: landau_damping
-:link-type: doc
-`landau_damping.py` — the damping rate and frequency at $k\lambda_D=0.5$. Landau 1946.
-:::
+## 1D2V: two velocity components, the magnetic field grown by the plasma
 
-:::{grid-item-card} Langmuir waves
-:link: langmuir_wave
-:link-type: doc
-`langmuir_wave.py` — the Bohm-Gross dispersion relation, scanned in $k$.
-:::
+| case | what it shows | script | input file |
+|---|---|---|---|
+| {doc}`weibel` | a temperature anisotropy driving transverse magnetic modes | `2_intermediate/weibel.py` | `weibel.toml` |
 
-:::{grid-item-card} A maintained sheath
-:link: sheath_unmagnetized
-:link-type: doc
-`sheath_unmagnetized.py` — a source-to-collector sheath against the kinetic floating
-potential, in closed form.
-:::
+## 1D3V: three velocity components — sheaths, oblique fields, collisions
 
-:::{grid-item-card} An oblique magnetic field
-:link: sheath_magnetized
-:link-type: doc
-`sheath_magnetized.py` — the magnetic presheath, and what the wall is struck by.
-:::
+| case | what it shows | script | input file |
+|---|---|---|---|
+| {doc}`sheath_unmagnetized` | a maintained sheath against the kinetic floating potential | `1_basic/sheath_unmagnetized.py` | `sheath_unmagnetized.toml` |
+| {doc}`sheath_magnetized` | the magnetic presheath, and what the wall is struck by | `2_intermediate/sheath_magnetized.py` | `sheath_magnetized.toml` |
+| {doc}`sheath_reflection` | the Bohm criterion and the Hobbs-Wesson sheath drop | `2_intermediate/sheath_reflection.py` | — |
+| {doc}`grazing_sheath` | the two-layer transition, set up against the gyrokinetic code GYRAZE | `3_advanced/grazing_sheath.py` | — |
+| {doc}`collisions` | the Takizuka-Abe operator against the Fokker-Planck rates | `2_intermediate/collisions.py` | `collisions.toml` |
+| {doc}`sheath_optimization` | a wall's reflectivity recovered from the sheath it holds | `3_advanced/sheath_optimization.py` | — |
 
-:::{grid-item-card} Recovering a wall's reflectivity
-:link: sheath_optimization
-:link-type: doc
-`sheath_optimization.py` — an inverse problem solved with the gradient of the whole
-calculation, and the horizon over which that gradient is useful.
-:::
+## Where the numbers come from
 
-:::{grid-item-card} A sheath at grazing incidence
-:link: grazing_sheath
-:link-type: doc
-`grazing_sheath.py` — the magnetic presheath and the Debye sheath, set up to be compared
-with the gyrokinetic code GYRAZE.
-:::
+The scripts that draw the figures in this documentation live in `docs/scripts/` and record
+the numbers the pages quote in `measurements.json`; see {doc}`../numerics/verification`.
+Each example page names the script its figure and numbers come from. Most of those scripts
+run exactly the example's setup, some adding a scan around it. Two do not: the two-stream
+figure uses a quiet start at another drift, so that its growth rate can be fitted, and the
+sheath figure uses more particles.
 
-:::{grid-item-card} Bump-on-tail
-:link: bump_on_tail
-:link-type: doc
-`bump_on_tail.py` — a beam-driven instability and the quasilinear plateau.
-:::
-
-:::{grid-item-card} Weibel instability
-:link: weibel
-:link-type: doc
-`weibel.py` — a temperature anisotropy driving magnetic modes. Weibel 1959.
-:::
-
-:::{grid-item-card} Conservation laws
-:link: conservation
-:link-type: doc
-`conservation.py` — energy, momentum and charge in both schemes, periodic and between absorbing walls.
-:::
-
-:::{grid-item-card} Collisions
-:link: collisions
-:link-type: doc
-`collisions.py` — the Takizuka-Abe operator against the Fokker-Planck rates.
-:::
-
-:::{grid-item-card} Wall reflection
-:link: wall_reflection
-:link-type: doc
-`wall_reflection.py` — a wall returns the flux average of its reflection law.
-:::
-
-:::{grid-item-card} A wall that reflects electrons
-:link: sheath_reflection
-:link-type: doc
-`sheath_reflection.py` — the Bohm criterion and the sheath drop of Hobbs and Wesson, with and without reflection.
-:::
-
-:::{grid-item-card} Optimisation
-:link: optimize_two_stream
-:link-type: doc
-`optimize_two_stream.py` — gradient ascent through the whole solver finds the fastest beam.
-:::
-
-::::
-
-```{toctree}
-:hidden:
-
-two_stream
-landau_damping
-langmuir_wave
-sheath_unmagnetized
-bump_on_tail
-weibel
-collisions
-wall_reflection
-sheath_magnetized
-sheath_reflection
-conservation
-optimize_two_stream
-sheath_optimization
-grazing_sheath
-```
-
-There is also `input.toml`, which runs the two-stream case from the command line:
+There is also `examples/input.toml`, which runs the two-stream case from the command line:
 
 ```bash
 jaxincell examples/input.toml
 ```
 
-The scripts that produce the figures in this documentation live in `docs/scripts/` and
-record the numbers the pages quote in `measurements.json`; see
-{doc}`../numerics/verification`. Each example page names the script its figure and
-numbers come from. Most of those scripts run exactly the example's setup, some adding a
-scan around it. Two do not: the two-stream figure uses a quiet start at another drift, so
-that its growth rate can be fitted, and the sheath figure uses more particles.
+```{toctree}
+:hidden:
+
+landau_damping
+langmuir_wave
+two_stream
+bump_on_tail
+wall_reflection
+conservation
+optimize_two_stream
+weibel
+sheath_unmagnetized
+sheath_magnetized
+sheath_reflection
+grazing_sheath
+collisions
+sheath_optimization
+```

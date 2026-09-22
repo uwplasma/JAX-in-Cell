@@ -1,7 +1,9 @@
 # The output
 
-{meth}`~jaxincell.Simulation.run` returns an {class}`~jaxincell.Output`, a frozen
-dataclass and a pytree. Histories have the stored step as their first axis.
+{meth}`~jaxincell.Simulation.run` returns an {class}`~jaxincell.Output`, a frozen dataclass
+and a pytree. Histories have the stored step as their first axis.
+
+## Fields
 
 | field | shape | meaning |
 |---|---|---|
@@ -27,7 +29,7 @@ dataclass and a pytree. Histories have the stored step as their first axis.
 x_e, v_e = output.particles("electrons")     # (S, n_e, 3) each
 ```
 
-or, by hand, using the `species` index:
+Or by hand, using the `species` index:
 
 ```python
 import numpy as np
@@ -48,12 +50,12 @@ d["potential"]        # electrostatic potential at the faces, zero at the left w
 d["temperatures"]     # per species, per component, in eV
 ```
 
-`d["dominant_frequency"]` needs at least two stored steps and is NaN for a run that
-stored one. The full list and what each one means is in {doc}`../numerics/diagnostics`. The
-individual functions — {func}`~jaxincell.energies`,
-{func}`~jaxincell.gauss_residual`, {func}`~jaxincell.temperatures`,
-{func}`~jaxincell.dominant_frequency` — are exported too, so only what is needed has
-to be computed.
+* `d["dominant_frequency"]` needs at least two stored steps and is NaN for a run that
+  stored one.
+* The full list is in {doc}`../numerics/diagnostics`.
+* {func}`~jaxincell.energies`, {func}`~jaxincell.gauss_residual`,
+  {func}`~jaxincell.temperatures` and {func}`~jaxincell.dominant_frequency` are exported
+  too, so only what is needed has to be computed.
 
 ## Saving
 
@@ -64,9 +66,8 @@ import numpy as np
 np.savez_compressed("run.npz", t=output.t, E=output.E, rho=output.rho)
 ```
 
-For an interchange format the package can write openPMD {cite}`openpmd`, the
-community standard for particle-in-cell output, which the visualisation tools of the
-field read directly:
+For interchange the package writes openPMD {cite}`openpmd`, the community standard for
+particle-in-cell output, which the visualisation tools of the field read directly:
 
 ```python
 from jaxincell.openpmd import write_openpmd
@@ -74,16 +75,16 @@ from jaxincell.openpmd import write_openpmd
 write_openpmd(output, "run.h5")       # needs `pip install jaxincell[openpmd]`
 ```
 
-One iteration per stored step, meshes for `E`, `B`, `J` and `rho` with the right
-staggering recorded in the file, and one particle species per `Output.names` carrying
-position, momentum and weighting per particle, and charge, mass and a zero
-`positionOffset` as constant records. The momentum is the one the pusher advances:
-$\gamma m\mathbf v$ for a relativistic run, $m\mathbf v$ otherwise.
+* One iteration per stored step.
+* Meshes for `E`, `B`, `J` and `rho`, with the right staggering recorded in the file.
+* One particle species per `Output.names`, carrying position, momentum and weighting per
+  particle, and charge, mass and a zero `positionOffset` as constant records.
+* The momentum is the one the pusher advances: $\gamma m\mathbf v$ for a relativistic run,
+  $m\mathbf v$ otherwise.
 
-openPMD's `weighting` counts physical particles, while `Output.weight` counts them per
-unit area of the $y$-$z$ plane ({doc}`units`). The export multiplies by the transverse
-area the run stands for, `area` in m², recorded on the `weighting` record as
-`transverseArea`:
+openPMD's `weighting` counts physical particles, while `Output.weight` counts them per unit
+area of the $y$-$z$ plane ({doc}`units`). The export multiplies by the transverse area the
+run stands for, `area` in m², recorded on the `weighting` record as `transverseArea`:
 
 ```python
 write_openpmd(output, "run.h5", area=domain.length_y * domain.length_z)
@@ -94,7 +95,7 @@ densities and do not depend on it.
 
 ## Reading a run back
 
-An `Output` is a pytree, so `jax.tree_util` flattens and rebuilds it, and the
-diagnostics work on a reconstructed one as long as the fields they need are present.
-The simplest durable choice is to save the arrays and recompute the diagnostics on
-load; they are cheap compared with the run that produced them.
+An `Output` is a pytree, so `jax.tree_util` flattens and rebuilds it, and the diagnostics
+work on a reconstructed one as long as the fields they need are present. The simplest
+durable choice is to save the arrays and recompute the diagnostics on load: they are cheap
+next to the run that produced them.

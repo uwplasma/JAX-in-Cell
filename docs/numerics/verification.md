@@ -25,7 +25,27 @@ $kv_0 > \omega_{pe}$ it returns $\gamma = 0.106\,\omega_{pe}$ for a mode that ca
 grow at all.
 :::
 
-## Landau damping
+## Summary
+
+| case | velocity components | reference | deviation |
+|---|---|---|---|
+| Landau damping | 1D1V | kinetic root at $k\lambda_D = 0.5$ | {{ landau_gamma_deviation_percent }} % in the rate, {{ landau_omega_deviation_percent }} % in the frequency |
+| Langmuir dispersion | 1D1V | kinetic root, $k\lambda_D = 0.05$ to $0.5$ | {{ landau_dispersion_max_deviation_percent }} % at worst |
+| Two-stream | 1D1V | kinetic growth rate | {{ two_stream_gamma_deviation_percent }} % seeded, {{ two_stream_scan_mean_deviation_percent }} % mean over the scan |
+| Bump on tail | 1D1V | kinetic growth rate | {{ bump_on_tail_gamma_deviation_percent }} % |
+| Wall reflection | 1D1V | flux average of the reflection law | {{ reflection_max_error }} |
+| Conservation | 1D1V | the exact laws | energy {{ energy_error_max_implicit_8 }}, Gauss law {{ gauss_residual_max_implicit }} (implicit) |
+| Weibel | 1D2V | transverse kinetic root, marginal wavenumber | {{ weibel_mean_deviation_percent }} % mean, {{ weibel_max_deviation_percent }} % worst |
+| Maintained sheath | 1D3V | kinetic sheath theory | {{ source_sheath_phi_wall_deviation_percent }} % in the wall potential |
+| Sheath drop with reflection | 1D3V | Hobbs and Wesson | {{ sheath_drop_deviation_percent }} % |
+| Collisions | 1D3V | Fokker-Planck relaxation rates | {{ collisions_max_deviation_percent }} % |
+
+The sections below group by how many velocity components the physics needs, and derive each
+reference before comparing it.
+
+## 1D1V: electrostatic
+
+### Landau damping
 
 A Langmuir wave at $k\lambda_D = 0.5$ decays because the electrons at the phase
 velocity absorb it {cite}`landau1946`. The least damped root of
@@ -64,7 +84,7 @@ approximation $\omega^2 = \omega_{pe}^2(1 + 3k^2\lambda_D^2)$ {cite}`bohm1949`, 
 the kinetic root exceeds by 2.9 per cent at $k\lambda_D = 0.3$ and by 7.0 per cent at 0.5.
 The code is reproducing kinetic physics, not a fluid limit.
 
-## Two-stream instability
+### Two-stream instability
 
 Two counter-streaming beams of density $n/2$ each are unstable for
 $kv_0 < \omega_{pe}$, with the cold-beam maximum $\gamma = \omega_{pe}/2\sqrt2$ at
@@ -100,7 +120,7 @@ The window is set by amplitude, not by time — from ten times the seed to a ten
 saturation — so that the same part of the growth is fitted at every drift. The total
 energy changes by {{ two_stream_energy_error }} across the run.
 
-## Bump-on-tail instability
+### Bump-on-tail instability
 
 A weak beam on the tail makes $\partial f/\partial v > 0$, and every wave whose phase
 velocity sits in that window grows {cite}`oneil1965`. The beam here carries
@@ -122,7 +142,17 @@ Mode {{ bump_on_tail_mode }}, whose phase velocity is
 kinetic root, {{ bump_on_tail_gamma_deviation_percent }} % away, with
 {{ bump_on_tail_particles }} particles on {{ bump_on_tail_cells }} cells.
 
-## Weibel instability
+### Wall reflection
+
+A reflection law returns its flux average from a Maxwellian, not its average over the
+distribution: {{ reflection_returned_sigma }} for a Gaussian law of width $\sigma$, whose
+flux average is one half and whose distribution average is
+{{ reflection_distribution_average_sigma }}, and within {{ reflection_max_error }} of the
+flux average at five widths. See {doc}`../examples/wall_reflection`.
+
+## 1D2V: a field the plasma grows
+
+### Weibel instability
 
 A plasma hotter across the simulation axis than along it drives purely growing
 transverse magnetic modes {cite}`weibel1959`. Setting $\omega=0$ in the transverse
@@ -157,15 +187,9 @@ part of the recorded result.
 
 The total energy changes by {{ weibel_energy_error }} over the run.
 
-## Wall reflection
+## 1D3V: sheaths, oblique fields and collisions
 
-A reflection law returns its flux average from a Maxwellian, not its average over the
-distribution: {{ reflection_returned_sigma }} for a Gaussian law of width $\sigma$, whose
-flux average is one half and whose distribution average is
-{{ reflection_distribution_average_sigma }}, and within {{ reflection_max_error }} of the
-flux average at five widths. See {doc}`../examples/wall_reflection`.
-
-## Sheath formation
+### Sheath formation
 
 The edge of a plasma, between a thermal source wall {cite}`schwager1990` and a floating
 conductor. The ions reach the Bohm speed $c_s=\sqrt{T_e/m_i}$ {cite}`bohm1949sheath`
@@ -179,14 +203,35 @@ when the cells are refined; what is left of the difference lies mostly in placin
 point, where the potential still falls by about 0.1 $T_e/e$ per Debye length. See
 {doc}`../examples/sheath_reflection`.
 
-## Collisions
+```{figure} ../_static/figures/sheath_source.png
+:width: 100%
+:alt: The sheath potential against the kinetic reference, the densities, and the gradient
+
+A sheath held by a source rather than left to drain. (a) The potential against the kinetic
+reference. (b) The densities against $n(\phi)$. (c) The gradient of the wall potential with
+respect to the source, forward mode against reverse mode and against finite differences.
+```
+
+The same wall in an oblique magnetic field adds a magnetic presheath, and the ions enter it
+along the field rather than along the wall normal ({doc}`../examples/sheath_magnetized`); at
+grazing incidence the entrance condition is taken from the reference code's own manifest
+({doc}`../examples/grazing_sheath`).
+
+```{figure} ../_static/figures/sheath_magnetized.png
+:width: 100%
+:alt: A sheath in a magnetic field oblique to the wall
+
+The impact energies and angles the wall feels when the field meets it at an angle.
+```
+
+### Collisions
 
 The Takizuka-Abe operator is checked against the Fokker-Planck relaxation rates in the
 fast-beam limit, where they are closed-form and contain no adjustable constant. The
 worst of the four measured ratios is {{ collisions_max_deviation_percent }} % from
 theory; see {doc}`collisions` for the figure and the details.
 
-## Conservation
+## Conservation of the discrete laws
 
 Largest relative errors ({doc}`diagnostics`) over the two-stream run of
 {doc}`../examples/conservation` and, at the walls, over a drifting plasma of 120 steps; the
