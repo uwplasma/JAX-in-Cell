@@ -616,10 +616,80 @@ and 4.6e6 steps of run is 7e12 particle-steps, which is a hundred hours of GPU a
 rather than left running. The arithmetic above priced the box and the step count and missed this,
 which is the difference between a four-hour job and a four-day one.
 
-What that costs the benchmark: the rehearsal at `M=400, alpha=5 deg` is the one case that finishes,
+What that cost the benchmark: the rehearsal at `M=400, alpha=5 deg` was the one case that finished,
 and it sits at the edge of the reference's own accuracy range. A matched comparison inside that
-range needs either a source that emits a marker every `k` steps, which this code does not have, or
-a machine-week. Say which of the two the comparison rests on.
+range needed either a source that emits a marker every `k` steps, or a machine-week. **It now rests
+on the first.**
+
+#### A source that emits every `k` steps (W8, built)
+
+`Source(every=k)`, static, default 1. The source emits its `emit` markers on the steps with
+`(step + 1) % k == 0` -- the absolute step, so a continued run keeps the schedule -- as the window
+of the `k` steps that end there, each carrying `Gamma k dt / emit`: the emitted charge per unit time
+is exactly `Gamma` and stays differentiable in the reservoir's leaves. The marker that crossed the
+plane at the fraction `s_j = (j + 1/2)/emit` of the window is put where its orbit has taken it since,
+by the construction W2's single-step entry already uses (S07): position to second order in the flight
+`(1 - s_j) k dt`, velocity by the pusher over `((1 - s_j)k - 1/2) dt`, both in the field at the plane.
+So the stream is spread over `v k dt` rather than stacked on the plane. An idle step is a `lax.cond`
+that leaves the arrays and the ledger alone and skips the draw and the partial sort; `every = 1` takes
+the old path, operation for operation. A marker whose flight passes the far wall is left there on
+purpose: the collector holds its whole cloud as surface charge and the wall law of the same step
+collects it, so the ledger records the impact on the step it was emitted and the charge closes.
+
+The price is a ramp: a particle is in the box only from the emission after it crossed, so within
+`v k dt` of the plane the time-averaged density rises from zero to its value. The example therefore
+takes `k = residence/markers` with `emit = 1`, which makes `v k dt = dx/markers_per_cell` at the
+entrance speed -- the marker spacing, 0.01 dx at 100 a cell -- and caps the window's gyro-angle at the
+step's own `Omega k dt <= 0.25`. That keeps the electrons at `k = 1` (`Omega_e dt` is already 0.25)
+and turns the ions through under 0.01 rad a window.
+
+Evidence, `tests/test_sources.py`, each shown to fail on a broken variant: `every = 1` against a
+verbatim copy of the 7a6cfb4 injection, bit for bit (fails on a reordered weight); the window's
+positions and velocities against the uniform-field orbit to 1e-13 (fails when stacked on the plane);
+the ledger moves by exactly `Gamma k dt` on emitting steps and by zero between (fails unscaled, and
+when the ledger counts idle steps); a drifting reservoir's streaming density at `k = 20` equal to
+`k = 1` within four standard errors measured from eight seeds, every cell but the plane's, where the
+ramp takes 7 % at `v k dt = 0.25 dx`; the live pool divided by 20.0 at `k = 20` (fails when the
+schedule is ignored); `gauss_residual`, `charge_balance` and the floating collector's
+`J + eps_0 dE/dt` at round-off with `k = 2` and `5`; the far-wall case; and the gradient of the wall
+potential in the ion reservoir density finite and equal to a central difference to 1e-4 (fails with
+the weight's gradient stopped).
+
+**The cost, repriced** from the example's own geometry (its matched box is `15 rho_s + 3 rho_s +
+60 lambda_D = 213 lambda_D`, 425 cells; the 295 above was a `25 rho_s` box), three entrance-speed
+transits, 100 markers a cell, at the per-particle-step rates that priced the rows above: 170 ns on
+this laptop, 40-80 ns on one A4000.
+
+| case | ion residence | ion `k` | pool, `k=1` -> `k` | steps | particle-steps | laptop | one A4000 |
+|---|---|---|---|---|---|---|---|
+| rehearsal, `M=400, 5 deg` | 4.65e5 | 14 | 4.95e5 -> 6.3e4 | 1.40e6 | 6.9e11 -> 8.8e10 | 33 h -> 4.1 h | 8-15 h -> 1-2 h |
+| matched, `M=900, 4 deg` | 1.15e6 | 27 | 1.20e6 -> 9.1e4 | 3.44e6 | 4.1e12 -> 3.1e11 | 194 h -> 15 h | 46-91 h -> 3.5-7 h |
+
+The pool after is 32 400 ions and 29 600 electrons in the rehearsal and 42 500 and 48 700 in the
+matched case: **the electrons are now half of it**, held at `k = 1` by their gyro-angle, so the next
+factor of two is theirs and not the ions'. The A4000 column scales a per-particle rate that was
+measured on a full device; at 6-9e4 markers the device is far from full, and the step count, 1.4e6 and
+3.4e6, may make the per-step launch overhead the real cost. That overhead has not been measured.
+
+The quick preset runs end to end with it, and once with `--every=1` as the control (on this laptop
+under load; the preset is not grazing and measures nothing about the benchmark):
+
+| quick preset | ions live | wall potential | net current | ion flow at wall | ion fluence | mean impact energy | wall time |
+|---|---|---|---|---|---|---|---|
+| `k = 4` (chosen) | 4 625 | -0.987 T_e/e | +0.13 % | 0.60 c_s | 3.704e13 m^-2 | 3.56 eV | 168 s |
+| `k = 1` (control) | 18 825 | -1.067 T_e/e | -0.00 % | 0.62 c_s | 3.699e13 m^-2 | 3.62 eV | 283 s |
+
+The fluence agrees to 0.1 %, as the flux must. The wall potentials differ by 0.08 T_e/e, which is not
+resolved: the run keeps no error bar, `k = 4` carries a quarter of the ion markers, and the
+unmagnetised quick sheath's own standard error was 0.06-0.07. The control that decides it is the
+rehearsal-size one below, with an error bar.
+
+**Next:** time 14 000 steps of the rehearsal (`--transits=0.03`) on the office A4000 to measure the
+per-step cost at this pool, a few minutes; then the rehearsal on whichever is faster (about 4 h on this
+laptop), once more with `--every=7` as the control that the result does not depend on `k`, the two
+wall potentials compared against a block-averaged standard error of the late window; then
+`--matched` on the A4000, 3.5-7 h if the per-particle rate holds and about 15 h on this laptop if it
+does not.
 
 ### 8.2 Electron-field instability (W10)
 
@@ -688,7 +758,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] **W5** TOML/CLI and persistence: one resolver, native archives, openPMD round trip. *(U09's axis label is W6, with the rest of the plotting.)*
 - [x] **W6** plots and movies: evolving weighted populations, diagnostic histories, bounded memory, headless tests.
 - [x] **W7** repair the four existing sheath and optimisation examples and their documentation. *(S15, S16, S04's second half, G05, U12 and S20 closed; every number on the four pages is from a run of the preset the page names, and the convergence table is a script.)*
-- [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension.
+- [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension. *(GYRAZE pinned and reproduced; matched case moved to `M=900, gamma=0.2, alpha=4 deg`; `Source(every=k)` built and tested, which takes the matched run from about 100 GPU-hours to 3.5-7; next: time the rehearsal on the A4000, then run it and `--matched` -- see 8.1.)*
 - [ ] **W9** model-comparison and Weibel examples on the existing kernels and shared theory.
 - [ ] **W10** electron-field instability with its limiting controls.
 - [ ] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering.
