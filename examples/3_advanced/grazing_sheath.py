@@ -45,6 +45,16 @@ cell holds, the second how many entrance-speed crossings of the box the run last
 run says what it used. `--markers=40 --transits=2` is about a quarter of the default, which
 is a noisier first look at the same physics rather than a different problem.
 
+**The ions are emitted once every `k` steps, not every step** (`Source(every=k)`). An ion
+stays in the box for hundreds of thousands of steps, and a source that emits at least one
+marker a step would hold that many whatever the markers per cell asked for: 465 000 in the
+default preset and 1.2 million in `--matched`. Emitting every `k = residence/markers` steps
+makes the ion pool the markers asked for, each marker carrying `k` steps of flux and placed
+where its orbit has taken it since it crossed, so the stream moves `dx/markers_per_cell` in a
+window -- the marker spacing -- and turns through under a hundredth of a radian. The
+electrons, whose gyro-angle is already a quarter radian a step, stay at `k = 1`. `--every=K`
+sets the ions' `k` by hand; `--every=1` is the control that the result does not depend on it.
+
 The cell is half a Debye length in all three, which resolves the sheath and the presheath
 but **not** the electron gyroradius, `rho_e = 0.2 lambda_D`. The finite-`rho_e` electron
 response is what the reference keeps in its Debye sheath, so the comparison there is
@@ -100,6 +110,8 @@ for flag, name in (("--markers=", "markers_per_cell"), ("--transits=", "transits
     given = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(flag)), None)
     if given is not None:
         globals()[name] = type(globals()[name])(given)
+# the steps between ion emissions, worked out below unless given: --every=1 is the control
+ion_every = next((int(a.split("=", 1)[1]) for a in sys.argv if a.startswith("--every=")), None)
 reservoir_samples = 200000                  # velocities drawn once to stand for each reservoir
 
 # --- the scales, and the manifest they make ----------------------------------------------
@@ -193,16 +205,36 @@ print(f"  and under {100 * (sampled_parallel < 0.1).mean():.3f} per cent of it b
 
 # --- the run -----------------------------------------------------------------------------
 # Both species are magnetised, so both make progress towards the wall at their parallel speed
-# times sin(alpha), and the pool has to hold `emit` times that residence in steps.
+# times sin(alpha), and the pool has to hold `emit / every` times that residence in steps. An
+# ion's residence is hundreds of thousands of steps, far more than the markers the run asks
+# for, so the ions emit once every `every` steps rather than on every one: the pool is then the
+# markers asked for and not the residence. A window's markers are spread over the distance the
+# stream covers in it, which at the entrance speed is dx / markers_per_cell -- the marker
+# spacing itself -- and the gyro-angle over a window, Omega every dt, is held to the step's own
+# 0.25, which keeps the electrons at every = 1.
 residence_i = length / entrance_speed / time_step
 residence_e = length / (spread * np.sqrt(np.pi / 2) * np.sin(angle)) / time_step
 markers = markers_per_cell * cells
-emit_ions = max(int(round(markers / residence_i)), 1)
-emit_electrons = max(int(round(markers / residence_e)), 1)
-capacity_ions = int(1.4 * emit_ions * residence_i)
-capacity_electrons = int(1.4 * emit_electrons * residence_e)
-print(f"residence: ions {residence_i:.0f} steps, electrons {residence_e:.0f}; emitting "
-      f"{emit_ions} and {emit_electrons} a step into pools of {capacity_ions} and {capacity_electrons}")
+
+
+def schedule(residence, gyro_angle_per_step, every=None):
+    """`(emit, every)` for a pool of about `markers`: one emission every `residence / markers`
+    steps, as many at a time as a pool of that size needs, and no window longer than a quarter
+    of a gyro-radian."""
+    if every is None:
+        every = min(max(int(round(residence / markers)), 1), max(int(0.25 / gyro_angle_per_step + 1e-9), 1))
+    return max(int(round(markers * every / residence)), 1), every
+
+
+emit_ions, every_ions = schedule(residence_i, omega_ci * time_step, ion_every)
+emit_electrons, every_electrons = schedule(residence_e, omega_ce * time_step)
+capacity_ions = int(1.4 * emit_ions * residence_i / every_ions)
+capacity_electrons = int(1.4 * emit_electrons * residence_e / every_electrons)
+print(f"residence: ions {residence_i:.0f} steps, electrons {residence_e:.0f}; emitting {emit_ions} every "
+      f"{every_ions} steps and {emit_electrons} every {every_electrons} into pools of {capacity_ions} and "
+      f"{capacity_electrons}")
+print(f"  a window moves the ion stream {entrance_speed * every_ions * time_step / (length / cells):.3f} dx "
+      f"and turns it {omega_ci * every_ions * time_step:.1e} rad")
 
 external_B = np.zeros((cells, 3))
 external_B[:, 0], external_B[:, 2] = field * np.sin(angle), field * np.cos(angle)
@@ -216,10 +248,11 @@ energies = 0.5 * (np.asarray(impacts.energy_edges)[:-1] + np.asarray(impacts.ene
 angles = 0.5 * (np.asarray(impacts.angle_edges)[:-1] + np.asarray(impacts.angle_edges)[1:])
 electrons = Species("electrons", capacity_electrons, -1.0, mass_electron, density,
                     active=capacity_electrons // 4, sampling="quiet",
-                    source=Source(density=density, samples=electron_reservoir, emit=emit_electrons))
+                    source=Source(density=density, samples=electron_reservoir, emit=emit_electrons,
+                                  every=every_electrons))
 ions = Species("ions", capacity_ions, 1.0, mass_ratio * mass_electron, density,
                active=capacity_ions // 4, sampling="quiet",
-               source=Source(density=density, samples=ion_reservoir, emit=emit_ions))
+               source=Source(density=density, samples=ion_reservoir, emit=emit_ions, every=every_ions))
 out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"),
                  external_B=external_B, impacts=impacts).run(
     steps, seed=0, store_every=steps // stored, store_particles=False, moments="flux").validate()
@@ -295,7 +328,8 @@ settings = dict(electron_temperature=electron_temperature, density=density, mass
                 gyro_over_debye=gyro_over_debye, rho_s_over_debye=float(gyro_radius / debye),
                 length_over_debye=float(length / debye), cells=cells, steps=steps,
                 omega_pe_dt=float(omega_pe * time_step), omega_ce_dt=float(omega_ce * time_step),
-                emit_ions=emit_ions, emit_electrons=emit_electrons, capacity_ions=capacity_ions,
+                emit_ions=emit_ions, emit_electrons=emit_electrons, every_ions=every_ions,
+                every_electrons=every_electrons, capacity_ions=capacity_ions,
                 capacity_electrons=capacity_electrons, chodura_drift=float(drift),
                 transits=transits, quick=quick, matched=matched)
 results = dict(wall_potential=wall_potential, flow_at_the_wall=float(flow[-1]),
