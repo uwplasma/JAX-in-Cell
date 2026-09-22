@@ -240,7 +240,7 @@ def _van_der_corput(n, base):
 
 
 def quiet_start(n, length, vth=(0.0, 0.0, 0.0), drift=(0.0, 0.0, 0.0)):
-    """Positions and velocities of a quiet start, as plain arrays.
+    """Positions and velocities of a quiet start, as JAX arrays.
 
     Equally spaced positions and velocities at the quantiles of a bit-reversed
     (van der Corput) sequence, which is what ``Species(sampling="quiet")`` uses. It is
