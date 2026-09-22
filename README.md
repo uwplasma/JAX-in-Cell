@@ -42,15 +42,8 @@ fields on a staggered (Yee) grid with Maxwell's equations. It provides
 
 Everything runs as one XLA program on whatever device JAX finds.
 
-Every rate quoted in the documentation is checked against a closed-form or linear
-kinetic result rather than against another simulation. At kλ<sub>D</sub> = 0.5 the
-Landau damping rate is within 0.7 % of the kinetic root and the frequency within
-0.8 %. The two-stream growth rate is within 2.8 % on average and 6.0 % at worst over
-seven drifts spanning the unstable range. The Weibel growth rate is within 6.0 % on
-average and 9.2 % at worst over the five of seven seeded wavenumbers that grow cleanly
-enough to fit. The worst of the four collisional relaxation rates is within 2.5 % of
-Fokker-Planck theory. See
-[verification](https://jax-in-cell.readthedocs.io/en/latest/numerics/verification.html).
+Every rate it quotes is checked against a closed-form or linear kinetic result rather than
+against another simulation: see [benchmarks](#benchmarks).
 
 ## Install
 
@@ -125,68 +118,80 @@ print(gradient.species[0].drift, gradient.domain.length)
 Boris rotation and the boundary conditions — the whole run, with no adjoint to write
 and no finite differences anywhere.
 
-## What you can do
+## Benchmarks
 
-Every figure is the output of one script in `examples/`, and every script reproduces a
-result the code does not itself compute. Where there is a TOML file, the same run needs no
-Python: `jaxincell inputs/<file>.toml`.
+Each case is checked against a closed-form or linear kinetic result. The numbers below come
+from `docs/_static/figures/measurements.json`, which `python docs/scripts/make_all.py`
+regenerates with the figures. Where a TOML file is listed the run needs no Python:
+`jaxincell inputs/<file>.toml`.
+
+### 1D1V: electrostatic, one velocity component
 
 <table>
 <tr>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/two_stream.png" alt="Two-stream instability"></td>
 <td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/landau_damping.png" alt="Landau damping"></td>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/two_stream.png" alt="Two-stream instability"></td>
 <td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/bump_on_tail.png" alt="Bump-on-tail instability"></td>
-</tr>
-<tr>
-<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/two_stream.html">Two-stream instability</a></b><br>
-growth rate and saturation against Buneman (1959)<br>
-<code>1_basic/two_stream.py</code> · <code>inputs/two_stream.toml</code></td>
-<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/landau_damping.html">Landau damping</a></b><br>
-collisionless decay against the kinetic root<br>
-<code>1_basic/landau_damping.py</code> · <code>inputs/landau_damping.toml</code></td>
-<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/bump_on_tail.html">Bump on tail</a></b><br>
-beam-driven growth and the quasilinear plateau<br>
-<code>2_intermediate/bump_on_tail.py</code> · <code>inputs/bump_on_tail.toml</code></td>
-</tr>
-<tr>
-<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/weibel.png" alt="Weibel instability"></td>
-<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_source.png" alt="A maintained sheath"></td>
-<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_magnetized.png" alt="A sheath in an oblique magnetic field"></td>
-</tr>
-<tr>
-<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/weibel.html">Weibel instability</a></b><br>
-a magnetic field grown from a temperature anisotropy<br>
-<code>2_intermediate/weibel.py</code> · <code>inputs/weibel.toml</code></td>
-<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_unmagnetized.html">Maintained sheath</a></b><br>
-floating potential and densities against kinetic theory<br>
-<code>1_basic/sheath_unmagnetized.py</code> · <code>inputs/sheath_unmagnetized.toml</code></td>
-<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_magnetized.html">Oblique magnetic field</a></b><br>
-impact energies and angles the wall feels<br>
-<code>2_intermediate/sheath_magnetized.py</code> · <code>inputs/sheath_magnetized.toml</code></td>
-</tr>
-<tr>
-<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/autodiff.png" alt="Gradients through the whole solver"></td>
-<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_optimization.png" alt="A wall's reflectivity recovered from its sheath"></td>
-<td><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/conservation.png" alt="Explicit against implicit conservation"></td>
-</tr>
-<tr>
-<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html">Gradients</a></b><br>
-reverse mode against forward mode and finite differences<br>
-<code>3_advanced/optimize_two_stream.py</code></td>
-<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_optimization.html">An inverse problem</a></b><br>
-a wall's reflectivity recovered from the sheath it holds<br>
-<code>3_advanced/sheath_optimization.py</code></td>
-<td><b><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html">Explicit against implicit</a></b><br>
-energy and charge conservation, and what each costs<br>
-<code>3_advanced/conservation.py</code> · <code>inputs/conservation_implicit.toml</code></td>
 </tr>
 </table>
 
-Also in `examples/`: the Bohm-Gross dispersion relation scanned in `k`, Coulomb collisions
-against the Fokker-Planck rates, a partly reflecting wall returning the flux average of its
-law, the Hobbs-Wesson sheath drop, and a grazing-incidence sheath set up to be compared with
-the gyrokinetic code GYRAZE. `examples/README.md` lists what each teaches and how long it
-takes; the [documentation](https://jax-in-cell.readthedocs.io/en/latest/examples/index.html) derives what each one measures.
+| case | checked against | agreement | run |
+|---|---|---|---|
+| [Landau damping](https://jax-in-cell.readthedocs.io/en/latest/examples/landau_damping.html) | kinetic root at $k\lambda_D=0.5$ | rate 0.7 %, frequency 0.8 % | `1_basic/landau_damping.py` · `landau_damping.toml` |
+| [Langmuir waves](https://jax-in-cell.readthedocs.io/en/latest/examples/langmuir_wave.html) | kinetic root, $k\lambda_D = 0.05$ to $0.5$ | 0.4 % at worst | `1_basic/langmuir_wave.py` · `langmuir_wave.toml` |
+| [Two-stream](https://jax-in-cell.readthedocs.io/en/latest/examples/two_stream.html) | kinetic growth rate | 3.3 % seeded, 2.8 % mean over the unstable range | `1_basic/two_stream.py` · `two_stream.toml` |
+| [Bump on tail](https://jax-in-cell.readthedocs.io/en/latest/examples/bump_on_tail.html) | kinetic growth rate, quasilinear plateau | 6.3 % | `2_intermediate/bump_on_tail.py` · `bump_on_tail.toml` |
+| [Partly reflecting wall](https://jax-in-cell.readthedocs.io/en/latest/examples/wall_reflection.html) | flux average of the reflection law | 2e-4 | `2_intermediate/wall_reflection.py` |
+| [Conservation](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html) | energy, momentum and the Gauss law | implicit: energy 3e-16, Gauss law 7e-15 | `3_advanced/conservation.py` · `conservation_implicit.toml` |
+| [Optimisation](https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html) | fastest-growing drift from linear theory | 0.1 % after 12 ascent steps | `3_advanced/optimize_two_stream.py` |
+
+<table>
+<tr>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/conservation.png" alt="Energy, momentum and charge conservation"></td>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/autodiff.png" alt="Gradients through the solver"></td>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/two_stream_scan.png" alt="Growth rate across the unstable range"></td>
+</tr>
+</table>
+
+### 1D2V: a magnetic field the plasma grows itself
+
+<p align="center"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/weibel.png" width="70%" alt="Weibel instability"></p>
+
+| case | checked against | agreement | run |
+|---|---|---|---|
+| [Weibel](https://jax-in-cell.readthedocs.io/en/latest/examples/weibel.html) | transverse kinetic dispersion relation, and the marginal wavenumber $k_cc=\omega_{pe}\sqrt{T_z/T_x-1}$ | 6.0 % mean, 9.2 % worst over the 5 of 7 modes that grow cleanly | `2_intermediate/weibel.py` · `weibel.toml` |
+
+### 1D3V: sheaths, oblique fields and collisions
+
+<table>
+<tr>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_source.png" alt="A maintained sheath"></td>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_magnetized.png" alt="A sheath in an oblique magnetic field"></td>
+<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_optimization.png" alt="A wall's reflectivity recovered from its sheath"></td>
+</tr>
+</table>
+
+| case | checked against | agreement | run |
+|---|---|---|---|
+| [Unmagnetized sheath](https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_unmagnetized.html) | kinetic sheath theory: wall potential, densities, current balance | potential 0.6 %, densities 2 %, net current 0.02 % of the ion current | `1_basic/sheath_unmagnetized.py` · `sheath_unmagnetized.toml` |
+| [Oblique magnetic field](https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_magnetized.html) | Chodura: a magnetic presheath, and entry along the field | impact energy within a few per cent of the field-parallel sound speed | `2_intermediate/sheath_magnetized.py` · `sheath_magnetized.toml` |
+| [Grazing incidence](https://jax-in-cell.readthedocs.io/en/latest/examples/grazing_sheath.html) | GYRAZE's own entrance distribution and manifest | sampled distribution to a fraction of a per cent | `3_advanced/grazing_sheath.py` |
+| [Sheath drop with reflection](https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_reflection.html) | Hobbs and Wesson, with and without electron reflection | 2.0 % | `2_intermediate/sheath_reflection.py` |
+| [Collisions](https://jax-in-cell.readthedocs.io/en/latest/examples/collisions.html) | Fokker-Planck relaxation rates | 2.5 % at worst of four rates | `2_intermediate/collisions.py` · `collisions.toml` |
+| [Inverse problem](https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_optimization.html) | a wall's reflectivity recovered from the sheath it holds | gradients agree with finite differences to 8-10 digits | `3_advanced/sheath_optimization.py` |
+
+### Speed
+
+<p align="center"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/scaling.png" width="70%" alt="Cost per particle and per cell"></p>
+
+| what | cost |
+|---|---|
+| explicit step, 200 000 particles | 30 ns per particle per step |
+| implicit step, 8 Picard iterations | 683 ns per particle per step |
+| 1024 cells, 40 000 particles | 1.5 ms per step |
+
+Measured on a laptop CPU with JAX 0.11; `docs/scripts/fig_scaling.py` reproduces it, and the
+same code runs on a GPU or TPU without change.
 
 Bump-on-tail instability with periodic (left) and reflective (right) walls:
 
