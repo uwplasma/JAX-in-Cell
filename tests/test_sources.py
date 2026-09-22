@@ -1,17 +1,19 @@
 """The maintained source, the wall ledger, the electrode closure and the electrostatic
 model. Each test states the closed form it checks against, or the invariant that has to
 hold whatever the numbers are."""
+import functools
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax import random
 
-from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, bohm_edge, epsilon_0,
-                       gauss_residual, mass_electron, potential, elementary_charge as e_charge,
+from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, bohm_edge, charge_balance,
+                       epsilon_0, gauss_residual, mass_electron, potential, elementary_charge as e_charge,
                        speed_of_light as c)
-from jaxincell._core import apply_particle_bc, deposit
-from jaxincell._sources import _flux_cdf, _flux_quantile, crossing_flux, sample_crossing
+from jaxincell._core import apply_particle_bc, boris, deposit
+from jaxincell._sources import _flux_cdf, _flux_quantile, crossing_flux, inject, sample_crossing
 from jaxincell.sheath import densities, floating_potential, hobbs_wesson, source_density
 
 SIGMA = np.sqrt(1.0 * e_charge / mass_electron)          # electron spread at T_e = 1 eV
@@ -1082,3 +1084,277 @@ def test_a_sampled_reservoir_is_refused_when_it_is_not_one():
         Source(density=DENSITY, vth=(SIGMA,) * 3, model="sampled", emit=4)
     with pytest.raises(ValueError, match="needs them"):
         Source(density=DENSITY, samples=rng.standard_normal((10, 3)), model="maxwellian", emit=4)
+
+
+# --- a source that emits every k steps -----------------------------------------------------
+
+def _inject_as_it_was(key, source, block, x, v, w, qm, charge_over_mass, dt, length, field, push):
+    """:func:`jaxincell._sources.inject` as it stood before ``Source.every`` existed
+    (7a6cfb4), operation for operation: the reference ``every=1`` has to reproduce."""
+    start, n = block
+    emit = source.emit
+    inward = 1.0 if source.side == "left" else -1.0
+    weight = crossing_flux(source) * dt / emit
+    velocity = sample_crossing(key, source, emit, inward)
+    fraction = (jnp.arange(emit) + 0.5) / emit
+    flight = (1.0 - fraction) * dt
+    wall = -inward * length / 2
+    at_plane = jnp.broadcast_to(field, (emit, 6))
+    acceleration = charge_over_mass * (at_plane[:, :3] + jnp.cross(velocity, at_plane[:, 3:]))
+    entry = wall + velocity[:, 0] * flight + 0.5 * acceleration[:, 0] * flight ** 2
+    carried = push(velocity, at_plane, jnp.full((emit,), charge_over_mass), ((0.5 - fraction) * dt)[:, None])
+    position = jnp.stack([entry, jnp.zeros(emit), jnp.zeros(emit)], axis=1)
+    slots = start + jax.lax.top_k(-jax.lax.dynamic_slice(w, (start,), (n,)), emit)[1]
+    overflow = jnp.max(w[slots])
+    return (x.at[slots].set(position), v.at[slots].set(carried), w.at[slots].set(weight),
+            qm.at[slots].set(charge_over_mass), weight, velocity, overflow)
+
+
+def _inject_step_as_it_was(self, key, x, u, w, qm, wall, E, B, rho, step):
+    """``Simulation._inject`` as it stood before ``Source.every`` existed; ``step`` is new and unused."""
+    d = self.domain
+
+    def push(velocity, fields, charge_over_mass, interval):
+        return self._velocity(self._accelerate(self._momentum(velocity), fields, charge_over_mass, interval))
+    injected, energy, momentum = wall.injected, wall.energy_injected, wall.momentum_injected
+    overflow = wall.overflow
+    for i, (sp, block) in enumerate(zip(self.species, self.blocks)):
+        key, k = random.split(key)
+        plane = jnp.full((1, 3), (-1.0 if sp.source.side == "left" else 1.0) * d.length / 2)
+        x, v, w, qm, weight, entering, spill = _inject_as_it_was(k, sp.source, block, x, self._velocity(u), w, qm,
+                                                                 sp.charge_si / sp.mass, d.dt, d.length,
+                                                                 self._fields_at(plane, E, B, rho)[0], push)
+        u = self._momentum(v)
+        side = 0 if sp.source.side == "left" else 1
+        carried = self._momentum(entering)
+        injected = injected.at[i, side].add(weight * sp.source.emit)
+        energy = energy.at[i, side].add(weight * jnp.sum(self._kinetic(sp.mass, carried)))
+        momentum = momentum.at[i, side].add(weight * sp.mass * jnp.sum(carried, axis=0))
+        overflow = jnp.maximum(overflow, spill)
+    return x, u, w, qm, wall.replace(injected=injected, energy_injected=energy,
+                                     momentum_injected=momentum, overflow=overflow)
+
+
+def test_a_source_that_emits_every_step_is_the_source_it_was(monkeypatch):
+    """``every=1``, the default, is the code before ``every`` existed, bit for bit: two species,
+    a Maxwellian and a cold beam, entering a floating sheath in a magnetic field, where the
+    entry's partial push and the collector closure both act. A reordered expression -- the
+    weight as ``Gamma (dt / N) k`` rather than ``Gamma dt k / N`` -- is the same number to a
+    rounding error and fails this."""
+    domain = box(cells=24, particle_bc="absorbing", field_bc=("open", "absorbing"))
+    electrons = Species("electrons", 3000, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA,) * 3,
+                        active=800, sampling="quiet", source=maxwellian_source(6, density=1.1149 * DENSITY))
+    ions = Species("ions", 3000, 1.0, 1836 * mass_electron, DENSITY, 0.0, (0.2 * SIGMA, 0, 0),
+                   active=800, sampling="quiet",
+                   source=Source(density=DENSITY, vth=0.0, drift=(0.2 * SIGMA, 0, 0), emit=6))
+    external_B = jnp.zeros((24, 3)).at[:, 2].set(0.1 * OMEGA_PE * mass_electron / e_charge)
+
+    def leaves():
+        out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=external_B).run(
+            60, store_every=20, store_particles=False)
+        return [np.asarray(a) for a in jax.tree.leaves((out.state, out.E, out.J, out.rho, out.wall))]
+
+    now = leaves()
+    # the run is compiled once per configuration, and the configuration has not changed
+    jax.clear_caches()
+    monkeypatch.setattr(Simulation, "_inject", _inject_step_as_it_was)
+    before = leaves()
+    jax.clear_caches()
+    assert len(now) == len(before) > 10
+    assert all(np.array_equal(a, b) for a, b in zip(now, before))
+
+
+def test_every_is_a_whole_number_of_steps():
+    """``every`` sets a schedule and is a static integer, at least one."""
+    assert maxwellian_source(4).every == 1
+    assert maxwellian_source(4, every=np.int64(3)).every == 3
+    for bad in (0, -2, 2.5, True, "3"):
+        with pytest.raises(ValueError, match="whole number of steps"):
+            maxwellian_source(4, every=bad)
+
+
+def test_a_window_of_k_steps_is_emitted_at_once_and_spread_along_its_orbits():
+    """With ``every = k`` the particles of one emission stand for ``k`` steps of flux: each
+    carries :math:`\\Gamma k\\Delta t/N_{\\rm emit}`, and the one that crossed the plane at the
+    fraction :math:`s_j` of the window stands where its orbit has taken it since, not on the
+    plane. In a uniform field the orbit is a closed form: :math:`x = x_w + v_0\\tau + a\\tau^2/2`
+    at :math:`\\tau = (1 - s_j)k\\Delta t`, with the velocity taken back to :math:`t^n`,
+    :math:`v_0 + a(\\tau - \\Delta t/2)`. Piling the window onto the plane would put all of them
+    at :math:`x_w`, and a stream of sheets ``k`` steps apart is not a quiet one."""
+    k, emit, slots, dt, length, v0, E0 = 5, 8, 32, 1e-9, 1e-2, 1e5, 2e3
+    over_mass = e_charge / (1e4 * mass_electron)
+    source = Source(density=DENSITY, vth=0.0, drift=(v0, 0, 0), emit=emit, every=k)
+
+    def push(v, fields, qm, interval):
+        return boris(v, fields[:, :3], fields[:, 3:], qm[:, None], interval)
+
+    empty = jnp.zeros((slots, 3))
+    x, v, w, qm, weight, entering, overflow = inject(
+        random.PRNGKey(0), source, (0, slots), empty, empty, jnp.zeros(slots), jnp.zeros(slots), over_mass, dt,
+        length, jnp.array([E0, 0.0, 0.0, 0.0, 0.0, 0.0]), push)
+    fresh = np.asarray(w) > 0
+    assert fresh.sum() == emit and float(overflow) == 0.0
+    assert float(weight) == pytest.approx(DENSITY * v0 * k * dt / emit, rel=1e-14, abs=0)
+    assert np.all(np.asarray(entering)[:, 0] == v0)            # what the reservoir sent, not the back-dated
+    tau = (1 - (np.arange(emit) + 0.5) / emit) * k * dt
+    a = over_mass * E0
+    # the arrays hold them in slot order; the orbit is monotonic in tau, so sort both
+    assert np.sort(np.asarray(x)[fresh, 0]) == pytest.approx(np.sort(-length / 2 + v0 * tau + 0.5 * a * tau ** 2),
+                                                             rel=1e-13, abs=0)
+    assert np.sort(np.asarray(v)[fresh, 0]) == pytest.approx(np.sort(v0 + a * (tau - dt / 2)), rel=1e-13, abs=0)
+    assert np.all(np.asarray(qm)[fresh] == over_mass)
+
+
+def test_emitting_every_k_steps_puts_in_the_prescribed_flux_window_by_window():
+    """A source with ``every = k`` emits on the last step of each window of ``k`` and on no
+    other: the ledger moves by exactly :math:`\\Gamma k\\Delta t` there and not at all
+    between, so any ``k`` consecutive steps hold one window, and after a whole number of
+    windows the emitted weight is the one ``every = 1`` emits, :math:`\\Gamma t`. Every live
+    particle carries :math:`\\Gamma k\\Delta t/N_{\\rm emit}`."""
+    domain = box(particle_bc="absorbing", field_bc=("open", "absorbing"))
+    k, steps, emit, tenuous = 5, 40, 7, 1e-6 * DENSITY
+    flux = tenuous * SIGMA / np.sqrt(2 * np.pi)
+    species = Species("electrons", 400, -1.0, mass_electron, 0.0,
+                      source=Source(density=tenuous, vth=(np.sqrt(2) * SIGMA, 0, 0), emit=emit, every=k))
+    out = Simulation(domain, [species], Solver(model="electrostatic")).run(
+        steps, store_every=1, store_particles=False)
+    ledger = np.asarray(out.wall.injected)[:, 0, 0]
+    added = np.diff(np.concatenate([[0.0], ledger]))
+    emitting = np.asarray(out.steps) % k == 0                  # steps k-1, 2k-1, ...: stored after them
+    assert emitting.sum() == steps // k
+    assert np.all(added[~emitting] == 0.0)
+    assert added[emitting] == pytest.approx(flux * k * domain.dt, rel=1e-12, abs=0)
+    assert np.convolve(added, np.ones(k), "valid") == pytest.approx(flux * k * domain.dt, rel=1e-12, abs=0)
+    assert ledger[-1] / (steps * domain.dt) == pytest.approx(flux, rel=1e-12, abs=0)
+    w = np.asarray(out.state.w)
+    assert w[w > 0] == pytest.approx(flux * k * domain.dt / emit, rel=1e-12, abs=0)
+
+
+@functools.lru_cache(maxsize=None)
+def _free_stream(every, seeds):
+    """Density profile over a late window, and live particle count, of a tenuous drifting
+    reservoir streaming across an empty box, one run per seed: see the two tests below."""
+    cells, steps, emit, tenuous = 10, 3200, 10, 1e-10 * DENSITY
+    # v k dt = 0.25 dx at the mean crossing speed 3.3 sigma and k = 20, and a residence of 800 steps
+    domain = box(cells=cells, steps_per_plasma_period=264.0, particle_bc="absorbing", field_bc="reflective")
+    source = Source(density=tenuous, vth=(np.sqrt(2) * SIGMA,) * 3, drift=(3 * SIGMA, 0, 0), emit=emit,
+                    every=every)
+    species = Species("electrons", 12000 // every if every > 1 else 12000, -1.0, mass_electron, 0.0,
+                      source=source)
+
+    def run(seed):
+        out = Simulation(domain, [species], Solver(model="electrostatic")).run(
+            steps, seed=seed, store_every=steps // 4, store_particles=False, moments=True)
+        # the window from half-way to the end, in units of the reservoir density
+        return ((out.moments[-1] - out.moments[1])[0, 0] / (steps // 2) / tenuous,
+                jnp.sum(out.state.w > 0), out.overflow[-1])
+
+    profiles, live, overflow = jax.vmap(run)(jnp.asarray(seeds))
+    assert np.all(np.asarray(overflow) == 0.0)
+    return np.asarray(profiles), np.asarray(live)
+
+
+def test_emitting_every_k_steps_leaves_the_streaming_density_where_it_was():
+    """A drifting reservoir (u = 3 sigma, so no slow tail to wait for) streams freely across
+    an empty box, and the late-time density with ``every = 20`` is the one ``every = 1``
+    gives, cell by cell, within the noise measured from eight seeds of the first: the
+    standard error of their mean, four of them allowed. The reference emits twenty times the
+    draws and is not counted in that error, which only makes the test stricter.
+
+    The one exception is the plane's own cell, and it is expected: a particle is in the box
+    only from the emission after it crossed, so within :math:`v k\\Delta t` of the plane --
+    0.25 of a cell here, at the mean crossing speed -- the density is short by a ramp. It
+    takes 7 % from the first cell and nothing measurable from the rest."""
+    reference, _ = _free_stream(1, (0,))
+    windows, _ = _free_stream(20, tuple(range(8)))
+    reference, mean = reference[0], windows.mean(axis=0)
+    error = windows.std(axis=0, ddof=1) / np.sqrt(len(windows))
+    assert np.all(error[1:] < 0.02) and np.all(error > 0)     # the noise is measured, and it is small
+    assert np.all(np.abs(mean[1:] - reference[1:]) < 4 * error[1:])
+    assert np.mean(reference[1:-1]) == pytest.approx(0.9987, abs=0.02)   # n Phi(3), the half-space in front
+    assert 0.03 < (reference[0] - mean[0]) / reference[0] < 0.12        # the ramp, and only there
+
+
+def test_emitting_every_k_steps_divides_the_pool_by_k():
+    """The pool a species needs is what is alive at once, ``emit / every`` times the residence
+    in steps: the same stream at ``every = 20`` holds a twentieth of the particles, which is
+    what makes a residence of a million steps affordable."""
+    _, live_every_step = _free_stream(1, (0,))
+    _, live_every_twenty = _free_stream(20, tuple(range(8)))
+    assert live_every_step[0] > 5000
+    assert live_every_step[0] / live_every_twenty.mean() == pytest.approx(20, rel=0.05, abs=0)
+
+
+def test_the_charge_closes_with_a_source_that_emits_every_k_steps():
+    """The discrete Gauss law, the independent charge balance and the floating collector's
+    current closure hold to round-off with ``every > 1`` as with one: on an idle step the
+    source adds nothing to the arrays and nothing to the ledger, and on an emitting one it adds
+    the same thing to both."""
+    domain = box(cells=32, particle_bc="absorbing", field_bc=("open", "absorbing"))
+    electrons = Species("electrons", 4000, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA,) * 3,
+                        active=1000, sampling="quiet",
+                        source=maxwellian_source(12, density=1.1149 * DENSITY, every=2))
+    ions = Species("ions", 4000, 1.0, 1836 * mass_electron, DENSITY, 0.0, (0.2 * SIGMA, 0, 0),
+                   active=1000, sampling="quiet",
+                   source=Source(density=DENSITY, vth=0.0, drift=(0.2 * SIGMA, 0, 0), emit=15, every=5))
+    out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(
+        120, store_every=1, store_particles=False)
+    assert out.problems == ()
+    assert float(out.wall.injected[-1, 1, 0]) > 0 and float(out.wall.arrived[-1, 0, 1]) > 0
+    assert np.asarray(charge_balance(out)).max() < 1e-12
+    assert np.asarray(gauss_residual(out)).max() < 1e-12
+    J, E = np.asarray(out.J)[:, :, 0], np.asarray(out.E)[:, :, 0]
+    residual = J[1:] + epsilon_0 * (E[1:] - E[:-1]) / float(domain.dt)
+    assert np.abs(residual).max() < 1e-12 * np.abs(J[1:]).max()
+
+
+def test_a_particle_emitted_past_the_far_wall_is_collected_on_the_step_it_was_emitted():
+    """A window long enough for a particle to cross the whole box places it beyond the far
+    wall. It is left there on purpose: the collector holds its whole cloud as surface charge,
+    and the wall law of the same step takes it, so the ledger records the impact -- at the
+    speed it arrived with -- on the step the source emitted it, and the charge closes.
+
+    A beam crossing 0.3 of the box a step, emitted ten at a time every ten steps, stands at
+    depths :math:`(1 - s_j)\\,3L`; the eight with :math:`s_j < 0.767` reach the wall by the end of
+    the step and the other two are still inside."""
+    length, cells, v0, k, emit = 1e-2, 16, 1e5, 10, 10
+    mass = 1e4 * mass_electron
+    domain = Domain(length=length, cells=cells, time_step=0.3 * length / v0, particle_bc="absorbing",
+                    field_bc=("open", "absorbing"))
+    beam = Species("beam", 200, 1.0, mass, 0.0,
+                   source=Source(density=1e6, vth=0.0, drift=(v0, 0, 0), emit=emit, every=k))
+    out = Simulation(domain, [beam], Solver(model="electrostatic")).run(k, store_every=1)
+    weight = 1e6 * v0 * k * domain.dt / emit
+    arrived, injected = np.asarray(out.wall.arrived)[:, 0, 1], np.asarray(out.wall.injected)[:, 0, 0]
+    assert np.all(arrived[:-1] == 0) and np.all(injected[:-1] == 0)          # nothing before the window closes
+    assert injected[-1] == pytest.approx(emit * weight, rel=1e-12, abs=0)
+    assert arrived[-1] == pytest.approx(8 * weight, rel=1e-12, abs=0)
+    # at the speed they crossed with, to the beam's own feeble field
+    assert float(out.wall.energy_in[-1, 0, 1]) == pytest.approx(8 * weight * 0.5 * mass * v0 ** 2, rel=1e-8, abs=0)
+    assert int(np.sum(np.asarray(out.state.w) > 0)) == 2
+    assert np.all(np.abs(np.asarray(out.x[-1])[np.asarray(out.weight[-1]) > 0, 0]) < length / 2)
+    assert np.asarray(charge_balance(out)).max() < 1e-12
+
+
+def test_a_sheath_fed_every_k_steps_is_differentiable_in_the_reservoir():
+    """The weight :math:`\\Gamma k\\Delta t/N_{\\rm emit}` is a smooth function of the reservoir
+    density, and an idle step passes the arrays through a ``cond`` rather than dividing by
+    anything, so the derivative of a sheath observable -- the wall potential of a floating
+    collector -- with respect to the ion reservoir is finite, nonzero, and the slope of the
+    observable itself."""
+    domain = box(cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
+
+    def wall_potential(ion_density):
+        electrons = Species("electrons", 1500, -1.0, mass_electron, 0.0,
+                            source=maxwellian_source(6, density=1e-2 * DENSITY, every=2))
+        ions = Species("ions", 1500, 1.0, 400 * mass_electron, 0.0,
+                       source=Source(density=ion_density, vth=0.0, drift=(0.2 * SIGMA, 0, 0), emit=8, every=4))
+        out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(40, store_particles=False)
+        return potential(out)[-1, -1]
+
+    density = 1e-2 * DENSITY
+    slope = float(jax.grad(wall_potential)(density))
+    assert np.isfinite(slope) and slope != 0.0
+    step = 1e-4 * density
+    secant = (float(wall_potential(density + step)) - float(wall_potential(density - step))) / (2 * step)
+    assert slope == pytest.approx(secant, rel=1e-4, abs=0)

@@ -152,17 +152,17 @@ def _boundary_codes(value, name):
     return tuple(int(c) for c in codes)
 
 
-@pytree_dataclass(static=("side", "emit", "model"))
+@pytree_dataclass(static=("side", "emit", "model", "every"))
 class Source:
     """A maintained inflow of one species through one wall: a reservoir of plasma
     behind the plane that supplies a prescribed flux, independently of what leaves.
 
     The distribution behind the plane is a Maxwellian at rest or a cold beam; the
     flux that crosses is the velocity density weighted by the normal speed
-    (:mod:`~jaxincell._sources`). A fixed number of particles is emitted every step
-    with a continuous weight :math:`\\Gamma\\Delta t/N_{\\rm emit}`, so the emitted
-    weight is exactly the prescribed flux and is differentiable in ``density`` and
-    ``vth``.
+    (:mod:`~jaxincell._sources`). A fixed number of particles is emitted once every
+    ``every`` steps with a continuous weight :math:`\\Gamma k\\Delta t/N_{\\rm emit}`,
+    :math:`k` being ``every``, so the emitted weight is exactly the prescribed flux and is
+    differentiable in ``density`` and ``vth``.
 
     Args:
         density: Reservoir number density :math:`n_{\\rm in}`, :math:`\\mathrm{m^{-3}}`.
@@ -191,9 +191,23 @@ class Source:
             ``density`` is still the reservoir's density, and the flux follows from the two.
             ``vth`` and ``drift`` are then unused. It is data rather than a model, so the
             emitted weight is differentiable in ``density`` and not in the samples.
-        emit: Particles emitted per step. They occupy the dead slots of the
+        emit: Particles emitted at each emission. They occupy the dead slots of the
             species, so the species needs enough of them: ``n`` must exceed
-            ``emit`` times the longest residence time in steps.
+            ``emit / every`` times the longest residence time in steps.
+        every: Steps between emissions, :math:`k`. One emits on every step. More emits
+            ``emit`` particles once every :math:`k` steps, each carrying :math:`k` steps'
+            worth of flux and spread over the window they stand for: the one that crossed
+            the plane at the fraction :math:`s_j = (j+\\tfrac12)/N_{\\rm emit}` of it is placed
+            where its orbit has taken it since. The flux is unchanged and the pool the
+            species needs falls by :math:`k`, which is what a species whose residence is
+            hundreds of thousands of steps needs. The field at the plane is held over the
+            window, so :math:`k` is bounded by the entry's own resolution: the distance an
+            entering particle covers in :math:`k\\Delta t` small against a cell, and its
+            gyro-angle :math:`|\\Omega|k\\Delta t` small against one. Within
+            :math:`v_xk\\Delta t` of the plane the density is short by a ramp, because a
+            particle is only in the box from the emission after it crossed. The first
+            emission is on step :math:`k-1`, so that after any whole number of windows the
+            emitted weight equals ``every = 1``'s. Static, since it sets the schedule.
         min_weight: Fraction of the emitted weight below which a wall collects
             what is left of a particle instead of reflecting it again, freeing its
             slot. A wall that returns the fraction :math:`R` of each impact would
@@ -210,6 +224,7 @@ class Source:
     model: object = None
     min_weight: float = 1e-3
     samples: object = None
+    every: int = 1
 
     def __post_init__(self):
         if _template(self):
@@ -219,7 +234,11 @@ class Source:
         for name in ("vth", "drift"):
             object.__setattr__(self, name, _components(getattr(self, name), name))
         _require(self.side in ("left", "right"), f"side is 'left' or 'right', not {self.side!r}")
-        _require(self.emit >= 1, "a Source emits at least one particle per step")
+        _require(self.emit >= 1, "a Source emits at least one particle per emission")
+        _require(isinstance(self.every, (int, np.integer)) and not isinstance(self.every, bool)
+                 and self.every >= 1,
+                 f"every is a whole number of steps between emissions, at least one, not {self.every!r}")
+        object.__setattr__(self, "every", int(self.every))
         _require(not _plain(self.density) or self.density >= 0,
                  f"a Source density cannot be negative, not {self.density!r}")
         _require(not _plain(self.min_weight) or 0 <= self.min_weight <= 1,

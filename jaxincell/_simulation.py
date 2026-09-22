@@ -512,7 +512,8 @@ class Simulation:
         no source exactly as it was."""
         if not self.sources:
             return 0.0
-        floors = [jnp.broadcast_to(sp.source.min_weight * crossing_flux(sp.source) * self.domain.dt / sp.source.emit
+        floors = [jnp.broadcast_to(sp.source.min_weight * crossing_flux(sp.source) * self.domain.dt
+                                   * sp.source.every / sp.source.emit
                                    if sp.source is not None else 0.0, (sp.n,)) for sp in self.species]
         return jnp.concatenate(floors)
 
@@ -603,14 +604,19 @@ class Simulation:
                                 [per_species(arrived * (m * u_in[:, k]) - returned * (m * u_out[:, k]))
                                  for k in range(3)], axis=-1))
 
-    def _inject(self, key, x, u, w, qm, wall, E, B, rho):
-        """Emit one step's worth of every source into the dead slots of its species.
+    def _inject(self, key, x, u, w, qm, wall, E, B, rho, step):
+        """Emit what every source owes into the dead slots of its species.
 
         The particles enter at a quiet quadrature of times across the interval that ends at
         the position the leapfrog carries, and each is given the partial trajectory of
         :func:`~jaxincell._sources.inject` in the field at its entry plane, so that the
         deposit at the end of this step already sees it and the one full-step push the loop
-        applies afterwards is the push it should have had."""
+        applies afterwards is the push it should have had.
+
+        A source with ``every = k`` emits on the steps ``step`` (absolute, counted from the
+        start of the first run) with ``(step + 1) % k == 0``, the window of the ``k`` steps
+        that end there, and does nothing on the others: the arrays and the ledger pass through
+        unchanged, and neither the draw nor the partial sort of the pool is done."""
         if not self.sources:
             return x, u, w, qm, wall
         d = self.domain
@@ -626,15 +632,31 @@ class Simulation:
                 continue
             key, k = random.split(key)
             plane = jnp.full((1, 3), (-1.0 if sp.source.side == "left" else 1.0) * d.length / 2)
-            x, v, w, qm, weight, entering, spill = inject(k, sp.source, block, x, self._velocity(u), w, qm,
-                                                          sp.charge_si / sp.mass, d.dt, d.length,
-                                                          self._fields_at(plane, E, B, rho)[0], push)
-            u = self._momentum(v)
+
+            def emit(arrays, k=k, sp=sp, block=block, plane=plane):
+                x, u, w, qm = arrays
+                x, v, w, qm, weight, entering, spill = inject(k, sp.source, block, x, self._velocity(u), w, qm,
+                                                              sp.charge_si / sp.mass, d.dt, d.length,
+                                                              self._fields_at(plane, E, B, rho)[0], push)
+                carried = self._momentum(entering)      # the velocities as the pusher will carry them
+                return ((x, self._momentum(v), w, qm), weight * sp.source.emit,
+                        weight * jnp.sum(self._kinetic(sp.mass, carried)),
+                        weight * sp.mass * jnp.sum(carried, axis=0), spill)
+
+            def idle(arrays):
+                zero = jnp.zeros((), w.dtype)
+                return arrays, zero, zero, jnp.zeros(3, w.dtype), zero
+
+            if sp.source.every == 1:
+                arrays, charge, work, push_in, spill = emit((x, u, w, qm))
+            else:
+                arrays, charge, work, push_in, spill = lax.cond((step + 1) % sp.source.every == 0,
+                                                                emit, idle, (x, u, w, qm))
+            x, u, w, qm = arrays
             side = 0 if sp.source.side == "left" else 1
-            carried = self._momentum(entering)      # the velocities as the pusher will carry them
-            injected = injected.at[i, side].add(weight * sp.source.emit)
-            energy = energy.at[i, side].add(weight * jnp.sum(self._kinetic(sp.mass, carried)))
-            momentum = momentum.at[i, side].add(weight * sp.mass * jnp.sum(carried, axis=0))
+            injected = injected.at[i, side].add(charge)
+            energy = energy.at[i, side].add(work)
+            momentum = momentum.at[i, side].add(push_in)
             overflow = jnp.maximum(overflow, spill)
         return x, u, w, qm, wall.replace(injected=injected, energy_injected=energy,
                                          momentum_injected=momentum, overflow=overflow)
@@ -934,7 +956,8 @@ class Simulation:
         # What the sources supplied over the interval ending at the position the leapfrog
         # carries. They enter first, so the deposit below already counts them and no charge
         # appears between the two halves of the step.
-        x_half, u, w, qm, wall = self._inject(k_source, st.x, st.u, st.w, st.qm, st.wall, st.E, st.B, st.rho)
+        x_half, u, w, qm, wall = self._inject(k_source, st.x, st.u, st.w, st.qm, st.wall, st.E, st.B, st.rho,
+                                              st.steps)
         v = self._velocity(u)
         # First half step: sources from the motion x^n -> x^{n+1/2}. The density at x^n
         # is the one the previous step ended on (or the initial one), carried in the

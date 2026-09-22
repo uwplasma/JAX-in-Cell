@@ -22,11 +22,12 @@ component spread :math:`\\sigma` that makes the normal speed Rayleigh
 distributed, :math:`v_n = \\sigma\\sqrt{-2\\ln U}`, and
 :math:`\\Gamma = n\\sigma/\\sqrt{2\\pi}`.
 
-Each step emits a fixed number of particles carrying a continuous weight
+Every :math:`k` steps (``Source.every``, one by default) the source emits a fixed number
+of particles carrying a continuous weight
 
-.. math:: w = \\Gamma\\,\\Delta t/N_{\\rm emit},
+.. math:: w = \\Gamma\\,k\\Delta t/N_{\\rm emit},
 
-so the emitted weight is exactly :math:`\\Gamma\\Delta t` and is a differentiable
+so the emitted weight is exactly :math:`\\Gamma k\\Delta t` and is a differentiable
 function of the reservoir's density and temperature. A count that changed with
 the flux would not be: a particle number is an integer, and
 :math:`\\lfloor\\Gamma\\Delta t/w\\rfloor` has derivative zero almost everywhere.
@@ -181,8 +182,9 @@ def sample_crossing(key, source, n, inward):
 
 
 def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length, field, push):
-    """Emit one step's worth of the reservoir's flux into the dead slots of one
-    species block, and return the new arrays and what was emitted.
+    """Emit one window's worth of the reservoir's flux into the dead slots of one
+    species block, and return the new arrays and what was emitted. The window is
+    :math:`k` steps, ``source.every``, and one unless a source says otherwise.
 
     A slot is dead when its weight has reached zero: :func:`~jaxincell._core.apply_particle_bc`
     parks such a particle beyond the wall with no weight and no charge-to-mass ratio, where
@@ -206,6 +208,19 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length, field,
     and is what makes a magnetised entry keep its gyro-phase. Streaming freely instead leaves
     an error of order :math:`(q/m)|E|\\Delta t/v` in the entry velocity of every particle.
 
+    **A window of** :math:`K` **steps**, ``source.every``, is the same construction over
+    :math:`(t^{n+1/2} - K\\Delta t, t^{n+1/2}]`: the particle entered at
+    :math:`t^{n+1/2} - (1 - s_k)K\\Delta t`, flies :math:`(1 - s_k)K\\Delta t` to where the
+    position is carried, and its velocity is taken back over
+    :math:`[(1 - s_k)K - \\tfrac12]\\Delta t` to :math:`t^n`. At :math:`K=1` both are the
+    expressions above, operation for operation, and each particle carries :math:`K` steps of
+    flux. Spreading the entries over the window rather than stacking them on the plane is what
+    keeps the injected stream as quiet as one emitted every step; holding the field at the plane
+    over the whole window is what bounds :math:`K`. A particle whose flight takes it past the
+    far wall, or back behind its own, is placed there all the same: the wall law of the same
+    step then acts on it, so an absorbing wall collects it on the step it was emitted and its
+    ledger counts it, having held its whole cloud as surface charge in between.
+
     It is emitted at the top of a step, so the deposit of that step already counts it and no
     charge appears between the two halves of the step with no current to account for it.
 
@@ -217,16 +232,17 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length, field,
     start, n = block
     emit = source.emit
     inward = 1.0 if source.side == "left" else -1.0
-    weight = crossing_flux(source) * dt / emit
+    every = source.every
+    weight = crossing_flux(source) * dt * every / emit
     velocity = sample_crossing(key, source, emit, inward)
     fraction = (jnp.arange(emit) + 0.5) / emit
-    flight = (1.0 - fraction) * dt
+    flight = (1.0 - fraction) * every * dt
     wall = -inward * length / 2                                  # the left wall is at -L/2 and sends +x
     at_plane = jnp.broadcast_to(field, (emit, 6))
     acceleration = charge_over_mass * (at_plane[:, :3] + jnp.cross(velocity, at_plane[:, 3:]))
     entry = wall + velocity[:, 0] * flight + 0.5 * acceleration[:, 0] * flight ** 2
     carried = push(velocity, at_plane, jnp.full((emit,), charge_over_mass),
-                   ((0.5 - fraction) * dt)[:, None])
+                   ((every - 0.5 - every * fraction) * dt)[:, None])
     # the tangential coordinates are ignorable and periodic; start on the plane
     position = jnp.stack([entry, jnp.zeros(emit), jnp.zeros(emit)], axis=1)
     # dead slots first: the emit smallest weights in the block
@@ -258,6 +274,6 @@ def check_sources(species, solver, domain):
             raise ValueError(f"the {s.source.side} wall must be particle_bc='absorbing' for a Source on it: "
                              "a reservoir takes back whatever reaches it.")
         if s.source.emit > s.n:
-            raise ValueError(f"species {s.name!r} emits {s.source.emit} particles a step into {s.n} slots. "
+            raise ValueError(f"species {s.name!r} emits {s.source.emit} particles at a time into {s.n} slots. "
                              "Species.n is the capacity of the pool, and it has to hold every particle alive "
-                             "at once: at least emit times the longest residence time in steps.")
+                             "at once: at least emit / every times the longest residence time in steps.")
