@@ -931,6 +931,10 @@ figure 6 reproduced, and references for the rehearsal, matched and scan cases in
 3. **The same paper figures here** (branch `work/longyu-figures`, pushed, work in progress: a
    shared two-stream setup and a `fig_explicit_implicit.py` exist). Finish, review the PNGs, add
    them to the README 1D1V section and the docs, and merge into this branch.
+   **Done 2026-09-23:** `explicit_implicit.png` (conservation page) and `runtime_resolution.png`
+   (performance page) are in, with the README 1D1V rows. Left: the CPU timings are from the
+   laptop at load 57.5 and non-monotonic at 2000; re-time with `fig_runtime.py` on an idle
+   machine (the office Xeon with `JAX_PLATFORMS=cpu`, then GPU 1) and redraw.
 4. **GYRAZE (W8).** The rehearsal (`--gamma=0.5377 --reference=rehearsal-M400-a5-gDS0.2`) runs on
    office GPU 0 in `~/w8/rehearsal` from code at bfd6f90; read `run.log` when `done` appears. The
    k=7 control was stopped to lend GPU 1 to timings: restart it in `~/w8/control` with the same
