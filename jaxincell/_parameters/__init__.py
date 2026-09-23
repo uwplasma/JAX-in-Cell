@@ -1,5 +1,6 @@
 from ._domain_parameters import *
 from ._external_field_parameters import *
+from ._export_parameters import *
 from ._solver_parameters import *
 from ._source_parameters import *
 from ._species_definitions import *
