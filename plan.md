@@ -486,10 +486,15 @@ boundary and is not the first validation. Any angle scan stays well below 5 degr
 
 Three traps found by inspecting the source rather than the documentation:
 
-- **`gammaflag` is documented after all.** `1` defines `gamma` at the Debye-sheath entrance, `0`
-  at the magnetic-presheath entrance, and the README says `0` is "ALWAYS the appropriate choice
-  for matching to a code outside of the magnetic presheath". Use `0`, and record both the flag
-  and the resulting definition in the manifest.
+- **`gammaflag`: the README has it backwards, the source and figure 6 agree.** The README says `1`
+  defines `gamma` at the Debye-sheath entrance and `0` at the magnetic-presheath entrance. The C does
+  the opposite: flag `0` sets `gamma_DS = gamma_ref`, so `gamma_ref` *is* `rho_e/lambda_D` at the
+  Debye-sheath entrance, and flag `1` sets `gamma_DS = gamma_ref sqrt(n_e,DSE)`, the entrance value
+  carried in (a flag-1 run given `0.3/sqrt(0.071033)` printed `gamma_DS = 0.299745`). Figure 6 --
+  `gamma = rho_e/lambda_{D,DS} = 0.3` -- reproduces with flag `0`. Use `0` (flag `1` re-evaluates
+  `gamma_DS` inside the loop and had not converged on the figure-6 case after 410 iterations), record
+  in the manifest that `gamma_ref` is the Debye-sheath-entrance value, and give the PIC run the entrance
+  value `gamma_DS/sqrt(n_e,DSE)` (W8, "The references, generated", below).
 - **The wall-potential sign differs between the printout and the file.** The code prints
   `eφ_W/T_e = -0.5 v_cut^2` but stores `+0.5 v_cut^2` in `misc_output.txt`. The stored number is
   a magnitude.
@@ -684,12 +689,105 @@ resolved: the run keeps no error bar, `k = 4` carries a quarter of the ion marke
 unmagnetised quick sheath's own standard error was 0.06-0.07. The control that decides it is the
 rehearsal-size one below, with an error bar.
 
-**Next:** time 14 000 steps of the rehearsal (`--transits=0.03`) on the office A4000 to measure the
-per-step cost at this pool, a few minutes; then the rehearsal on whichever is faster (about 4 h on this
-laptop), once more with `--every=7` as the control that the result does not depend on `k`, the two
-wall potentials compared against a block-averaged standard error of the late window; then
-`--matched` on the A4000, 3.5-7 h if the per-particle rate holds and about 15 h on this laptop if it
-does not.
+#### The references, generated (W8)
+
+Built at the pinned commit in `~/local/GYRAZE-ref` against MacPorts GSL 2.8:
+`make -B PROFILE=release CFLAGS="-Wall -O3 -I/opt/local/include" LDFLAGS="-O3 -L/opt/local/lib -lgsl
+-lgslcblas -lm"`. Figure 6 reproduces to the printed digit: `(-2.410640, -2.822029)`, current
+`0.000088`, 43 iterations, and the same six `misc_output.txt` numbers as above. Every case runs in its own
+directory under `~/local/gyraze-runs/<case>/` through `run_case.py` there (writes the two input files,
+runs the binary, lifts the final outputs out of GYRAZE's nested `OUTPUT/` tree and deletes the iteration
+histories; clean means exit status 0 **and** "MP+DS combined iteration converged"), and
+`make_manifest.py` writes `manifest.json` beside the outputs, refusing a run that did not exit cleanly.
+All of it stays outside the repository; the four clean cases are copied to `office:~/gyraze-runs/`.
+
+| case (`gammaflag=0`, `gamma_DS=0.2`, `tau=1`, floating wall) | `(phi_DSE, phi_wall)` | plan's table | `n_e,DSE` | entrance `gamma` that matches | `epsilon = lambda_D,DSE/rho_B` |
+|---|---|---|---|---|---|
+| `rehearsal-M400-a5-gDS0.2` | -1.577109, -1.678860 | -1.5771, -1.6789 | 0.1384 | 0.5377 | 0.25 |
+| `matched-M900-a4-gDS0.2` | -1.882981, -2.083706 | -1.8830, -2.0837 | 0.1108 | 0.6009 | 0.167 |
+| `scan-M900-a3-gDS0.2` | -1.958526, -2.072392 | -1.9585, -2.0724 | 0.0946 | 0.6502 | 0.167 |
+| `scan-M900-a5-gDS0.2` | -1.806034, -2.094028 | -1.8060, -2.0940 | 0.1264 | 0.5626 | 0.167 |
+
+Each manifest holds: the commit, date, paper version and build; the licence and provenance; the case
+and the numerical-parameter file's hash; exit status, iterations, `(phi_DSE, phi_wall)` and
+`misc_output.txt` under the C's names; the definition of `gamma` above; both orientations and potential
+references; every normalisation; the conversion to this code's units; both entrance distributions,
+checked against the closed forms rather than assumed (ions `0.2535-0.2541` against `2/(2 pi sqrt(pi/2))
+= 0.2540` times `U exp(-U-mu)` over the bulk, electrons `0.0632-0.0641` against `(2 pi)^(-3/2)`); the
+Debye reference density; each file's zero-padding row; `epsilon` and `alpha`; and each file's sha256.
+
+**Two more normalisation traps, from the source, and the example had both.** (1) `phi_n_MP.txt`'s `x`
+is in the **Bohm** gyroradius `rho_B = sqrt(Z T_e m_i)/(ZeB) = rho_S/sqrt(1+tau)`, not `rho_S`: the
+orbit code writes `chi = (x - xbar)^2/2 + Z phi/tau` in the thermal `rho_i` and is handed
+`x_grid/sqrt(tau)`. (2) `phi_n_DS.txt`'s `x` is in `rho_e = sqrt(T_e m_e)/(eB)`, not `lambda_D`: the
+sheath Poisson equation is solved as `phi''/gamma_DS^2 = n_e - n_i`. Both are fixed by `B` alone, so in
+this code `rho_e = gamma lambda_D` and `rho_B = sqrt(M) gamma lambda_D` whatever the density. So the
+figure-6 presheath above is `25 rho_B = 17.7 rho_S` and its Debye sheath `83 rho_e = 25 lambda_D,DS`;
+the 719-Debye-length arithmetic overstates that box, and its conclusion stands.
+
+**The example as written is not the reference's problem, and it cannot be.** Its `gamma = 0.2` is at the
+entrance plane, so its Debye sheath has `gamma_DS = 0.2 sqrt(n_e,DSE) = 0.067-0.074` and
+`epsilon = 0.5-0.67`: no separation of scales at all. GYRAZE cannot supply that case: below its
+`SMALLGAMMA = 0.19999` it replaces the Debye-sheath solve by a one-number model (a one-line
+`phi_n_DS.txt`) and then aborts with SIGABRT in all four cases (kept as `aborted-*-gup0.2`, not
+references; wall potentials 0.02-0.03 `T_e/e` above the table's), and forcing the solve at
+`SMALLGAMMA = 0.05` was killed by the OS within a minute. The matched run therefore takes the entrance
+`gamma` the manifest names, through the example's new `--gamma=G`, which is what makes it `epsilon =
+0.25` and `0.167` -- and costs more, because `rho_s/lambda_D` grows with it.
+
+**The comparison, and its predeclared tolerances** (`grazing_sheath.py`, `--reference=DIR`). The two
+reference layers are joined the matched-asymptotic way (potentials add, densities multiply, the sheath
+layer is 0 and 1 past its padded far end) at this run's distance from the wall; the example stops before
+the run if the manifest is incomplete or GYRAZE did not exit cleanly, and says so when the case differs
+from the run's. A number passes when `|run - reference| <= 3 SE + (max(epsilon, alpha) + (dx/l)^2) scale`:
+`SE` is the standard error of four block means of the late window; `max(epsilon, alpha)` is the first
+order the reference drops, coefficient one because no coefficient is computed; `(dx/l)^2` is the
+second-order deposit and field solve on the layer's scale (`lambda_D,DSE` in the sheath, `rho_B` in the
+presheath); `scale` is the layer's own drop. Compared: the wall potential and the mean ion impact energy
+(`scale = |phi_wall|`), the Debye-sheath drop from the wall to where the reference sheath has done 90 %
+of its drop, the largest potential and ion and electron density differences over the presheath beyond
+that point and out of the source's run-up (`scale` = the reference's drop and density range there), and
+the ion flux to the wall (`sum_flux_i n_0 sqrt(T_e/m_e) sin alpha`; the entrance distribution fixes it in
+both, so only `3 SE`). The mean impact energy is `sum_Q_i/sum_flux_i + |phi_wall|` -- each ion's energy
+is conserved in static fields, and `sum_Q_i/sum_flux_i = 2.99` is the entrance flux's `3 tau`. The
+energy-angle distribution is **not** compared: `Fi_W.txt` holds the wall orbits' invariants, and making a
+distribution of them is GYRAZE's post-processing, which would have to be re-derived. At the rehearsal's
+`epsilon = 0.25` the wall-potential allowance is about 0.48 `T_e/e` plus `3 SE`, over a quarter of it: a
+weak test by construction, and the recorded difference, not the verdict, is the result.
+
+The quick preset against the rehearsal reference ran end to end in 159 s on this laptop, saying first
+that it is not the same problem (`M` 100 against 400, 15 against 5 degrees, `gamma` 0.2 against 0.5377):
+seven rows, the reference dashed on the potential and density panels, every number in `run.json`. Its
+ion flux, 0.0412, is its own `1.5958 sqrt(m_e/m_i) sin(15 deg) = 0.0413`, not the reference's 0.0070,
+so that row fails as it should. A timing slice that ends before any ion reaches the wall now says so and
+records `null`, where it used to divide by zero.
+
+**Measured cost, and the three GPU runs.** The office A4000 ran the 13 960-step rehearsal slice
+(`--transits=0.03`, `gamma = 0.2`, pools 46 540 ions at `k = 14` and 41 480 electrons) in 73 s including
+compilation, 5.2 ms a step at most: the rehearsal as written is 2.0 h there and `--matched` 5-7 h. The
+matched-`gamma` runs are larger. The range below scales that 73 s by steps alone (the launch-bound
+floor) and by steps times pool (the particle-bound ceiling):
+
+| run | cells | steps | pool capacities (ions, electrons) | one A4000 |
+|---|---|---|---|---|
+| rehearsal, `--gamma=0.5377` | 668 | 2.88e6 | 96 000, 85 600 (`k_i = 14`) | 4.2-8.6 h |
+| control, `--gamma=0.5377 --every=7` | 668 | 2.88e6 | 192 000, 85 600 | 4.2-13 h |
+| matched, `--matched --gamma=0.6009` | 1038 | 8.39e6 | 145 000, 166 000 (`k_i = 27`) | 12-43 h |
+
+On office, with `REPO` the checkout of this branch; each run writes `grazing_sheath/` (or
+`grazing_sheath_matched/`) under its working directory, so each gets its own, and they go one after
+another on one GPU:
+
+    mkdir -p ~/w8/rehearsal && cd ~/w8/rehearsal && python $REPO/examples/3_advanced/grazing_sheath.py --gamma=0.5377 --reference=$HOME/gyraze-runs/rehearsal-M400-a5-gDS0.2
+    mkdir -p ~/w8/control && cd ~/w8/control && python $REPO/examples/3_advanced/grazing_sheath.py --gamma=0.5377 --every=7 --reference=$HOME/gyraze-runs/rehearsal-M400-a5-gDS0.2
+    mkdir -p ~/w8/matched && cd ~/w8/matched && python $REPO/examples/3_advanced/grazing_sheath.py --matched --gamma=0.6009 --reference=$HOME/gyraze-runs/matched-M900-a4-gDS0.2
+
+The control halves `k` rather than setting `k = 1`: at `k = 1` the ion pool is the residence, 1.3e6
+markers, fourteen times the run it checks. The result is `k`-independent if the two wall potentials
+differ by less than `3 sqrt(SE_1^2 + SE_2^2)` from the two `run.json`s. `--markers=50` halves the
+particle-bound end of the matched run if 43 h is too long.
+Next after these: the 3 and 5 degree scan against `scan-M900-a{3,5}-gDS0.2` with `--gamma=0.6502` and
+`0.5626`, which needs an `--angle` knob the example does not have yet.
 
 ### 8.2 Electron-field instability (W10)
 
@@ -758,7 +856,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] **W5** TOML/CLI and persistence: one resolver, native archives, openPMD round trip. *(U09's axis label is W6, with the rest of the plotting.)*
 - [x] **W6** plots and movies: evolving weighted populations, diagnostic histories, bounded memory, headless tests.
 - [x] **W7** repair the four existing sheath and optimisation examples and their documentation. *(S15, S16, S04's second half, G05, U12 and S20 closed; every number on the four pages is from a run of the preset the page names, and the convergence table is a script.)*
-- [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension. *(GYRAZE pinned and reproduced; matched case moved to `M=900, gamma=0.2, alpha=4 deg`; `Source(every=k)` built and tested, which takes the matched run from about 100 GPU-hours to 3.5-7; next: time the rehearsal on the A4000, then run it and `--matched` -- see 8.1.)*
+- [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension. *(GYRAZE pinned and reproduced; matched case moved to `M=900, gamma=0.2, alpha=4 deg`; `Source(every=k)` built and tested; references for the rehearsal, the matched case and the 3 and 5 degree scan generated with manifests in `~/local/gyraze-runs` and on office; the example compares seven quantities against predeclared tolerances; two source-read traps found -- GYRAZE's `gamma` is at the Debye-sheath entrance and its axes are `rho_B` and `rho_e` -- so the matched runs need `--gamma=0.5377` and `0.6009`; next: the three A4000 runs in 8.1, then the scan.)*
 - [ ] **W9** model-comparison and Weibel examples on the existing kernels and shared theory.
 - [ ] **W10** electron-field instability with its limiting controls.
 - [ ] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering.
