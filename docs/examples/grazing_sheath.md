@@ -110,6 +110,30 @@ of the run's block means, plus the first order in $\lambda_D/\rho_B$ and $\alpha
 asymptotic reference drops, plus the grid's second-order error. Every number and verdict goes
 to `run.json`, and the reference is drawn dashed on the figure.
 
+### The rehearsal: $m_i/m_e = 400$ at 5°, $\gamma = 0.54$
+
+Default preset, three ion transits, 5.4 h on one A4000; GYRAZE reference at $\epsilon =
+\lambda_D/\rho_B = 0.25$, where the reference's dropped orders are large.
+
+| quantity | this code | GYRAZE | tolerance | verdict |
+|---|---|---|---|---|
+| Debye-sheath drop $[T_e/e]$ | −0.588 | −0.526 | 0.20 | pass |
+| mean ion impact energy $[T_e]$ | 4.43 | 4.67 | 0.66 | pass |
+| wall potential $[T_e/e]$ | −1.03 | −1.68 | 2.9 (noise 0.81) | pass, uninformative |
+| presheath potential, max diff | 0.89 | — | 2.9 | pass, uninformative |
+| ion flux $[n_0\sqrt{T_e/m_e}]$ | 0.0074 | 0.0070 | 0.0003 | fail (+6 %) |
+| ion density, max diff $[n_0]$ | 0.44 | — | 0.40 | fail |
+| electron density, max diff $[n_0]$ | 0.44 | — | 0.40 | fail |
+
+![Rehearsal against GYRAZE](../_static/figures/grazing_rehearsal.png)
+
+The Debye sheath and the impact energy agree. The magnetic presheath does not: the ion density
+at the entrance plane is 0.82 $n_0$, the potential rises about 0.8 $T_e/e$ above the plane,
+ions slow along $\mathbf B$ to half the reference flow, and the density piles up to 1.4 $n_0$.
+The likely cause, not yet tested: the open entrance plane absorbs ions that gyrate back across
+it within one gyroradius, so the plane is not the neutral, field-free entrance GYRAZE assumes.
+The matched run waits on a fix of the entrance treatment.
+
 ## How to run
 
 ```bash

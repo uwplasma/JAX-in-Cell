@@ -50,12 +50,12 @@ def plasma_frequency(simulation):
     return np.sqrt(n * e ** 2 / (epsilon_0 * mass_electron))
 
 
-def phase_space(ax, x, v, w, extent, bins=(110, 90)):
+def phase_space(ax, x, v, w, extent, bins=(110, 90), depth=300):
     """A weighted log histogram of ``(x, v)``; the colour scale is set from the frame given."""
     counts = np.histogram2d(x, v, bins=bins, range=extent, weights=w)[0].T
     top = np.percentile(counts[counts > 0], 99.5)
     image = ax.imshow(np.ma.masked_less_equal(counts, 0), origin="lower", aspect="auto", cmap="magma",
-                      norm=LogNorm(top / 300, top), extent=(*extent[0], *extent[1]), interpolation="bilinear")
+                      norm=LogNorm(top / depth, top), extent=(*extent[0], *extent[1]), interpolation="bilinear")
     ax.set_facecolor("black")
     return image, lambda x, v, w: image.set_data(np.ma.masked_less_equal(
         np.histogram2d(x, v, bins=bins, range=extent, weights=w)[0].T, 0))
@@ -147,31 +147,36 @@ def weibel():
 def sheath():
     simulation, out = run("sheath_unmagnetized", steps=1500, store_every=10)
     w_pe = plasma_frequency(simulation)
-    electrons, ions = simulation.species
+    electrons = simulation.species[0]
     T_e = mass_electron * electrons.vth[0] ** 2 / 2 / e              # eV, with v_th = sqrt(2T/m)
     debye = electrons.vth[0] / np.sqrt(2) / w_pe
-    c_s = np.sqrt(T_e * e / ions.mass)                              # ions.mass is in kg
+    v_e = np.sqrt(T_e * e / mass_electron)
     t, L = np.asarray(out.t) * w_pe, float(out.length)
-    sl = block(out, "ions")
+    sl = block(out, "electrons")
     x, v, w = (np.asarray(a)[:, sl] for a in (out.x[..., 0], out.v[..., 0], out.weight))
     phi = np.asarray(potential(out)) / T_e
     grid = (np.asarray(out.grid) + L / 2) / debye
     fig, (left, right), title = canvas("")
-    live = w > 0
-    extent = [(0, L / debye), (min(0.0, (v[live] / c_s).min()), 1.05 * (v[live] / c_s).max())]
-    _, show = phase_space(left, (x[-1] + L / 2) / debye, v[-1] / c_s, w[-1], extent, bins=(96, 100))
-    left.axhline(1.0, color="w", ls="--", lw=1.5)
-    left.text(0.3, 1.0, r" Bohm speed $c_s$", color="w", fontsize=14, va="bottom")
-    left.set(xlabel=r"$x/\lambda_D$ (wall on the right)", ylabel=r"$v_{i,x}/c_s$",
-             title="ions accelerate into the wall")
-    right.plot(grid, phi[0], color="0.85")
-    now, = right.plot(grid, phi[0], color="#0072B2")
+    extent = [(0, L / debye), (-4.0, 4.0)]
+    _, show = phase_space(left, (x[-1] + L / 2) / debye, v[-1] / v_e, w[-1], extent, bins=(40, 48), depth=30)
+    left.axhline(0.0, color="w", ls=":", lw=1)
+    cut, = left.plot(grid, -np.sqrt(2 * np.clip(phi[0] - phi[0, -1], 0, None)), color="#56B4E9", ls="--", lw=2,
+                     label="fastest electron the wall returns")
+    left.legend(loc="lower left", fontsize=13, facecolor="black", edgecolor="w", labelcolor="w")
+    left.set(xlabel=r"$x/\lambda_D$ (wall on the right)", ylabel=r"$v_{e,x}/v_{te}$",
+             title="the wall keeps only the slow electrons")
+    late = phi[t.size // 2:].mean(axis=0)
+    right.plot(grid, late, color="0.8", lw=5, label="late-time mean")
+    now, = right.plot(grid, phi[0], color="#0072B2", label="now")
+    right.legend(loc="lower left")
     right.set(xlabel=r"$x/\lambda_D$", ylabel=r"$e\phi/T_e$", title="the potential drops at the wall",
-              xlim=(0, L / debye), ylim=(1.15 * min(phi.min(), -1.0), 0.3))
+              xlim=(0, L / debye), ylim=(1.4 * late.min(), 0.3))
 
     def update(i):
-        show((x[i] + L / 2) / debye, v[i] / c_s, w[i])
-        now.set_ydata(phi[max(0, i - 4): i + 1].mean(axis=0))       # a short running mean against noise
+        show((x[i] + L / 2) / debye, v[i] / v_e, w[i])
+        mean = phi[max(0, i - 4): i + 1].mean(axis=0)               # a short running mean against noise
+        now.set_ydata(mean)
+        cut.set_ydata(-np.sqrt(2 * np.clip(mean - mean[-1], 0, None)))
         title.set_text(rf"A plasma against a floating wall    $t\,\omega_{{pe}} = {t[i]:.0f}$")
     return fig, update, range(t.size)
 
