@@ -49,6 +49,48 @@ energy ({doc}`../numerics/implicit`).
 | drift | $5\times10^7$ m/s, quiet start |
 | boundaries | periodic, and two absorbing walls |
 
+## At a larger step
+
+The implicit scheme is worth its cost when it takes a larger step than the explicit one
+can. Here both schemes run two problems whose rates are known, Landau damping at
+$k\lambda_D = 0.5$ and the quiet two-stream problem of {doc}`two_stream`, with the implicit
+step {{ schemes_step_ratio }} times the explicit one.
+
+```{figure} ../_static/figures/explicit_implicit.png
+:width: 100%
+:alt: Landau damping and two-stream growth with the explicit and the implicit scheme, and their energy errors
+
+(a) Field energy of Landau damping, {{ schemes_landau_particles }} quiet-start electrons and
+a seed of $ak = {{ schemes_landau_seed_ak }}$: explicit at
+$\omega_{pe}\Delta t = {{ schemes_landau_omega_pe_dt_explicit }}$
+($c\Delta t/\Delta x = {{ schemes_landau_courant_explicit }}$, the explicit light-wave
+limit), implicit at $\omega_{pe}\Delta t = {{ schemes_landau_omega_pe_dt_implicit }}$
+($c\Delta t/\Delta x = {{ schemes_landau_courant_implicit }}$). The dotted line is the
+kinetic decay $e^{2\gamma t}$ from the first maximum; each scheme's rate in the legend comes
+from the maxima of its field energy. (b) Field energy of the two-stream problem: explicit at
+$\omega_{pe}\Delta t = {{ schemes_two_stream_omega_pe_dt_explicit }}$, implicit at
+{{ schemes_two_stream_omega_pe_dt_implicit }}. Each rate is fitted to the seeded mode as in
+{doc}`two_stream`, and the dotted line is the kinetic growth $e^{2\gamma t}$ drawn to where
+the fit ends; early in the growth the field energy is mostly the noise of the other modes,
+which is why the rate is fitted to the seeded mode. (c) and (d) The relative total-energy error of each run in (a) and (b).
+```
+
+| | explicit | implicit | kinetic root |
+|---|---|---|---|
+| Landau damping, $\gamma/\omega_{pe}$ | {{ schemes_landau_gamma_explicit }} ({{ schemes_landau_gamma_deviation_percent_explicit }} %) | {{ schemes_landau_gamma_implicit }} ({{ schemes_landau_gamma_deviation_percent_implicit }} %) | {{ schemes_landau_gamma_theory }} |
+| two-stream, $\gamma/\omega_{pe}$ | {{ schemes_two_stream_gamma_explicit }} ({{ schemes_two_stream_gamma_deviation_percent_explicit }} %) | {{ schemes_two_stream_gamma_implicit }} ({{ schemes_two_stream_gamma_deviation_percent_implicit }} %) | {{ schemes_two_stream_gamma_theory }} |
+| Landau damping, largest energy error | {{ schemes_landau_energy_error_explicit }} | {{ schemes_landau_energy_error_implicit }} | |
+| two-stream, largest energy error | {{ schemes_two_stream_energy_error_explicit }} | {{ schemes_two_stream_energy_error_implicit }} | |
+
+At {{ schemes_step_ratio }} times the step the implicit rates stay as close to the kinetic
+roots as the explicit ones, and the energy error stays at round-off in the Landau run and at
+{{ schemes_two_stream_energy_error_implicit }} in the two-stream run, with the default
+{{ schemes_picard_iterations }} Picard iterations. There a beam electron crosses
+{{ schemes_two_stream_beam_cells_per_step_implicit }} cells per step, against
+{{ schemes_two_stream_beam_cells_per_step_explicit }} in the explicit run, past the one cell
+the explicit scheme wants ({doc}`../numerics/stability`).
+The figure and the numbers come from `docs/scripts/fig_explicit_implicit.py`.
+
 ## The cost
 
 Eight Picard iterations with two sub-steps costs about

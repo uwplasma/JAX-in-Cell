@@ -254,8 +254,9 @@ the commit, the library versions, the precision and the device under `_provenanc
 documentation quotes double-precision results, so a run with `JAX_ENABLE_X64=0` refuses
 to record. `conf.py` exposes the numbers as substitutions, so that a page can write
 `{{ landau_gamma_measured }}` and always quote the value of the committed figure.
-`fig_scaling.py` measures wall-clock time and should be run on an otherwise idle
-machine.
+`fig_scaling.py` and `fig_runtime.py` measure wall-clock time and should be run on an
+otherwise idle machine. `fig_runtime.py` also compares with a GPU: run it once on a machine
+with one to record the GPU timings, then on a CPU, which draws the figure from both.
 
 ## Releasing
 

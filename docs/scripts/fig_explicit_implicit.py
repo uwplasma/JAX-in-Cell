@@ -42,7 +42,8 @@ def run(simulation, t_end, omega_pe, frames=60):
             "W": np.asarray(diagnostics(fields)["electric"]),
             "t_error": np.asarray(sampled.t) * omega_pe,
             "error": np.asarray(diagnostics(sampled)["energy_error"]),
-            "omega_pe_dt": float(omega_pe * simulation.domain.dt)}
+            "omega_pe_dt": float(omega_pe * simulation.domain.dt),
+            "courant": float(c * simulation.domain.dt / simulation.domain.dx)}
 
 
 def decay_rate(t, W, peaks):
@@ -127,4 +128,7 @@ for name, _, _ in SCHEMES:
         values[f"schemes_{case}_gamma_deviation_percent_{name}"] = deviation(r["gamma"], reference)
         values[f"schemes_{case}_energy_error_{name}"] = largest(r)
         values[f"schemes_{case}_omega_pe_dt_{name}"] = round(r["omega_pe_dt"], 4)
+        values[f"schemes_{case}_courant_{name}"] = round(r["courant"], 2)
+    # how many cells a beam electron crosses per step; the explicit scheme wants at most about one
+    values[f"schemes_two_stream_beam_cells_per_step_{name}"] = round(two_stream_runs[name]["courant"] * DRIFT / c, 2)
 record(**values)

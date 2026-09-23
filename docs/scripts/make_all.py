@@ -34,6 +34,7 @@ SCRIPTS = [
     "fig_collisions.py",
     "fig_autodiff.py",
     "fig_scaling.py",
+    "fig_runtime.py",
 ]
 # sheath_convergence.py is deliberately not in that list: it is twelve full sheath runs and takes
 # about half an hour, where everything above takes minutes. Name it on the command line to run it.
