@@ -1,0 +1,53 @@
+# A beam slowing down on a background, by Coulomb collisions.
+#
+#   jaxincell inputs/collisions.toml --no-plot
+#
+# The binary Takizuka-Abe scatter conserves momentum and energy pair by pair and reproduces
+# the NRL formulary's slowing-down and perpendicular-diffusion rates.
+# examples/2_intermediate/collisions.py measures both against the formulary; this file runs
+# the same physics inside a full simulation, where the fields act as well.
+
+[domain]
+length = 1e-4
+cells = 16
+dt_over_dx_c = 1.0
+particle_bc = "periodic"
+field_bc = "periodic"
+
+[collisions]
+pairs = [["beam", "background"], ["background", "background"]]
+coulomb_log = 12.5
+
+[[species]]
+name = "beam"
+n = 20000
+charge = -1
+mass = "electron"
+density = 1e20
+vth = [1e5, 1e5, 1e5]
+drift = [3e7, 0.0, 0.0]
+sampling = "quiet"
+
+[[species]]
+name = "background"
+n = 20000
+charge = -1
+mass = "electron"
+density = 1e20
+vth = [3e5, 3e5, 3e5]
+sampling = "quiet"
+
+[[species]]
+name = "ions"
+n = 5000
+charge = 1
+mass = "electron"
+mass_ratio = 1e9
+density = 2e20
+vth = [0.0, 0.0, 0.0]
+sampling = "quiet"
+
+[run]
+steps = 200
+seed = 0
+store_every = 4

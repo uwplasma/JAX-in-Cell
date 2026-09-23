@@ -1,59 +1,99 @@
-# Domain parameters
+# The box, the grid and the walls
 
-The `domain_parameters` section defines the simulation box, the grid, the time step
-and the boundary conditions.
+{class}`~jaxincell.Domain` holds everything geometric.
 
-| parameter | default | type | differentiable | meaning |
-|---|---|---|---|---|
-| `length` | `1e-2` | float | yes | Box length $L$ in metres along $x$. The box spans $[-L/2, L/2]$. |
-| `length_y`, `length_z` | `0` | float | yes | Periodic extent in $y$ and $z$; `0` means "same as `length`". Only used to wrap the $y$ and $z$ coordinates of particles. |
-| `number_grid_points` | `50` | int | no | Number of cells $N_x$ along $x$. |
-| `number_grid_points_y`, `number_grid_points_z` | `0` | int | no | Accepted for future use; `0` is replaced by `3`. No field is defined on a $y$ or $z$ grid. |
-| `total_steps` | `350` | int | no | Number of time steps. Every step is stored in the output. |
-| `timestep_over_spatialstep_times_c` | `1.0` | float | yes | $c\,\Delta t/\Delta x$. |
-| `particle_BC_left`, `particle_BC_right` | `0` | int | no | Particle boundary condition at $x=-L/2$ and $x=+L/2$: `0` periodic, `1` reflective, `2` absorbing. |
-| `field_BC_left`, `field_BC_right` | `0` | int | no | Field boundary condition: `0` periodic, `1` reflective, `2` absorbing. |
+```python
+from jaxincell import Domain
 
-## Derived quantities
-
-```{math}
-\Delta x = \frac{L}{N_x}, \qquad
-x_i = -\frac{L}{2} + \left(i + \tfrac12\right)\Delta x, \quad i = 0, \dots, N_x - 1, \qquad
-\Delta t = \texttt{timestep\_over\_spatialstep\_times\_c}\;\frac{\Delta x}{c}.
+domain = Domain(length=0.01, cells=64, dt_over_dx_c=1.0,
+                particle_bc="periodic", field_bc="periodic")
 ```
 
-`grid` in the output holds the cell centres $x_i$. Electric field and current density
-are stored at the cell faces $x_{i+1/2}$, the magnetic field at the cell centres; the
-output arrays have one value per cell for every quantity and the
-{doc}`../numerics/discretization` page explains which location each one refers to.
+## Arguments
 
-## Choosing the resolution
+| argument | meaning | default |
+|---|---|---|
+| `length` | box length $L$ in metres; the box is $[-L/2, L/2]$ | `1e-2` |
+| `cells` | number of cells $N_x$ (static) | `64` |
+| `dt_over_dx_c` | the ratio $c\Delta t/\Delta x$ | `1.0` |
+| `time_step` | $\Delta t$ in seconds, instead of `dt_over_dx_c` | `None` |
+| `particle_bc` | wall type for particles, one name or a `(left, right)` pair (static) | `"periodic"` |
+| `field_bc` | wall type for fields (static) | `"periodic"` |
+| `restitution` | the normal velocity of whatever a wall sends back is multiplied by `-restitution`; one number or a `(left, right)` pair | `1.0` |
+| `length_y`, `length_z` | periods of the two ignorable coordinates | `1e-2` |
 
-The grid spacing should resolve the electron Debye length. With the quadratic spline
-shape function and the digital filter switched on, $\Delta x \lesssim 2\lambda_D$ is
-safe; the finite-grid instability appears for coarser grids. The spacing is not set
-directly: `grid_points_per_Debye_length` in the species section fixes
-$\lambda_D/\Delta x$, and the density follows from it (see {doc}`species`).
+Derived quantities are properties, so they follow the arguments:
 
-The time step has three constraints, discussed in {doc}`../numerics/stability`:
+```python
+domain.dx       # length / cells
+domain.dt       # the step in seconds, however it was given
+domain.courant  # c dt / dx, however it was given
+domain.grid     # cell centres, shape (cells,)
+```
 
-* plasma oscillations: $\omega_{pe}\Delta t \lesssim 0.2$ for accuracy (the leapfrog
-  limit is $\omega_{pe}\Delta t < 2$);
-* particle motion: a pseudo-particle should not cross more than one cell per step,
-  $v_{\max}\Delta t < \Delta x$, because the charge-conserving current deposit sweeps a
-  window of six cells around each particle;
-* light waves, explicit scheme only: $c\,\Delta t/\Delta x \le 1$ whenever a transverse
-  field component can be excited. Purely electrostatic runs with velocities only along
-  $x$ do not excite transverse fields and may use a larger value, as the examples do.
+## Setting the time step
 
-The implicit Crank-Nicolson scheme removes the light-wave constraint but not the other
-two.
+Give the step one way or the other, not both. `dt_over_dx_c` fixes $\Delta t$ through the
+grid, so refining the mesh refines the step with it; `time_step` says the seconds.
+`Domain.dt` and `Domain.courant` read back whichever was given.
 
-## Boundary conditions
+* **Electromagnetic problems** need $c\Delta t/\Delta x \le 1$; at exactly one the vacuum
+  wave propagates without error.
+* **Electrostatic problems** never excite the transverse fields, so the light-wave limit
+  does not apply. The step is set by the plasma frequency or the gyro-frequency, which
+  `time_step=0.1 / omega_pe` states directly where a Courant number would have to be
+  worked out from the grid. Values of `dt_over_dx_c` well above one are normal there —
+  the two-stream runs in {doc}`../numerics/verification` use {{ energy_courant }}. What
+  binds instead is $\omega_p\Delta t \lesssim 0.2$.
 
-The codes apply to the $x$ boundaries only; $y$ and $z$ are always periodic with
-periods `length_y` and `length_z`. Particle and field conditions are independent, but
-the physically consistent combinations are the diagonal ones: periodic with periodic,
-reflective with reflective, absorbing with absorbing. {doc}`boundaries` describes what
-each condition does to particles and fields, and {doc}`../numerics/boundaries` gives the
-ghost-cell formulas.
+```python
+print(f"omega_pe dt = {float(simulation.plasma_frequency() * domain.dt):.3f}")
+print(f"dx / lambda_D = {float(domain.dx / simulation.debye_length()):.2f}")
+```
+
+{doc}`../numerics/stability` collects all four resolution conditions.
+
+:::{warning}
+Running above the Courant limit with transverse particle motion — an isotropic
+temperature, a magnetic field, collisions — makes the explicit field solver diverge
+within a few steps. {class}`~jaxincell.Simulation` warns when it sees that
+combination; take the warning seriously, or switch to `algorithm="implicit"`.
+:::
+
+## Walls
+
+`"periodic"`, `"reflective"`, `"absorbing"` and, for particles only, `"thermal"`, either
+as one name for both ends or as a pair:
+
+```python
+Domain(particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing"))
+```
+
+What each one does ({doc}`../numerics/boundaries`):
+
+| wall | particles | fields |
+|---|---|---|
+| `"periodic"` | recirculates | periodic |
+| `"reflective"` | mirrors the position, reverses the normal velocity | mirrored |
+| `"absorbing"` | collects the particle, all of it unless its species returns a fraction (`Species.reflection`), and parks what it keeps outside the grid | first-order Mur radiating condition, so outgoing waves leave without reflection |
+| `"thermal"` | mirrors the position and redraws the velocity from the half-Maxwellian of the species, standing for the plasma beyond the box | not available; use a reflective field wall |
+
+* A periodic wall needs a periodic partner, checked at construction. That and every other
+  invalid choice — an unknown wall name, fewer than four cells, a thermal field wall, a
+  restitution outside $[0, 1]$ — raises `ValueError`.
+* Particle and field walls are set separately, which is occasionally useful (particles
+  reflected while radiation leaves), but usually they should match.
+* Two absorbing walls are conductors that keep the charge they collect, short-circuited
+  to one another, so they stay at the same potential and the plasma floats above them.
+* One absorbing wall opposite a reflective or thermal one is a floating electrode on its
+  own. That pair, a thermal wall facing a floating conductor, is what
+  {doc}`../examples/sheath_reflection` uses.
+* Holding one wall's field at zero instead would pile all the collected charge onto the
+  other.
+
+## The ignorable coordinates
+
+Particles carry $y$ and $z$ positions, wrapped periodically with periods `length_y` and
+`length_z`. Nothing depends on them — the fields are functions of $x$ alone — so they
+matter only for a plot or a diagnostic. Leave them at the default unless there is a
+reason not to.

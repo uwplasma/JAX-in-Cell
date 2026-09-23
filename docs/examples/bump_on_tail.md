@@ -1,45 +1,60 @@
 # Bump-on-tail instability
 
-`examples/bump-on-tail.py` reads `examples/bump-on-tail.toml`, which defines four
-populations: bulk electrons, a weak electron beam, bulk protons and a small proton
-population that neutralises the beam. A variable at the top of the script selects
-periodic or reflective walls, the explicit or the implicit scheme, and whether the
-filter is on.
+A weak beam on the tail of a Maxwellian makes $\partial f/\partial v > 0$ there, and every
+wave with a phase velocity in that window grows. The waves saturate by flattening the bump
+into a plateau — the quasilinear end state {cite}`vedenov1961,oneil1965`.
 
-```{literalinclude} ../../examples/bump-on-tail.toml
-:language: toml
+```{figure} ../_static/figures/bump_on_tail.png
+:width: 100%
+:alt: Growth of the resonant mode and the quasilinear plateau
+
+(a) $|E_{k=5}(t)|$, the fit through its linear phase (dashed) and the kinetic growth rate
+at the same intercept (dotted). (b) The velocity distribution initially (dashed) and at
+the end (solid), with the phase velocity of mode {{ bump_on_tail_mode }} marked: the
+positive slope has gone.
 ```
 
-## Physics
+## What is measured against what
 
-A beam of density $n_b = $ {{ bump_on_tail_beam_fraction }} $\,n_0$ at $v_b = 0.25c$ on a
-Maxwellian of thermal speed $0.07c$ creates a region of positive slope in $f_e(v_x)$.
-Langmuir waves with phase velocity in that region grow by inverse Landau damping. The
-kinetic dispersion relation for the four populations gives the fastest growth for
-mode {{ bump_on_tail_mode }} of the box ($k c/\omega_{pe} = $ {{ bump_on_tail_kc_over_wpe }}),
-with $\omega_r = $ {{ bump_on_tail_omega_theory }} $\,\omega_{pe}$ and
-$\gamma = $ {{ bump_on_tail_gamma_theory }} $\,\omega_{pe}$, close to the values quoted in the
-header of the input file. As the waves grow they flatten the bump into a plateau,
-which is the quasilinear saturation of the instability.
+| quantity | measured | reference | deviation |
+|---|---|---|---|
+| growth rate $\gamma/\omega_{pe}$, mode {{ bump_on_tail_mode }} | {{ bump_on_tail_gamma_measured }} | {{ bump_on_tail_gamma_theory }} (kinetic root) | {{ bump_on_tail_gamma_deviation_percent }} % |
+| frequency $\omega/\omega_{pe}$ | — | {{ bump_on_tail_omega_theory }} (kinetic root) | — |
+| the positive slope, after saturation | panel (b) | flat, quasilinear theory | — |
 
-Density ratios between populations are set through `grid_points_per_Debye_length`,
-as explained in {doc}`../user_guide/species`: the beam uses
-$\sqrt{0.03}$ times the value of the bulk. The beam and its neutralising ions share a
-position seed so that they start charge neutral cell by cell. The filter is switched
-off because the default settings would remove mode 7 in a 70-cell box.
+## The setup
 
-## Result
+| | |
+|---|---|
+| beam fraction of the density | {{ bump_on_tail_beam_fraction }} |
+| beam drift | {{ bump_on_tail_beam_drift_over_vth }} $v_{th}$ |
+| beam width | {{ bump_on_tail_beam_width_over_vth }} $v_{th}$ |
+| resonant mode | {{ bump_on_tail_mode }}, phase velocity {{ bump_on_tail_phase_velocity_over_vth }} $v_{th}$ |
+| bulk $k\lambda_D$ | {{ bump_on_tail_bulk_k_lambda_D }} |
+| cells | {{ bump_on_tail_cells }} |
+| $\Delta x/\lambda_D$ | {{ bump_on_tail_dx_over_debye }} |
+| particles | {{ bump_on_tail_particles }} |
+| seed | $ak$ = {{ bump_on_tail_seed_ak }} |
 
-Running the input file as written, several modes grow out of the particle-noise floor
-at comparable rates and the fastest saturates about two e-foldings later, so the
-electrostatic energy never follows a clean exponential. That is enough to watch the
-beam flatten into a plateau and the phase-space holes form, which is what the
-animation shows, but not enough to measure a growth rate.
+The thermal speed is chosen from the resonance condition $\omega_{pe}/k = v_{\rm beam}$,
+so that the fastest-growing wave fits an integer number of times in the box and is well
+resolved by the grid. Without that the seeded mode can land outside the unstable band
+entirely.
 
-{doc}`../numerics/verification` reloads the same four populations with a quiet start
-and seeds the fastest mode, which lowers the noise floor far enough for the growth
-rate and the real frequency to be compared with the kinetic dispersion relation. The
-figure is on that page.
+## How to run
 
-The README of the repository shows animations of this case with periodic and with
-reflective walls.
+```bash
+python examples/2_intermediate/bump_on_tail.py
+jaxincell inputs/bump_on_tail.toml
+```
+
+The figure and the numbers come from `docs/scripts/fig_bump_on_tail.py`, which runs this
+setup.
+
+## Things to try
+
+* Widen the beam until it merges with the bulk and the instability disappears.
+* Watch the plateau form: it fills the whole velocity range between the bulk and the beam,
+  not just the resonant band of the seeded mode, because as the distribution flattens more
+  waves come into resonance.
+* Compare the energy that went into the field with the free energy in the bump.

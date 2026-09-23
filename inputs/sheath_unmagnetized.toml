@@ -1,0 +1,62 @@
+# A maintained sheath: a reservoir on the left, a floating collector on the right.
+#
+#   jaxincell inputs/sheath_unmagnetized.toml --no-plot --save sheath
+#
+# Electrons outrun the ions, charge the collector negative, and are held back until as many
+# electrons as ions arrive. With a Source behind the left plane the plasma does not drain, so
+# the sheath reaches a steady state and can be compared with the closed-form floating
+# potential, -0.79926 T_e/e at this beam speed. examples/1_basic/sheath_unmagnetized.py makes
+# that comparison and the density one behind it.
+#
+# T_e = 1 eV, n = 1e16 m^-3, m_i/m_e = 1836, box 10 lambda_D, omega_pe dt = 0.1. This is the
+# script's --quick preset: one ion transit, so the averages are noisy.
+
+[domain]
+length = 7.433942e-4     # 10 lambda_D
+cells = 48
+time_step = 1.772591e-11 # omega_pe dt = 0.1
+particle_bc = "absorbing"
+field_bc = ["open", "absorbing"]     # the left plane imposes nothing, the right floats
+
+[solver]
+model = "electrostatic"  # E_x from the charge density: exact with a source
+
+[[species]]
+name = "electrons"
+n = 12000                # a pool, not a population: it has to hold every live particle
+charge = -1
+mass = "electron"
+density = 1e16
+vth = [5.930970e5, 5.930970e5, 5.930970e5]
+active = 3000            # slots filled at t = 0; the source fills the rest
+sampling = "quiet"
+
+[species.source]
+density = 1.114897e16    # the reservoir that makes the source plane neutral
+vth = [5.930970e5, 5.930970e5, 5.930970e5]
+emit = 12
+
+[[species]]
+name = "ions"
+n = 12000
+charge = 1
+mass = "electron"
+mass_ratio = 1836
+density = 1e16
+vth = [0.0, 0.0, 0.0]
+drift = [8.387658e4, 0.0, 0.0]       # a cold beam at Mach 8.6
+active = 3000
+sampling = "quiet"
+
+[species.source]
+density = 1e16
+vth = [0.0, 0.0, 0.0]
+drift = [8.387658e4, 0.0, 0.0]
+emit = 12
+
+[run]
+steps = 480
+seed = 0
+store_every = 8
+store_particles = false
+moments = "flux"         # the running sums the density and flow profiles come from
