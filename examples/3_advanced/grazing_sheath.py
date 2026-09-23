@@ -268,10 +268,14 @@ n_e, n_i = window[0, 0] / density, window[1, 0] / density
 flow = np.divide(window[1, 1], window[1, 0], out=np.zeros(cells), where=window[1, 0] > 0) / sound_speed
 centres = np.asarray(out.grid) + domain.length / 2                   # distance from the entrance plane
 current = np.asarray(out.wall.collected)[-1, :, 1] - np.asarray(out.wall.collected)[late, :, 1]
+# a short slice, such as a timing run, can end before any ion has reached the wall; every ratio to
+# the ion current or fluence is then undefined, and is said and recorded as null, not divided by 0
+none_arrived = "no ion reached the wall in the window"
+net_current = float(100 * (current[1] - current[0]) / current[1]) if current[1] > 0 else None
 
 print(f"\nwall potential {wall_potential:+.3f} T_e/e, measured from the entrance plane")
-print(f"  net collector current {100 * (current[1] - current[0]) / current[1]:+.2f} per cent of the ion "
-      f"current: the wall floats, so it should be zero")
+print(f"  net collector current {net_current:+.2f} per cent of the ion current: the wall floats, so it "
+      "should be zero" if net_current is not None else f"  net collector current: {none_arrived}")
 print(f"  ion flow at the wall {flow[-1]:.2f} c_s, and {flow[len(flow) // 2]:.2f} halfway in")
 print(f"  densities: {n_e[0]:.3f} and {n_i[0]:.3f} n_0 at the plane, {n_e[-1]:.3f} and {n_i[-1]:.3f} "
       f"at the wall")
@@ -282,11 +286,15 @@ print(f"  pool: {int((np.asarray(out.state.w)[:capacity_electrons] > 0).sum())} 
 # everything above the ceiling and is reported as itself
 spectrum = np.asarray(out.wall.spectrum[-1, 1, 1] - out.wall.spectrum[late, 1, 1])
 fluence = float(out.wall.arrived[-1, 1, 1] - out.wall.arrived[late, 1, 1])
-mean_energy = float(out.wall.energy_in[-1, 1, 1] - out.wall.energy_in[late, 1, 1]) / fluence / e_charge
-incidence = float((spectrum.sum(axis=0) * angles).sum() / spectrum.sum())
-print(f"  ion impacts: fluence {fluence:.3e} m^-2, mean energy {mean_energy:.2f} eV, mean incidence "
-      f"{incidence:.0f} deg from the normal, {100 * spectrum[-1].sum() / spectrum.sum():.2f} per cent "
-      "above the energy ceiling")
+mean_energy = incidence = None
+if fluence > 0 and spectrum.sum() > 0:
+    mean_energy = float(out.wall.energy_in[-1, 1, 1] - out.wall.energy_in[late, 1, 1]) / fluence / e_charge
+    incidence = float((spectrum.sum(axis=0) * angles).sum() / spectrum.sum())
+    print(f"  ion impacts: fluence {fluence:.3e} m^-2, mean energy {mean_energy:.2f} eV, mean incidence "
+          f"{incidence:.0f} deg from the normal, {100 * spectrum[-1].sum() / spectrum.sum():.2f} per cent "
+          "above the energy ceiling")
+else:
+    print(f"  ion impacts: {none_arrived}")
 
 # --- against the reference, if it is there -----------------------------------------------
 comparison = {}
@@ -334,7 +342,7 @@ settings = dict(electron_temperature=electron_temperature, density=density, mass
                 transits=transits, quick=quick, matched=matched)
 results = dict(wall_potential=wall_potential, flow_at_the_wall=float(flow[-1]),
                ion_fluence=fluence, mean_impact_energy=mean_energy, mean_incidence=incidence,
-               net_current_percent=float(100 * (current[1] - current[0]) / current[1]),
+               net_current_percent=net_current,
                density_at_the_plane=[float(n_e[0]), float(n_i[0])],
                overflow=float(out.overflow[-1]), **comparison)
 (folder / "run.json").write_text(json.dumps(provenance(example="grazing_sheath", settings=settings,
