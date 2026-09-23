@@ -81,8 +81,9 @@ tolerance of $10^{-6}$ the examples converge in a few iterations.
 ## Properties
 
 Energy conservation
-: For the two-stream configuration of `examples/input.toml` the relative change of
-  the total energy stays at {{ energy_error_max_implicit }} over the run, against
+: For the two-stream configuration of `examples/input.toml` (with
+  {{ energy_particles }} particles per species) the relative change of the total
+  energy stays at {{ energy_error_max_implicit }} over the run, against
   {{ energy_error_max_explicit }} for the explicit scheme with the same time step,
   see {doc}`verification`.
 
@@ -94,7 +95,9 @@ Time step
 
 Cost
 : Each Picard iteration performs $N_{sub}$ Boris pushes and current deposits over all
-  particles plus two curl evaluations, so a step costs several times an explicit step.
+  particles plus two curl evaluations, so a step costs more than an explicit step: the
+  runs of {doc}`../examples/energy_conservation` take roughly one and a half to two
+  times as long as their explicit counterparts.
 
 ## Limitations of the current implementation
 

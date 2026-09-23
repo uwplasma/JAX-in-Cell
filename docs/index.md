@@ -69,8 +69,8 @@ Landau damping, two-stream, bump-on-tail, Weibel, optimisation and inference.
 
 Two counter-streaming electron beams, from `examples/input.toml`. (a) Electrostatic
 energy with the growth rate measured in the linear phase and the rate predicted by
-the kinetic dispersion relation. (b-d) Electron phase space before, during and after
-the instability. See {doc}`numerics/verification` for how these numbers are obtained.
+the kinetic dispersion relation. (b) Growth rate against drift speed. (c-e) Electron
+phase space before, during and after the instability. See {doc}`numerics/verification` for how these numbers are obtained.
 ```
 
 ## What the code does
