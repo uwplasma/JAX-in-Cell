@@ -47,8 +47,18 @@ Each script writes its PNG files and records the numbers it measured (growth rat
 frequencies, energy errors, timings) in `docs/_static/figures/measurements.json`.
 `conf.py` exposes those numbers as substitutions, so that a page can write
 `{{ landau_gamma_measured }}` and always quote the value of the committed figure.
-`fig_scaling.py` measures wall-clock time and should be run on an otherwise idle
-machine.
+`fig_scaling.py` and `fig_two_stream_scan.py` measure wall-clock time and should be
+run on an otherwise idle machine; they record the load average with the timings. The
+GPU half of `fig_two_stream_scan.py` is measured on a GPU machine with
+`python docs/scripts/fig_two_stream_scan.py --measure`, which records the timings under
+`drift_scan_gpu` in `measurements.json`; the figure is then drawn on any machine from
+the recorded numbers.
+
+All figures share one style, set in `docs/scripts/common.py`: panels of 9 by 7 inches
+(`figure(ncols, nrows)`), a 3 pt frame, inward ticks on all four sides with minor
+ticks, no grid, 24 pt axis labels and tick labels, 18 pt legends without a frame,
+3 pt lines, and bold panel letters placed with `panel_label`. Apart from the text of the
+schematic drawings, scripts do not set font sizes or figure sizes of their own.
 
 ## Style
 

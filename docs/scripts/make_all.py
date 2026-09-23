@@ -7,7 +7,9 @@ Run from the repository root with the package installed::
 The scripts need scipy in addition to the package dependencies. Simulations run
 on whatever JAX backend is available; the measurements they record (growth
 rates, energy errors, timings) are written to docs/_static/figures/measurements.json
-and quoted by the documentation through MyST substitutions.
+and quoted by the documentation through MyST substitutions. The GPU timings of
+fig_two_stream_scan.py are measured separately on a GPU with
+``python docs/scripts/fig_two_stream_scan.py --measure`` and read from that file.
 """
 import runpy
 import sys
@@ -21,7 +23,7 @@ SCRIPTS = [
     "fig_landau_damping.py",
     "fig_weibel.py",
     "fig_bump_on_tail.py",
-    "fig_energy_conservation.py",
+    "fig_explicit_implicit.py",
     "fig_boundary_conditions.py",
     "fig_two_stream_scan.py",
     "fig_autodiff.py",

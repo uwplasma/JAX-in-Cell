@@ -178,3 +178,4 @@ jaxincell/version.py
 
 # Logs of the documentation figure scripts
 docs/scripts/*.log
+docs/_static/figures/.measurements.lock
