@@ -898,3 +898,43 @@ scientific limitations. Distinguish **implemented**, **kernel-tested**, **physic
 
 No requested functionality disappears in a simplification. An example's comments and explicit
 construction lines are part of its function as a teaching tool.
+
+## 13. Pause of 2026-09-22: state and next steps
+
+**Done and pushed here.** Every documentation figure in the group's paper style
+(`final_fig.ipynb` on `lma/JOSS`), set once as `jaxincell.style()`/`figure()`. README benchmarks
+by 1D1V / 1D2V / 1D3V, with relative image paths so they render on any branch. Example and
+user-guide pages led by their figure and a measured-against-reference table. `Source(every=k)`.
+A 48 % explicit-step regression, which the wall ledger caused in periodic boxes, fixed (41 ns per
+particle-step, level with 00f6ce0). GYRAZE rebuilt at the pinned commit outside the repository,
+figure 6 reproduced, and references for the rehearsal, matched and scan cases in
+`~/local/gyraze-runs` and `office:~/gyraze-runs`. `--gamma` and a seven-quantity comparison in
+`grazing_sheath.py`. PR #43 merged here, keeping this tree. CI green at 55bc44d.
+
+**Estimated completion by lane:** W8 ~60 %, W9 ~15 %, W10 ~5 %, W11 ~15 %, W12 ~35 %.
+
+**Paused mid-way. Resume in this order:**
+
+1. **Showcase movies.** `docs/scripts/movies.py` now draws two panels per case in normalised units
+   (the phase space or field on the left, the physics quantity revealed in time on the right), at
+   1280x720. Two-stream and bump-on-tail are reviewed and good; Weibel (now run to 240 ω_pe to reach
+   saturation) and the sheath (velocity axis taken from the data, since the source injects ions near
+   Mach 8.6) need one render and a look at their frames. Then post the four MP4s as a PR #42
+   comment — GitHub plays only uploaded attachments — and put the resulting links in the README and
+   the docs. Posting needs the maintainer's go-ahead.
+2. **Docs-only PR to `main`** (branch `docs/benchmarks-style`, pushed, work in progress, no PR yet):
+   restyles `main`'s own figures and README with `main`'s code only. Finish it: regenerate
+   every figure; add the paper's explicit/implicit 2x2 (Landau and two-stream, with energy error)
+   and runtime CPU/GPU plus growth rate against drift for several particle counts; README
+   benchmarks by dimensionality; `sphinx -W`; open the PR, get CI green, and merge it — the
+   maintainer asked for this merge.
+3. **The same paper figures here** (branch `work/longyu-figures`, pushed, work in progress: a
+   shared two-stream setup and a `fig_explicit_implicit.py` exist). Finish, review the PNGs, add
+   them to the README 1D1V section and the docs, and merge into this branch.
+4. **GYRAZE (W8).** The rehearsal (`--gamma=0.5377 --reference=rehearsal-M400-a5-gDS0.2`) runs on
+   office GPU 0 in `~/w8/rehearsal` from code at bfd6f90; read `run.log` when `done` appears. The
+   k=7 control was stopped to lend GPU 1 to timings: restart it in `~/w8/control` with the same
+   command plus `--every=7`. Then the matched run (`--matched --gamma=0.6009`, 12-43 h on one A4000)
+   and the 3 and 5 degree scan, which needs an `--angle` option. Put the figure on the page.
+5. **W9, W11, W10, W12** as in section 10. W9's new examples and W11's two mandatory items are
+   independent of W8 and can run in parallel.
