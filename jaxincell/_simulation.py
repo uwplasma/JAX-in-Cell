@@ -589,6 +589,12 @@ class Simulation:
         carried momenta of the particles before the wall acted and after it has finished acting
         -- after a thermal wall's redraw, not before it -- so that the energy and momentum each
         wall received and returned follow without a second pass over the walls."""
+        if self.domain.particle_bc == (0, 0):
+            # nothing can reach a wall, so there is nothing to record; returning the ledger as it
+            # was lets XLA drop the push back to the impact and the spectrum as dead code, which
+            # were a third of the cost of a periodic step
+            return wall
+
         def per_species(per_particle):
             return jnp.stack([jnp.sum(per_particle[:, a:a + n], axis=1) for a, n in self.blocks])
 
