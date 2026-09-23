@@ -144,12 +144,21 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 | [Partly reflecting wall](https://jax-in-cell.readthedocs.io/en/latest/examples/wall_reflection.html) | flux average of the reflection law | 2e-4 | `2_intermediate/wall_reflection.py` |
 | [Conservation](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html) | energy, momentum and the Gauss law | implicit: energy 3e-16, Gauss law 7e-15 | `3_advanced/conservation.py` · `conservation_implicit.toml` |
 | [Optimisation](https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html) | fastest-growing drift from linear theory | 0.1 % after 12 ascent steps | `3_advanced/optimize_two_stream.py` |
+| [Explicit and implicit](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html#at-a-larger-step) | kinetic Landau and two-stream rates, implicit step 4 times the explicit one | implicit: rates 1.6 % and 3.0 %, energy 1e-16 and 9e-13 | `docs/scripts/fig_explicit_implicit.py` |
+| [Particle count](https://jax-in-cell.readthedocs.io/en/latest/user_guide/performance.html#gpus-and-tpus) | kinetic two-stream rate at seven drifts | 3.1 % mean with 16 000 pseudo-electrons, 15.9 % with 1000 | `docs/scripts/fig_runtime.py` |
 
 <table>
 <tr>
 <td width="33%"><img src="docs/_static/figures/conservation.png" alt="Energy, momentum and charge conservation"></td>
 <td width="33%"><img src="docs/_static/figures/autodiff.png" alt="Gradients through the solver"></td>
 <td width="33%"><img src="docs/_static/figures/two_stream_scan.png" alt="Growth rate across the unstable range"></td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/_static/figures/explicit_implicit.png" alt="Landau damping and two-stream growth with the explicit and implicit schemes, and their energy errors"></td>
+<td width="50%"><img src="docs/_static/figures/runtime_resolution.png" alt="Runtime on a CPU and a GPU against particle count, and growth rate against drift for three particle counts"></td>
 </tr>
 </table>
 
@@ -189,6 +198,7 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 | explicit step, 200 000 particles | 39 ns per particle per step |
 | implicit step, 8 Picard iterations | 890 ns per particle per step |
 | 1024 cells, 40 000 particles | 1.9 ms per step |
+| two-stream, 256 000 pseudo-electrons, 900 steps | 20.7 s on the CPU, 4.99 s on an NVIDIA RTX A4000 (4.2×) |
 
 Measured on a shared laptop CPU (Apple M3 Max, JAX 0.11, load about 10), so an idle machine is
 faster; `docs/scripts/fig_scaling.py` reproduces it, and the same code runs on a GPU or TPU
