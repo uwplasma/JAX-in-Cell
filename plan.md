@@ -942,3 +942,37 @@ figure 6 reproduced, and references for the rehearsal, matched and scan cases in
    and the 3 and 5 degree scan, which needs an `--angle` option. Put the figure on the page.
 5. **W9, W11, W10, W12** as in section 10. W9's new examples and W11's two mandatory items are
    independent of W8 and can run in parallel.
+
+## 14. State of 2026-09-23
+
+**Finished.**
+- Showcase movies: two-stream, bump-on-tail, Weibel (to saturation) and the sheath (electron phase space, with the fastest electron the wall returns drawn over it), 60-500 kB each, from `docs/scripts/movies.py`. They still need uploading as PR attachments and linking from the README; that is a publishing step for the maintainer.
+- Documentation and figures on `main` in the paper style, from `main`'s own code (PR #44, merged).
+- The paper's explicit/implicit 2x2 and the CPU/GPU runtime and growth-rate-against-drift figures, here, in the README's 1D1V section and the docs. MyST substitutions inside math never rendered on eight pages; fixed.
+- W8 rehearsal (`m_i/m_e` 400, 5 degrees, 5.4 h on an A4000): recorded on the grazing-sheath page with its table and figure.
+
+**W8, open: the entrance plane.** The Debye sheath (-0.588 against -0.526 T_e/e) and the impact energy (4.43 against 4.67 T_e) agree. The magnetic presheath does not:
+- The ion density at the plane is 0.82 n_0.
+- The potential rises 0.8 T_e/e above the plane.
+- The ions move along B at about half the reference flow.
+- The density piles up to 1.4 n_0.
+- The ion flux is 6 % high.
+
+The hypothesis to test first is that the open plane absorbs ions that gyrate back across it within one gyroradius. The test: a buffer of a few rho_i before the compared region, or re-emitting what leaves through the plane. A second test is six transits, to rule out an unfinished transient. The matched run (`--matched --gamma=0.6009`) and the 3 and 5 degree scan wait on this, because they would carry the same defect. W8 is at about 65 %.
+
+**Branches.**
+- `rj/additions-to-pr`, `fix/warn-on-ignored-parameters` (#41), `collsion` (#35), `ds/OpenPMD` (#36), `rishi/mixed_BCs` (#34) and `rj/full_EM_2` (#31) are all contained here; each PR closes as merged when #42 merges.
+- #41 is also resolved in substance: `external_E`/`external_B` arrays and the `[external]` TOML table are applied in every push, and tested for gyration (tests/test_physics.py).
+- Not contained, and a lane of their own:
+  - **W13, 3-D external fields** (`ds/3D_external_fields`): external E and B on an (x, y, z) grid interpolated at the particle's y and z as well as x, plus a magnetic-moment diagnostic. It is written against `main`'s old API, so it needs a port onto `Simulation(external_E=..., external_B=...)` with a grid shape `(cx, cy, cz, 3)` and extents, not a merge.
+  - `ds/source_particles`: superseded by `Source` and the wall ledger.
+  - Research branches outside the scope of #42: `rj/gr` (a general-relativistic Boris push), `rj/momentum`, `rj/full_EM`, `rj/full_EM_PIC`, `woolford_comparisons` (PyPIC3D comparison), `multifidelity`, `bump_on_tail`, `merge_exact_conservation_magnetic2`, and the paper branches `JOSS` and `lma/JOSS`. Stale: `development`, `rj/fix_ghost`, `rj/fft_position_velocity`, `lma/enegy_conservation_to_main`, `XYJeff23-patch-1`.
+
+**Left for later, in order:**
+1. W8 entrance treatment, then the matched run and the scan.
+2. Re-time the runtime figures on an idle office (CPU and GPU 1). Office was unreachable on 2026-09-23 and this Mac was at load 60-190, so the CPU points are inflated.
+3. W9 (model-comparison and Weibel examples, ~15 %).
+4. W11 (algorithm audit, source-free implicit electrostatic, collision time-centering, ~15 %).
+5. W10 (electron-field instability, ~5 %).
+6. W12 (convergence and device coverage, then the review packet, ~45 %).
+7. W13 (the 3-D external-field port).
