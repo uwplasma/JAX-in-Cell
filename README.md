@@ -186,12 +186,13 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 
 | what | cost |
 |---|---|
-| explicit step, 200 000 particles | 30 ns per particle per step |
-| implicit step, 8 Picard iterations | 683 ns per particle per step |
-| 1024 cells, 40 000 particles | 1.5 ms per step |
+| explicit step, 200 000 particles | 39 ns per particle per step |
+| implicit step, 8 Picard iterations | 890 ns per particle per step |
+| 1024 cells, 40 000 particles | 1.9 ms per step |
 
-Measured on a laptop CPU with JAX 0.11; `docs/scripts/fig_scaling.py` reproduces it, and the
-same code runs on a GPU or TPU without change.
+Measured on a shared laptop CPU (Apple M3 Max, JAX 0.11, load about 10), so an idle machine is
+faster; `docs/scripts/fig_scaling.py` reproduces it, and the same code runs on a GPU or TPU
+without change.
 
 Bump-on-tail instability with periodic (left) and reflective (right) walls:
 
