@@ -93,6 +93,23 @@ $m_i/m_e = 400$ and $5°$ — the cheapest case where GYRAZE still converges, at
 the $5$–$8°$ range its own README calls inaccurate — and `--matched` for a machine that can
 afford it.
 
+## Against GYRAZE
+
+With `--reference=DIR` the run is compared against a GYRAZE output directory and its
+`manifest.json`, which GYRAZE's missing licence keeps outside this repository.
+
+| convention | GYRAZE | this code |
+|---|---|---|
+| presheath length | Bohm gyroradius $\rho_B = \rho_s/\sqrt{1+\tau}$ | metres, converted |
+| Debye-sheath length | $\rho_e$ | $\rho_e = \gamma\lambda_D$ |
+| $\gamma = \rho_e/\lambda_D$ | at the Debye-sheath entrance (`gammaflag = 0`) | at the entrance plane, `--gamma` |
+
+A matched run passes the entrance-plane value its manifest names with `--gamma`. Seven
+quantities are compared, each against a tolerance declared in the script: three standard errors
+of the run's block means, plus the first order in $\lambda_D/\rho_B$ and $\alpha$ that the
+asymptotic reference drops, plus the grid's second-order error. Every number and verdict goes
+to `run.json`, and the reference is drawn dashed on the figure.
+
 ## How to run
 
 ```bash

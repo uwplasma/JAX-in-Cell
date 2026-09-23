@@ -438,8 +438,8 @@ if reference is not None:
                                 difference=number(difference), standard_error=number(se), scale=float(scale),
                                 tolerance=number(tolerance), passed=verdict)
         pair = f"{'':8s}  {'':8s}" if theirs is None else f"{mine:+.4f}  {theirs:+.4f}"
-        print(f"  {name:44s} {pair}  |diff| {difference:.4f} <= {tolerance:.4f}? "
-              f"{ {True: 'pass', False: 'FAIL', None: 'not measured'}[verdict]}")
+        word = {True: "pass", False: "FAIL", None: "not measured"}[verdict]
+        print(f"  {name:44s} {pair}  |diff| {difference:.4f} <= {tolerance:.4f}? {word}")
     comparison = dict(
         reference=str(reference), role=manifest["role"], case=case, matched=not unmatched,
         unmatched=unmatched, epsilon=float(epsilon), alpha=float(angle), sigmas=SIGMAS, blocks=BLOCKS,
