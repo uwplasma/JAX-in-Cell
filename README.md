@@ -1,6 +1,6 @@
 <p align="center">
-    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/JAX-in-Cell_logo.png#gh-light-mode-only" width="460" alt="JAX-in-Cell">
-    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/JAX-in-Cell_logo_dark.png#gh-dark-mode-only" width="460" alt="JAX-in-Cell">
+    <img src="docs/_static/JAX-in-Cell_logo.png#gh-light-mode-only" width="460" alt="JAX-in-Cell">
+    <img src="docs/_static/JAX-in-Cell_logo_dark.png#gh-dark-mode-only" width="460" alt="JAX-in-Cell">
 </p>
 
 <p align="center">
@@ -129,9 +129,9 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 
 <table>
 <tr>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/landau_damping.png" alt="Landau damping"></td>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/two_stream.png" alt="Two-stream instability"></td>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/bump_on_tail.png" alt="Bump-on-tail instability"></td>
+<td width="33%"><img src="docs/_static/figures/landau_damping.png" alt="Landau damping"></td>
+<td width="33%"><img src="docs/_static/figures/two_stream.png" alt="Two-stream instability"></td>
+<td width="33%"><img src="docs/_static/figures/bump_on_tail.png" alt="Bump-on-tail instability"></td>
 </tr>
 </table>
 
@@ -147,15 +147,15 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 
 <table>
 <tr>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/conservation.png" alt="Energy, momentum and charge conservation"></td>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/autodiff.png" alt="Gradients through the solver"></td>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/two_stream_scan.png" alt="Growth rate across the unstable range"></td>
+<td width="33%"><img src="docs/_static/figures/conservation.png" alt="Energy, momentum and charge conservation"></td>
+<td width="33%"><img src="docs/_static/figures/autodiff.png" alt="Gradients through the solver"></td>
+<td width="33%"><img src="docs/_static/figures/two_stream_scan.png" alt="Growth rate across the unstable range"></td>
 </tr>
 </table>
 
 ### 1D2V: a magnetic field the plasma grows itself
 
-<p align="center"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/weibel.png" width="70%" alt="Weibel instability"></p>
+<p align="center"><img src="docs/_static/figures/weibel.png" width="70%" alt="Weibel instability"></p>
 
 | case | checked against | agreement | run |
 |---|---|---|---|
@@ -165,9 +165,9 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 
 <table>
 <tr>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_source.png" alt="A maintained sheath"></td>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_magnetized.png" alt="A sheath in an oblique magnetic field"></td>
-<td width="33%"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/sheath_optimization.png" alt="A wall's reflectivity recovered from its sheath"></td>
+<td width="33%"><img src="docs/_static/figures/sheath_source.png" alt="A maintained sheath"></td>
+<td width="33%"><img src="docs/_static/figures/sheath_magnetized.png" alt="A sheath in an oblique magnetic field"></td>
+<td width="33%"><img src="docs/_static/figures/sheath_optimization.png" alt="A wall's reflectivity recovered from its sheath"></td>
 </tr>
 </table>
 
@@ -182,7 +182,7 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 
 ### Speed
 
-<p align="center"><img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/scaling.png" width="70%" alt="Cost per particle and per cell"></p>
+<p align="center"><img src="docs/_static/figures/scaling.png" width="70%" alt="Cost per particle and per cell"></p>
 
 | what | cost |
 |---|---|

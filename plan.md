@@ -9,7 +9,7 @@ box only when a commit, a test and a reproducible number exist for it.
 | | |
 |---|---|
 | **Development branch** | **`research-release`**, PR #42 -> `main`, head `433d401` at the time of writing. All changes in this plan are made here. |
-| Reference only | `rj/additions-to-pr`, PR #43 -> `research-release`, head `ffa5d6f`. Read it for the example changes and the progress-meter attempt, and port what is worth keeping onto `research-release` deliberately. **Do not commit to it, merge it, or rebase it.** |
+| Reference only | `rj/additions-to-pr`, PR #43 -> `research-release`, head `ffa5d6f`. Read it for the example changes and the progress-meter attempt, and port what is worth keeping onto `research-release` deliberately. *(Merged into `research-release` on 2026-09-22 at the maintainer's request, keeping this branch's tree: every change it carried was decided below.)* |
 
 Leave both pull requests open. Do not push to `main`, merge, force-push, tag or publish; the
 maintainer chooses the integration order. New commits are authored and committed by
