@@ -34,7 +34,7 @@ positive slope has gone.
 | cells | {{ bump_on_tail_cells }} |
 | $\Delta x/\lambda_D$ | {{ bump_on_tail_dx_over_debye }} |
 | particles | {{ bump_on_tail_particles }} |
-| seed | $ak = {{ bump_on_tail_seed_ak }}$ |
+| seed | $ak$ = {{ bump_on_tail_seed_ak }} |
 
 The thermal speed is chosen from the resonance condition $\omega_{pe}/k = v_{\rm beam}$,
 so that the fastest-growing wave fits an integer number of times in the box and is well

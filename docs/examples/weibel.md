@@ -42,7 +42,7 @@ it. The gain figures above are how far apart the two groups end up.
 | anisotropy $T_z/T_x$ | {{ weibel_anisotropy }} |
 | cells | {{ weibel_cells }} |
 | particles | {{ weibel_particles }} |
-| steps | {{ weibel_steps }}, to $t\,\omega_{pe} = {{ weibel_t_end }}$ |
+| steps | {{ weibel_steps }}, to $t\,\omega_{pe}$ = {{ weibel_t_end }} |
 | `dt_over_dx_c` | {{ weibel_courant }} |
 | seed amplitude, panel (b) | {{ weibel_seed_amplitude }} |
 

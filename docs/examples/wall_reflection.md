@@ -11,7 +11,7 @@ partly reflecting wall hands back against two formulas that have no free paramet
 (a) The fraction of the electrons reaching a wall that come back, for a Gaussian law of
 width $u$, against its flux average (solid) and its average over the distribution
 (dotted). (b) The fraction of the normal energy flux that comes back, with restitution
-$e = {{ reflection_restitution }}$. (c) At $u = \sigma$, the impact speeds of the part
+$e$ = {{ reflection_restitution }}. (c) At $u = \sigma$, the impact speeds of the part
 returned and the part collected, against $R(v)\,v f(v)$ and $v f(v)$.
 ```
 
@@ -22,7 +22,7 @@ returned and the part collected, against $R(v)\,v f(v)$ and $v f(v)$.
 | returned particle fraction at $u = \sigma$ | {{ reflection_returned_sigma }} | $u^2/(u^2+\sigma^2) = 1/2$, the flux average | — |
 | returned particle fraction, all five widths | panel (a) | flux average | {{ reflection_max_error }} |
 | returned energy flux, all five widths | panel (b) | $e^2\left[u^2/(u^2+\sigma^2)\right]^2$ | {{ reflection_energy_max_error }} |
-| average over the distribution instead | — | $u/\sqrt{u^2+\sigma^2} = {{ reflection_distribution_average_sigma }}$ at $u=\sigma$ | ruled out |
+| average over the distribution instead | — | $u/\sqrt{u^2+\sigma^2}$ = {{ reflection_distribution_average_sigma }} at $u=\sigma$ | ruled out |
 
 **The wall samples the flux.** Particles reaching a wall with normal speed near $v$ arrive
 in proportion to $v f(v)$, because fast ones come from further away, so a law $R(v)$

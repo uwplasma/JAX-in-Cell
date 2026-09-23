@@ -2,14 +2,14 @@
 
 A small-amplitude Langmuir wave decays without any collisions, because the electrons
 travelling at the phase velocity absorb it {cite}`landau1946`. At
-$k\lambda_D = {{ landau_k_lambda_D }}$ both the rate and the frequency are compared with
+$k\lambda_D$ = {{ landau_k_lambda_D }} both the rate and the frequency are compared with
 the least-damped root of the kinetic dispersion relation {cite}`canosa1972`.
 
 ```{figure} ../_static/figures/landau_damping.png
 :width: 100%
 :alt: Landau damping of the seeded mode and the measured dispersion relation
 
-(a) $|E_k(t)|$ at $k\lambda_D = {{ landau_k_lambda_D }}$, the maxima used (circles), the
+(a) $|E_k(t)|$ at $k\lambda_D$ = {{ landau_k_lambda_D }}, the maxima used (circles), the
 fit through them (dashed) and the kinetic rate (dotted), above the noise floor (grey).
 (b) The measured frequency (circles) against the kinetic root (solid) and Bohm-Gross
 (dashed), over $k\lambda_D = 0.05$ to $0.5$.
@@ -34,7 +34,7 @@ successive maxima of a modulus are half a period apart, and their envelope gives
 | cells | {{ landau_cells }} |
 | particles | {{ landau_particles }} |
 | $\omega_{pe}\Delta t$ | {{ landau_omega_pe_dt }} |
-| seed | $ak = {{ landau_seed_ak }}$ |
+| seed | $ak$ = {{ landau_seed_ak }} |
 | sampling | `sampling="quiet"` |
 
 The quiet start is what makes the measurement possible: the wave has to be followed over

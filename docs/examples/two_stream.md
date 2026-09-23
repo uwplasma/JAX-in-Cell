@@ -21,7 +21,7 @@ binned as pseudo-particles per bin: the vortex that ends the growth.
 | growth rate over seven drifts | scan below | kinetic root | {{ two_stream_scan_mean_deviation_percent }} % mean, {{ two_stream_scan_max_deviation_percent }} % worst |
 | energy drift over the run | {{ two_stream_energy_error }} | zero | — |
 
-The fit runs over $\omega_{pe}t = {{ two_stream_fit_window }}$ with $R^2 = {{ two_stream_fit_r2 }}$.
+The fit runs over $\omega_{pe}t$ = {{ two_stream_fit_window }} with $R^2$ = {{ two_stream_fit_r2 }}.
 
 ```{figure} ../_static/figures/two_stream_scan.png
 :width: 100%
@@ -53,7 +53,7 @@ Warm beams are less unstable, and the comparison above uses the full kinetic roo
 | $\omega_{pe}$ | {{ two_stream_omega_pe }} rad/s |
 | $\omega_{pe}\Delta t$ | {{ two_stream_omega_pe_dt }} |
 | $\Delta x/\lambda_D$ | {{ two_stream_dx_over_debye }} |
-| seed | $ak = {{ two_stream_seed_ak }}$ |
+| seed | $ak$ = {{ two_stream_seed_ak }} |
 | $kv_0/\omega_{pe}$ | {{ two_stream_k_v0_over_wpe }} |
 
 The figure comes from `docs/scripts/fig_two_stream.py`, which runs a quieter version of

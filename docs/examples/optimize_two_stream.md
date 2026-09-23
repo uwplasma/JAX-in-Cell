@@ -20,8 +20,8 @@ ascent iterates on it (circles); the dashed line is the fastest-growing kinetic 
 | quantity | measured | reference | deviation |
 |---|---|---|---|
 | optimum $kv_0/\omega_{pe}$ after {{ autodiff_ascent_iterations }} ascent steps | {{ autodiff_ascent_k_v0_over_wpe }} | {{ autodiff_kinetic_optimum_k_v0_over_wpe }} (kinetic root, beams this warm) | {{ autodiff_ascent_deviation_percent }} % |
-| cold-beam optimum, for reference | — | $\sqrt{3/8} = {{ autodiff_cold_optimum_k_v0_over_wpe }}$ | — |
-| reverse-mode gradient | {{ autodiff_gradient }} | central difference, best at $h = {{ autodiff_best_step }}$ m/s | {{ autodiff_best_relative_error }} |
+| cold-beam optimum, for reference | — | $\sqrt{3/8}$ = {{ autodiff_cold_optimum_k_v0_over_wpe }} | — |
+| reverse-mode gradient | {{ autodiff_gradient }} | central difference, best at $h$ = {{ autodiff_best_step }} m/s | {{ autodiff_best_relative_error }} |
 | forward against reverse mode | — | each other | {{ autodiff_forward_reverse_agreement }} |
 
 Nothing is finite-differenced to compute the gradient: `jax.grad` runs back through the

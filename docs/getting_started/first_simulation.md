@@ -32,9 +32,9 @@ Everything else follows from those five numbers.
 | choice | what it fixes |
 |---|---|
 | **density** | $\omega_{pe} = \sqrt{n e^2/\epsilon_0 m_e}$, the clock of the problem. At $4.37\times10^{17}\,\mathrm{m^{-3}}$ it is $3.7\times10^{10}$ rad/s, so a plasma period is 0.17 ns and the interesting physics takes a few tens of them. |
-| **thermal speed** | $\lambda_D = v_{th}/(\sqrt2\,\omega_{pe}) = 2.8\times10^{-4}$ m. The cell must resolve it, or the explicit scheme heats itself through the finite-grid instability. Here $\Delta x/\lambda_D = {{ two_stream_dx_over_debye }}$ — comfortably below one. |
+| **thermal speed** | $\lambda_D = v_{th}/(\sqrt2\,\omega_{pe}) = 2.8\times10^{-4}$ m. The cell must resolve it, or the explicit scheme heats itself through the finite-grid instability. Here $\Delta x/\lambda_D$ = {{ two_stream_dx_over_debye }} — comfortably below one. |
 | **box length** | which mode is seeded. Mode 1 has $k = 2\pi/L$, and the beams are most unstable near $kv_0/\omega_{pe} = \sqrt{3/8}$. Solving for $v_0$ at fixed $L$ and $n$ is how the drift was picked; at $v_0 = 6\times10^7$ m/s the mode sits at $kv_0/\omega_{pe} = 1.01$, just past the peak — a deliberately unexciting choice for a first run. |
-| **time step** | `dt_over_dx_c=4.5` gives $\omega_{pe}\Delta t = {{ two_stream_omega_pe_dt }}$, well inside the accuracy limit of 0.2. |
+| **time step** | `dt_over_dx_c=4.5` gives $\omega_{pe}\Delta t$ = {{ two_stream_omega_pe_dt }}, well inside the accuracy limit of 0.2. |
 
 `dt_over_dx_c=4.5` is above the light-wave Courant limit of one, which is allowed here
 only because a purely electrostatic run never excites the transverse fields — see

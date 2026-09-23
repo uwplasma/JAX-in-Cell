@@ -60,9 +60,9 @@ the gather or the field solver.
 
 The parameters are those of the sheath benchmark of the Vlasov code kobra
 {cite}`konewko2026`. Their printed wall potential, $+0.739$, does not solve their printed
-equation; the root of that equation at $v_0 = {{ source_sheath_beam_speed }}$ is
+equation; the root of that equation at $v_0$ = {{ source_sheath_beam_speed }} is
 {{ source_sheath_phi_wall_reference }}, which is what is used here, and
-$n_{e0} = {{ source_sheath_amplitude }}$ follows from it.
+$n_{e0}$ = {{ source_sheath_amplitude }} follows from it.
 
 `Output.wall.overflow` stays at zero. Refining the time step or lengthening the box without
 raising the capacity is the one way to get this wrong: both make particles live longer, the
