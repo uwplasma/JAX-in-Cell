@@ -67,9 +67,14 @@ resolving the electron gyro-phase caps the step at `omega_pe dt = 0.075`, which 
 steps a transit. That is the asymptotic limit doing its job, and it is worth stating
 rather than approximating quietly.
 
-With `--reference DIR`, the profiles are compared against the GYRAZE output directory at
-DIR. Nothing from that code is kept here: it is unlicensed, so it is run separately and
-read, not vendored.
+With `--reference=DIR`, the run is compared against the GYRAZE output directory at DIR and
+the manifest beside it: the potential and both densities through the presheath, the
+Debye-sheath drop, the wall potential, the mean ion impact energy and the ion flux, each
+against a tolerance declared below, with the reference dashed on the figure. GYRAZE fixes
+`gamma` at the Debye-sheath entrance rather than at the entrance plane, so a matched run
+passes the entrance value its manifest names, `--gamma=G`; a run that does not match is said
+to be a different problem. Nothing from that code is kept here: it is unlicensed, so it is
+run separately and read, not vendored.
 """
 
 import json
@@ -105,8 +110,11 @@ cells_per_debye = 2.0                       # dx = 0.5 lambda_D, which does not 
 markers_per_cell = 60 if quick else 100
 transits = 2.0 if quick else 3.0            # entrance-speed crossings of the box
 # the two knobs that trade noise and settling against the run's cost, so that a first look
-# need not be a whole night: --markers=40 --transits=2 is about a quarter of the default
-for flag, name in (("--markers=", "markers_per_cell"), ("--transits=", "transits")):
+# need not be a whole night: --markers=40 --transits=2 is about a quarter of the default. The
+# third, --gamma=G, is rho_e/lambda_D at the entrance plane: a GYRAZE reference fixes it at the
+# Debye-sheath entrance instead, and its manifest names the entrance value that matches it
+for flag, name in (("--markers=", "markers_per_cell"), ("--transits=", "transits"),
+                   ("--gamma=", "gyro_over_debye")):
     given = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(flag)), None)
     if given is not None:
         globals()[name] = type(globals()[name])(given)
@@ -151,6 +159,29 @@ if quick:
     print("\n--quick is a smoke preset: the angle is not grazing and the scales are not separated, so\n"
           "nothing below is a measurement of the grazing-incidence problem. It checks that the script\n"
           "runs and that the pools hold.\n")
+
+# --- the reference, read before the run so that a bad one fails now and not after hours ----
+# GYRAZE is unlicensed, so it is run outside this repository (plan.md 8.1): only its output
+# directory is read, with the manifest.json that has to sit beside it.
+if reference is not None:
+    reference = Path(reference).expanduser()
+    manifest = json.loads((reference / "manifest.json").read_text())
+    missing = [k for k in ("case", "reference", "run", "gamma_definition", "coordinates",
+                           "potential_references", "normalisations", "conversion_to_jax_in_cell",
+                           "incoming_distributions", "debye_reference_density", "asymptotics")
+               if k not in manifest]
+    if missing or manifest["run"]["exit_status"] != 0:
+        sys.exit(f"{reference}: the manifest lacks {missing} or GYRAZE did not exit cleanly")
+    case = manifest["case"]
+    ours_vs_theirs = {"m_i/m_e": (mass_ratio, case["M"]), "tau": (temperature_ratio, case["tau"]),
+                      "alpha": (angle_degrees, case["alpha_deg"]),
+                      "gamma at the entrance plane": (gyro_over_debye, case["gamma_up_equivalent"])}
+    unmatched = [f"{k} {a:g} against {b:g}" for k, (a, b) in ours_vs_theirs.items() if abs(a / b - 1) > 0.01]
+    print(f"reference {reference.name}: {manifest['role']}, GYRAZE {manifest['reference']['commit'][:10]}, "
+          f"gamma_DS {case['gamma_DS']:g} (= {case['gamma_up_equivalent']:g} at the entrance plane)")
+    if unmatched:
+        print("  NOT the same problem as this run -- " + "; ".join(unmatched) + ". The comparison below "
+              "runs end to end, and its pass/fail says nothing about either code.")
 
 # --- the entrance distributions, sampled -------------------------------------------------
 
@@ -297,23 +328,127 @@ else:
     print(f"  ion impacts: {none_arrived}")
 
 # --- against the reference, if it is there -----------------------------------------------
+# GYRAZE's files, in the C's write order and units (checked in the pinned source, plan.md 8.1):
+#   phi_n_MP.txt   x/rho_B from the Debye-sheath entrance out, phi (zero at the presheath
+#                  entrance), sum n_i, n_e (over the presheath-entrance density)
+#   phi_n_DS.txt   x/rho_e from the wall out, phi - phi_DSE, sum n_i, n_e (over n_e at the DSE)
+#   misc_output.txt  net current, |phi_wall|, Q_e, sum Q_i, flux_e, sum flux_i (along B)
+# rho_B = sqrt(Z T_e m_i)/(ZeB) = rho_s/sqrt(1+tau) is the Bohm gyroradius, not rho_s, and
+# rho_e = sqrt(T_e m_e)/(eB) = gamma lambda_D: both are fixed by B alone. The two layers are
+# joined the matched-asymptotic way -- the potentials add, the densities multiply -- and past its
+# own far end the Debye-sheath layer takes its matching value, 0 and 1.
+#
+# The tolerances are declared here, before any matched run. A number passes when
+#     |this run - reference| <= SIGMAS * standard error + (max(epsilon, alpha) + (dx/l)^2) * scale.
+SIGMAS = 3.0    # this run's noise: the standard error of BLOCKS block means of the late window
+BLOCKS = 4      # four blocks of five stored frames: the fewest that still give a spread
+# The reference is the limit epsilon = lambda_D,DSE/rho_B -> 0 at lowest order in alpha, so it
+# drops terms of first order in both; with no computed coefficient, the allowance is that order
+# times the layer's own drop (`scale`), coefficient one. (dx/l)^2 is the second-order deposit and
+# field solve on the layer's scale l: lambda_D,DSE in the Debye sheath, rho_B in the presheath.
+PRESHEATH_EDGE = 0.1   # the presheath is compared where the reference Debye-sheath drop is under 10 %
 comparison = {}
 if reference is not None:
-    folder = Path(reference)
-    presheath = np.loadtxt(folder / "phi_n_MP.txt")                  # x/rho_s, phi, sum n_i, n_e
-    sheath = np.loadtxt(folder / "phi_n_DS.txt")                     # x/lambda_D from the wall
-    # their x runs from the Debye-sheath entrance outwards, and ours from the entrance plane in
-    their_x = (presheath[:, 0] - presheath[0, 0]) * gyro_radius
-    ours = length - centres                                          # distance from the wall
-    # the far field of each file has one density column written as zeros; drop it
-    good = (presheath[:, 2] > 0) & (presheath[:, 3] > 0)
-    theirs = np.interp(their_x[good][::-1], their_x[good][::-1], presheath[good, 1][::-1])
-    mine = np.interp(their_x[good][::-1], ours[::-1], np.interp(ours, faces + domain.length / 2, profile)[::-1])
-    comparison = {"presheath_potential_max_difference": float(np.abs(mine - theirs).max()),
-                  "their_wall_potential": float(sheath[0, 1] + presheath[0, 1])}
-    print(f"\nagainst {folder}: the presheath potentials differ by at most "
-          f"{comparison['presheath_potential_max_difference']:.3f} T_e/e, and their wall potential is "
-          f"{comparison['their_wall_potential']:+.3f} against this run's {wall_potential:+.3f}")
+    presheath = np.loadtxt(reference / "phi_n_MP.txt")
+    sheath = np.loadtxt(reference / "phi_n_DS.txt")
+    misc = np.loadtxt(reference / "misc_output.txt")
+    rho_e = gyro_over_debye * debye
+    rho_B = gyro_radius / np.sqrt(1 + temperature_ratio)
+    n_dse = presheath[0, 3]
+    epsilon = 1 / (gyro_over_debye * np.sqrt(mass_ratio * n_dse))   # lambda_D,DSE / rho_B in this run
+    order = max(epsilon, angle)
+    dx = length / cells
+
+    def layer(table, column, unit, d, beyond):
+        """One reference column at this run's distances from the wall. The far field that the C
+        writes as exact zeros is an unfilled array, not a profile: it is cut off, and past the cut
+        the column is `beyond`."""
+        end = np.flatnonzero(table[:, column])[-1] + 1
+        return np.interp(d, table[:end, 0] * unit, table[:end, column], right=beyond)
+
+    def composite(d):
+        """The reference's (phi, n_i, n_e) at distance d from the wall; NaN past the presheath file."""
+        return (layer(presheath, 1, rho_B, d, np.nan) + layer(sheath, 1, rho_e, d, 0.0),
+                layer(presheath, 2, rho_B, d, np.nan) * layer(sheath, 2, rho_e, d, 1.0),
+                layer(presheath, 3, rho_B, d, np.nan) * layer(sheath, 3, rho_e, d, 1.0))
+
+    # this run's late window in BLOCKS pieces, for the standard errors
+    cut = np.linspace(late, len(out.steps) - 1, BLOCKS + 1).round().astype(int)
+    span = np.diff(np.asarray(out.steps)[cut]).astype(float)
+    moments = np.diff(np.asarray(out.moments)[cut], axis=0)[:, :, 0] / span[:, None, None] / density
+    arrived = np.diff(np.asarray(out.wall.arrived)[cut, 1, 1])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        energy = np.diff(np.asarray(out.wall.energy_in)[cut, 1, 1]) / arrived / e_charge / electron_temperature
+    phi_blocks = np.array([block.mean(axis=0) for block in np.array_split(phi, BLOCKS)])
+
+    def error(blocks):
+        return np.asarray(blocks).std(axis=0, ddof=1) / np.sqrt(BLOCKS)
+
+    def number(value):
+        return float(value) if value is not None and np.isfinite(value) else None   # JSON has no NaN
+
+    # where things are compared: out of the source's run-up, inside the presheath file, and, for the
+    # profiles, outside the reference's Debye sheath
+    d_face, d_cell = length - (faces + domain.length / 2), length - centres
+    top = length - buffer_gyro * gyro_radius
+    drop_ds = layer(sheath, 1, rho_e, 0.0, 0.0)
+    d_grid = np.linspace(0, top, 20001)
+    edge = d_grid[np.argmax(np.abs(layer(sheath, 1, rho_e, d_grid, 0.0)) < PRESHEATH_EDGE * abs(drop_ds))]
+    ref_face, ref_cell = composite(d_face), composite(d_cell)
+    out_face = (d_face >= edge) & (d_face <= top) & np.isfinite(ref_face[0])
+    phi_at_edge = np.interp(edge, d_face[::-1], profile[::-1])
+    phi_edge_blocks = [np.interp(edge, d_face[::-1], b[::-1]) for b in phi_blocks]
+    ref_at_edge = composite(np.array([edge]))
+    lam_dse = debye / np.sqrt(n_dse)
+    # name: (this run, reference, standard error, scale, the layer's length); a profile's row holds
+    # its largest difference in place of this run's number, and None for the reference's
+    rows = {}
+    rows["wall potential [T_e/e]"] = (wall_potential, ref_face[0][-1], error(phi_blocks[:, -1]),
+                                      abs(ref_face[0][-1]), lam_dse)
+    rows["Debye-sheath drop [T_e/e]"] = (wall_potential - phi_at_edge, ref_face[0][-1] - ref_at_edge[0][0],
+                                         error(phi_blocks[:, -1] - phi_edge_blocks),
+                                         abs(ref_face[0][-1] - ref_at_edge[0][0]), lam_dse)
+    rows["presheath potential, max |diff| [T_e/e]"] = (
+        float(np.abs(profile - ref_face[0])[out_face].max()), None, error(phi_blocks)[out_face].max(),
+        abs(ref_at_edge[0][0]), rho_B)
+    for name, index, ours in (("ion", 1, n_i), ("electron", 2, n_e)):
+        inside = (d_cell >= edge) & (d_cell <= top) & np.isfinite(ref_cell[index])
+        rows[f"{name} density, max |diff| [n_0]"] = (
+            float(np.abs(ours - ref_cell[index])[inside].max()), None,
+            error(moments[:, 1 if index == 1 else 0])[inside].max(),
+            float(np.ptp(ref_cell[index][inside])), rho_B)
+    # each ion's energy is conserved in the static fields, so its mean at the wall is the entrance
+    # flux's own (sum Q_i / sum flux_i, which is 3 tau for this distribution) plus |phi_wall|
+    rows["mean ion impact energy [T_e]"] = (
+        mean_energy / electron_temperature if mean_energy is not None else np.nan,
+        misc[3] / misc[5] + misc[1], error(energy), abs(ref_face[0][-1]), lam_dse)
+    # the ion flux is fixed by the entrance distribution in both codes: only the noise is allowed
+    rows["ion flux to the wall [n_0 sqrt(T_e/m_e)]"] = (
+        fluence / (span.sum() * time_step) / (density * spread), misc[5] * np.sin(np.radians(case["alpha_deg"])),
+        error(arrived / (span * time_step) / (density * spread)), 0.0, np.inf)
+
+    print(f"\nagainst {reference}: epsilon = lambda_D,DSE/rho_B {epsilon:.3f} and alpha {angle:.3f} rad, "
+          f"the orders the reference drops; the presheath is compared from {edge / rho_B:.2f} rho_B")
+    quantities = {}
+    for name, (mine, theirs, se, scale, ell) in rows.items():
+        tolerance = SIGMAS * float(se) + (order + (dx / ell) ** 2) * scale
+        difference = mine if theirs is None else abs(mine - theirs)
+        verdict = bool(difference <= tolerance) if np.isfinite(difference + tolerance) else None
+        quantities[name] = dict(this_run=number(None if theirs is None else mine), reference=number(theirs),
+                                difference=number(difference), standard_error=number(se), scale=float(scale),
+                                tolerance=number(tolerance), passed=verdict)
+        pair = f"{'':8s}  {'':8s}" if theirs is None else f"{mine:+.4f}  {theirs:+.4f}"
+        print(f"  {name:44s} {pair}  |diff| {difference:.4f} <= {tolerance:.4f}? "
+              f"{ {True: 'pass', False: 'FAIL', None: 'not measured'}[verdict]}")
+    comparison = dict(
+        reference=str(reference), role=manifest["role"], case=case, matched=not unmatched,
+        unmatched=unmatched, epsilon=float(epsilon), alpha=float(angle), sigmas=SIGMAS, blocks=BLOCKS,
+        presheath_from_rho_B=float(edge / rho_B), quantities=quantities,
+        impact_distribution="not compared: Fi_W.txt holds the wall orbits' invariants, and making an "
+                            "energy-angle distribution of them is GYRAZE's own post-processing, which "
+                            "would have to be re-derived; the mean impact energy needs none of it")
+    if unmatched:
+        print("  (not the same problem: see above)")
 
 # --- the figure and the record -----------------------------------------------------------
 fig, axes = figure(3)
@@ -326,6 +461,13 @@ axes[1].legend(frameon=False)
 axes[2].plot(centres / gyro_radius, flow, color="C2")
 axes[2].axhline(1.0, color="0.6", lw=2)
 axes[2].set(xlabel=r"$x/\rho_s$", ylabel=r"$\langle v_x\rangle/c_s$", title="ion flow towards the wall")
+if reference is not None:                       # the reference, dashed, on the same axes
+    d_plot = np.linspace(0.0, length, 4000)
+    ref_phi, ref_ni, ref_ne = composite(d_plot)
+    axes[0].plot((length - d_plot) / gyro_radius, ref_phi, "--", color="0.3", label="GYRAZE")
+    axes[0].legend(frameon=False)
+    axes[1].plot((length - d_plot) / gyro_radius, ref_ni, "--", color="C0")
+    axes[1].plot((length - d_plot) / gyro_radius, ref_ne, "--", color="C1")
 plt.tight_layout()
 
 folder = Path.cwd() / ("grazing_sheath_quick" if quick else
@@ -344,7 +486,7 @@ results = dict(wall_potential=wall_potential, flow_at_the_wall=float(flow[-1]),
                ion_fluence=fluence, mean_impact_energy=mean_energy, mean_incidence=incidence,
                net_current_percent=net_current,
                density_at_the_plane=[float(n_e[0]), float(n_i[0])],
-               overflow=float(out.overflow[-1]), **comparison)
+               overflow=float(out.overflow[-1]), comparison=comparison or None)
 (folder / "run.json").write_text(json.dumps(provenance(example="grazing_sheath", settings=settings,
                                                        results=results), indent=1))
 np.savez(folder / "profiles.npz", centres=centres, faces=faces, phi=profile, n_e=n_e, n_i=n_i,
