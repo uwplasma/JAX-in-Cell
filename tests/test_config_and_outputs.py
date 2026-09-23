@@ -496,3 +496,26 @@ def test_provenance_records_what_produced_a_number_and_says_when_it_cannot(monke
 
     monkeypatch.setattr(subprocess, "run", missing)
     assert provenance()["git"] == "unknown"
+
+
+def test_figure_lays_out_panels_in_the_package_style():
+    """``figure(ncols, nrows)`` gives panels of ``PANEL`` inches in the style ``style()`` sets
+    (ticks inward on all four sides, a heavy frame), and ``aspect`` flattens a panel; both are
+    reached lazily through the package, as ``plot`` is."""
+    import matplotlib
+    import matplotlib.pyplot as plt
+    import jaxincell
+    from jaxincell._plot import PANEL
+
+    with matplotlib.rc_context():
+        fig, axes = jaxincell.figure(2)
+        assert tuple(fig.get_size_inches()) == (2 * PANEL[0], PANEL[1]) and len(axes) == 2
+        assert matplotlib.rcParams["xtick.direction"] == "in" and matplotlib.rcParams["ytick.right"]
+        assert matplotlib.rcParams["axes.linewidth"] == 3.0
+        flat, _ = jaxincell.figure(aspect=0.5)
+        assert tuple(flat.get_size_inches()) == (PANEL[0], 0.5 * PANEL[0])
+        plt.close(fig)
+        plt.close(flat)
+    jaxincell.style()
+    assert matplotlib.rcParams["axes.linewidth"] == 3.0
+    matplotlib.rcdefaults()
