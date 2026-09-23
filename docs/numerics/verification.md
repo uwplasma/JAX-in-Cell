@@ -35,6 +35,8 @@ grow at all.
 | Bump on tail | 1D1V | kinetic growth rate | {{ bump_on_tail_gamma_deviation_percent }} % |
 | Wall reflection | 1D1V | flux average of the reflection law | {{ reflection_max_error }} |
 | Conservation | 1D1V | the exact laws | energy {{ energy_error_max_implicit_8 }}, Gauss law {{ gauss_residual_max_implicit }} (implicit) |
+| Explicit against implicit | 1D1V | kinetic rates of Landau damping and two-stream, implicit step {{ schemes_step_ratio }} times the explicit one | implicit: rates {{ schemes_landau_gamma_deviation_percent_implicit }} % and {{ schemes_two_stream_gamma_deviation_percent_implicit }} %, energy {{ schemes_landau_energy_error_implicit }} and {{ schemes_two_stream_energy_error_implicit }} |
+| Particle count | 1D1V | kinetic two-stream rate over seven drifts | {{ resolution_mean_deviation_percent_16000 }} % mean with 16000 pseudo-electrons, {{ resolution_mean_deviation_percent_1000 }} % with 1000 |
 | Weibel | 1D2V | transverse kinetic root, marginal wavenumber | {{ weibel_mean_deviation_percent }} % mean, {{ weibel_max_deviation_percent }} % worst |
 | Maintained sheath | 1D3V | kinetic sheath theory | {{ source_sheath_phi_wall_deviation_percent }} % in the wall potential |
 | Sheath drop with reflection | 1D3V | Hobbs and Wesson | {{ sheath_drop_deviation_percent }} % |
@@ -247,6 +249,11 @@ explicit wall runs are filtered, the implicit ones cannot be.
 | Gauss law, walls returning half of each electron | {{ gauss_residual_reflecting_wall }} | {{ gauss_residual_reflecting_wall_implicit }} |
 | Gauss law, thermal wall and floating conductor | {{ gauss_residual_thermal_wall }} | {{ gauss_residual_thermal_wall_implicit }} |
 | charge, deposited against carried | {{ charge_error_relative }} | |
+
+The implicit scheme keeps its energy at a larger step too: at {{ schemes_step_ratio }} times
+the explicit step it holds Landau damping to {{ schemes_landau_energy_error_implicit }} and
+the two-stream run to {{ schemes_two_stream_energy_error_implicit }}, with both rates as
+close to the kinetic roots as the explicit ones ({doc}`../examples/conservation`).
 
 ## Reproducibility
 

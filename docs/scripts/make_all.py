@@ -26,6 +26,7 @@ SCRIPTS = [
     "fig_bump_on_tail.py",
     "fig_weibel.py",
     "fig_conservation.py",
+    "fig_explicit_implicit.py",
     "fig_boundaries.py",
     "fig_wall_reflection.py",
     "fig_sheath.py",
