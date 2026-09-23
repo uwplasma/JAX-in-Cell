@@ -8,6 +8,7 @@ the plots always come from the same run.
 import json
 import os
 import pathlib
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -45,34 +46,40 @@ C_FIT = COLORS["green"]
 CMAP_SIGNED = "RdBu_r"
 CMAP_DENSITY = "viridis"
 
-SINGLE = (6.0, 3.6)
-WIDE = (7.4, 3.4)
-TALL = (6.0, 6.0)
+# One panel of a figure, in inches. Every figure is built from panels of this
+# size, so that type and line widths look the same in all of them when the pages
+# scale the images to the text width.
+PANEL = (9.0, 7.0)
+SINGLE = PANEL
+WIDE = (2 * PANEL[0], PANEL[1])
 
-plt.rcParams.update({
-    "font.size": 9.5,
-    "axes.titlesize": 10,
-    "axes.labelsize": 9.5,
-    "legend.fontsize": 8.5,
-    "xtick.labelsize": 8.5,
-    "ytick.labelsize": 8.5,
-    "axes.grid": True,
-    "grid.color": "#D9D9D9",
-    "grid.linewidth": 0.5,
-    "grid.linestyle": "-",
-    "axes.axisbelow": True,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.linewidth": 0.7,
-    "lines.linewidth": 1.5,
-    "legend.frameon": False,
-    "figure.dpi": 100,
-    "savefig.dpi": 200,
-    "savefig.bbox": "tight",
-    "savefig.pad_inches": 0.03,
-    "figure.facecolor": "white",
-    "mathtext.fontset": "dejavusans",
-})
+# The group's figure style: a heavy frame, ticks turned inward on all four sides
+# with visible minor ticks, no grid, and type large enough to read when a figure
+# is scaled down to the width of a page or a slide.
+STYLE = {
+    "font.size": 20, "axes.titlesize": 20, "axes.labelsize": 24, "legend.fontsize": 18,
+    "xtick.labelsize": 24, "ytick.labelsize": 24, "axes.grid": False,
+    "axes.spines.top": True, "axes.spines.right": True, "axes.linewidth": 3.0,
+    "xtick.direction": "in", "ytick.direction": "in", "xtick.top": True, "ytick.right": True,
+    "xtick.major.width": 3.0, "ytick.major.width": 3.0, "xtick.major.size": 7.0,
+    "ytick.major.size": 7.0, "xtick.minor.width": 2.0, "ytick.minor.width": 2.0,
+    "xtick.minor.size": 5.0, "ytick.minor.size": 5.0,
+    "xtick.minor.visible": True, "ytick.minor.visible": True,
+    "lines.linewidth": 3.0, "lines.markersize": 10.0, "legend.frameon": False,
+    "figure.dpi": 100, "savefig.dpi": 110, "savefig.bbox": "tight", "savefig.pad_inches": 0.05,
+    "figure.facecolor": "white", "mathtext.fontset": "dejavusans",
+}
+plt.rcParams.update(STYLE)
+
+
+def figure(ncols=1, nrows=1, aspect=None, **kwargs):
+    """``ncols`` by ``nrows`` panels of :data:`PANEL` inches each.
+
+    ``aspect`` gives a flatter (or taller) panel, as a fraction of the panel width.
+    Remaining keyword arguments go to ``plt.subplots``.
+    """
+    height = PANEL[0] * aspect if aspect else PANEL[1]
+    return plt.subplots(nrows, ncols, figsize=(ncols * PANEL[0], nrows * height), **kwargs)
 
 
 def compress_png(path, colors=256):
@@ -111,22 +118,34 @@ def savefig(fig, name):
 
 def record(**values):
     """Merge scalar results into measurements.json (used by the docs text)."""
+    import fcntl
     FIGURE_DIR.mkdir(parents=True, exist_ok=True)
-    data = {}
-    if MEASUREMENTS.exists():
-        data = json.loads(MEASUREMENTS.read_text())
-    for key, value in values.items():
-        if isinstance(value, (np.floating, np.integer)):
-            value = value.item()
-        data[key] = value
-    MEASUREMENTS.write_text(json.dumps(dict(sorted(data.items())), indent=2) + "\n")
+    with open(FIGURE_DIR / ".measurements.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)     # scripts may run in parallel
+        data = json.loads(MEASUREMENTS.read_text()) if MEASUREMENTS.exists() else {}
+        for key, value in values.items():
+            if isinstance(value, (np.floating, np.integer)):
+                value = value.item()
+            data[key] = value
+        MEASUREMENTS.write_text(json.dumps(dict(sorted(data.items())), indent=2) + "\n")
     for key, value in values.items():
         print(f"  {key} = {value}")
 
 
-def panel_label(ax, text, x=-0.14, y=1.04):
-    ax.text(x, y, text, transform=ax.transAxes, fontsize=10.5, fontweight="bold",
+def panel_label(ax, text, x=-0.16, y=1.02):
+    """Bold panel letter, for example "(a)", above the top-left corner of ``ax``."""
+    ax.text(x, y, text, transform=ax.transAxes, fontsize=22, fontweight="bold",
             va="bottom", ha="left")
+
+
+def plain_log_ticks(axis, lo, hi):
+    """Label a logarithmic ``axis`` (``ax.xaxis`` or ``ax.yaxis``) at 1, 2, 5 times
+    powers of ten between ``lo`` and ``hi``, written as plain numbers."""
+    from matplotlib.ticker import FixedLocator, NullFormatter, ScalarFormatter
+    ticks = [m * 10.0**e for e in range(-3, 6) for m in (1, 2, 5) if lo <= m * 10.0**e <= hi]
+    axis.set_major_locator(FixedLocator(ticks))
+    axis.set_major_formatter(ScalarFormatter())
+    axis.set_minor_formatter(NullFormatter())
 
 
 def fit_growth_rate(time, energy, t_start, t_end):
@@ -293,3 +312,62 @@ def robust_growth_fit(time, energy, min_r2=0.95, min_duration=15.0, min_efolds=1
                         "t1": float(t_seg[-1]), "efolds": float(0.5 * slope * duration),
                         "duration": float(duration)}
     return best
+
+
+def mode_window(t, mode_energy, noise_factor=30.0, top=0.1):
+    """Exponential-growth window of one Fourier mode: from the last time the mode
+    energy was below ``noise_factor`` times its initial level to the last time it was
+    below ``top`` times its largest value, both before the first saturation.
+
+    The first saturation is the first time the mode reaches half of its largest
+    value. Near the edge of the unstable band the mode can dip after saturating
+    and reach its largest value only later; without this cut the window would
+    stretch over the saturated phase."""
+    i_peak = int(np.argmax(mode_energy >= 0.5 * mode_energy.max()))
+    noise = mode_energy[:20].mean()
+    lo = np.where(mode_energy[:i_peak] < noise_factor * noise)[0]
+    hi = np.where(mode_energy[:i_peak] < top * mode_energy.max())[0]
+    t0 = t[lo[-1]] if lo.size else t[0]
+    t1 = t[hi[-1]] if hi.size else t[max(i_peak - 1, 1)]
+    if t1 <= t0:
+        t0, t1 = t[max(i_peak // 4, 1)], t[max(i_peak - 1, 2)]
+    return t0, t1
+
+
+def analyse_two_stream(output):
+    """Growth rate of the first Fourier mode of E_x in a two-stream run, and the
+    kinetic root for the same populations.
+
+    The rate is half the slope of ln|E_1|^2 over the window of :func:`mode_window`.
+    Returns ``(t, gamma_fit, gamma_theory, (t0, t1, intercept, slope), e_folds)``
+    with ``t`` in units of the inverse plasma frequency and ``e_folds`` the growth
+    of the mode amplitude from its initial level to its peak."""
+    from dispersion import electrostatic_epsilon, most_unstable_root
+    wpe = float(output["plasma_frequency"])
+    t = np.asarray(output["time_array"]) * wpe
+    L = float(output["length"])
+    Ex = np.asarray(output["electric_field"][:, :, 0])
+    mode_energy = (np.abs(np.fft.rfft(Ex, axis=1))[:, 1] / Ex.shape[1]) ** 2
+    t0, t1 = mode_window(t, mode_energy)
+    gamma_fit, intercept, slope = fit_growth_rate(t, mode_energy, t0, t1)
+    populations = species_for_linear_theory(output)
+    root = most_unstable_root(lambda w: electrostatic_epsilon(w, 2 * np.pi / L, populations),
+                              (-0.5, 0.5), (0.01, 1.0), n_real=21, n_imag=20, scale=wpe)
+    gamma_th = root.imag / wpe if root is not None else np.nan
+    e_folds = 0.5 * np.log(mode_energy.max() / mode_energy[:20].mean())
+    return t, gamma_fit, gamma_th, (t0, t1, intercept, slope), e_folds
+
+
+def cpu_name():
+    """Human-readable processor name (macOS sysctl, Linux /proc/cpuinfo, else platform)."""
+    try:
+        return subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True).strip()
+    except Exception:
+        pass
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.lower().startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return platform.processor() or platform.machine()

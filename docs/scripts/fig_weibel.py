@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from jax import block_until_ready
 from scipy.special import erfinv
 
-from common import (CMAP_SIGNED, C_ELECTRONS, C_FIT, C_THEORY, COLORS, panel_label, record,
+from common import (CMAP_SIGNED, C_ELECTRONS, C_FIT, C_THEORY, COLORS, PANEL, panel_label, record,
                     robust_growth_fit, savefig, silence_progress_bars, species_for_linear_theory)
 from dispersion import most_unstable_root, weibel_dispersion
 from jaxincell import (Simulation, diagnostics, mass_electron, mass_proton, speed_of_light)
@@ -117,35 +117,38 @@ record(weibel_modes_run=len(MODES), weibel_modes_compared=len(kept),
        weibel_gamma_theory_max=float(np.nanmax([results[m]["theory"] for m in MODES])),
        weibel_kc_over_wpe_fastest=float(results[SHOWCASE]["kc"]))
 
-fig = plt.figure(figsize=(7.4, 5.8))
-gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1.0], hspace=0.5, wspace=0.35)
+fig = plt.figure(figsize=(2 * PANEL[0], 2 * PANEL[1]))
+gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.0], hspace=0.35, wspace=0.3)
 
 ax = fig.add_subplot(gs[0, :])
 By, grid, t = showcase["By"], showcase["grid"], showcase["t"]
+By = 1e4 * np.asarray(By)                                  # in units of 1e-4 T
 limit = np.percentile(np.abs(By), 99.5)
-mesh = ax.pcolormesh(grid, t, By, cmap=CMAP_SIGNED, vmin=-limit, vmax=limit,
+mesh = ax.pcolormesh(100 * np.asarray(grid), t, By, cmap=CMAP_SIGNED, vmin=-limit, vmax=limit,
                      rasterized=True, shading="nearest")
 ax.grid(False)
-ax.set_xlabel("x (m)")
+ax.set_xlabel("x (cm)")
+ax.tick_params(axis="x", pad=10)
 ax.set_ylabel(r"$t\,\omega_{pe}$")
-ax.set_title(rf"seeded mode {SHOWCASE},  $kc/\omega_{{pe}} = {showcase['kc']:.2f}$", fontsize=9)
+ax.set_title(rf"seeded mode {SHOWCASE},  $kc/\omega_{{pe}} = {showcase['kc']:.2f}$")
 bar = fig.colorbar(mesh, ax=ax, pad=0.015, fraction=0.04)
-bar.set_label(r"$B_y$ (T)")
-panel_label(ax, "(a)", x=-0.07)
+bar.set_label(r"$B_y$ ($10^{-4}$ T)")
+bar.ax.tick_params(which="both", direction="out")
+panel_label(ax, "(a)", x=-0.07, y=1.04)
 
 ax = fig.add_subplot(gs[1, 0])
 for mode, colour in zip((2, 4, 8), (COLORS["sky"], C_ELECTRONS, COLORS["purple"])):
     r = results[mode]
-    ax.semilogy(r["t"], r["amplitude"], color=colour, lw=1.2, label=f"mode {mode}")
+    ax.semilogy(r["t"], r["amplitude"], color=colour, lw=2.5, label=f"mode {mode}")
     if r["fit"]:
         f = r["fit"]
         tt = np.linspace(f["t0"], f["t1"], 30)
         ax.semilogy(tt, np.exp(0.5 * (f["intercept"] + f["slope"] * tt)), color=C_FIT,
-                    lw=2.2, alpha=0.8)
-ax.plot([], [], color=C_FIT, lw=2.2, label="fitted window")
+                    lw=7, alpha=0.5)
+ax.plot([], [], color=C_FIT, lw=7, alpha=0.5, label="fitted window")
 ax.set_xlabel(r"$t\,\omega_{pe}$")
 ax.set_ylabel(r"$|\hat B_y(k)|$  (T)")
-ax.legend(loc="lower right", fontsize=7.5)
+ax.legend(loc="lower right")
 panel_label(ax, "(b)")
 
 ax = fig.add_subplot(gs[1, 1])
@@ -153,10 +156,10 @@ kc_fine = np.array([results[m]["kc"] for m in MODES])
 ax.plot(kc_fine, [results[m]["theory"] for m in MODES], ls="--", color=C_THEORY,
         label="linear theory")
 ax.plot([results[m]["kc"] for m in kept], [results[m]["fit"]["gamma"] for m in kept],
-        "o", ms=5, color=C_ELECTRONS, label="simulation")
+        "o", color=C_ELECTRONS, label="simulation")
 ax.set_xlabel(r"$k c / \omega_{pe}$")
 ax.set_ylabel(r"$\gamma / \omega_{pe}$")
-ax.set_ylim(bottom=0)
-ax.legend(loc="lower left", fontsize=8)
+ax.set_ylim(0, 1.2 * max(results[m]["theory"] for m in MODES))
+ax.legend(loc="lower center")
 panel_label(ax, "(c)")
 savefig(fig, "weibel")

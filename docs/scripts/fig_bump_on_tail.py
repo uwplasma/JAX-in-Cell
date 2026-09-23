@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from jax import block_until_ready
 from scipy.special import erfinv
 
-from common import (C_ELECTRONS, C_FIT, C_THEORY, panel_label, phase_space_scatter, record,
+from common import (C_ELECTRONS, C_FIT, C_THEORY, PANEL, panel_label, phase_space_scatter, record,
                     robust_growth_fit, savefig, silence_progress_bars, species_for_linear_theory)
 from dispersion import electrostatic_epsilon, most_unstable_root
 from jaxincell import (Simulation, diagnostics, mass_electron, mass_proton, speed_of_light)
@@ -127,8 +127,8 @@ v_e = np.asarray(output["velocity_electrons"][:, :, 0]) / speed_of_light
 charges = np.asarray(output["charge_integer_lookup"])[np.asarray(output["species_integer_index"])]
 weights = np.asarray(output["weights"]).reshape(-1)[charges < 0]
 
-fig = plt.figure(figsize=(7.4, 5.6))
-gs = fig.add_gridspec(2, 2, hspace=0.5, wspace=0.35)
+fig = plt.figure(figsize=(2 * PANEL[0], 2 * PANEL[1]))
+gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
 
 ax = fig.add_subplot(gs[0, 0])
 bins = np.linspace(-0.3, 0.45, 161)
@@ -140,34 +140,34 @@ for index, label, colour, style in ((0, "initial", C_THEORY, "--"),
 ax.set_xlabel(r"$v_x / c$")
 ax.set_ylabel(r"$f_e(v_x)$  (arbitrary units)")
 ax.set_ylim(bottom=1e-2)
-ax.legend(loc="upper right", fontsize=8)
+ax.legend(loc="upper right")
 panel_label(ax, "(a)")
 
 ax = fig.add_subplot(gs[0, 1])
 ax.semilogy(t, mode_amplitude, color=C_ELECTRONS, label=rf"mode {MODE} of $E_x$")
 tt = np.linspace(fit["t0"], fit["t1"], 40)
-ax.semilogy(tt, np.exp(0.5 * (fit["intercept"] + fit["slope"] * tt)), color=C_FIT, lw=2.4,
-            alpha=0.85, label=rf"fit: $\gamma = {fit['gamma']:.4f}\,\omega_{{pe}}$")
+ax.semilogy(tt, np.exp(0.5 * (fit["intercept"] + fit["slope"] * tt)), color=C_FIT, lw=7,
+            alpha=0.5, label=rf"fit: $\gamma = {fit['gamma']:.4f}\,\omega_{{pe}}$")
 anchor = np.exp(0.5 * (fit["intercept"] + fit["slope"] * fit["t0"]))
 ax.semilogy(tt, anchor * np.exp(gamma_theory * (tt - fit["t0"])), ls="--", color=C_THEORY,
             label=rf"theory: $\gamma = {gamma_theory:.4f}\,\omega_{{pe}}$")
 ax.axvspan(fit["t0"], fit["t1"], color="#EEEEEE", zorder=0)
 ax.set_xlabel(r"$t\,\omega_{pe}$")
 ax.set_ylabel(r"$|\hat E_x(k)|$  (V/m)")
-ax.legend(loc="lower right", fontsize=7.5)
+ax.legend(loc="lower right")
 panel_label(ax, "(b)")
 
 ax = fig.add_subplot(gs[1, 0])
 i_end = int(np.argmin(np.abs(t - fit["t1"])))
-phase_space_scatter(ax, x_e[i_end], v_e[i_end], L, 0.45, size=0.6)
-ax.set_title(rf"end of linear phase, $t\,\omega_{{pe}} = {t[i_end]:.0f}$", fontsize=9)
+phase_space_scatter(ax, x_e[i_end], v_e[i_end], L, 0.45, size=3.0)
+ax.set_title(rf"end of linear phase, $t\,\omega_{{pe}} = {t[i_end]:.0f}$")
 ax.set_xlabel("x / L")
 ax.set_ylabel(r"$v_x / c$")
 panel_label(ax, "(c)")
 
 ax = fig.add_subplot(gs[1, 1])
-phase_space_scatter(ax, x_e[-1], v_e[-1], L, 0.45, size=0.6)
-ax.set_title(rf"saturated, $t\,\omega_{{pe}} = {t[-1]:.0f}$", fontsize=9)
+phase_space_scatter(ax, x_e[-1], v_e[-1], L, 0.45, size=3.0)
+ax.set_title(rf"saturated, $t\,\omega_{{pe}} = {t[-1]:.0f}$")
 ax.set_xlabel("x / L")
 ax.set_ylabel(r"$v_x / c$")
 panel_label(ax, "(d)")

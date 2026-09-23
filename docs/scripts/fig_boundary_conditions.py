@@ -1,10 +1,9 @@
 """Particle boundary conditions: a drifting quasi-neutral plasma with periodic,
 reflective and absorbing walls, shown through the electron density n_e(x, t)."""
 import numpy as np
-import matplotlib.pyplot as plt
 from jax import block_until_ready
 
-from common import CMAP_DENSITY, panel_label, savefig, silence_progress_bars
+from common import CMAP_DENSITY, figure, panel_label, savefig, silence_progress_bars
 from jaxincell import Simulation, speed_of_light
 
 silence_progress_bars()
@@ -32,7 +31,7 @@ def parameters_for(bc):
     }
 
 
-fig, axes = plt.subplots(1, 3, figsize=(7.4, 3.1), sharey=True, gridspec_kw={"wspace": 0.12})
+fig, axes = figure(3, 1, sharey=True, gridspec_kw={"wspace": 0.1})
 for ax, (bc, name) in zip(axes, ((0, "periodic"), (1, "reflective"), (2, "absorbing"))):
     output = block_until_ready(Simulation(parameters_for(bc)).run())
     wpe = float(output["plasma_frequency"])
@@ -50,8 +49,8 @@ for ax, (bc, name) in zip(axes, ((0, "periodic"), (1, "reflective"), (2, "absorb
     ax.grid(False)
     ax.set_title(f"{name} walls")
     ax.set_xlabel("x / L")
-    panel_label(ax, f"({'abc'[bc]})", x=-0.1)
+    panel_label(ax, f"({'abc'[bc]})", x=0.0)
 axes[0].set_ylabel(r"$t\,\omega_{pe}$")
-cb = fig.colorbar(im, ax=axes, pad=0.02, fraction=0.03)
+cb = fig.colorbar(im, ax=axes, pad=0.015, fraction=0.025)
 cb.set_label(r"$n_e(x,t)\,/\,\bar n_e(0)$")
 savefig(fig, "boundary_conditions")
