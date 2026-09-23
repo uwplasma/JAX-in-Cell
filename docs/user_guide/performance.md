@@ -58,9 +58,38 @@ particle history and the options that bound it.
 
 Nothing in the package is CPU-specific; install a JAX build for the accelerator and the
 same program runs on it. The gain is largest where the particle count is large enough to
-fill the device — panel (a) shows the cost per particle still falling at
-{{ scaling_particles_max }} particles on a CPU, and an accelerator moves that knee much
+fill the device — panel (a) of the figure above shows the cost per particle still falling
+at {{ scaling_particles_max }} particles on a CPU, and an accelerator moves that knee much
 further out.
+
+```{figure} ../_static/figures/runtime_resolution.png
+:width: 100%
+:alt: Runtime of a two-stream run against particle count on a CPU and a GPU, and the growth rate against drift for three particle counts
+
+(a) Wall-clock time of the quiet two-stream run of {doc}`../examples/two_stream`,
+{{ runtime_steps }} steps on {{ two_stream_cells }} cells with half as many ions as
+pseudo-electrons, against the number of pseudo-electrons: on the CPU of an
+{{ runtime_cpu_device }} (JAX {{ runtime_cpu_jax_version }}) and on one
+{{ runtime_gpu_device }} (JAX {{ runtime_gpu_jax_version }}), both in double precision,
+compilation excluded, the best of five runs. (b) The growth rate of the seeded mode
+against $kv_0/\omega_{pe}$ with {{ resolution_counts }} pseudo-electrons, fitted as in
+{doc}`../examples/two_stream`, against the kinetic root.
+```
+
+| {{ runtime_counts_largest }} pseudo-electrons, {{ runtime_steps }} steps | |
+|---|---|
+| CPU, {{ runtime_cpu_device }} | {{ runtime_cpu_seconds_largest }} s |
+| GPU, {{ runtime_gpu_device }} | {{ runtime_gpu_seconds_largest }} s |
+| GPU over CPU | {{ runtime_gpu_speedup_largest }}× faster |
+
+Both machines were shared when they were timed (load averages {{ runtime_cpu_load }} on
+the laptop and {{ runtime_gpu_load }} on the host of the GPU), so the CPU curve is
+noisier than an idle machine would give. Panel (b) is the price of fewer particles: the
+growth rate is off the kinetic root by {{ resolution_mean_deviation_percent_1000 }} % on
+average with 1000 pseudo-electrons, {{ resolution_mean_deviation_percent_4000 }} % with
+4000 and {{ resolution_mean_deviation_percent_16000 }} % with 16000, and most at the
+small drifts, where the rate is lowest. `docs/scripts/fig_runtime.py` draws the figure; run
+on a GPU it records that device's timings, and on a CPU it times the CPU and reads them.
 
 Measure before choosing single precision ({doc}`units`) for speed. On a CPU the two cost
 about the same, and on the NVIDIA RTX A4000 we tested, with JAX 0.10.2, a single-precision
