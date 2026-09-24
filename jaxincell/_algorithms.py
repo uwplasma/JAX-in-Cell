@@ -20,12 +20,16 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
                       field_solver):
     """One explicit leapfrog step with the Boris pusher.
 
-    Deposits the current from the motion between the two half-step positions,
-    advances the fields by half a step (Ampere then Faraday), gathers the fields
-    at the half-step positions, pushes the particles with the Boris rotation,
-    applies the boundary conditions, deposits the new current, advances the fields
-    by the second half step (Faraday then Ampere) and, if ``field_solver`` is not
-    zero, replaces the longitudinal electric field by the solution of Gauss's law.
+    Deposits the current from the motion ``x^n -> x^{n+1/2}``, advances the fields
+    by half a step (Ampere then Faraday), gathers the fields at the half-step
+    positions, pushes the particles with the Boris rotation, applies the boundary
+    conditions, deposits the current from the motion ``x^{n+1/2} -> x^{n+1}``,
+    advances the fields by the second half step (Faraday then Ampere) and, if
+    ``field_solver`` is not zero, replaces the longitudinal electric field by the
+    solution of Gauss's law. The two deposits are charge conserving and together
+    cover ``x^n -> x^{n+1}``, so with periodic boundaries (or reflective ones and
+    no filter) ``dE_x/dx = rho(x^{n+1}) / epsilon_0`` holds at every step to
+    round-off, as it does at ``t = 0``.
 
     Args:
         carry (tuple): ``(E, B, x_minus_half, x, x_plus_half, v, q, m, q_over_m)``
@@ -56,8 +60,10 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
     falpha   = solver_parameters["filter_alpha"]
     fstrides = solver_parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
     
-    J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+    # Charge-conserving deposit over the first half step, x^n -> x^{n+1/2}, so that
+    # the change of E over the whole step matches rho(x^{n+1}) - rho(x^n) exactly.
+    J = current_density(positions, positions, positions_plus1_2, velocities,
+                qs, dx, dt / 2, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
                 filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                 field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
@@ -90,8 +96,9 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
-    J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+    # Second half step, x^{n+1/2} -> x^{n+1}
+    J = current_density(positions_plus1_2, positions_plus1, positions_plus1, velocities_plus1,
+                qs, dx, dt / 2, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
                 filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                 field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
