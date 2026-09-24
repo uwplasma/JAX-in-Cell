@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from jaxincell._constants import epsilon_0
+from jaxincell._diagnostics import diagnostics
 from jaxincell._simulation import Simulation
 
 
@@ -66,3 +67,5 @@ def test_explicit_scheme_keeps_gauss_law_to_round_off(boundary, filter_passes):
     output = Simulation(two_stream_parameters(boundary, filter_passes)).run()
     residual = gauss_law_residual(output, periodic=(boundary == 0))
     assert residual.max() < 1e-9
+    diagnostics(output)
+    assert np.max(np.asarray(output["gauss_error_Linf_rel"])) < 1e-9

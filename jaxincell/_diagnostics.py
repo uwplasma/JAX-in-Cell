@@ -146,3 +146,29 @@ def diagnostics(output):
                     output["kinetic_energy"])
 
     output.update({'total_energy': total_energy})
+
+    # Total momentum sum(m v) and its change relative to sum(m |v|) at t = 0
+    total_momentum = (jnp.sum(mass_electrons_array[:, None] * output['velocity_electrons'], axis=-2) +
+                      jnp.sum(mass_ions_array[:, None]      * output['velocity_ions'],      axis=-2))
+    momentum_scale = (jnp.sum(mass_electrons_array * jnp.linalg.norm(output['velocity_electrons'][0], axis=-1)) +
+                      jnp.sum(mass_ions_array      * jnp.linalg.norm(output['velocity_ions'][0],      axis=-1)))
+    output.update({
+        'total_momentum': total_momentum,
+        'momentum_error_rel': jnp.linalg.norm(total_momentum - total_momentum[0], axis=-1) / (momentum_scale + 1e-300),
+    })
+
+    # Gauss's law residual dE_x/dx - rho/epsilon_0 (backward difference, the stencil the
+    # field solve uses), as max over x relative to max |rho/epsilon_0|; measures charge conservation
+    if 'charge_density' in output:
+        Ex  = E_field_over_time[..., 0]
+        rhs = output['charge_density'] / epsilon_0
+        periodic = int(output.get('field_BC_left', 0)) == 0 and int(output.get('field_BC_right', 0)) == 0
+        Ex_left = jnp.roll(Ex, 1, axis=-1) if periodic else jnp.pad(Ex[:, :-1], ((0, 0), (1, 0)))
+        gauss_residual = (Ex - Ex_left) / output['dx'] - rhs
+        if periodic:  # a periodic E can only match rho up to its mean
+            gauss_residual = gauss_residual - jnp.mean(gauss_residual, axis=-1, keepdims=True)
+        gauss_error_Linf = jnp.max(jnp.abs(gauss_residual), axis=-1)
+        output.update({
+            'gauss_error_Linf': gauss_error_Linf,
+            'gauss_error_Linf_rel': gauss_error_Linf / (jnp.max(jnp.abs(rhs), axis=-1) + 1e-300),
+        })
