@@ -85,10 +85,20 @@ Dominant frequency
   resolution is $2\pi/(S\,\Delta t)$, which is coarse for short runs; for accurate
   frequencies fit the signal directly, as in the {doc}`../numerics/verification` page.
 
+Charge and momentum conservation
+: `gauss_error_Linf` is $\max_i|(E_{x,i} - E_{x,i-1})/\Delta x - \rho_i/\epsilon_0|$ at every
+  step, and `gauss_error_Linf_rel` the same divided by $\max_i|\rho_i/\epsilon_0|$ (added
+  when the output holds `charge_density`). `total_momentum`, shape `(S, 3)`, is
+  $\sum_p m_p\mathbf v_p$ and `momentum_error_rel` is $|\mathbf P(t) - \mathbf P(0)|$ divided
+  by $\sum_p m_p|\mathbf v_p(0)|$. {func}`jaxincell.plot` draws both relative errors on
+  the energy panel, next to the relative energy error.
+
 The relative energy error $|\mathcal E(t) - \mathcal E(0)|/\mathcal E(0)$ built from
 `total_energy` is the standard check of a run. The explicit scheme is expected to
 drift by $10^{-3}$ to $10^{-2}$ over hundreds of plasma periods, the implicit scheme
-to stay at round-off.
+to stay at round-off. For the charge error it is the other way round: the explicit
+scheme keeps Gauss's law at round-off (with periodic boundaries), the implicit one
+does not, see {doc}`../numerics/implicit`.
 
 ## Memory
 

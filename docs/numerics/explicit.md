@@ -15,12 +15,12 @@ displaced by $\pm\tfrac12\Delta t\,\mathbf v^0$ to create $x^{\pm1/2}$.
 
 ## One step
 
-1. **Current at $t^n$.** $J_x^n$ is computed from the motion $x^{n-1/2}\to x^{n+1/2}$
-   (see below); $J_y^n$ and $J_z^n$ are deposited as $q_p v_{y,p}^n S_2$ and
-   $q_p v_{z,p}^n S_2$ at $x^n$. The digital filter is applied.
+1. **Current of the first half step.** $J_x^{n+1/4}$ is computed from the motion
+   $x^{n}\to x^{n+1/2}$ over $\Delta t/2$ (see below); $J_y$ and $J_z$ are deposited as
+   $q_p v_{y,p}^n S_2$ and $q_p v_{z,p}^n S_2$ at $x^n$. The digital filter is applied.
 2. **First half field update.** Ampere then Faraday, each over $\Delta t/2$:
    ```{math}
-   \mathbf E^{n+1/2} = \mathbf E^n + \frac{\Delta t}{2}\left(c^2\nabla\times\mathbf B^n - \frac{\mathbf J^n}{\epsilon_0}\right), \qquad
+   \mathbf E^{n+1/2} = \mathbf E^n + \frac{\Delta t}{2}\left(c^2\nabla\times\mathbf B^n - \frac{\mathbf J^{n+1/4}}{\epsilon_0}\right), \qquad
    \mathbf B^{n+1/2} = \mathbf B^n - \frac{\Delta t}{2}\nabla\times\mathbf E^{n+1/2}.
    ```
 3. **Gather.** The external fields, if any, are added, and $\mathbf E^{n+1/2}$ and
@@ -31,19 +31,19 @@ displaced by $\pm\tfrac12\Delta t\,\mathbf v^0$ to create $x^{\pm1/2}$.
 5. **Boundary conditions** are applied to $x^{n+3/2}$ and $\mathbf v^{n+1}$, and the
    integer-time position $x^{n+1} = x^{n+3/2} - \tfrac12\Delta t\, v_x^{n+1}$ is formed
    and wrapped as well.
-6. **Current at $t^{n+1}$** from the motion $x^{n+1/2}\to x^{n+3/2}$ and the transverse
-   velocities at $x^{n+1}$.
+6. **Current of the second half step**, $J_x^{n+3/4}$, from the motion
+   $x^{n+1/2}\to x^{n+1}$ over $\Delta t/2$, and the transverse velocities at $x^{n+1}$.
 7. **Second half field update.** Faraday then Ampere:
    ```{math}
    \mathbf B^{n+1} = \mathbf B^{n+1/2} - \frac{\Delta t}{2}\nabla\times\mathbf E^{n+1/2}, \qquad
-   \mathbf E^{n+1} = \mathbf E^{n+1/2} + \frac{\Delta t}{2}\left(c^2\nabla\times\mathbf B^{n+1} - \frac{\mathbf J^{n+1}}{\epsilon_0}\right).
+   \mathbf E^{n+1} = \mathbf E^{n+1/2} + \frac{\Delta t}{2}\left(c^2\nabla\times\mathbf B^{n+1} - \frac{\mathbf J^{n+3/4}}{\epsilon_0}\right).
    ```
 8. **Electrostatic correction** (only with `field_solver = 1`): $E_x^{n+1}$ is replaced
    by the solution of Gauss's law from the charge density deposited at the cell faces
    from $x^{n+1}$.
 9. The charge density at the cell centres is deposited from $x^{n+1}$ for the output,
    and the step returns $(x^{n+1}, \mathbf v^{n+1}, \mathbf E^{n+1}, \mathbf B^{n+1},
-   \mathbf J^{n+1}, \rho^{n+1})$.
+   \mathbf J^{n+3/4}, \rho^{n+1})$.
 
 Combining steps 2 and 7, the magnetic field is advanced over the full step with the
 mid-point electric field, $\mathbf B^{n+1} = \mathbf B^n - \Delta t\,\nabla\times\mathbf E^{n+1/2}$,
@@ -93,30 +93,36 @@ clipped to $0.99c$ at initialisation.
 ## Charge-conserving current deposit
 
 The longitudinal current is not deposited as $q v_x S_2$. Instead, it is derived from
-the change of the particle's charge cloud between the two half-step positions, so that
-the discrete continuity equation holds exactly on the grid
-{cite}`villasenor1992,esirkepov2001`:
+the change of the particle's charge cloud over each half step, so that the discrete
+continuity equation holds exactly on the grid {cite}`villasenor1992,esirkepov2001`:
 
 ```{math}
-\frac{\rho_i^{n+1/2} - \rho_i^{n-1/2}}{\Delta t} + \frac{J_{x,i+1/2}^{n} - J_{x,i-1/2}^{n}}{\Delta x} = 0 .
+\frac{\rho_i^{n+1/2} - \rho_i^{n}}{\Delta t/2} + \frac{J_{x,i+1/2}^{n+1/4} - J_{x,i-1/2}^{n+1/4}}{\Delta x} = 0 ,
 ```
 
-For each particle the code forms $\Delta\rho_i = q_p[S_2(x_i - x^{n+1/2}) - S_2(x_i - x^{n-1/2})]/\Delta t$
-on the cell centres and integrates it from the left,
+and the same from $x^{n+1/2}$ to $x^{n+1}$ for $J_x^{n+3/4}$. For each particle the code
+forms $\Delta\rho_i = q_p[S_2(x_i - x^{b}) - S_2(x_i - x^{a})]/(\Delta t/2)$, with $x^a$ and
+$x^b$ the positions at the start and end of the half step, on the cell centres and
+integrates it from the left,
 
 ```{math}
 J_{x,i+1/2} = -\Delta x\sum_{j\le i}\Delta\rho_j ,
 ```
 
 over a window of six cells starting three cells to the left of the cell that contains
-$x^{n-1/2}$. The window is enough because the cloud spans three cells and moves by less
-than one cell per step; the sum of $\Delta\rho$ over the window vanishes, so the
+$x^{a}$. The window is enough because the cloud spans three cells and moves by less
+than one cell per half step; the sum of $\Delta\rho$ over the window vanishes, so the
 current returns to zero on both sides. Contributions of all particles are summed and
 filtered.
 
-Because the continuity equation is satisfied, advancing $E_x$ with Ampere's law
-preserves Gauss's law to round-off: $\partial_x E_x - \rho/\epsilon_0$ stays at its
-initial value, and the initial field is computed from Gauss's law. No correction step
+The two half steps join end to end, $x^n\to x^{n+1/2}\to x^{n+1}$, so over a full step
+Ampere's law changes $\partial_x E_x$ by exactly $(\rho^{n+1} - \rho^n)/\epsilon_0$, with
+$\rho$ the density deposited at the integer-time positions and stored in the output.
+Gauss's law is therefore preserved to round-off: $\partial_x E_x - \rho/\epsilon_0$ stays
+at its initial value, and the initial field is computed from Gauss's law. The
+`gauss_error_Linf_rel` diagnostic measures this (below $10^{-11}$ on the two-stream
+example of `examples/input.toml`). The digital filter keeps the property for periodic boundaries, where it
+commutes with the difference operator, but not at reflecting or absorbing walls. No correction step
 is needed in the electromagnetic mode; the electrostatic mode `field_solver = 1`
 recomputes $E_x$ from $\rho$ anyway, which also removes any error that the boundary
 treatment introduces.

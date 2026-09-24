@@ -39,8 +39,9 @@ steps so that they are available at $t^{n+1/2}$ when the particles are pushed.
 :width: 100%
 :alt: Time levels of positions, velocities, fields and currents in the explicit scheme
 
-Time levels of the explicit scheme. The current $\mathbf J^n$ is computed from the
-motion between $x^{n-1/2}$ and $x^{n+1/2}$ and is therefore centred at $t^n$.
+Time levels of the explicit scheme. Each half field update uses the current of the
+motion over that half step, $x^{n}\to x^{n+1/2}$ and then $x^{n+1/2}\to x^{n+1}$, so
+the charge moved by the currents matches the change of $\rho$ between integer times.
 ```
 
 The implicit scheme keeps positions, velocities and fields all at integer times and

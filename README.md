@@ -152,7 +152,7 @@ explains how each rate is fitted.
 
 | case | theory | simulation | script |
 |---|---|---|---|
-| Weibel, $T_z/T_x = 100$, one run per mode | transverse kinetic dispersion relation, $\gamma_{max} = 0.059\,\omega_{pe}$ | 5 of 10 modes fitted, 6 % mean and 11 % largest deviation | [`fig_weibel.py`](docs/scripts/fig_weibel.py) |
+| Weibel, $T_z/T_x = 100$, one run per mode | transverse kinetic dispersion relation, $\gamma_{max} = 0.059\,\omega_{pe}$ | 5 of 10 modes fitted, 6 % mean and 9 % largest deviation | [`fig_weibel.py`](docs/scripts/fig_weibel.py) |
 
 The pusher always advances all three velocity components; no 1D3V case on `main` is
 yet compared with a reference.

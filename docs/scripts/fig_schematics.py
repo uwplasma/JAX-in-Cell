@@ -44,8 +44,10 @@ for tt, label in ((-0.5, r"$n-1/2$"), (0, r"$n$"), (0.5, r"$n+1/2$"), (1.0, r"$n
 for tt in (-0.5, 0.5, 1.5):
     ax.plot(tt, rows["x"], "o", ms=14, color=C_ELECTRONS)
 for tt in (0, 1.0):
+    ax.plot(tt, rows["x"], "o", ms=14, mfc="white", mec=C_ELECTRONS)
     ax.plot(tt, rows["v"], "o", ms=14, color=C_ELECTRONS)
     ax.plot(tt, rows["E, B"], "s", ms=14, color=C_IONS)
+for tt in (0.25, 0.75):
     ax.plot(tt, rows["J"], "D", ms=12, color=COLORS["green"])
 ax.plot(0.5, rows["E, B"], "s", ms=14, mfc="white", mec=C_IONS)
 ax.annotate("", xy=(0.47, rows["x"]), xytext=(-0.47, rows["x"]), arrowprops=dict(arrowstyle="->", lw=2.6, color=C_ELECTRONS))
@@ -56,10 +58,10 @@ ax.annotate("", xy=(0.47, rows["E, B"]), xytext=(0.03, rows["E, B"]), arrowprops
 ax.annotate("", xy=(0.97, rows["E, B"]), xytext=(0.53, rows["E, B"]), arrowprops=dict(arrowstyle="->", lw=2.6, color=C_IONS))
 ax.text(0.25, rows["E, B"] - 0.18, "$\\Delta t/2$:\nE, then B", ha="center", va="top", fontsize=19)
 ax.text(0.75, rows["E, B"] - 0.18, "$\\Delta t/2$:\nB, then E", ha="center", va="top", fontsize=19)
-ax.text(0.0, rows["J"] - 0.32, r"$\mathbf{J}^{n}$ from $x^{n-1/2}\to x^{n+1/2}$", ha="center", fontsize=19)
-ax.text(1.0, rows["J"] - 0.32, r"$\mathbf{J}^{n+1}$ from $x^{n+1/2}\to x^{n+3/2}$", ha="center", fontsize=19)
-ax.annotate("", xy=(0.0, rows["E, B"] - 0.12), xytext=(0.0, rows["J"] + 0.12), arrowprops=dict(arrowstyle="->", lw=1.9, color=COLORS["green"], ls="--"))
-ax.annotate("", xy=(1.0, rows["E, B"] - 0.12), xytext=(1.0, rows["J"] + 0.12), arrowprops=dict(arrowstyle="->", lw=1.9, color=COLORS["green"], ls="--"))
+ax.text(0.25, rows["J"] - 0.32, r"$\mathbf{J}$ from $x^{n}\to x^{n+1/2}$", ha="right", fontsize=19)
+ax.text(0.75, rows["J"] - 0.32, r"$\mathbf{J}$ from $x^{n+1/2}\to x^{n+1}$", ha="left", fontsize=19)
+ax.annotate("", xy=(0.25, rows["E, B"] - 0.62), xytext=(0.25, rows["J"] + 0.12), arrowprops=dict(arrowstyle="->", lw=1.9, color=COLORS["green"], ls="--"))
+ax.annotate("", xy=(0.75, rows["E, B"] - 0.62), xytext=(0.75, rows["J"] + 0.12), arrowprops=dict(arrowstyle="->", lw=1.9, color=COLORS["green"], ls="--"))
 savefig(fig, "time_staggering")
 
 # --- 3. Particle shape functions ------------------------------------------
