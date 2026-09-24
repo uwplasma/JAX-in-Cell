@@ -31,8 +31,10 @@ The scalar parameters `external_electric_field_amplitude`,
 `external_electric_field_wavenumber`, `external_magnetic_field_amplitude`,
 `external_magnetic_field_wavenumber`, `external_electric_field_function` and
 `external_magnetic_field_function` are accepted and validated, but on the `main`
-branch they do not create a field. The electric-field amplitude only appears in the
-`print_info` summary as the normalised field strength
+branch they do not create a field. Setting a non-zero amplitude or a field function
+raises a `UserWarning` at construction saying so, because the run would otherwise
+proceed silently with no external field. The electric-field amplitude only appears in
+the `print_info` summary as the normalised field strength
 $-q_e E_0 \lambda_D / k_B T_e$. Use the array form above to apply an external field.
 ```
 
@@ -72,5 +74,6 @@ sourced, how often, at what rate, where in the box and with what velocity.
 
 The section is validated (lengths of the per-source tuples must match
 `source_species`) and copied into the output, but no code path on `main` creates
-particles from it. The implementation lives on the `ds/source_particles` branch of the
-repository. Leave the section out, or keep `source_term_active = 0`.
+particles from it. Setting `source_term_active = 1` raises a `UserWarning` saying that
+no particles will be injected. The implementation lives on the `ds/source_particles`
+branch of the repository. Leave the section out, or keep `source_term_active = 0`.
