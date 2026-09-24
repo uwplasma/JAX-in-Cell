@@ -8,6 +8,7 @@ as produced by the documentation build scripts under `docs/scripts/`.
 :maxdepth: 1
 
 two_stream
+relativistic_two_stream
 landau_damping
 langmuir_wave
 bump_on_tail
