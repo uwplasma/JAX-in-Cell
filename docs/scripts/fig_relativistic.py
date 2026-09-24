@@ -64,6 +64,10 @@ L = 2.0 * np.pi / k
 dx = L / GRID_POINTS
 dt = C_DT_OVER_DX * dx / c
 steps = int(round(T_END / (wpe * dt)))
+# Debye length of the beams, lambda_D = v_th / (sqrt(2) omega_pe) with v_th = sqrt(2 T / m):
+# the convention of the code (grid_points_per_Debye_length) and of the kinetic
+# two-stream dispersion relation 1 + [2 + xi_1 Z(xi_1) + xi_2 Z(xi_2)] / (2 k^2 lambda_D^2) = 0.
+debye_length = VTH_OVER_C * c / (np.sqrt(2.0) * wpe)
 
 # Growth rate of every box mode k_m = m k, for both sets of equations. Only the
 # first mode is unstable for the relativistic beams (a^2 < 2 wb^2 / gamma0^3);
@@ -160,7 +164,8 @@ record(relativistic_v0_over_c=V0_OVER_C, relativistic_gamma0=gamma0, relativisti
        relativistic_c_dt_over_dx=C_DT_OVER_DX, relativistic_omega_pe_dt=wpe * dt, relativistic_steps=steps,
        relativistic_k_c_over_wpe=k * c / wpe, relativistic_k_v0_over_wpe=k * v0 / wpe,
        relativistic_length_c_over_wpe=L * wpe / c, relativistic_dx_wpe_over_c=dx * wpe / c,
-       relativistic_t_end=T_END,
+       relativistic_t_end=T_END, relativistic_length_over_debye=int(round(L / debye_length)),
+       relativistic_dx_over_debye=dx / debye_length, relativistic_debye_c_over_wpe=debye_length * wpe / c,
        **{f"relativistic_gamma_cold_{key}": theory[key]["cold"] for key in theory},
        **{f"relativistic_gamma_warm_{key}": theory[key]["warm"] for key in theory},
        **{f"relativistic_fastest_mode_{key}": theory[key]["mode"] for key in theory},
@@ -190,19 +195,21 @@ fig, axes = figure(2, 2, gridspec_kw={"wspace": 0.3, "hspace": 0.34})
 ax = axes[0, 0]
 for key, _, label, colour in RUNS:
     ax.semilogy(results[key]["t"], results[key]["energy"], color=colour, label=label)
+# Fastest box mode of each theory: mode 1 with the gamma0^3, mode 2 without (see the page).
+THEORY_LABELS = {"relativistic": "relativistic cold theory", "newtonian": "non-rel. cold theory"}
 for key, _, _, colour in RUNS:
     f = results[key]["fit"]
     tt = np.linspace(f["t0"], f["t1"], 50)
     # Theory is drawn from the electrostatic energy at the start of the fit window,
     # shifted up by a factor 5 so that it does not hide the simulation.
     anchor = 5 * results[key]["energy"][int(np.argmin(np.abs(results[key]["t"] - f["t0"])))]
-    ax.semilogy(tt, anchor * np.exp(2 * theory[key]["cold"] * (tt - tt[0])), ls="--", color=C_THEORY)
-ax.plot([], [], ls="--", color=C_THEORY, label=r"cold theory, $e^{2\gamma t}$")
+    ax.semilogy(tt, anchor * np.exp(2 * theory[key]["cold"] * (tt - tt[0])), ls="--", color=colour,
+                label=rf"{THEORY_LABELS[key]}, $\gamma = {theory[key]['cold']:.3f}\,\omega_{{pe}}$")
 ax.set_xlabel(r"$t\,\omega_{pe}$")
 ax.set_ylabel(r"$\frac{\epsilon_0}{2}\int E_x^2\,dx$  (J/m$^2$)")
 ax.set_xlim(0, T_END)
-ax.set_ylim(top=30 * max(r["energy"].max() for r in results.values()))
-ax.legend(loc="lower right")
+ax.set_ylim(1e-9, 30 * max(r["energy"].max() for r in results.values()))
+ax.legend(loc="lower right", fontsize=16, handlelength=1.8)
 panel_label(ax, "(a)")
 
 # (b) Relative change of the two total energies
@@ -216,11 +223,12 @@ ax.plot([], [], color=C_THEORY, label=r"$\sum(\gamma-1)mc^2$ + field")
 ax.plot([], [], color=C_THEORY, ls=":", label=r"$\sum mv^2/2$ + field")
 if newt["t_superluminal"] is not None:
     ax.axvline(newt["t_superluminal"], color=COLORS["grey"], lw=2, ls="-.")
-    ax.text(newt["t_superluminal"] + 2, 10.0, r"first $|v| \geq c$", color=COLORS["grey"], fontsize=18)
+    ax.text(newt["t_superluminal"] + 2, 3e3, "first $|v| \\geq c$: $\\gamma$ undefined,\n"
+            r"so is $\sum(\gamma-1)mc^2$", color=COLORS["grey"], fontsize=18, va="top")
 ax.set_xlabel(r"$t\,\omega_{pe}$")
 ax.set_ylabel(r"$|\,\mathcal{E}(t) - \mathcal{E}(0)\,| / \mathcal{E}(0)$")
 ax.set_xlim(0, T_END)
-ax.set_ylim(1e-9, 1e2)
+ax.set_ylim(1e-9, 1e4)
 ax.legend(loc="lower right")
 panel_label(ax, "(b)")
 
@@ -229,13 +237,13 @@ v_lim = 1.1 * max(np.abs(r["ve"][int(np.argmax(r["energy"]))]).max() for r in re
 for ax, (key, _, label, colour), letter in zip(axes[1], RUNS, ("(c)", "(d)")):
     r = results[key]
     i = int(np.argmax(r["energy"]))
-    ax.scatter(r["x"][i], r["ve"][i], s=1.5, color=colour, alpha=0.5, linewidths=0, rasterized=True)
+    ax.scatter(r["x"][i] * L / debye_length, r["ve"][i], s=1.5, color=colour, alpha=0.5, linewidths=0, rasterized=True)
     for sign in (+1, -1):
         ax.axhline(sign, color=C_THEORY, ls="--", lw=2)
         ax.axhspan(sign, sign * v_lim, color="#EEEEEE", zorder=0)
-    ax.set_xlim(-0.5, 0.5)
+    ax.set_xlim(-0.5 * L / debye_length, 0.5 * L / debye_length)
     ax.set_ylim(-v_lim, v_lim)
-    ax.set_xlabel("x / L")
+    ax.set_xlabel(r"$x / \lambda_D$")
     ax.set_ylabel(r"$v_x / c$")
     ax.set_title(rf"{label}, $t\,\omega_{{pe}} = {r['t'][i]:.0f}$")
     panel_label(ax, letter)
