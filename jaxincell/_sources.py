@@ -1,6 +1,5 @@
 import jax.numpy as jnp
 from jax import jit, vmap
-from jax.lax import dynamic_update_slice
 from functools import partial
 from ._filters import filter_scalar_field, filter_vector_field
 
@@ -109,6 +108,29 @@ def single_particle_charge_density(x, q, dx, grid, particle_BC_left, particle_BC
     grid_BCs = grid_BCs  .at[-1].set(chargedens_for_R + grid_BCs  [-1])
     return grid_BCs
 
+def _charge_density_on_window(x, q, dx, grid, cell_no, particle_BC_left, particle_BC_right):
+    """
+    Same values as :func:`single_particle_charge_density`, but only on the nodes
+    ``cell_no - 3 ... cell_no + 2`` (wrapped), which contain the whole quadratic
+    shape of a particle whose nearest node is ``cell_no - 2 ... cell_no + 1``.
+    Working on six nodes instead of the whole grid keeps the deposit cost
+    independent of the grid size.
+
+    Returns:
+        tuple: Node indices, shape ``(W,)``, and charge density on them, shape ``(W,)``,
+        with ``W = min(6, len(grid))``.
+    """
+    grid_size = grid.shape[0]
+    idx = (cell_no - 3 + jnp.arange(min(6, grid_size))) % grid_size
+    xg = grid[idx]
+    r = jnp.abs(x - xg)
+    rho = (q/dx)*jnp.where(r <= dx/2, 3/4-(x-xg)**2/(dx**2),
+                   jnp.where((dx/2 < r) & (r <= 3*dx/2), 0.5*(3/2-r/dx)**2, 0.0))
+    chargedens_for_L, chargedens_for_R = charge_density_BCs(particle_BC_left, particle_BC_right, x, dx, grid, q)
+    rho = rho + jnp.where(idx == 0, chargedens_for_L, 0.0)
+    rho = rho + jnp.where(idx == grid_size - 1, chargedens_for_R, 0.0)
+    return idx, rho
+
 @jit
 def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_right,
                              filter_passes=5, filter_alpha=0.5, filter_strides=(1, 2, 4),
@@ -132,14 +154,11 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
     Returns:
         array: Total charge density on the grid.
     """
-    # Vectorize over particles
-    chargedens_contrib = vmap(single_particle_charge_density, in_axes=(0, 0, None, None, None, None))
-    
-    # Compute charge density for all particles
-    chargedens = chargedens_contrib(xs_n[:, 0], qs[:, 0], dx, grid, particle_BC_left, particle_BC_right)
-
-    # Sum the contributions across all particles
-    total_chargedens = jnp.sum(chargedens, axis=0)
+    # Each particle's shape on the six nodes around its nearest node, summed on the grid
+    cell_no = ((xs_n[:, 0] - (grid[0] - dx / 2)) // dx).astype(int)
+    idx, chargedens = vmap(_charge_density_on_window, in_axes=(0, 0, None, None, 0, None, None))(
+        xs_n[:, 0], qs[:, 0], dx, grid, cell_no, particle_BC_left, particle_BC_right)
+    total_chargedens = jnp.zeros(grid.shape[0], dtype=chargedens.dtype).at[idx.ravel()].add(chargedens.ravel())
 
     # Apply digital filtering to the total charge density
     total_chargedens = filter_scalar_field(
@@ -189,38 +208,25 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf,
         q = qs[i, 0]
         cell_no = ((x_nminushalf - grid_start) // dx).astype(int)
 
-        # Compute the charge density difference over time
-        diff_chargedens_1particle_whole = (
-            single_particle_charge_density(x_nplushalf, q, dx, grid, particle_BC_left, particle_BC_right) -
-            single_particle_charge_density(x_nminushalf, q, dx, grid, particle_BC_left, particle_BC_right)
-        ) / dt
-
-        # Sweep only cells -3 to 2 relative to particle's initial position.
-        diff_chargedens_1particle_short = jnp.roll(diff_chargedens_1particle_whole, 3 - cell_no)[:6]
-        j_grid_short = jnp.cumsum(-diff_chargedens_1particle_short * dx)
-
-        # Copy 6-cell grid back onto proper grid
-        j_grid_x = jnp.zeros(len(grid))
-        j_grid_x = dynamic_update_slice(j_grid_x, j_grid_short, (0,))
-
-        # Roll back to its correct position on grid
-        j_grid_x = jnp.roll(j_grid_x, cell_no - 3)
+        # Compute the charge density difference over time on cells -3 to 2
+        # relative to the particle's initial position.
+        idx_x, rho_plus = _charge_density_on_window(x_nplushalf, q, dx, grid, cell_no, particle_BC_left, particle_BC_right)
+        _, rho_minus = _charge_density_on_window(x_nminushalf, q, dx, grid, cell_no, particle_BC_left, particle_BC_right)
+        diff_chargedens_1particle_short = (rho_plus - rho_minus) / dt
+        j_x = jnp.cumsum(-diff_chargedens_1particle_short * dx)
 
         # Compute y- and z-components of the current density
         x_n = xs_n[i, 0]
-        vy_n = vs_n[i, 1]
-        vz_n = vs_n[i, 2]
-        chargedens = single_particle_charge_density(x_n, q, dx, grid, particle_BC_left, particle_BC_right)
+        idx_yz, chargedens = _charge_density_on_window(x_n, q, dx, grid, ((x_n - grid_start) // dx).astype(int),
+                                                       particle_BC_left, particle_BC_right)
 
-        j_grid_y = chargedens * vy_n
-        j_grid_z = chargedens * vz_n
+        return idx_x, j_x, idx_yz, chargedens * vs_n[i, 1], chargedens * vs_n[i, 2]
 
-        return j_grid_x, j_grid_y, j_grid_z  # Each output has shape (grid_size,)
- 
-    current_dens_x, current_dens_y, current_dens_z = vmap(compute_current)(jnp.arange(len(xs_nminushalf)))
-    current_dens_x = jnp.sum(current_dens_x, axis=0)
-    current_dens_y = jnp.sum(current_dens_y, axis=0)
-    current_dens_z = jnp.sum(current_dens_z, axis=0)
+    idx_x, j_x, idx_yz, j_y, j_z = vmap(compute_current)(jnp.arange(len(xs_nminushalf)))
+    zeros = jnp.zeros(grid.shape[0], dtype=j_x.dtype)
+    current_dens_x = zeros.at[idx_x.ravel()].add(j_x.ravel())
+    current_dens_y = zeros.at[idx_yz.ravel()].add(j_y.ravel())
+    current_dens_z = zeros.at[idx_yz.ravel()].add(j_z.ravel())
 
     current_density = jnp.stack([current_dens_x, current_dens_y, current_dens_z], axis=0).T
 

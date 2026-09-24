@@ -39,8 +39,8 @@ The time step has three constraints, discussed in {doc}`../numerics/stability`:
 
 * plasma oscillations: $\omega_{pe}\Delta t \lesssim 0.2$ for accuracy (the leapfrog
   limit is $\omega_{pe}\Delta t < 2$);
-* particle motion: a pseudo-particle should not cross more than one cell per step,
-  $v_{\max}\Delta t < \Delta x$, because the charge-conserving current deposit sweeps a
+* particle motion: a pseudo-particle should not cross more than one cell per half step,
+  $v_{\max}\Delta t < 2\Delta x$, because the charge-conserving current deposit sweeps a
   window of six cells around each particle;
 * light waves, explicit scheme only: $c\,\Delta t/\Delta x \le 1$ whenever a transverse
   field component can be excited. Purely electrostatic runs with velocities only along

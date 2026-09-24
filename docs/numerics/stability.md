@@ -15,12 +15,12 @@ Plasma oscillations
 
 Cell crossing
 : The charge-conserving current deposit sweeps six cells around each particle and
-  assumes that the particle moves by less than one cell per step,
-  $|v_x|\Delta t < \Delta x$. Faster particles deposit a truncated current and Gauss's
+  assumes that the particle moves by less than one cell per half step,
+  $|v_x|\Delta t < 2\Delta x$. Faster particles deposit a truncated current and Gauss's
   law is no longer preserved. Check the thermal tails: with $v_{th}/c = 0.05$ and
   $c\,\Delta t/\Delta x = 4.5$ the bulk moves $0.2$ cells per step but a drift of $0.2c$
-  brings it to $0.9$ cells, which is why the examples with drifts of this size are at
-  the limit.
+  brings it to $0.9$ cells, about half the limit, so the tails of the examples with
+  drifts of this size are the particles to watch.
 
 Light waves
 : The explicit field update is stable for $c\,\Delta t/\Delta x \le 1$. The constraint

@@ -755,8 +755,12 @@ def plot(
         te = np.asarray(output["total_energy"])
         denom = float(max(abs(te[0]), 1e-30))
         ax_en.plot(time[1:], np.abs(te[1:] - te[0]) / denom, label="Relative energy error")
+        if "gauss_error_Linf_rel" in output:
+            ax_en.plot(time, np.asarray(output["gauss_error_Linf_rel"]), label="Relative charge (Gauss's law) error")
+        if "momentum_error_rel" in output:
+            ax_en.plot(time[1:], np.asarray(output["momentum_error_rel"])[1:], label="Relative momentum change")
 
-        ax_en.set_title("Energy")
+        ax_en.set_title("Energy and conservation")
         ax_en.set_xlabel(r"Time ($\omega_{pe}^{-1}$)")
         ax_en.set_ylabel("Energy (J)")
         ax_en.set_yscale("log")

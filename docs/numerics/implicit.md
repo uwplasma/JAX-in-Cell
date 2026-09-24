@@ -107,6 +107,10 @@ Cost
 * The particle push is the non-relativistic Boris rotation; `relativistic` is ignored.
 * The charge density stored in the output is deposited from $x^{n+1}$ without
   filtering.
+* The current is deposited as $q v S_2$ at the sub-step mid-points, which does not
+  satisfy the discrete continuity equation, so Gauss's law is not maintained:
+  `gauss_error_Linf_rel` reaches about 0.4 on the two-stream example of
+  `examples/input.toml`, against below $10^{-11}$ for the explicit scheme.
 * Reverse-mode automatic differentiation (`jax.grad`) is not available through the
   while loop; forward mode (`jax.jvp`, `jax.jacfwd`) is, see
   {doc}`../user_guide/differentiation`.

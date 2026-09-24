@@ -29,6 +29,23 @@ The velocities stored in the output are the integer-time velocities and the fiel
 are the integer-time fields, so the energies are synchronous and their sum is the
 right quantity to monitor for conservation.
 
+## Charge and momentum
+
+Charge conservation is measured through Gauss's law with the backward difference
+that the field solve uses (periodic wrap for periodic fields, $E_{x,-1} = 0$
+otherwise),
+
+```{math}
+r_i = \frac{E_{x,i} - E_{x,i-1}}{\Delta x} - \frac{\rho_i}{\epsilon_0}, \qquad
+\texttt{gauss\_error\_Linf\_rel} = \frac{\max_i |r_i|}{\max_i |\rho_i/\epsilon_0|},
+```
+
+with the mean of $r$ removed for periodic fields, which can only satisfy Gauss's law
+up to the mean charge. The total momentum is $\mathbf P = \sum_p m_p\mathbf v_p$
+(non-relativistic, like the kinetic energy), and `momentum_error_rel` is
+$|\mathbf P(t) - \mathbf P(0)|/\sum_p m_p|\mathbf v_p(0)|$; the denominator is used
+because $\mathbf P(0)$ itself is often zero. Neither scheme conserves momentum exactly.
+
 ## Dominant frequency
 
 The time series of $E_x$ at the centre cell is centred, normalised and transformed
