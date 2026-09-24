@@ -22,7 +22,8 @@ pseudo-particles with their pseudo-masses $m_p = m_s w_s$,
 
 split into electrons (negative charge) and ions (non-negative charge). The kinetic
 energy is the non-relativistic one even when the relativistic pusher is used; for
-$v \le 0.3c$ the difference is below 10 %. The total is the sum of all five terms.
+$v \le 0.3c$ the difference is below 10 %. {doc}`../examples/relativistic_two_stream`
+shows how to form the relativistic energy $\sum_p(\gamma_p - 1)m_pc^2$ from the output. The total is the sum of all five terms.
 All values are energies per unit area of the $y$-$z$ plane, in J/m².
 
 The velocities stored in the output are the integer-time velocities and the fields

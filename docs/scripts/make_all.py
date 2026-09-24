@@ -24,6 +24,7 @@ SCRIPTS = [
     "fig_weibel.py",
     "fig_bump_on_tail.py",
     "fig_explicit_implicit.py",
+    "fig_relativistic.py",
     "fig_boundary_conditions.py",
     "fig_two_stream_scan.py",
     "fig_autodiff.py",
