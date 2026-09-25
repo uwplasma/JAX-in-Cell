@@ -2,7 +2,7 @@ import jax.numpy as jnp
 from copy import deepcopy
 from functools import partial
 from jax_tqdm import scan_tqdm
-from jax import lax, jit, config
+from jax import lax, jit, config, eval_shape
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
@@ -250,17 +250,48 @@ class Simulation:
                 solver_parameters["number_of_particle_substeps_implicit_CN"]
             )
 
+        # Keep the requested snapshots in fixed-size buffers carried through the scan.
+        # An unset snapshot_steps records every step.
+        num_snapshots = len(self._snapshot_steps)
+        snapshot_steps_arr = jnp.array(self._snapshot_steps, dtype=int)
+        time_array = (snapshot_steps_arr + 1) * dt
+        # The sentinel keeps the lookup valid after the last requested snapshot.
+        snapshot_steps_with_end = jnp.array((*self._snapshot_steps, total_steps), dtype=int)
+
+        _, sample_step_data = eval_shape(step_func, initial_carry, 0)
+        snapshot_buffers = tuple(
+            jnp.zeros((num_snapshots,) + leaf.shape, dtype=leaf.dtype)
+            for leaf in sample_step_data
+        )
+
         @scan_tqdm(total_steps)
-        def simulation_step(carry, step_index):
-            return step_func(carry, step_index)
+        def scan_body(carry_and_buffers, step_index):
+            sim_carry, buffers, next_snapshot = carry_and_buffers
+            new_sim_carry, step_data = step_func(sim_carry, step_index)
 
+            should_save = step_index == snapshot_steps_with_end[next_snapshot]
 
-        # Run simulation
-        _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
+            def save_snapshot(buffers):
+                return tuple(
+                    buf.at[next_snapshot].set(value)
+                    for buf, value in zip(buffers, step_data)
+                )
 
-        # Unpack results
+            buffers = lax.cond(
+                should_save,
+                save_snapshot,
+                lambda buffers: buffers,
+                buffers,
+            )
+            next_snapshot += should_save.astype(next_snapshot.dtype)
+            # Returning None prevents scan from stacking a second output history.
+            return (new_sim_carry, buffers, next_snapshot), None
+
+        (_, snapshot_buffers, _), _ = lax.scan(
+            scan_body, (initial_carry, snapshot_buffers, jnp.array(0, dtype=int)), jnp.arange(total_steps)
+        )
         positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+        magnetic_field_over_time, current_density_over_time, charge_density_over_time = snapshot_buffers
 
         # **Output results**
         from ._constants import epsilon_0, mass_electron
@@ -302,7 +333,7 @@ class Simulation:
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
-            "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
+            "time_array":  time_array,
             "grid": grid,
             "dt": dt,
             "plasma_frequency": plasma_frequency,
@@ -437,6 +468,7 @@ class Simulation:
         self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
         self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
         self.build_domain()
+        self.resolve_snapshot_steps()
         self.initialize_particles()
         self.initialize_fields()
         self.build_hash_values()
@@ -466,6 +498,15 @@ class Simulation:
         self.dx = domain_state["dx"]
         self.dt = domain_state["dt"]
         self.grid = domain_state["grid"]
+
+    def resolve_snapshot_steps(self):
+        snapshot_steps = self._solver_parameters["snapshot_steps"]
+        if snapshot_steps is None:
+            snapshot_steps = tuple(range(self._domain_parameters["total_steps"]))
+        else:
+            snapshot_steps = tuple(s for s in snapshot_steps if 0 <= s < self._domain_parameters["total_steps"])
+            assert len(snapshot_steps) > 0, "All snapshot steps are out of bounds. Please provide at least one valid snapshot step."
+        self._snapshot_steps = snapshot_steps
 
     def initialize_particles(self):
         domain_state = self.current_domain_state()
