@@ -104,7 +104,8 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
     E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
     
     if field_solver != 0:
-        charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right,
+        # Field of the updated positions x^{n+1}, deposited on the cell centres as at t = 0.
+        charge_density = calculate_charge_density(positions_plus1, qs, dx, grid, particle_BC_left, particle_BC_right,
                                                   filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                                                   field_BC_left=field_BC_left, field_BC_right=field_BC_right)
         switcher = {
@@ -112,7 +113,11 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
             2: partial(E_from_Gauss_1D_Cartesian, periodic=field_BC_left == 0 and field_BC_right == 0),
             3: E_from_Poisson_1D_FFT,
         }
-        E_field = E_field.at[:,0].set(switcher[field_solver](charge_density, dx))
+        E_x = switcher[field_solver](charge_density, dx)
+        if field_solver != 2:  # the FFT solves return E on the centres; E_x lives half a cell to the right
+            kx = jnp.fft.fftfreq(E_x.size, d=dx) * 2 * jnp.pi
+            E_x = jnp.fft.ifft(jnp.fft.fft(E_x) * jnp.exp(0.5j * kx * dx)).real
+        E_field = E_field.at[:,0].set(E_x)
 
     # Update positions and velocities
     positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2

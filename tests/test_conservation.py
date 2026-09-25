@@ -69,3 +69,15 @@ def test_explicit_scheme_keeps_gauss_law_to_round_off(boundary, filter_passes):
     assert residual.max() < 1e-9
     diagnostics(output)
     assert np.max(np.asarray(output["gauss_error_Linf_rel"])) < 1e-9
+
+
+def test_electrostatic_boris_field_follows_the_updated_particles():
+    # With field_solver=1 the step replaces E by Gauss's law for x^{n+1}. Solving it
+    # for x^n instead lags the field by one step, an O(dt) energy error; here that
+    # was 2.9e-5 over 200 steps, against 1.0e-6 without the lag.
+    parameters = two_stream_parameters(total_steps=200)
+    parameters["solver_parameters"]["field_solver"] = 1
+    output = Simulation(parameters).run()
+    diagnostics(output)
+    energy = np.asarray(output["total_energy"])
+    assert np.max(np.abs(energy - energy[0])) / energy[0] < 1e-5
