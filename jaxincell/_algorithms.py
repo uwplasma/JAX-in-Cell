@@ -62,11 +62,17 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
     
     # Charge-conserving deposit over the first half step, x^n -> x^{n+1/2}, so that
     # the change of E over the whole step matches rho(x^{n+1}) - rho(x^n) exactly.
+    def electrostatic(J):
+        # With field_solver != 0, E_x is Gauss's law with <E_x> = 0 in a periodic box, so the
+        # mean current must not change E_x in the Ampere half steps either (as in CN_step).
+        periodic = field_BC_left == 0 and field_BC_right == 0
+        return J.at[:, 0].add(-jnp.mean(J[:, 0])) if field_solver != 0 and periodic else J
+
     J = current_density(positions, positions, positions_plus1_2, velocities,
                 qs, dx, dt / 2, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
                 filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                 field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-    E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+    E_field, B_field = field_update1(E_field, B_field, dx, dt/2, electrostatic(J), field_BC_left, field_BC_right)
     
     # Add external fields
     total_E = E_field + external_field_parameters["external_electric_field"]
@@ -101,7 +107,7 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
                 qs, dx, dt / 2, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
                 filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                 field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-    E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+    E_field, B_field = field_update2(E_field, B_field, dx, dt/2, electrostatic(J), field_BC_left, field_BC_right)
     
     if field_solver != 0:
         # Field of the updated positions x^{n+1}, deposited on the cell centres as at t = 0.
