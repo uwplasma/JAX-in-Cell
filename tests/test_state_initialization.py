@@ -826,3 +826,19 @@ def test_initialize_field_state_default_and_provided_external_fields():
     reflecting = domain_parameters(length=4.0, number_grid_points=4, field_BC_left=1, field_BC_right=1)
     reflecting_state = initialize_field_state(reflecting, solver, external_defaults, domain_state, particle_state)
     assert jnp.allclose(reflecting_state["fields"][0][:, 0], expected_E_x)
+
+
+def test_quiet_velocities_are_seed_free_gaussian_quantiles():
+    """quiet_velocities_*: velocities at Gaussian quantiles in van der Corput order, one base per axis, so the
+    sample mean and spread match the drift and thermal speed closely and no seed enters."""
+    species = electron_species(vth_over_c_x=0.02, vth_over_c_y=0.01, drift_speed_x=1e6, quiet_velocities_x=True,
+                               quiet_velocities_y=True, quiet_velocities_z=False)
+    sigma = np.array([0.02, 0.01]) * speed_of_light / np.sqrt(2)
+    _, v1 = initialize_species_phase_space(species, 1, 2, 4096, (1.0, 1.0, 1.0))
+    _, v2 = initialize_species_phase_space(species, 3, 4, 4096, (1.0, 1.0, 1.0))
+    v1, v2 = np.asarray(v1), np.asarray(v2)
+    np.testing.assert_array_equal(v1[:, :2], v2[:, :2])
+    # a random load's mean is off by sigma / sqrt(N) = 1.6e-2 sigma here; the quiet one by < 5e-3 sigma
+    assert np.all(np.abs(v1[:, :2].mean(axis=0) - [1e6, 0.0]) < 5e-3 * sigma)
+    np.testing.assert_allclose(v1[:, :2].std(axis=0), sigma, rtol=5e-3)  # random: ~1/sqrt(2N) = 1.1e-2
+    assert abs(np.corrcoef(v1[:, 0], v1[:, 1])[0, 1]) < 0.05

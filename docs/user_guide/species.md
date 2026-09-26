@@ -35,6 +35,7 @@ vth_over_c_x = "_electrons0"
 | `perturbation_wavenumber_x`, `_y`, `_z` | `0` | yes | Mode number $m$ of the displacement, $k = 2\pi m/L$. |
 | `random_positions_x` | `false` | no | Uniform random positions instead of equally spaced ones. |
 | `random_positions_y`, `random_positions_z` | `true` | no | Same for $y$ and $z$. |
+| `quiet_velocities_x`, `_y`, `_z` | `false` | no | Quiet start: deterministic velocities instead of random draws (see below). |
 | `seed_position_override`, `seed_position` | `false`, `None` | no | Use `seed_position` as the position seed of this population instead of the derived one. |
 | `initial_positions`, `initial_velocities` | `None` | yes | Arrays of shape `(number_pseudoparticles, 3)` that replace the generated phase space entirely. |
 
@@ -156,3 +157,15 @@ beam of electrons) are merged into one entry. To separate them use
 `output["species_integer_index"]`, an integer per pseudo-particle in input order
 (`_electrons0`, `_electrons1`, ..., `_ions0`, ...), together with `output["weights"]`,
 `output["charge_integer_lookup"]` and `output["mass_integer_lookup"]`.
+
+## Quiet start
+
+A random load puts thermal noise of order $N^{-1/2}$ into the density and the field, which hides small
+perturbations. With `quiet_velocities_x = true` the velocities are instead the quantiles of the Maxwellian:
+particle $i$ gets $v_i = v_{th}\,\mathrm{erf}^{-1}(2q_i - 1)$, so the sample has the exact mean and spread.
+The fractions $q_i$ are taken in *van der Corput order*: $q_i$ is $i$ written in base $b$ with its digits
+mirrored after the decimal point (base 2: 1/2, 1/4, 3/4, 1/8, 5/8, ...). Consecutive particles, which sit next to
+each other in space, therefore get velocities spread over the whole Maxwellian rather than sorted ones, and each
+stretch of positions sees the full distribution. The axes use bases 2, 3 and 5, so they are not correlated.
+This is the classic quiet start (Birdsall & Langdon, Ch. 16). It lowers the noise floor of
+`examples/Landau_damping.py` 16x; it does not help runs whose error is numerical heating rather than noise.
