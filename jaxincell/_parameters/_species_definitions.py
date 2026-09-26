@@ -30,9 +30,12 @@ SPECIES_CANONICAL_PREFIXES = {
     "ions": "ions",
 }
 
+# Old name -> new name. The value is unchanged: the old name described it backwards.
+DEPRECATED_SPECIES_PARAMETERS = {"grid_points_per_Debye_length": "dx_over_Debye_length"}
+
 DEFAULT_CHARGED_SPECIES_PARAMETERS = {
     "number_pseudoparticles": 500,
-    "grid_points_per_Debye_length": 2,
+    "dx_over_Debye_length": 2,
     "weight": 0,
     "perturbation_amplitude_x": 0.0,
     "perturbation_amplitude_y": 0.0,
@@ -111,7 +114,7 @@ SPECIES_INITIAL_DEFAULT_PARAMETERS = {
 }
 
 DIFFERENTIABLE_CHARGED_SPECIES_PARAMETERS = [
-    "grid_points_per_Debye_length",
+    "dx_over_Debye_length",
     "weight",
     "charge_over_elementary_charge",
     "perturbation_amplitude_x",

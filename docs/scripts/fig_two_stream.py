@@ -58,7 +58,7 @@ record(two_stream_gamma_theory=gamma_theory, two_stream_gamma_measured=main_gamm
        two_stream_scan_max_relative_deviation=float(np.max(np.abs(scan_measured[ok] - scan_theory[ok]) / scan_theory[ok])),
        two_stream_scan_mean_relative_deviation=float(np.mean(np.abs(scan_measured[ok] - scan_theory[ok]) / scan_theory[ok])),
        two_stream_k_lambda_D=k * float(output["dx"]) / float(np.asarray(
-           parameters["species_parameters"]["electrons"]["electrons0"]["grid_points_per_Debye_length"])),
+           parameters["species_parameters"]["electrons"]["electrons0"]["dx_over_Debye_length"])),
        two_stream_k_vd_over_wpe=k * 6e7 / wpe,
        two_stream_fit_window=[float(t0), float(t1)], two_stream_omega_pe=wpe,
        two_stream_omega_pe_dt=float(output["dt"]) * wpe)

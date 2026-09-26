@@ -35,7 +35,7 @@ def _small_parameters_for_algorithms():
 
     base_species = {
         "number_pseudoparticles": number_pseudoparticles,
-        "grid_points_per_Debye_length": 1.0,
+        "dx_over_Debye_length": 1.0,
         "weight": 1.0,
         "perturbation_amplitude_x": 0.0,
         "perturbation_amplitude_y": 0.0,

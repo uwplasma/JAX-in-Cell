@@ -23,7 +23,7 @@ parameters = {
         "electrons": {
             "electrons0": {
                 "number_pseudoparticles": 3500,
-                "grid_points_per_Debye_length": 2,
+                "dx_over_Debye_length": 2,
                 "perturbation_amplitude_x": 1e-7,
                 "perturbation_wavenumber_x": 8,
                 "vth_over_c_x": 0.05,
@@ -34,7 +34,7 @@ parameters = {
         "ions": {
             "ions0": {
                 "number_pseudoparticles": 3500,
-                "grid_points_per_Debye_length": 2,
+                "dx_over_Debye_length": 2,
                 "vth_over_c_x": "_electrons0",
                 "vth_over_c_y": "_electrons0",
                 "vth_over_c_z": "_electrons0",

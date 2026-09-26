@@ -18,7 +18,7 @@ from tests.helpers import scalar
 def small_simulation_parameters(total_steps=10, number_grid_points=8, number_pseudoparticles=20):
     base_species = {
         "number_pseudoparticles": number_pseudoparticles,
-        "grid_points_per_Debye_length": 1.0,
+        "dx_over_Debye_length": 1.0,
         "weight": 1.0,
         "perturbation_amplitude_x": 0.0,
         "perturbation_amplitude_y": 0.0,
@@ -290,7 +290,7 @@ def test_simulation_with_extra_species_and_external_fields():
     )
     parameters["species_parameters"]["ions"]["extra_ion"] = {
         "number_pseudoparticles": number_extra_particles,
-        "grid_points_per_Debye_length": 1.0,
+        "dx_over_Debye_length": 1.0,
         "weight": 1.0,
         "charge_over_elementary_charge": 2.0,
         "mass_over_proton_mass": 4.0,
@@ -385,7 +385,7 @@ print_info = false
 
 [species_parameters.electrons.electrons0]
 number_pseudoparticles = 20
-grid_points_per_Debye_length = 1.0
+dx_over_Debye_length = 1.0
 weight = 1.0
 charge_over_elementary_charge = -1.0
 vth_over_c_x = 0.01
@@ -394,7 +394,7 @@ vth_over_c_z = 0.01
 
 [species_parameters.ions.ions0]
 number_pseudoparticles = 20
-grid_points_per_Debye_length = 1.0
+dx_over_Debye_length = 1.0
 weight = 1.0
 charge_over_elementary_charge = 1.0
 mass_over_proton_mass = 1.0
@@ -466,7 +466,7 @@ print_info = false
 
 [species_parameters.electrons.electrons0]
 number_pseudoparticles = 4
-grid_points_per_Debye_length = 1.0
+dx_over_Debye_length = 1.0
 weight = 1.0
 charge_over_elementary_charge = -1.0
 vth_over_c_x = 0.01
@@ -475,7 +475,7 @@ vth_over_c_z = 0.01
 
 [species_parameters.ions.ions0]
 number_pseudoparticles = 4
-grid_points_per_Debye_length = 1.0
+dx_over_Debye_length = 1.0
 weight = 1.0
 charge_over_elementary_charge = 1.0
 mass_over_proton_mass = 1.0

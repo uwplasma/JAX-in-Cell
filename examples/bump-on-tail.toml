@@ -42,7 +42,7 @@ filter_strides = [1, 2, 4]
 
 [species_parameters.electrons.electrons0]
 number_pseudoparticles = 12000
-grid_points_per_Debye_length = 2.565
+dx_over_Debye_length = 2.565
 weight = 0
 charge_over_elementary_charge = -1
 random_positions_x = true
@@ -66,7 +66,7 @@ velocity_plus_minus_z = false
 
 [species_parameters.ions.ions0]
 number_pseudoparticles = 12000
-grid_points_per_Debye_length = 2.565
+dx_over_Debye_length = 2.565
 weight = 0
 charge_over_elementary_charge = 1
 mass_over_proton_mass = 1
@@ -94,12 +94,12 @@ velocity_plus_minus_z = false
 
 # Old generic species weight_ratio = 3e-2.
 # The new species model sets density through computed weight. Since
-# weight is proportional to grid_points_per_Debye_length**2 for equal
-# particle counts, grid_points_per_Debye_length is scaled by sqrt(3e-2)
+# weight is proportional to dx_over_Debye_length**2 for equal
+# particle counts, dx_over_Debye_length is scaled by sqrt(3e-2)
 # to preserve the previous beam/bulk weight ratio.
 [species_parameters.electrons.beam]
 number_pseudoparticles = 12000
-grid_points_per_Debye_length = 0.44427103214
+dx_over_Debye_length = 0.44427103214
 weight = 0
 charge_over_elementary_charge = -1
 random_positions_x = true
@@ -123,7 +123,7 @@ seed_position = 10
 # Old generic species weight_ratio = 3e-2.
 [species_parameters.ions.beam_neutralizer]
 number_pseudoparticles = 12000
-grid_points_per_Debye_length = 0.44427103214
+dx_over_Debye_length = 0.44427103214
 weight = 0
 charge_over_elementary_charge = 1
 mass_over_proton_mass = 1

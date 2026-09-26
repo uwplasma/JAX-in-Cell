@@ -1,6 +1,9 @@
+import warnings
+
 import jax.numpy as jnp
 from .._constants import mass_proton, mass_electron
 from ._species_definitions import (
+    DEPRECATED_SPECIES_PARAMETERS,
     SPECIES_AXES,
     SPECIES_CANONICAL_PREFIXES,
     SPECIES_DEFAULT_LABELS,
@@ -70,8 +73,8 @@ def validate_species_parameters(species_type, species_label, species):
         f"Got {species['number_pseudoparticles']}."
     )
     coerce_species_initial_phase_space_parameters(species, species_label)
-    assert species["grid_points_per_Debye_length"] > 0, (
-        f"Grid points per Debye length must be positive. Got {species['grid_points_per_Debye_length']}."
+    assert species["dx_over_Debye_length"] > 0, (
+        f"dx_over_Debye_length must be positive. Got {species['dx_over_Debye_length']}."
     )
 
     for key in COMMON_SPECIES_FLOAT_PARAMETERS:
@@ -169,6 +172,15 @@ def resolve_species_references(species_parameters):
                 )
     return species_parameters
 
+def rename_deprecated_species_parameters(values):
+    """Accept the old name of a renamed parameter, with a DeprecationWarning."""
+    for old, new in DEPRECATED_SPECIES_PARAMETERS.items():
+        if old in values:
+            warnings.warn(f"'{old}' is deprecated, use '{new}' (the same value, dx / lambda_D).",
+                          DeprecationWarning, stacklevel=4)
+            values[new] = values.pop(old)
+    return values
+
 def clean_and_initialize_species_parameters(species_parameters, input_parameters=None):
     if input_parameters is None:
         input_parameters = {}
@@ -190,7 +202,7 @@ def clean_and_initialize_species_parameters(species_parameters, input_parameters
             canonical_label = f"_{SPECIES_CANONICAL_PREFIXES[species_type]}{index}"
             canonical_species[canonical_label] = {
                 **defaults,
-                **values,
+                **rename_deprecated_species_parameters({**values}),
                 "user_label": user_label,
             }
         species_parameters[species_type] = canonical_species

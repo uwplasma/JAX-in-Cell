@@ -52,8 +52,8 @@ def test_empty_species_input_builds_initial_ion_and_electron_species():
     assert electron["user_label"] == "electrons0"
     assert ion["number_pseudoparticles"] == 500
     assert electron["number_pseudoparticles"] == 500
-    assert scalar(ion["grid_points_per_Debye_length"]) == 2.0
-    assert scalar(electron["grid_points_per_Debye_length"]) == 2.0
+    assert scalar(ion["dx_over_Debye_length"]) == 2.0
+    assert scalar(electron["dx_over_Debye_length"]) == 2.0
     assert scalar(ion["perturbation_amplitude_x"]) == 1e-7
     assert scalar(electron["perturbation_amplitude_x"]) == 1e-7
     assert scalar(electron["perturbation_wavenumber_x"]) == 8.0
@@ -97,8 +97,8 @@ def test_nested_species_input_merges_initial_defaults_into_first_species():
     assert electron["user_label"] == "cloud"
     assert ion["number_pseudoparticles"] == 4
     assert electron["number_pseudoparticles"] == 5
-    assert scalar(ion["grid_points_per_Debye_length"]) == 2.0
-    assert scalar(electron["grid_points_per_Debye_length"]) == 2.0
+    assert scalar(ion["dx_over_Debye_length"]) == 2.0
+    assert scalar(electron["dx_over_Debye_length"]) == 2.0
     assert scalar(ion["perturbation_amplitude_x"]) == 1e-7
     assert scalar(electron["perturbation_amplitude_x"]) == 1e-7
     assert scalar(ion["drift_speed_x"]) == 7.0
@@ -347,8 +347,8 @@ def test_initial_phase_space_overrides_are_cleaned_and_shape_validated():
         ("ions", "beam", "number_pseudoparticles", 0, "Number of pseudoparticles"),
         ("ions", "beam", "number_pseudoparticles", -1, "Number of pseudoparticles"),
         ("electrons", "cloud", "number_pseudoparticles", 1.5, "Number of pseudoparticles"),
-        ("ions", "beam", "grid_points_per_Debye_length", 0, "Grid points per Debye length"),
-        ("electrons", "cloud", "grid_points_per_Debye_length", -1, "Grid points per Debye length"),
+        ("ions", "beam", "dx_over_Debye_length", 0, "dx_over_Debye_length must be positive"),
+        ("electrons", "cloud", "dx_over_Debye_length", -1, "dx_over_Debye_length must be positive"),
         ("ions", "beam", "weight", -0.1, "Weight must be non-negative"),
         ("electrons", "cloud", "weight", -0.1, "Weight must be non-negative"),
         ("ions", "beam", "random_positions_x", 1, "random_positions_x must be a boolean"),
@@ -366,7 +366,7 @@ def test_species_parameter_validation_rejects_invalid_particle_counts_and_weight
 
     Cases covered:
     - number_pseudoparticles must be a positive integer for ions and electrons.
-    - grid_points_per_Debye_length must be positive.
+    - dx_over_Debye_length must be positive.
     - weight must be nonnegative.
     - boolean flags must be actual bool values, not integers or strings.
     """
@@ -680,3 +680,12 @@ def test_build_species_hash_stability_and_non_species_metadata():
 
     assert build_species_hash(species_parameters) != build_species_hash(with_metadata)
     assert build_species_hash(with_metadata) != build_species_hash(changed_metadata)
+
+
+def test_deprecated_grid_points_per_Debye_length_is_renamed_with_a_warning():
+    """The old name is accepted, warns, and sets dx_over_Debye_length to the same value."""
+    with pytest.warns(DeprecationWarning, match="dx_over_Debye_length"):
+        species = clean_and_initialize_species_parameters(
+            {"electrons": {"electrons0": {"grid_points_per_Debye_length": 0.3}}})
+    electrons = species["electrons"]["_electrons0"]
+    assert electrons["dx_over_Debye_length"] == 0.3 and "grid_points_per_Debye_length" not in electrons

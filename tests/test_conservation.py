@@ -9,7 +9,7 @@ from jaxincell._simulation import Simulation
 def two_stream_parameters(boundary=0, filter_passes=0, total_steps=80):
     electrons = {
         "number_pseudoparticles": 400,
-        "grid_points_per_Debye_length": 0.5,
+        "dx_over_Debye_length": 0.5,
         "charge_over_elementary_charge": -1,
         "perturbation_amplitude_x": 1e-4,
         "perturbation_wavenumber_x": 1,
@@ -19,7 +19,7 @@ def two_stream_parameters(boundary=0, filter_passes=0, total_steps=80):
     }
     ions = {
         "number_pseudoparticles": 400,
-        "grid_points_per_Debye_length": 0.5,
+        "dx_over_Debye_length": 0.5,
         "charge_over_elementary_charge": 1,
         "mass_over_proton_mass": 1,
         "vth_over_c_x": 0.05,
