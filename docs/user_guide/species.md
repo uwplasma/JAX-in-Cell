@@ -12,7 +12,7 @@ vth_over_c_x = 0.0707
 
 [species_parameters.electrons.beam]
 number_pseudoparticles = 12000
-grid_points_per_Debye_length = 0.444    # 3 % of the bulk density, see below
+dx_over_Debye_length = 0.444    # 3 % of the bulk density, see below
 drift_speed_x = 7.5e7
 
 [species_parameters.ions.protons]
@@ -25,8 +25,8 @@ vth_over_c_x = "_electrons0"
 | parameter | default | differentiable | meaning |
 |---|---|---|---|
 | `number_pseudoparticles` | `500` | no | Number of pseudo-particles $N_s$. |
-| `grid_points_per_Debye_length` | `2` | yes | $\Delta x/\lambda_{D}$ evaluated with this population's density and the reference electron temperature. Sets the density, see below. |
-| `weight` | `0` | yes | Number of physical particles per pseudo-particle, $w_s$. `0` means "compute from `grid_points_per_Debye_length`". |
+| `dx_over_Debye_length` | `2` | yes | $\Delta x/\lambda_{D}$ evaluated with this population's density and the reference electron temperature. Sets the density, see below. |
+| `weight` | `0` | yes | Number of physical particles per pseudo-particle, $w_s$. `0` means "compute from `dx_over_Debye_length`". |
 | `charge_over_elementary_charge` | `-1` (electrons), `1` (ions) | yes | Charge $q_s/e$. |
 | `vth_over_c_x`, `vth_over_c_y`, `vth_over_c_z` | `0` | yes | Thermal speed per component, $v_{th}/c$, with $f \propto \exp(-v^2/v_{th}^2)$. A string value refers to another population, see below. |
 | `drift_speed_x`, `drift_speed_y`, `drift_speed_z` | `0` | yes | Drift velocity per component in m/s. |
@@ -67,7 +67,7 @@ Any further population uses the table above (cold, at rest, unperturbed).
 The code has no density parameter. Instead, the electron Debye length is prescribed in
 units of the cell size, and the weight follows. Let $v_{th,e}$ be the largest of the
 three thermal speeds of the first electron population and $q_e$ its charge. For a
-population $s$ with $N_s$ pseudo-particles and $g_s$ = `grid_points_per_Debye_length`,
+population $s$ with $N_s$ pseudo-particles and $g_s$ = `dx_over_Debye_length`,
 
 ```{math}
 w_s = \frac{\epsilon_0\, m_e c^2}{q_e^2}\,
@@ -77,9 +77,10 @@ n_s = \frac{N_s w_s}{L} = \frac{\epsilon_0 m_e v_{th,e}^2}{2 q_e^2 \lambda_{D,s}
 \quad \lambda_{D,s} = \frac{\Delta x}{g_s}.
 ```
 
-In words: $g_s$ is the number of grid points per Debye length that a plasma of density
-$n_s$ and temperature $k_B T_e = m_e v_{th,e}^2/2$ would have. For the first electron
-population this is exactly the Debye length of the run. For any other population it is
+In words: $g_s$ is the cell size in units of the Debye length that a plasma of density
+$n_s$ and temperature $k_B T_e = m_e v_{th,e}^2/2$ would have ($g_s < 1$ resolves
+$\lambda_D$). For the first electron population $\Delta x/g_s$ is exactly the Debye length
+of the run. For any other population it is
 a convenient way to set a density ratio: because $n_s \propto g_s^2$, a beam with 3 % of
 the bulk density uses $g_{beam} = \sqrt{0.03}\, g_{bulk}$, which is what
 `examples/bump-on-tail.toml` does. Setting `weight` to a positive number bypasses the
@@ -141,7 +142,7 @@ that the beam electrons and their neutralising ions start at the same places.
 
 `initial_positions` and `initial_velocities` accept arrays of shape `(N_s, 3)` in SI
 units. They replace the generated phase space after the weight has been computed, so
-`grid_points_per_Debye_length` and `vth_over_c_*` still set the density and are still
+`dx_over_Debye_length` and `vth_over_c_*` still set the density and are still
 printed; make sure the supplied velocities are consistent with them if you rely on the
 derived quantities. Both arrays are differentiable inputs, which allows gradients with
 respect to the full initial condition. A quiet start built this way is used in

@@ -18,14 +18,14 @@ def test_runtime_input_parameters_are_cleaned_to_canonical_section_overrides():
             "length": 0.02,
             "ions": {
                 "ions0": {
-                    "grid_points_per_Debye_length": 1.5,
+                    "dx_over_Debye_length": 1.5,
                     "drift_speed_x": 3.0,
                     "mass_over_proton_mass": 2.0,
                 },
             },
             "electrons": {
                 "electrons0": {
-                    "grid_points_per_Debye_length": 1.5,
+                    "dx_over_Debye_length": 1.5,
                 },
             },
         }
@@ -34,12 +34,12 @@ def test_runtime_input_parameters_are_cleaned_to_canonical_section_overrides():
     assert set(cleaned_input_parameters) == set(PARAMETER_SECTIONS)
     assert cleaned_input_parameters["domain_parameters"] == {"length": 0.02}
     assert cleaned_input_parameters["species_parameters"]["ions"]["_ions0"] == {
-        "grid_points_per_Debye_length": 1.5,
+        "dx_over_Debye_length": 1.5,
         "drift_speed_x": 3.0,
         "mass_over_proton_mass": 2.0,
     }
     assert cleaned_input_parameters["species_parameters"]["electrons"]["_electrons0"] == {
-        "grid_points_per_Debye_length": 1.5,
+        "dx_over_Debye_length": 1.5,
     }
     assert cleaned_input_parameters["external_field_parameters"] == {}
     assert cleaned_input_parameters["source_parameters"] == {}
@@ -148,7 +148,7 @@ def test_initial_input_parameters_route_all_values_but_only_expose_differentiabl
 
     assert scalar(sim.domain_parameters["length"]) == 0.02
     assert sim.domain_parameters["total_steps"] == 2
-    assert "grid_points_per_Debye_length" not in sim.domain_parameters
+    assert "dx_over_Debye_length" not in sim.domain_parameters
     assert scalar(sim.solver_parameters["filter_alpha"]) == 0.25
     assert sim.solver_parameters["filter_passes"] == 0
     assert scalar(sim.species_parameters["ions"]["_ions0"]["mass_over_proton_mass"]) == 2.0
@@ -419,7 +419,7 @@ def test_runtime_input_parameters_loose_species_values_apply_to_all_species_of_t
     cleaned_input_parameters = sim.clean_runtime_input_parameters(
         {
             "ions": {"drift_speed_x": 3.0},
-            "electrons": {"grid_points_per_Debye_length": 1.5},
+            "electrons": {"dx_over_Debye_length": 1.5},
         }
     )
 
@@ -428,8 +428,8 @@ def test_runtime_input_parameters_loose_species_values_apply_to_all_species_of_t
         "_ions1": {"drift_speed_x": 3.0},
     }
     assert cleaned_input_parameters["species_parameters"]["electrons"] == {
-        "_electrons0": {"grid_points_per_Debye_length": 1.5},
-        "_electrons1": {"grid_points_per_Debye_length": 1.5},
+        "_electrons0": {"dx_over_Debye_length": 1.5},
+        "_electrons1": {"dx_over_Debye_length": 1.5},
     }
 
     with pytest.raises(ValueError, match="ions\\.number_pseudoparticles"):
@@ -478,3 +478,10 @@ def test_initial_input_parameters_nested_species_edge_cases_are_documented():
     assert "unknown_numeric_key" not in exposed_input_parameters["ions"]["ions0"]
     assert scalar(exposed_input_parameters["electrons"]["electrons0"]["drift_speed_x"]) == -4.0
     assert "number_pseudoparticles" not in exposed_input_parameters["electrons"]["electrons0"]
+
+
+def test_runtime_input_parameters_accept_the_deprecated_Debye_length_name():
+    sim = Simulation(base_simulation_parameters())
+    with pytest.warns(DeprecationWarning):
+        cleaned = sim.clean_runtime_input_parameters({"electrons": {"electrons0": {"grid_points_per_Debye_length": 1.5}}})
+    assert cleaned["species_parameters"]["electrons"]["_electrons0"] == {"dx_over_Debye_length": 1.5}

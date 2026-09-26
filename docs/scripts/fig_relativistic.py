@@ -65,7 +65,7 @@ dx = L / GRID_POINTS
 dt = C_DT_OVER_DX * dx / c
 steps = int(round(T_END / (wpe * dt)))
 # Debye length of the beams, lambda_D = v_th / (sqrt(2) omega_pe) with v_th = sqrt(2 T / m):
-# the convention of the code (grid_points_per_Debye_length) and of the kinetic
+# the convention of the code (dx_over_Debye_length) and of the kinetic
 # two-stream dispersion relation 1 + [2 + xi_1 Z(xi_1) + xi_2 Z(xi_2)] / (2 k^2 lambda_D^2) = 0.
 debye_length = VTH_OVER_C * c / (np.sqrt(2.0) * wpe)
 

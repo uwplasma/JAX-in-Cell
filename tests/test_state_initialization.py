@@ -241,7 +241,7 @@ def test_make_particles_from_state_electron_reference_and_weight_logic():
 
     automatic_weight_electron = electron_species(
         number_pseudoparticles=3,
-        grid_points_per_Debye_length=1.0,
+        dx_over_Debye_length=1.0,
         weight=0.0,
         charge_over_elementary_charge=-1.0,
         vth_over_c_x=0.01,
@@ -266,7 +266,7 @@ def test_make_particles_from_state_electron_reference_and_weight_logic():
         / domain_state["box_size"][0]
         / (2 * automatic_weight_electron["number_pseudoparticles"])
         * 0.01**2
-        / (1 / automatic_weight_electron["grid_points_per_Debye_length"])**2
+        / (1 / automatic_weight_electron["dx_over_Debye_length"])**2
     )
     assert jnp.allclose(automatic_state["weights"], expected_auto_weight)
 

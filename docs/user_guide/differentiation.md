@@ -18,7 +18,7 @@ Solver
 : `filter_alpha`
 
 Every population
-: `grid_points_per_Debye_length`, `weight`, `charge_over_elementary_charge`,
+: `dx_over_Debye_length`, `weight`, `charge_over_elementary_charge`,
   `perturbation_amplitude_{x,y,z}`, `perturbation_wavenumber_{x,y,z}`,
   `vth_over_c_{x,y,z}`, `drift_speed_{x,y,z}`, `initial_positions`, `initial_velocities`
 

@@ -169,7 +169,7 @@ def make_particles_from_state(
     vth_electrons_over_c = electron_reference["vth_electrons_over_c"]
     charge_electrons = electron_reference["charge_electrons"]
 
-    Debye_length_per_dx = 1 / species["grid_points_per_Debye_length"]
+    Debye_length_per_dx = 1 / species["dx_over_Debye_length"]
     weight = (
         epsilon_0
         * mass_electron
@@ -305,7 +305,7 @@ def print_simulation_information(
     weight = particle_state["weights"][0, 0]
     charge_electrons = particle_state["charge_electrons"]
     vth_electrons = particle_state["vth_electrons"]
-    Debye_length_per_dx = 1 / electron_species["grid_points_per_Debye_length"]
+    Debye_length_per_dx = 1 / electron_species["dx_over_Debye_length"]
     electron_temperature = mass_electron * vth_electrons**2 / 2 / (-charge_electrons)
     plasma_frequency = (
         jnp.sqrt(number_pseudoelectrons * weight * charge_electrons**2)

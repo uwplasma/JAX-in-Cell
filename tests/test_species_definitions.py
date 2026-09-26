@@ -22,7 +22,7 @@ from jaxincell._parameters._species_definitions import (
 
 EXPECTED_SHARED_SPECIES_KEYS = [
     "number_pseudoparticles",
-    "grid_points_per_Debye_length",
+    "dx_over_Debye_length",
     "weight",
     "charge_over_elementary_charge",
     "seed_position_override",
@@ -45,7 +45,7 @@ ION_ONLY_KEYS = [
     "ion_temperature_over_electron_temperature_z",
 ]
 EXPECTED_SHARED_DIFFERENTIABLE_KEYS = [
-    "grid_points_per_Debye_length",
+    "dx_over_Debye_length",
     "weight",
     "charge_over_elementary_charge",
     "perturbation_amplitude_x",

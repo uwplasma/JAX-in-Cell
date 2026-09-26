@@ -11,6 +11,7 @@ from ._parameters._species_definitions import (
     SPECIES_PARAMETER_KEYS,
     SPECIES_TYPES,
 )
+from ._parameters._species_parameters import rename_deprecated_species_parameters
 __all__ = [
     "build_runtime_flat_parameter_routes",
     "build_runtime_parameter_sections",
@@ -175,7 +176,7 @@ def clean_runtime_input_parameters(
     for key, value in input_parameters.items():
         if key in SPECIES_TYPES:
             for species_label, species_values in iter_species_parameter_groups(key, value, strict=True):
-                for species_key, species_value in species_values.items():
+                for species_key, species_value in rename_deprecated_species_parameters({**species_values}).items():
                     if species_key not in SPECIES_DIFFERENTIABLE_KEYS.get(key, ()):
                         if species_label is None:
                             invalid_parameter_paths.append(f"{key}.{species_key}")

@@ -39,7 +39,7 @@ with random sampling.
 
 ## Weights
 
-The weight of each population is computed from its `grid_points_per_Debye_length` and
+The weight of each population is computed from its `dx_over_Debye_length` and
 the thermal speed and charge of the first electron population, as derived in
 {doc}`../user_guide/species`:
 

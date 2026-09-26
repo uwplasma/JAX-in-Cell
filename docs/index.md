@@ -106,9 +106,9 @@ parameters = {
     "species_parameters": {
         "electrons": {"electrons0": {"number_pseudoparticles": 5000, "vth_over_c_x": 0.05,
                                      "drift_speed_x": 6e7, "velocity_plus_minus_x": True,
-                                     "grid_points_per_Debye_length": 0.5,
+                                     "dx_over_Debye_length": 0.5,
                                      "perturbation_amplitude_x": 5e-7, "perturbation_wavenumber_x": 1}},
-        "ions": {"ions0": {"number_pseudoparticles": 5000, "grid_points_per_Debye_length": 0.5,
+        "ions": {"ions0": {"number_pseudoparticles": 5000, "dx_over_Debye_length": 0.5,
                            "vth_over_c_x": "_electrons0"}},
     },
 }
