@@ -374,7 +374,8 @@ def initialize_field_state(domain_parameters, solver_parameters, external_field_
     charge_density = calculate_charge_density(positions, charges, dx, grid, domain_parameters["particle_BC_left"], domain_parameters["particle_BC_right"],
                                             solver_parameters["filter_passes"], solver_parameters["filter_alpha"], solver_parameters["filter_strides"],
                                             field_BC_left=domain_parameters["field_BC_left"], field_BC_right=domain_parameters["field_BC_right"])
-    E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
+    periodic = domain_parameters["field_BC_left"] == 0 and domain_parameters["field_BC_right"] == 0
+    E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx, periodic=periodic)
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
 
     G = domain_parameters['number_grid_points']

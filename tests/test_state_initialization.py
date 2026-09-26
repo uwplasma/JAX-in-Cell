@@ -738,7 +738,8 @@ def test_initialize_field_state_default_and_provided_external_fields():
     - default external electric and magnetic fields are zero arrays of shape (G, 3).
     - provided external_field_parameters dictionaries with E/B arrays are converted to JAX arrays.
     - incomplete external field dictionaries fall back to zero arrays.
-    - initial electric field x-component is produced from calculate_charge_density and E_from_Gauss_1D_Cartesian.
+    - initial electric field x-component is produced from calculate_charge_density and E_from_Gauss_1D_Cartesian,
+      with its mean removed in a periodic box and kept otherwise.
     """
     domain = domain_parameters(length=4.0, number_grid_points=4)
     solver = solver_parameters(filter_passes=0, filter_strides=(1,))
@@ -781,7 +782,8 @@ def test_initialize_field_state_default_and_provided_external_fields():
 
     assert E_field.shape == (4, 3)
     assert B_field.shape == (4, 3)
-    assert jnp.allclose(E_field[:, 0], expected_E_x)
+    assert jnp.allclose(E_field[:, 0], expected_E_x - jnp.mean(expected_E_x))
+    assert abs(jnp.mean(expected_E_x)) > 0.1 * jnp.max(jnp.abs(expected_E_x))  # the cumulative sum has a mean
     assert jnp.allclose(E_field[:, 1:], 0.0)
     assert jnp.allclose(B_field, 0.0)
     assert jnp.allclose(field_state["external_electric_field"], jnp.zeros((4, 3)))
@@ -820,3 +822,7 @@ def test_initialize_field_state_default_and_provided_external_fields():
 
     assert jnp.allclose(fallback_field_state["external_electric_field"], jnp.zeros((4, 3)))
     assert jnp.allclose(fallback_field_state["external_magnetic_field"], jnp.zeros((4, 3)))
+
+    reflecting = domain_parameters(length=4.0, number_grid_points=4, field_BC_left=1, field_BC_right=1)
+    reflecting_state = initialize_field_state(reflecting, solver, external_defaults, domain_state, particle_state)
+    assert jnp.allclose(reflecting_state["fields"][0][:, 0], expected_E_x)

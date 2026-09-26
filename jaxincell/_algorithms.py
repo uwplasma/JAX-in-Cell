@@ -109,7 +109,7 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
                                                   field_BC_left=field_BC_left, field_BC_right=field_BC_right)
         switcher = {
             1: E_from_Gauss_1D_FFT,
-            2: E_from_Gauss_1D_Cartesian,
+            2: partial(E_from_Gauss_1D_Cartesian, periodic=field_BC_left == 0 and field_BC_right == 0),
             3: E_from_Poisson_1D_FFT,
         }
         E_field = E_field.at[:,0].set(switcher[field_solver](charge_density, dx))
