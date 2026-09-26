@@ -35,6 +35,7 @@ vth_over_c_x = "_electrons0"
 | `perturbation_wavenumber_x`, `_y`, `_z` | `0` | yes | Mode number $m$ of the displacement, $k = 2\pi m/L$. |
 | `random_positions_x` | `false` | no | Uniform random positions instead of equally spaced ones. |
 | `random_positions_y`, `random_positions_z` | `true` | no | Same for $y$ and $z$. |
+| `quiet_velocities_x`, `_y`, `_z` | `false` | no | Quiet start: velocities at the Gaussian quantiles in van der Corput order (bases 2, 3, 5) instead of random draws. Removes most of the thermal noise, so small perturbations (for example linear Landau damping) are resolved with far fewer particles. |
 | `seed_position_override`, `seed_position` | `false`, `None` | no | Use `seed_position` as the position seed of this population instead of the derived one. |
 | `initial_positions`, `initial_velocities` | `None` | yes | Arrays of shape `(number_pseudoparticles, 3)` that replace the generated phase space entirely. |
 
