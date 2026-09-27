@@ -210,6 +210,29 @@ def test_implicit_scheme_conserves_energy_and_charge_to_round_off(drift, relativ
     assert float(np.asarray(d["gauss_residual"]).max()) < 1e-10
 
 
+@pytest.mark.parametrize("boundary", ["periodic", "reflective"])
+def test_implicit_electrostatic_scheme_conserves_energy_and_charge_without_a_projection(boundary):
+    """model='electrostatic' keeps the implicit update of E_x, Ampere's law with the continuity
+    current, and drops only the transverse fields: the same discrete-gradient identity then
+    makes the electric energy change by exactly the work on the particles, and the Gauss law
+    holds because the current is the continuity one, not because E_x is re-solved. In a
+    periodic box the mean current is left out, so <E_x> stays zero, the convention of the
+    explicit electrostatic model. The instability still grows by more than two decades."""
+    e = Species.electrons(n=2000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(6e7, 0, 0), plus_minus=True,
+                          sampling="lattice", perturbation_amplitude=5e-7, perturbation_mode=1)
+    i = Species.ions(n=2000, density=4.37e17, electrons=e, sampling="lattice")
+    domain = Domain(length=0.01, cells=64, dt_over_dx_c=4.5, particle_bc=boundary, field_bc=boundary)
+    out = Simulation(domain, [e, i], Solver(algorithm="implicit", model="electrostatic")).run(150, seed=3)
+    d = diagnostics(out)
+    E = np.asarray(out.E)
+    assert float(np.asarray(d["energy_error"]).max()) < 1e-14
+    assert float(np.asarray(d["gauss_residual"]).max()) < 1e-10
+    assert not np.any(E[:, :, 1:]) and not np.any(np.asarray(out.B))
+    if boundary == "periodic":
+        assert float(np.abs(E[:, :, 0].mean(axis=1)).max()) < 1e-12 * float(np.abs(E).max())
+    assert float(np.asarray(d["electric"]).max()) > 1e2 * float(np.asarray(d["electric"])[0])
+
+
 def test_the_implicit_gauss_law_holds_along_its_derivative():
     """Reverse-mode derivatives run through the implicit scheme at a wall that returns half
     of each electron, with ions that start at rest, whose zero displacement takes the slope

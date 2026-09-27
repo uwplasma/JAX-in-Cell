@@ -320,10 +320,10 @@ class Simulation:
         A filter keeps its energy conservation only if the same filter acts on the current
         and on the field gathered at the particles, as a transpose pair that respects the
         parity of each component at the walls; that pair is not implemented. The Gauss
-        solve, and the electrostatic model that always uses it, would overwrite E_x after
-        the update that conserves energy, which is the property the scheme is there for.
-        Silently skipping a switch, as the scheme once did, makes a run look filtered or
-        electrostatic when it is neither."""
+        solve would overwrite E_x after the update that conserves energy, which is the
+        property the scheme is there for; the electrostatic model keeps that update.
+        Silently skipping a switch, as the scheme once did, makes a run look filtered
+        when it is not."""
         s = self.solver
         if s.algorithm != "implicit":
             return
@@ -336,12 +336,11 @@ class Simulation:
                              "collector, and the implicit scheme carries no surface charge to close it "
                              "with: its continuity current would be anchored at nothing. A Source needs "
                              "algorithm='explicit' in any case.")
-        for setting in ("field_solver='gauss'" if s.field_solver == "gauss" else None,
-                        "model='electrostatic'" if s.electrostatic else None):
-            if setting is not None:
-                raise ValueError(f"{setting} would take E_x from the charge density and so replace the update "
-                                 "that makes the implicit scheme conserve energy, which is the property it is "
-                                 "there for; it is available with algorithm='explicit' only.")
+        if s.field_solver == "gauss":
+            raise ValueError("field_solver='gauss' would take E_x from the charge density and so replace the "
+                             "update that makes the implicit scheme conserve energy, which is the property it "
+                             "is there for; it is available with algorithm='explicit' only. "
+                             "model='electrostatic' keeps that update and is available with both.")
 
     def _check_collisions(self):
         """The default Coulomb logarithm is taken from the lightest negatively charged species,
@@ -1092,12 +1091,21 @@ class Simulation:
             state, orbits = lax.scan(one, init, (orbits, keys))
             return state[:6], state[-1], orbits
 
+        def advance(E_half, B_half, J):
+            """E after the step. An electrostatic run keeps Ampere's law for E_x alone, with the mean
+            current of a periodic box left out so that <E_x> stays zero, and evolves neither the
+            transverse E nor B (docs/numerics/implicit.md)."""
+            if self.solver.electrostatic:
+                J_x = J[:, 0] - (jnp.mean(J[:, 0]) if bc[0] == 0 else 0.0)
+                return E.at[:, 0].add(-dt * J_x / epsilon_0)
+            return E + dt * (c ** 2 * curl_B(B_half, E_half, dx, bc) - J / epsilon_0)
+
         def picard(state, _):
             E_new, orbits, _ = state
             E_half = 0.5 * (E + E_new)
-            B_half = B - 0.5 * dt * curl_E(E_half, B, dx, bc)
+            B_half = B if self.solver.electrostatic else B - 0.5 * dt * curl_E(E_half, B, dx, bc)
             particles, J, orbits = substeps(E_half, B_half, orbits)
-            return (E + dt * (c ** 2 * curl_B(B_half, E_half, dx, bc) - J / epsilon_0), orbits, (particles, J)), None
+            return (advance(E_half, B_half, J), orbits, (particles, J)), None
 
         v = self._velocity(u)      # the first guess: every particle streams freely at its present velocity
         free = jax.vmap(lambda s: wrap_positions(x + s * dtau * v, w, box, d.particle_bc, dx))
@@ -1105,7 +1113,7 @@ class Simulation:
         state, _ = lax.scan(picard, (E, orbits, ((x, u, w, qm, rho, st.wall), jnp.zeros_like(E))), None,
                             length=self.solver.picard_iterations)
         E_new, _, ((x, u, w, qm, rho_next, wall), J) = state
-        B_new = B - dt * curl_E(0.5 * (E + E_new), B, dx, bc)
+        B_new = B if self.solver.electrostatic else B - dt * curl_E(0.5 * (E + E_new), B, dx, bc)
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
         v = self._velocity(u)
         return (State(E_new, B_new, x, u, w, qm, rho_next, st.sigma, key, st.time + dt, st.steps + 1, wall,

@@ -120,6 +120,32 @@ explicit scheme, does not make the force between two particles antisymmetric, as
 Chacón and Barnes {cite}`chen2011`: over the two-stream run the momentum error reaches
 {{ momentum_error_implicit }}, against {{ momentum_error_relative }} for the explicit scheme.
 
+## The electrostatic model
+
+`Solver(algorithm="implicit", model="electrostatic")` keeps everything above for $E_x$ and
+drops the rest: $E_y$, $E_z$ and $\mathbf B$ are not evolved (external fields still act), and
+$E_x$ is advanced by Ampere's law with the same continuity current,
+
+```{math}
+:label: implicit-electrostatic
+E_{x,i+1/2}^{n+1} = E_{x,i+1/2}^{n} - \frac{\Delta t}{\epsilon_0}\left(J^{n+1/2}_{x,i+1/2} - \langle J_x^{n+1/2}\rangle\right),
+```
+
+with the mean $\langle J_x\rangle$ subtracted in a periodic box only. $E_x$ is **not** re-solved
+from $\rho^{n+1}$ afterwards: the Gauss law already holds by the telescoping argument above,
+and a projection would replace the field whose work the discrete gradient balances.
+Subtracting the mean current is the convention of the explicit electrostatic model, where the
+Gauss solve returns $\langle E_x\rangle = 0$: the initial field has zero mean, so every later one
+does, and the uniform plasma oscillation a net current would drive is absent. The energy
+balance is unchanged, since $\sum_i E_{x,i}\langle J_x\rangle = N\langle E_x\rangle\langle J_x\rangle = 0$
+and the mean-current term of {eq}`discrete-gradient` vanishes with $\langle E_x\rangle$. Between
+walls the current is the wall-closed one and nothing is subtracted.
+
+On the two-stream run of the tests (2000 electrons and ions, 64 cells, 150 steps at
+$c\Delta t/\Delta x = 4.5$) the energy error is $2.8\times10^{-11}$ after 4 Picard iterations and
+$2.3\times10^{-16}$ after 8 and 12, the Gauss residual $\le 2\times10^{-15}$ and
+$|\langle E_x\rangle|/\max|E_x| \le 6\times10^{-17}$ at every step.
+
 ## Solving the system
 
 The equations are nonlinear because the orbit depends on the field and the field on
@@ -146,7 +172,7 @@ the condition for the energy to be exact.
 A filter keeps both laws only if it acts symmetrically on the current and on the gathered
 field {cite}`chen2011`; that pair is not implemented, so the implicit scheme refuses
 `filter_passes`, and `field_solver="gauss"`, which would overwrite the $E_x$ the energy
-balance needs.
+balance needs; `model="electrostatic"` does not, as above.
 
 ## Convergence
 
