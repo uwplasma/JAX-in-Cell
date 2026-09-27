@@ -50,6 +50,15 @@ start with an underscore; the numerical kernels are documented too, because the
    :member-order: bysource
 ```
 
+## Linear theory
+
+The references the examples and figures compare with; plain NumPy, with SciPy imported on first use.
+
+```{eval-rst}
+.. automodule:: jaxincell.theory
+   :members:
+```
+
 ## Numerical kernels
 
 ```{eval-rst}

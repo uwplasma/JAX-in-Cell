@@ -25,7 +25,8 @@ They are ordered by how much of the code they use, not by how interesting they a
 | script | what it shows | compared with | runs in |
 |---|---|---|---|
 | `bump_on_tail.py` | a beam on the tail of a Maxwellian drives a wave | the kinetic growth rate | ~1 min |
-| `weibel.py` | a temperature anisotropy grows a magnetic field | the growth rates of six modes | ~1 min |
+| `weibel.py` | a temperature anisotropy grows a magnetic field: the cutoff, then every mode of a twelve-wavelength box | the transverse kinetic root, mode by mode | a few min on a GPU; `--quick` ~2 min |
+| `compare_models.py` | one two-stream problem with seven solver settings | the kinetic growth rate; energy conservation | ~2 min on a GPU; `--quick` ~2 min |
 | `collisions.py` | Coulomb slowing-down and perpendicular diffusion | the NRL formulary rates | ~20 s |
 | `wall_reflection.py` | a velocity-dependent wall, through its flux average | `u^2/(u^2+sigma^2)`, in closed form | ~20 s |
 | `sheath_magnetized.py` | the sheath in a field oblique to the wall | its own limits, and the impact distributions | ~1 h |

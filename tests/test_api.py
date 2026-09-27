@@ -459,6 +459,9 @@ def test_courant_warning_fires_only_when_a_light_wave_can_be_seeded():
         Simulation(above, [isotropic], Solver(algorithm="implicit"))
     with pytest.warns(UserWarning, match="exceeds one"):
         Simulation(above, [isotropic], Solver())
+    # collisions turn a longitudinal beam isotropic, so they seed the light wave too
+    with pytest.warns(UserWarning, match="collisions give"):
+        Simulation(above, [longitudinal], Solver(), Collisions(coulomb_log=10.0))
 
 
 def test_command_line_reports_usage_without_a_file(capsys):

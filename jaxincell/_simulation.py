@@ -386,9 +386,10 @@ class Simulation:
                 return v is None or bool(np.any(v[:, 1:]))
             return any(plain(u) and u != 0 for u in tuple(s.vth[1:]) + tuple(s.drift[1:]))
 
-        if any(transverse(s) for s in self.species):
-            warnings.warn(f"c dt / dx = {courant:g} exceeds one while the particles carry transverse "
-                          "velocity: the explicit field solver is unstable for electromagnetic waves. "
+        # collisions scatter velocity into y and z, so they seed the light wave from a beam that had none
+        if self.collisions is not None or any(transverse(s) for s in self.species):
+            warnings.warn(f"c dt / dx = {courant:g} exceeds one while the particles carry, or collisions give "
+                          "them, transverse velocity: the explicit field solver is unstable for electromagnetic waves. "
                           "Use dt_over_dx_c <= 1, or algorithm='implicit'.", stacklevel=3)
 
     # -- derived quantities -------------------------------------------------------

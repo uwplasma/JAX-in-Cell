@@ -58,8 +58,8 @@ jobs:
   examples:
     # The tests exercise the package; this checks that the scripts people copy from
     # still run against it. These take a couple of minutes together on a CPU runner, the
-    # three sheath scripts in the smaller preset their `--quick` flag selects; the rest
-    # (bump-on-tail, Weibel, two-stream, the full sheath presets) take minutes each and
+    # sheath, Weibel and model-comparison scripts in the smaller preset their `--quick` flag
+    # selects; the rest (bump-on-tail, two-stream, the full presets) take minutes each and
     # are left to the documentation build of the figures.
     runs-on: ubuntu-22.04
     name: Examples
@@ -75,7 +75,7 @@ jobs:
     - name: Install jaxincell
       run: |
         python -m pip install --upgrade pip
-        pip install -e .
+        pip install -e . scipy     # scipy: the kinetic roots of jaxincell.theory
     - name: Run the fastest examples
       run: |
         for script in 2_intermediate/collisions 2_intermediate/wall_reflection \
@@ -85,7 +85,7 @@ jobs:
           echo "::endgroup::"
         done
         for script in 1_basic/sheath_unmagnetized 2_intermediate/sheath_magnetized \
-                      3_advanced/sheath_optimization; do
+                      3_advanced/sheath_optimization 2_intermediate/weibel 2_intermediate/compare_models; do
           echo "::group::examples/$script.py --quick"
           python "examples/$script.py" --quick
           echo "::endgroup::"

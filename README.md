@@ -146,6 +146,7 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 | [Conservation](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html) | energy, momentum and the Gauss law | implicit: energy 3e-16, Gauss law 7e-15 | `3_advanced/conservation.py` · `conservation_implicit.toml` |
 | [Optimisation](https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html) | fastest-growing drift from linear theory | 0.1 % after 12 ascent steps | `3_advanced/optimize_two_stream.py` |
 | [Explicit and implicit](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html#at-a-larger-step) | kinetic Landau and two-stream rates, implicit step 4 times the explicit one | implicit: rates 1.6 % and 3.0 %, energy 1e-16 and 9e-13 | `docs/scripts/fig_explicit_implicit.py` |
+| [Seven solver settings](https://jax-in-cell.readthedocs.io/en/latest/examples/compare_models.html) | kinetic two-stream rate with electrostatic, Gauss, Ampere, implicit, filtered, relativistic and collisional settings | electrostatic, Gauss, filtered and collisional identical to the reference (3.3 %); implicit 3.1 % with energy to 3e-16; relativistic 1.1 % from its own reference | `2_intermediate/compare_models.py` |
 | [Particle count](https://jax-in-cell.readthedocs.io/en/latest/user_guide/performance.html#gpus-and-tpus) | kinetic two-stream rate at seven drifts | 3.1 % mean with 16 000 pseudo-electrons, 15.9 % with 1000 | `docs/scripts/fig_runtime.py` |
 
 <table>
@@ -163,7 +164,7 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 </tr>
 <tr>
 <td width="50%"><img src="docs/_static/figures/relativistic_two_stream.png" alt="Relativistic two-stream instability with the relativistic Boris pusher on and off"></td>
-<td width="50%"></td>
+<td width="50%"><img src="docs/_static/figures/compare_models.png" alt="One two-stream problem with seven solver settings"></td>
 </tr>
 </table>
 
@@ -173,7 +174,7 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 
 | case | checked against | agreement | run |
 |---|---|---|---|
-| [Weibel](https://jax-in-cell.readthedocs.io/en/latest/examples/weibel.html) | transverse kinetic dispersion relation, and the marginal wavenumber $k_cc=\omega_{pe}\sqrt{T_z/T_x-1}$ | 6.0 % mean, 9.2 % worst over the 5 of 7 modes that grow cleanly | `2_intermediate/weibel.py` · `weibel.toml` |
+| [Weibel](https://jax-in-cell.readthedocs.io/en/latest/examples/weibel.html) | transverse kinetic dispersion relation, and the marginal wavenumber $k_cc=\omega_{pe}\sqrt{T_z/T_x-1}$ | seeded single modes: 6.0 % mean, 9.2 % worst over the 5 of 7 that grow cleanly; one unseeded 12-wavelength box, mode by mode: 7.2 % mean, 18.0 % worst over 8 of 11 unstable modes | `2_intermediate/weibel.py` · `weibel.toml` |
 
 ### 1D3V: sheaths, oblique fields and collisions
 

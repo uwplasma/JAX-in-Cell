@@ -131,18 +131,6 @@ def phase_space_hist(ax, x, v, box_length, v_max, weights=None, bins=(70, 90), c
 
 def maxwellian_populations(simulation):
     """The drifting-Maxwellian populations of a Simulation, in the form the
-    dispersion solvers want. A species built with ``plus_minus`` is two beams of
-    half the density drifting in opposite directions."""
-    from dispersion import plasma_frequency
-    populations = []
-    for s in simulation.species:
-        common = {"name": s.name, "vthx": s.vth[0] or 1.0, "vth": s.vth[0] or 1.0,
-                  "A": (s.vth[2] / s.vth[0]) ** 2 if s.vth[0] else 1.0}
-        if s.plus_minus:
-            wp = plasma_frequency(s.density / 2, s.charge_si, s.mass)
-            populations += [{**common, "wp": wp, "u": sign * s.drift[0], "density": s.density / 2}
-                            for sign in (+1, -1)]
-        else:
-            populations.append({**common, "wp": plasma_frequency(s.density, s.charge_si, s.mass),
-                                "u": s.drift[0], "density": s.density})
-    return populations
+    dispersion solvers want (:func:`jaxincell.theory.populations`)."""
+    from jaxincell.theory import populations
+    return populations(simulation)

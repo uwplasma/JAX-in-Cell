@@ -1062,3 +1062,53 @@ need its own discrete identities and both AD modes. No code added.
 Checks: flake8 0; focused tests (test_collisions, test_boundaries_and_loop, the implicit tests of
 test_physics) pass; `sphinx-build -W` clean apart from Python 3.10's own `dataclasses.replace`
 docstring on office (CI uses 3.12); full suite left to CI.
+
+### W9: model comparison and Weibel (2026-09-27)
+
+**Done.**
+- **Shared theory is public: `jaxincell/theory.py`.** The dispersion functions moved out of
+  `docs/scripts/dispersion.py` (now a re-export), plus `populations(simulation)`,
+  `two_stream_rate(simulation, mode)` and `weibel_rate(k, wp, vthx, anisotropy)`. NumPy, with
+  SciPy imported on first use; SciPy joins the `dev` extra so the tests cover it
+  (`tests/test_theory.py`: the Landau root, Z' and Z'', the Weibel rates the physics test
+  hard-codes, the cold two-stream limit through `populations`, and the Newton rejections).
+  No `sys.path` hack in any example.
+- **Weibel (U13, E02).** `2_intermediate/weibel.py` keeps the four-wavelength threshold box
+  and adds PR #43's twelve-wavelength run (120000 particles, 284 cells, 12000 steps to
+  t omega_pe = 325, through saturation), with every mode fitted over one linear window
+  (t omega_pe from 20 to the time the total |B|^2 reaches 5 % of its maximum, here 20 to 70),
+  against `weibel_rate`. Modes with R^2 < 0.8 are drawn open and not compared (declared
+  before the comparison). Result, double precision on an A4000: **7.2 % mean, 18.0 % worst
+  over 8 of 11 unstable modes** (k/k_c 0.17-0.83); single precision gives the same numbers.
+  Four-wavelength gains: 13.3 smallest below the cutoff, 4.77 largest above. History: fields
+  every 20 steps, no particle history. `--quick` (six wavelengths, 24000 particles, 3000
+  steps) is ~2 min on a CPU and says it is a smoke preset. Writes `run.json` with provenance,
+  `modes.npz` and the figure. `fig_weibel.py` gains panel (c) by running the example and
+  reading its `run.json`, so the page and the example are one run; `weibel_wide_*` keys in
+  `measurements.json`.
+- **Model comparison (U14, first part).** `2_intermediate/compare_models.py`: one seeded
+  two-stream setup (20000 electrons, omega_pe dt = 0.087, to t omega_pe = 40) run with one
+  switch changed at a time, each against `two_stream_rate` of the same populations.
+  Reference, electrostatic, Gauss and filtered: 0.2805 against 0.2899 (-3.3 %, identical to
+  four digits), energy 2e-4. Implicit: 0.2808 (-3.1 %), energy 3e-16. Relativistic: 0.2683
+  against 0.2713 (the kinetic root times the cold gamma0^-3/2 reduction at the same k),
+  -1.1 %. Collisional (electrostatic): identical to electrostatic, as nu/omega_pe ~ 1e-7
+  requires. `fig_compare_models.py` runs it for the page `docs/examples/compare_models.md`.
+- **Defect found and fixed: collisions above the light-wave Courant limit.** The first
+  collisional run blew up (|v| ~ 1e103 by step 58) at c dt/dx = 4.5 in the explicit
+  electromagnetic model: collisions scatter a longitudinal beam into y and z, which seeds
+  the light wave, and `_check_courant` only looked at the initial transverse velocity. It
+  now also warns when `collisions` is set (`test_courant_warning_fires_only_when_a_light_wave_can_be_seeded`
+  extended). The example runs its collisional case electrostatic and says why.
+- README 1D1V row and figure, 1D2V Weibel row; examples index and toctree; API page gains
+  `jaxincell.theory`; CI Examples job runs `weibel --quick` and `compare_models --quick`
+  (with scipy).
+
+**Left in W9 (not ticked):**
+1. E01: Landau floor measured where the amplitude stops falling; re-measure example, figure
+   and test together at 500 and 800 steps.
+2. `1_basic/parameters_and_sampling.py` (the README parameter tutorial of section 11).
+3. `2_intermediate/output_and_restart.py` (rest of U14).
+4. The remaining existing examples' saved data and provenance (section 11), and the
+   filtered/unfiltered pair at a wavelength the filter does act on (mode 1 of 64 cells is
+   untouched by two passes, which the page says).

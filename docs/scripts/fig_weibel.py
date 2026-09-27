@@ -1,6 +1,14 @@
 """Weibel instability: the marginal wavenumber in a box that holds several
-wavelengths, and the growth rate against the transverse kinetic dispersion
-relation from single-mode runs."""
+wavelengths, the growth rate against the transverse kinetic dispersion
+relation from single-mode runs, and mode by mode in the wide box of
+examples/2_intermediate/weibel.py, which this runs and reads back."""
+import json
+import os
+import runpy
+import sys
+import tempfile
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 from common import C_ELECTRONS, C_THEORY, figure, panel_label, record, savefig
@@ -69,14 +77,15 @@ modes = np.arange(1, 9)
 gain = B_k[-1, modes] / np.median(B_k[:5, modes], axis=0)
 unstable = 2 * np.pi * modes / length < K_C
 
-fig, axes = figure(2)
+fig, axes = figure(3)
 for mode in modes:
     k = 2 * np.pi * mode / length
     axes[0].semilogy(t, B_k[:, mode], color=plt.cm.viridis(0.1 + 0.8 * mode / 8),
                      ls="-" if k < K_C else ":", lw=2, label=fr"$k/k_c={k / K_C:.2f}$")
 axes[0].set(xlabel=r"$t\,\omega_{pe}$", ylabel=r"$|B_{y,k}|$ (T)",
             title="unseeded: solid below the cutoff, dotted above")
-axes[0].legend(ncol=2)
+axes[0].set_ylim(top=3e3 * B_k[:, modes].max())    # room for the legend above the curves
+axes[0].legend(ncol=2, fontsize=13, loc="upper left")
 panel_label(axes[0], "a")
 
 # (b) one wavelength per box, one mode seeded: the rate can be measured
@@ -104,6 +113,29 @@ axes[1].text(1.02, 0.05, r"$k_c c=\omega_{pe}\sqrt{T_z/T_x-1}$", rotation=90, va
 axes[1].set(xlabel=r"$k/k_c$", ylabel=r"$\gamma/\omega_{pe}$", title="seeded single-mode runs")
 axes[1].legend()
 panel_label(axes[1], "b")
+# (c) the example's wide box, every mode fitted over one linear window: its own run, read back
+EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "2_intermediate" / "weibel.py"
+with tempfile.TemporaryDirectory() as folder:
+    here, argv = Path.cwd(), sys.argv
+    try:
+        os.chdir(folder)
+        sys.argv = [str(EXAMPLE)]
+        runpy.run_path(str(EXAMPLE), run_name="__main__")
+        wide = json.loads((Path(folder) / "weibel" / "run.json").read_text())
+    finally:
+        os.chdir(here)
+        sys.argv = argv
+res = wide["results"]
+kk, rate_w, kin_w, r2_w = (np.array(res[key]) for key in ("k_over_kc", "measured", "kinetic", "r2"))
+good = (r2_w >= wide["settings"]["good_fit"]) & (kin_w > 0)
+axes[2].plot(fine, [theory(f * K_C) for f in fine], "-", color=C_THEORY, label="kinetic theory")
+axes[2].plot(kk[good], rate_w[good], "o", color=C_ELECTRONS, label="JAX-in-Cell")
+axes[2].plot(kk[~good], rate_w[~good], "o", mfc="none", color=C_ELECTRONS, label=r"$R^2<0.8$, excluded")
+axes[2].axvline(1.0, color="0.7", lw=2)
+axes[2].set(xlabel=r"$k/k_c$", ylabel=r"$\gamma/\omega_{pe}$",
+            title=f"{wide['settings']['wide']['wavelengths']} wavelengths, unseeded, every mode")
+axes[2].legend()
+panel_label(axes[2], "c")
 fig.tight_layout()
 savefig(fig, "weibel")
 
@@ -119,4 +151,11 @@ record(weibel_anisotropy=RATIO, weibel_particles=N_A, weibel_cells=CELLS_A, weib
        weibel_gain_min_unstable=round(float(gain[unstable].min()), 1),
        weibel_gain_max_stable=round(float(gain[~unstable].max()), 2),
        weibel_gamma_max_theory=round(float(max(predicted)), 4),
+       weibel_wide_wavelengths=wide["settings"]["wide"]["wavelengths"],
+       weibel_wide_particles=wide["settings"]["wide"]["particles"],
+       weibel_wide_steps=wide["settings"]["wide"]["steps"],
+       weibel_wide_window=f"{res['window'][0]:.0f} to {res['window'][1]:.0f}",
+       weibel_wide_modes_compared=int(good.sum()), weibel_wide_modes_unstable=int((kin_w > 0).sum()),
+       weibel_wide_mean_deviation_percent=round(res["mean_deviation_percent"], 1),
+       weibel_wide_max_deviation_percent=round(res["max_deviation_percent"], 1),
        weibel_energy_error=f"{float(np.max(np.abs(energy / energy[0] - 1))):.1e}")
