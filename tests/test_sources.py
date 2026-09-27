@@ -718,10 +718,12 @@ def test_the_two_field_models_agree_between_walls_and_differ_by_the_mean_field_i
     assert abs(ring[0].mean()) > 0.01 * np.abs(ring[0]).max()
 
 
-def test_the_implicit_scheme_refuses_the_electrostatic_model():
-    with pytest.raises(ValueError, match="electrostatic"):
+def test_the_implicit_scheme_refuses_the_gauss_solve_and_takes_the_electrostatic_model():
+    # W11 made the implicit electrostatic model an Ampere update; only the projection is refused
+    with pytest.raises(ValueError, match="gauss"):
         Simulation(Domain(), [Species.electrons(n=10, density=1e10)],
-                   Solver(algorithm="implicit", model="electrostatic"))
+                   Solver(algorithm="implicit", field_solver="gauss"))
+    Simulation(Domain(), [Species.electrons(n=10, density=1e10)], Solver(algorithm="implicit", model="electrostatic"))
 
 
 @pytest.mark.parametrize("solver, message", [
