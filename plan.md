@@ -859,7 +859,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension. *(GYRAZE pinned and reproduced; matched case moved to `M=900, gamma=0.2, alpha=4 deg`; `Source(every=k)` built and tested; references for the rehearsal, the matched case and the 3 and 5 degree scan generated with manifests in `~/local/gyraze-runs` and on office; the example compares seven quantities against predeclared tolerances; two source-read traps found -- GYRAZE's `gamma` is at the Debye-sheath entrance and its axes are `rho_B` and `rho_e` -- so the matched runs need `--gamma=0.5377` and `0.6009`; next: the three A4000 runs in 8.1, then the scan.)*
 - [ ] **W9** model-comparison and Weibel examples on the existing kernels and shared theory.
 - [ ] **W10** electron-field instability with its limiting controls.
-- [ ] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering.
+- [x] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering. *(section 16, W11. The optional algorithms of section 9 are deferred, not evaluated.)*
 - [ ] **W12** convergence, performance, documentation, review packet. *(Documentation part started: every figure in one style, set in the package as `jaxincell.style()`/`figure()`; README benchmarks grouped as 1D1V, 1D2V and 1D3V with the agreement against each reference; example and user-guide pages led by their figure and a measured-against-reference table, prose kept to the numerics pages; movies written for the web by `docs/scripts/movies.py`, 0.1-0.5 MB each, to be embedded once uploaded as PR attachments, since GitHub plays no video stored in the repository. Open: convergence and device-coverage evidence.)*
 
 ## 11. Acceptance checklist
@@ -1000,3 +1000,65 @@ contains #44–#50.
 Conflicts in the merge were resolved to this branch's files; `main`'s files that this branch had
 removed (the old `_algorithms.py`, `_boundary_conditions.py` and the like, their tests and
 old-API docs scripts) stay removed.
+
+## 16. Lanes after the integration
+
+### W11: algorithms (2026-09-27)
+
+Three commits on `research-release`, each with its test; numbers from office CPU, double precision.
+
+**Source-free implicit electrostatic (mandatory, done).** `Solver(algorithm="implicit",
+model="electrostatic")` is no longer refused. The Picard loop advances E_x by Ampere's law with
+the same continuity current and discrete-gradient force as the electromagnetic scheme; E_y, E_z
+and B are not evolved (external fields still act). No Poisson projection follows. Periodic
+mean-field convention chosen explicitly: the mean of J_x is left out in a periodic box, so
+<E_x> = 0 at every step, as in the explicit electrostatic model; between walls nothing is
+subtracted. Energy balance unchanged because sum_i E_x,i <J_x> = 0. Final residuals on the
+tests' two-stream (2000+2000, 64 cells, 150 steps, c dt/dx = 4.5): energy error 2.8e-11 at 4
+Picard iterations, 2.3e-16 at 8 and 12; Gauss residual <= 2e-15; |<E_x>|/max|E_x| <= 6e-17;
+same at reflecting walls. `field_solver="gauss"` stays refused with the implicit scheme.
+Test: `test_implicit_electrostatic_scheme_conserves_energy_and_charge_without_a_projection`
+(periodic, reflective). Docs: numerics/implicit.md, "The electrostatic model".
+
+**Collision time-centring (mandatory, done).** The explicit step kicks u^n -> u^{n+1} at
+x^{n+1/2}; collisions used to act right after the kick at x^{n+1/2}, and the next drift then
+moved the integer-time position with the scattered velocity, so every collision changed the
+energy by (dt/2) Delta p_a . (q_a E_a/m_a - q_b E_b/m_b). They now act at
+x^{n+1} = x^{n+1/2} + dt v_kicked/2, between the two half drifts, and the drift continues with the
+scattered velocity (Strang-type split around the unsplit kick; splitting the Boris kick is
+rejected because two dt/2 rotations do not compose to one dt rotation). Evidence:
+- isolated oscillator (electrons and a 25 m_e species of equal charge in one harmonic well,
+  all in one cell so every collision is exact, nu/omega ~ 0.1, 16 periods), max relative
+  energy error at omega dt = 0.4 / 0.2 / 0.1: collisionless 1.07e-3 / 2.45e-4 / 4.54e-5; new
+  placement 1.01e-3 / 1.96e-4 / 3.86e-5 (second order, collisionless level); old placement
+  22.1 / 6.83 / 1.53. Test `test_collisions_at_the_integer_time_keep_the_leapfrog_energy_error`
+  fails on the old code.
+- homogeneous thermal plasma (e + 25 m_e ions, 20000 each, 64 cells, ln Lambda = 1e4,
+  200/omega_pe): self-collisions only, total energy drift 3e-5 (omega_pe dt 0.4) and 1e-5 (0.1)
+  against 1e-5 collisionless, both placements alike.
+- with electron-ion collisions, 6.7e-3 / 2.5e-3 (new) and 5.9e-3 / 2.3e-3 (old); relaxation
+  T_i = 4 T_e: 9.0e-4 / 2.8e-4 (new), 9.3e-4 / 1.8e-4 (old). This drift is the between-species
+  operator's own (a particle of the shorter list collides several times from the same start
+  velocities, second order in angle, so first order in dt per unit time), not the splitting's.
+  Open: an exact multi-pass between-species pairing would remove it; not attempted.
+- implicit scheme: collisions act after the step at (x^{n+1}, u^{n+1}), both at t^{n+1}; energy
+  still exact there (audit table), splitting first order.
+Docs: numerics/collisions.md, "Where in the step".
+
+**Audit (done).** `docs/scripts/audit_invariants.py` (in make_all.py) measures, separately, max
+energy error, max momentum error and max Gauss residual for explicit EM, explicit EM + filter,
+explicit gauss, explicit ES, explicit ES + self-collisions, implicit EM, implicit ES, implicit
+ES + self-collisions, periodic and reflecting, on the two-stream setup; values in
+measurements.json, table on numerics/verification.md, "Discrete invariants, model by model".
+Summary: Gauss residual <= 3e-15 everywhere; energy round-off (2-4e-16) only for the implicit
+scheme, explicit 2.3e-5 (4e-6 with the filter) over 150 steps; periodic momentum round-off only
+for the explicit scheme (implicit 1e-5); between walls momentum is exchanged with the walls
+(4e-3 explicit, 1.5e-2 implicit) and is not an error.
+
+**Optional algorithms: deferred.** ECSIM, Ricketson-Hu, Higuera-Cary and Darwin were not
+prototyped: none has a measured end-to-end benefit on a case this project runs, and each would
+need its own discrete identities and both AD modes. No code added.
+
+Checks: flake8 0; focused tests (test_collisions, test_boundaries_and_loop, the implicit tests of
+test_physics) pass; `sphinx-build -W` clean apart from Python 3.10's own `dataclasses.replace`
+docstring on office (CI uses 3.12); full suite left to CI.
