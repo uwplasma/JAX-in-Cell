@@ -11,8 +11,8 @@ python examples/1_basic/two_stream.py
 ```
 
 Where an input file is listed the run needs no Python: `jaxincell inputs/<file>.toml`.
-Six scripts — `sheath_unmagnetized.py`, `sheath_magnetized.py`, `sheath_optimization.py`,
-`grazing_sheath.py`, `weibel.py` and `compare_models.py` — take `--quick`, a smoke run of ten seconds to two minutes with
+Seven scripts — `sheath_unmagnetized.py`, `sheath_magnetized.py`, `sheath_optimization.py`,
+`grazing_sheath.py`, `weibel.py`, `compare_models.py` and `electron_field.py` — take `--quick`, a smoke run of ten seconds to two minutes with
 far fewer particles. It reproduces the structure with more noise, and each says so when it
 starts, so that a smoke run is not quoted as a measurement.
 
@@ -27,6 +27,7 @@ starts, so that a smoke run is not quoted as a measurement.
 | {doc}`two_stream` | growth, saturation and the phase-space vortex | `1_basic/two_stream.py` | `two_stream.toml` |
 | {doc}`relativistic_two_stream` | beams at $0.8c$ with the relativistic Boris pusher on and off | `docs/scripts/fig_relativistic.py` | — |
 | {doc}`compare_models` | one problem with seven solver settings: which change the rate, which only the cost | `2_intermediate/compare_models.py` | — |
+| {doc}`electron_field` | a uniform imposed field, and the three ion models that decide whether waves grow | `3_advanced/electron_field.py` | — |
 | {doc}`bump_on_tail` | a beam-driven wave and the quasilinear plateau | `2_intermediate/bump_on_tail.py` | `bump_on_tail.toml` |
 | {doc}`wall_reflection` | a wall returns the flux average of its reflection law | `2_intermediate/wall_reflection.py` | — |
 | {doc}`conservation` | energy, momentum and charge in both schemes | `3_advanced/conservation.py` | `conservation_implicit.toml` |
@@ -79,6 +80,7 @@ conservation
 optimize_two_stream
 weibel
 compare_models
+electron_field
 sheath_unmagnetized
 sheath_magnetized
 sheath_reflection

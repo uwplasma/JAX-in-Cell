@@ -206,3 +206,48 @@ def damped_mode(t, amplitude, above=5.0):
         raise ValueError(f"only {used.size} maxima stand above {above:g} times the noise floor")
     rate = np.polyfit(t[used], np.log(amplitude[used]), 1)[0]
     return float(rate), float(np.pi / np.mean(np.diff(t[used]))), used, floor
+
+
+def field_epsilon(omega, k, kappa, drift=0.0):
+    """The dielectric function of Maxwellian electrons in a uniform field, and its derivative in omega,
+    from Fried's characteristics with the zero-order field kept (Beving, Hopkins and Baalrud, Phys.
+    Plasmas 30, 112105, 2023, eq. 7):
+
+    :math:`\\epsilon = 1 - Z'(\\zeta)/(k^2 s^2)`, :math:`s^2 = 2(1 + i\\kappa/k)`,
+    :math:`\\zeta = (\\omega - k u)/(k s)`.
+
+    Dimensionless, in that paper's units: ``k`` in :math:`1/\\lambda_{De}`, ``omega`` in
+    :math:`\\omega_{pe}`, ``drift`` :math:`u` in :math:`v_{Te} = \\sqrt{T_e/m_e}` (not this module's
+    :math:`\\sqrt{2T/m}`), and ``kappa`` is :math:`\\kappa_e\\lambda_{De} = eE_0\\lambda_{De}/T_e`
+    with the field antiparallel to ``k``. At ``kappa = 0`` it is :func:`electrostatic_epsilon` of one
+    Maxwellian. The drift enters only through :math:`\\omega - ku`, so it Doppler-shifts every root
+    and leaves every growth rate unchanged.
+
+    The relation treats the accelerating distribution as a steady state. For collisionless
+    Vlasov-Poisson on an exactly uniform immobile background, the change of variables
+    :math:`x' = x - at^2/2`, :math:`v' = v - at` removes the field altogether, so its growth is a
+    prediction to test and not a consequence of the equations.
+    """
+    s = np.sqrt(2.0 * (1.0 + 1j * kappa / k))
+    xi = (omega - k * drift) / (k * s)
+    return 1.0 - Zprime(xi) / (k * s) ** 2, -Zsecond(xi) / (k * s) ** 3
+
+
+def field_rate(k, kappa, drift=0.0):
+    """The small-field, large-phase-velocity growth rate of the same paper (eq. 10), in
+    :math:`\\omega_{pe}`, with :func:`field_epsilon`'s units: :math:`\\Theta(\\omega_r)/2\\,[3k\\kappa -
+    \\sqrt{\\pi/8}\\,e^{-3/2 - 1/(2k^2)}/|k|^3]`, where :math:`\\omega_r = \\sqrt{1 + 3k^2} - ku` is
+    the paper's eq. 8. That frequency vanishes where the wave stands still in the frame of the ions,
+    :math:`k = 1/u` for :math:`u \\gg 1` (eq. 11), the paper's cutoff."""
+    k = np.asarray(k, float)
+    frequency = np.sqrt(1 + 3 * k ** 2) - k * drift
+    with np.errstate(over="ignore", divide="ignore"):
+        landau = np.sqrt(np.pi / 8) * np.exp(-1.5 - 0.5 / k ** 2) / np.abs(k) ** 3
+    return 0.5 * (frequency > 0) * (3 * k * kappa - landau)
+
+
+def field_root(k, kappa, drift=0.0):
+    """The growing electron plasma wave of :func:`field_epsilon`, by Newton from the Bohm-Gross
+    frequency Doppler-shifted by the drift; ``None`` if Newton does not converge."""
+    guess = np.sqrt(1 + 3 * k ** 2) + k * drift + 0.5j * field_rate(k, kappa)
+    return newton(lambda w: field_epsilon(w, k, kappa, drift), guess)

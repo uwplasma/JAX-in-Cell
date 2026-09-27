@@ -82,3 +82,29 @@ def test_the_damped_mode_fit_measures_its_floor_where_the_decay_stops():
         theory.damped_mode(t[:1000], np.abs(np.cos(1.4 * t[:1000])) * np.exp(-0.15 * t[:1000]))
     with pytest.raises(ValueError, match="only"):
         theory.damped_mode(t, amplitude, above=100.0)
+
+
+def test_the_field_dielectric_reduces_to_the_maxwellian_one_and_drift_is_a_doppler_shift():
+    """Beving, Hopkins and Baalrud (2023), eq. 7: kappa = 0 is one Maxwellian (lambda_D = 1 at
+    v_th = sqrt(2) in this module's convention), its derivative is the derivative, and a drift
+    moves the root by k u without changing its growth."""
+    w, k = 1.1 - 0.05j, 0.4
+    maxwellian = theory.electrostatic_epsilon(w, k, [{"wp": 1.0, "u": 0.0, "vth": np.sqrt(2.0)}])[0]
+    assert abs(theory.field_epsilon(w, k, 0.0)[0] - maxwellian) < 1e-12
+    h = 1e-6
+    value = [theory.field_epsilon(w + s * h, 0.15, 0.2, 3.0)[0] for s in (1, -1)]
+    assert abs((value[0] - value[1]) / (2 * h) - theory.field_epsilon(w, 0.15, 0.2, 3.0)[1]) < 1e-6
+    rest, moving = theory.field_root(0.15, 0.2), theory.field_root(0.15, 0.2, drift=10.0)
+    assert abs(moving - rest - 1.5) < 1e-9
+    assert theory.field_root(0.15, 0.0) .imag < 1e-7                # no field: Landau damped, barely
+
+
+def test_the_field_growth_rate_is_the_small_field_limit_of_the_root():
+    """Eq. 10 against the root of eq. 7 at kappa lambda_D = 1/500, the paper's Fig. 6, and its
+    cutoff where the wave stands still in the ion frame."""
+    for k in (0.05, 0.1):
+        assert theory.field_root(k, 0.002).imag == pytest.approx(theory.field_rate(k, 0.002), rel=0.03)
+    assert theory.field_rate(0.05, 0.2) == pytest.approx(0.015)          # 3 k kappa / 2
+    assert theory.field_rate(0.06, 0.2, drift=20.0) == 0.0               # k > 1/u: past the cutoff
+    assert theory.field_rate(0.4, 0.0) < 0                               # Landau damping alone
+    assert theory.field_root(0.15, 0.2, drift=np.nan) is None

@@ -858,7 +858,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] **W7** repair the four existing sheath and optimisation examples and their documentation. *(S15, S16, S04's second half, G05, U12 and S20 closed; every number on the four pages is from a run of the preset the page names, and the convergence table is a script.)*
 - [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension. *(GYRAZE pinned and reproduced; matched case moved to `M=900, gamma=0.2, alpha=4 deg`; `Source(every=k)` built and tested; references for the rehearsal, the matched case and the 3 and 5 degree scan generated with manifests in `~/local/gyraze-runs` and on office; the example compares seven quantities against predeclared tolerances; two source-read traps found -- GYRAZE's `gamma` is at the Debye-sheath entrance and its axes are `rho_B` and `rho_e` -- so the matched runs need `--gamma=0.5377` and `0.6009`; next: the three A4000 runs in 8.1, then the scan.)*
 - [x] **W9** model-comparison and Weibel examples on the existing kernels and shared theory. *(E01, E02, U13 and U14 closed; `parameters_and_sampling.py` and `output_and_restart.py` added; every example writes its settings, results and provenance through `jaxincell.save_run`. Section 16, W9.)*
-- [ ] **W10** electron-field instability with its limiting controls.
+- [x] **W10** electron-field instability with its limiting controls. *(section 16, W10: the paper's case reproduces growth of the paper's size only with discrete ions; the exactly uniform background, where the change of frame removes the field, shows none.)*
 - [x] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering. *(section 16, W11. The optional algorithms of section 9 are deferred, not evaluated.)*
 - [ ] **W12** convergence, performance, documentation, review packet. *(Documentation part started: every figure in one style, set in the package as `jaxincell.style()`/`figure()`; README benchmarks grouped as 1D1V, 1D2V and 1D3V with the agreement against each reference; example and user-guide pages led by their figure and a measured-against-reference table, prose kept to the numerics pages; movies written for the web by `docs/scripts/movies.py`, 0.1-0.5 MB each, to be embedded once uploaded as PR attachments, since GitHub plays no video stored in the repository. Open: convergence and device-coverage evidence.)*
 
@@ -881,7 +881,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] Weibel linear growth verified mode by mode; PR #43's nonlinear preset ported and preserved. *(W9: 7.2 % mean, 18.0 % worst over 8 of 11 unstable modes.)*
 - [x] Explicit/implicit, collisional/collisionless, filtered/unfiltered and relativistic comparisons demonstrated. *(W9's `compare_models.py`.)*
 - [x] Independent-target sheath inference with real statistical uncertainty. *(W7's G05: 0.3264 against 0.35 on a residual of 0.0512, and an error bar of +-0.0207 that is a scatter and not a grid.)*
-- [ ] Electron-field example with verified inputs, limiting controls and an honest interpretation.
+- [x] Electron-field example with verified inputs, limiting controls and an honest interpretation. *(W10, section 16.)*
 - [ ] Source-free implicit ES and collision time-centering done; optional algorithms have implement/defer evidence.
 - [ ] Fast suite and headless examples pass; scientific claims carry separate convergence evidence.
 - [ ] Clean install, CLI and documentation builds pass; precision and supported versions documented.
@@ -1216,3 +1216,57 @@ physics inside the reference's range: `office:~/w8/matched-77a80cc`, PID 979146,
 in that directory when it exits; read the tail of `run.log` and `grazing_sheath_matched/run.json`,
 then add its table and figure (PIL, ~1600 px, 128 colours) to `grazing_sheath.md`. Next: the 3 and
 5 degree scan, which needs `--angle`.
+
+### W10: electron-field instability (2026-09-27)
+
+**Inputs verified** against the open full text (OSTI 2311492, the accepted manuscript of
+Phys. Plasmas 30, 112105): helium, n = 3e14 m^-3, T_e = 3 eV, T_i = 0.026 eV, E_0 = -800 V/m,
+lambda_De = 7.43e-4 m (reproduced: 7.434e-4), kappa_e lambda_De = 0.198, 1200 lambda_De, five
+cells per lambda_De, 400 particles per cell per species, random positions, sixteen
+realisations, periodic, electrostatic; fit window t omega_pe 35-170 on <E> (eq. 2, E minus its
+time mean at each x). Their thermal speed is v_Te = sqrt(T_e/m_e) in the text and in eq. 7's
+sqrt(2(1 + i kappa/k)); the Maxwellian printed after eq. 6 uses exp(-v^2/v_Te^2), which is
+the sqrt(2T/m) convention, an inconsistency of the paper. They quote gamma_fit = 7.9e-3
+against 1.5e-2 from eq. 10 at the mean drift of the window (20 v_Te).
+
+**Theory** (`jaxincell.theory`): `field_epsilon` (eq. 7, with its derivative), `field_rate`
+(eq. 10 with the eq. 8 step), `field_root` (Newton from Bohm-Gross). Tests: kappa = 0 is the
+Maxwellian dielectric; the derivative; eq. 10 is the small-field limit of the eq. 7 root to 3 %
+at kappa lambda_De = 1/500; 3 k kappa/2 = 0.015 at the paper's numbers. Found: in eq. 7 the
+drift enters only as omega - k u, so it Doppler-shifts the root and never changes its growth;
+the paper's cutoff k < 1/u (eq. 11) and k* = 1/(kappa t) (eq. 12) come from the eq. 8 heuristic,
+where omega_r = 0 is a wave standing still in the ion frame.
+
+**Example** `examples/3_advanced/electron_field.py`, five cases, each of four realisations
+(seeds 0-3), omega_pe dt = 0.005 (40 v_Te crosses one cell per step, the paper's condition),
+40000 steps to t omega_pe = 200; field by `external_E`; <E> averaged over one plasma period
+before fitting (it beats at 2 omega_pe). Office GPU 1 (A4000), double precision, 3.2 h.
+
+| case | d ln<E>/dt, t omega_pe 35-170 | gain |
+|---|---|---|
+| uniform background, E_0 | -2.2e-5 | 0.999 |
+| uniform background, no field | -5.0e-6 | 1.00 |
+| frozen ions (1e9 m_p macro-particles), E_0 | 1.56e-2 | 8.5 |
+| frozen ions, no field | -1.1e-4 | 0.99 |
+| mobile He+, E_0 (the paper's case) | 2.09e-2 | 19 |
+| eq. 10, 2 gamma at k* = 0.049 | 2.92e-2 | |
+| the paper's fit | 7.9e-3 | |
+
+Change of frame: the driven uniform run moved by a t^2/2 against the undriven one (same
+particles) differs by 5.0e-3 over k lambda_De <= 0.3 in the fit window, 0.31 over all
+wavelengths (the grid stays in the lab frame while the electrons cross it at up to 40 v_Te).
+External work E_0 * integral of J against kinetic plus field energy gained: 2.5e-5 relative.
+The spectrum's peak sits at 1.14 (helium) and 1.12 (frozen) times eq. 12.
+
+**Interpretation.** The continuum limit of the setup (uniform background) shows no growth,
+as the change of frame requires; growth needs the field and discrete ions, and frozen
+macro-particles already give three quarters of the helium rate. k* = omega_pe/(a t) is the
+wave standing still in the ion frame: the Cherenkov wake of the ions' charge noise swept
+through resonance by the accelerating electrons. The growth reproduced here is of the
+paper's size, but it is not evidence for the Fried continuum instability.
+
+**Left open:** the ion macro-particle-count scaling of the helium growth (the decisive
+test of the wake picture); sixteen realisations instead of four; collisions and walls, which
+also break the change of frame. Docs: `docs/examples/electron_field.md` from
+`docs/scripts/fig_electron_field.py` (in make_all.py; runs the example); README 1D1V row;
+CI Examples job runs `electron_field --quick`.
