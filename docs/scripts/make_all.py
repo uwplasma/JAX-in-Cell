@@ -33,6 +33,7 @@ SCRIPTS = [
     "fig_sheath.py",
     "fig_sheath_source.py",
     "fig_collisions.py",
+    "audit_invariants.py",
     "fig_autodiff.py",
     "fig_scaling.py",
     "fig_runtime.py",

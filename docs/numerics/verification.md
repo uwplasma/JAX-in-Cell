@@ -261,3 +261,39 @@ The whole suite runs on one CPU core in a few minutes. `pytest` repeats the phys
 above at reduced resolution as part of the test suite, so a regression in any of the
 rates fails CI rather than waiting to be noticed in a figure; see
 {doc}`../development`.
+
+## Discrete invariants, model by model
+
+Energy, momentum and the Gauss law are separate properties, and each combination of field
+model, integrator, filter and collisions keeps a different subset of them. The table gives the
+largest error of each over the two-stream setup of the tests (2000 electrons and ions on 64
+cells, 150 steps, $c\Delta t/\Delta x = 0.9$ explicit and $4.5$ implicit), in a periodic box and
+between reflecting walls (`docs/scripts/audit_invariants.py`). Energy is relative to the
+total, momentum to $\sum_p|\mathbf p_p(0)|$; collisions are the self-collisions of each species
+at $\ln\Lambda = 10^4$.
+
+| model | energy, periodic | energy, walls | momentum, periodic | momentum, walls | Gauss, periodic | Gauss, walls |
+|---|---|---|---|---|---|---|
+| explicit, electromagnetic | {{ audit_explicit_em_periodic_energy_error }} | {{ audit_explicit_em_reflective_energy_error }} | {{ audit_explicit_em_periodic_momentum_error }} | {{ audit_explicit_em_reflective_momentum_error }} | {{ audit_explicit_em_periodic_gauss_residual }} | {{ audit_explicit_em_reflective_gauss_residual }} |
+| explicit, 2 filter passes | {{ audit_explicit_em_filter_periodic_energy_error }} | {{ audit_explicit_em_filter_reflective_energy_error }} | {{ audit_explicit_em_filter_periodic_momentum_error }} | {{ audit_explicit_em_filter_reflective_momentum_error }} | {{ audit_explicit_em_filter_periodic_gauss_residual }} | {{ audit_explicit_em_filter_reflective_gauss_residual }} |
+| explicit, `field_solver="gauss"` | {{ audit_explicit_gauss_periodic_energy_error }} | {{ audit_explicit_gauss_reflective_energy_error }} | {{ audit_explicit_gauss_periodic_momentum_error }} | {{ audit_explicit_gauss_reflective_momentum_error }} | {{ audit_explicit_gauss_periodic_gauss_residual }} | {{ audit_explicit_gauss_reflective_gauss_residual }} |
+| explicit, electrostatic | {{ audit_explicit_es_periodic_energy_error }} | {{ audit_explicit_es_reflective_energy_error }} | {{ audit_explicit_es_periodic_momentum_error }} | {{ audit_explicit_es_reflective_momentum_error }} | {{ audit_explicit_es_periodic_gauss_residual }} | {{ audit_explicit_es_reflective_gauss_residual }} |
+| explicit, electrostatic, collisions | {{ audit_explicit_es_collisions_periodic_energy_error }} | {{ audit_explicit_es_collisions_reflective_energy_error }} | {{ audit_explicit_es_collisions_periodic_momentum_error }} | {{ audit_explicit_es_collisions_reflective_momentum_error }} | {{ audit_explicit_es_collisions_periodic_gauss_residual }} | {{ audit_explicit_es_collisions_reflective_gauss_residual }} |
+| implicit, electromagnetic | {{ audit_implicit_em_periodic_energy_error }} | {{ audit_implicit_em_reflective_energy_error }} | {{ audit_implicit_em_periodic_momentum_error }} | {{ audit_implicit_em_reflective_momentum_error }} | {{ audit_implicit_em_periodic_gauss_residual }} | {{ audit_implicit_em_reflective_gauss_residual }} |
+| implicit, electrostatic | {{ audit_implicit_es_periodic_energy_error }} | {{ audit_implicit_es_reflective_energy_error }} | {{ audit_implicit_es_periodic_momentum_error }} | {{ audit_implicit_es_reflective_momentum_error }} | {{ audit_implicit_es_periodic_gauss_residual }} | {{ audit_implicit_es_reflective_gauss_residual }} |
+| implicit, electrostatic, collisions | {{ audit_implicit_es_collisions_periodic_energy_error }} | {{ audit_implicit_es_collisions_reflective_energy_error }} | {{ audit_implicit_es_collisions_periodic_momentum_error }} | {{ audit_implicit_es_collisions_reflective_momentum_error }} | {{ audit_implicit_es_collisions_periodic_gauss_residual }} | {{ audit_implicit_es_collisions_reflective_gauss_residual }} |
+
+What the table says, and what it does not claim:
+
+- **Gauss law**: round-off for every model and boundary, because every model takes the
+  continuity current or solves the Gauss law ({doc}`deposition`).
+- **Energy**: round-off only for the implicit scheme, with or without the electrostatic model
+  and collisions. The explicit leapfrog has a bounded error of order $(\omega_{pe}\Delta t)^2$,
+  which the filter reduces here by removing the grid-scale noise that carries it.
+- **Momentum**: round-off in a periodic box for the explicit scheme, whose gather is the
+  transpose of its deposit, and not for the implicit one, whose discrete-gradient force is not
+  antisymmetric ({doc}`implicit`). Between walls momentum is exchanged with the walls, so its
+  change there is physics, not error.
+- **Collisions** conserve each pair's momentum and energy, so self-collisions leave every
+  column unchanged. Between species with unequal numbers in a cell the energy is conserved
+  only to second order in the scattering angle ({doc}`collisions`).
