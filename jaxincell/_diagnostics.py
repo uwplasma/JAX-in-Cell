@@ -1,12 +1,13 @@
 """Post-processing of an :class:`Output`: energies, momentum, Gauss-law residual,
 temperatures and the dominant frequency. Everything is a plain function of the
 stored arrays and can be recomputed at will."""
+import jax
 import jax.numpy as jnp
 
 from ._config import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
 __all__ = ["bohm_edge", "charge_balance", "diagnostics", "dominant_frequency", "energies",
-           "gauss_residual", "moment_profiles", "potential", "temperatures"]
+           "gauss_residual", "magnetic_moment", "moment_profiles", "potential", "temperatures"]
 
 
 def _blocks(out):
@@ -50,6 +51,25 @@ def energies(out):
 
 def _nonzero(scale):
     return jnp.maximum(scale, jnp.finfo(scale.dtype).tiny)
+
+
+def magnetic_moment(out, simulation):
+    """Magnetic moment of every stored particle relative to the external field,
+    :math:`\\mu = p_\\perp^2/(2 m |\\mathbf B|)` with :math:`\\mathbf p = \\gamma m \\mathbf v`
+    (:math:`m v_\\perp^2/2B` at low speed), ``(stored, N)`` in J/T. ``B`` is
+    ``simulation.external_B`` gathered at each particle as the push gathers it
+    (:meth:`~jaxincell.Simulation.external_fields_at`), so the moment is the adiabatic
+    invariant of motion in that field alone: it is conserved when the field changes little
+    over a gyro-radius and a gyro-period, which is what it is for checking. Zero where the
+    field vanishes. Needs ``run(store_particles=True)``."""
+    B = jax.vmap(simulation.external_fields_at)(out.x)[..., 3:]
+    strength = jnp.linalg.norm(B, axis=-1)
+    field = strength > 0
+    b = B / jnp.where(field, strength, 1.0)[..., None]
+    v_perp = out.v - jnp.sum(out.v * b, axis=-1, keepdims=True) * b
+    gamma2 = 1 / (1 - jnp.sum(out.v ** 2, axis=-1) / c ** 2) if out.relativistic else 1.0
+    mu = 0.5 * out.mass * gamma2 * jnp.sum(v_perp ** 2, axis=-1) / jnp.where(field, strength, 1.0)
+    return jnp.where(field, mu, 0.0)
 
 
 def gauss_residual(out):

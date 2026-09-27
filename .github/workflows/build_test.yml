@@ -87,7 +87,7 @@ jobs:
         done
         for script in 1_basic/sheath_unmagnetized 2_intermediate/sheath_magnetized \
                       3_advanced/sheath_optimization 2_intermediate/weibel 2_intermediate/compare_models \
-                      3_advanced/electron_field; do
+                      3_advanced/electron_field 2_intermediate/external_fields_3d; do
           echo "::group::examples/$script.py --quick"
           python "examples/$script.py" --quick
           echo "::endgroup::"

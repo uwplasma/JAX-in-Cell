@@ -19,7 +19,7 @@ import jax.numpy as jnp
 from ._config import epsilon_0, speed_of_light as c
 
 __all__ = ["s2_weights", "map_indices", "deposit", "PARITY", "PARK", "to_centres",
-           "with_ghosts", "gather", "current_from_continuity", "to_faces", "wall_faces_E", "curl_E",
+           "with_ghosts", "gather", "gather_xyz", "current_from_continuity", "to_faces", "wall_faces_E", "curl_E",
            "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic",
            "apply_particle_bc", "wrap_positions", "smooth"]
 
@@ -102,6 +102,22 @@ def gather(F, x, x0, dx):
     particles parked beyond a wall, whose force is zero anyway."""
     idx, w = s2_weights(x, x0 - dx, dx)
     return jnp.einsum("nk,nkc->nc", w, F[jnp.clip(idx, 0, F.shape[0] - 1)])
+
+
+def gather_xyz(G, x, x0, dx, periods):
+    """Interpolate a field given on an ``(x, y, z)`` grid of centres, ``(n + 2, ny, nz, C)``
+    with the ghost centres of :func:`with_ghosts` along ``x``, to positions ``x`` ``(N, 3)``,
+    giving ``(N, C)``. Along ``x`` it is :func:`gather`; along ``y`` and ``z`` the same spline
+    on ``ny`` and ``nz`` centres spanning the periods ``(L_y, L_z)`` of the ignorable
+    coordinates, periodic in both, as the particles are. The weights are a tensor product,
+    so a grid with ``ny = nz = 1`` gathers as :func:`gather` does, to round-off."""
+    ix, wx = s2_weights(x[:, 0], x0 - dx, dx)
+    ix = jnp.clip(ix, 0, G.shape[0] - 1)
+    ny, nz = G.shape[1], G.shape[2]
+    iy, wy = s2_weights(x[:, 1], -periods[0] / 2 + periods[0] / (2 * ny), periods[0] / ny)
+    iz, wz = s2_weights(x[:, 2], -periods[1] / 2 + periods[1] / (2 * nz), periods[1] / nz)
+    values = G[ix[:, :, None, None], (iy % ny)[:, None, :, None], (iz % nz)[:, None, None, :]]
+    return jnp.einsum("na,nb,nc,nabcf->nf", wx, wy, wz, values)
 
 
 # --- sources -----------------------------------------------------------------------

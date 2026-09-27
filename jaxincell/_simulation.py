@@ -17,7 +17,7 @@ from ._config import Collisions, Domain, Impacts, Solver, Source, Species, pytre
 from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
 from ._progress import reporter
 from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, s2_weights,
-                    current_from_continuity, curl_B, curl_E, deposit, gather, half_step_fields, smooth,
+                    current_from_continuity, curl_B, curl_E, deposit, gather, gather_xyz, half_step_fields, smooth,
                     to_centres, to_faces, wall_faces_E, with_ghosts, wrap_positions)
 from ._sources import check_sources, crossing_flux, inject
 
@@ -284,8 +284,12 @@ class Simulation:
         species: The particle populations.
         solver: Integrator, field solver and filter.
         collisions: Binary-collision model, or ``None``.
-        external_E, external_B: Static external fields as arrays of shape
-            ``(cells, 3)`` on the faces (E) and centres (B), or ``None``.
+        external_E, external_B: Static external fields, or ``None``. Either an array of
+            shape ``(cells, 3)``, on the faces (E) and centres (B) of the grid, or an array of
+            shape ``(cells, ny, nz, 3)``, on the centres of an ``(x, y, z)`` grid whose ``x``
+            cells are the domain's and whose ``ny`` and ``nz`` cells span the periods
+            ``length_y`` and ``length_z`` of the domain, gathered at each particle's ``x``,
+            ``y`` and ``z``.
         impacts: :class:`~jaxincell.Impacts` bins for the energy and incidence of what
             reaches each wall, or ``None`` for no spectrum. It costs one scatter per
             species per wall per step.
@@ -310,6 +314,7 @@ class Simulation:
         if len(set(names)) != len(names):
             raise ValueError(f"species names must be distinct, got {names}")
         self._check_implicit()
+        self._check_external()
         self._check_collisions()
         self._check_courant()
         check_sources(self.species, self.solver, self.domain)
@@ -341,6 +346,16 @@ class Simulation:
                              "update that makes the implicit scheme conserve energy, which is the property it "
                              "is there for; it is available with algorithm='explicit' only. "
                              "model='electrostatic' keeps that update and is available with both.")
+
+    def _check_external(self):
+        for name in ("external_E", "external_B"):
+            field = getattr(self, name)
+            if field is None:
+                continue
+            shape = jnp.shape(field)
+            if len(shape) not in (2, 4) or shape[0] != self.domain.cells or shape[-1] != 3:
+                raise ValueError(f"{name} has shape {shape}; it must be (cells, 3) or (cells, ny, nz, 3) "
+                                 f"with cells = {self.domain.cells}")
 
     def _check_collisions(self):
         """The default Coulomb logarithm is taken from the lightest negatively charged species,
@@ -928,15 +943,40 @@ class Simulation:
         implies (:func:`~jaxincell._core.with_ghosts`). Gathering E straight from the faces
         does neither; in a periodic box a lone particle pushed itself with up to 8 % of its
         own field. ``rho`` gives the field at an absorbing left wall. External fields are
-        added as given, continued unchanged beyond a wall."""
+        added as given, continued unchanged beyond a wall; one given on an ``(x, y, z)`` grid
+        is gathered at the particle's ``y`` and ``z`` too (:meth:`external_fields_at`)."""
         d, bc = self.domain, self.domain.field_bc
         F = with_ghosts(jnp.concatenate([to_centres(E, *wall_faces_E(E, B, rho, d.dx, bc)), B], axis=1), bc,
                         jnp.asarray(PARITY))
-        if self.external_E is not None or self.external_B is not None:
-            E_ext = jnp.zeros_like(E) if self.external_E is None else jnp.asarray(self.external_E)
-            B_ext = jnp.zeros_like(B) if self.external_B is None else jnp.asarray(self.external_B)
+        flat = [f is not None and jnp.ndim(f) == 2 for f in (self.external_E, self.external_B)]
+        if any(flat):
+            E_ext = jnp.asarray(self.external_E) if flat[0] else jnp.zeros_like(E)
+            B_ext = jnp.asarray(self.external_B) if flat[1] else jnp.zeros_like(B)
             F = F + with_ghosts(jnp.concatenate([to_centres(E_ext, E_ext[0], E_ext[-1]), B_ext], axis=1), bc)
-        return gather(F, x[:, 0], d.grid[0], d.dx)
+        fields = gather(F, x[:, 0], d.grid[0], d.dx)
+        if any(f is not None and jnp.ndim(f) == 4 for f in (self.external_E, self.external_B)):
+            fields = fields + self._external_xyz(x)
+        return fields
+
+    def _external_xyz(self, x):
+        """The external fields given on an ``(x, y, z)`` grid, at positions ``x``, ``(N, 6)``."""
+        d = self.domain
+        parts = [gather_xyz(with_ghosts(jnp.asarray(f), d.field_bc), x, d.grid[0], d.dx, (d.length_y, d.length_z))
+                 if f is not None and jnp.ndim(f) == 4 else jnp.zeros((x.shape[0], 3), x.dtype)
+                 for f in (self.external_E, self.external_B)]
+        return jnp.concatenate(parts, axis=1)
+
+    def external_fields_at(self, x):
+        """The external E and B at positions ``x`` ``(N, 3)``, as ``(N, 6)``, gathered as the
+        push gathers them: with the spline of the deposit along ``x`` and, for a field given on
+        an ``(x, y, z)`` grid, along ``y`` and ``z`` as well. Zero where no field is given."""
+        d = self.domain
+        zero = jnp.zeros((d.cells, 3))
+        flat = [jnp.asarray(f) if f is not None and jnp.ndim(f) == 2 else zero
+                for f in (self.external_E, self.external_B)]
+        F = with_ghosts(jnp.concatenate([to_centres(flat[0], flat[0][0], flat[0][-1]), flat[1]], axis=1),
+                        d.field_bc)
+        return gather(F, x[:, 0], d.grid[0], d.dx) + self._external_xyz(x)
 
     def _accelerate(self, v, fields, qm, dt):
         """The Boris step in the fields ``(N, 6)`` gathered at the particles."""

@@ -33,6 +33,7 @@ They are ordered by how much of the code they use, not by how interesting they a
 | `wall_reflection.py` | a velocity-dependent wall, through its flux average | `u^2/(u^2+sigma^2)`, in closed form | ~20 s |
 | `sheath_magnetized.py` | the sheath in a field oblique to the wall | its own limits, and the impact distributions | ~1 h |
 | `sheath_reflection.py` | a wall that returns part of the electron flux | Hobbs and Wesson (1967) | ~4 min |
+| `external_fields_3d.py` | an external field on an (x, y, z) grid: grad-B drift and a mirror bounce | guiding-centre theory | ~40 s; `--quick` ~20 s |
 
 ## 3_advanced
 

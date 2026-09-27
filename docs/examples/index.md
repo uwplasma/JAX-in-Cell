@@ -11,8 +11,8 @@ python examples/1_basic/two_stream.py
 ```
 
 Where an input file is listed the run needs no Python: `jaxincell inputs/<file>.toml`.
-Seven scripts — `sheath_unmagnetized.py`, `sheath_magnetized.py`, `sheath_optimization.py`,
-`grazing_sheath.py`, `weibel.py`, `compare_models.py` and `electron_field.py` — take `--quick`, a smoke run of ten seconds to two minutes with
+Eight scripts — `sheath_unmagnetized.py`, `sheath_magnetized.py`, `sheath_optimization.py`,
+`grazing_sheath.py`, `weibel.py`, `compare_models.py`, `electron_field.py` and `external_fields_3d.py` — take `--quick`, a smoke run of ten seconds to two minutes with
 far fewer particles. It reproduces the structure with more noise, and each says so when it
 starts, so that a smoke run is not quoted as a measurement.
 
@@ -49,6 +49,7 @@ starts, so that a smoke run is not quoted as a measurement.
 | {doc}`grazing_sheath` | the two-layer transition, set up against the gyrokinetic code GYRAZE | `3_advanced/grazing_sheath.py` | — |
 | {doc}`collisions` | the Takizuka-Abe operator against the Fokker-Planck rates | `2_intermediate/collisions.py` | `collisions.toml` |
 | {doc}`sheath_optimization` | a wall's reflectivity recovered from the sheath it holds | `3_advanced/sheath_optimization.py` | — |
+| {doc}`external_fields_3d` | a field on an $(x, y, z)$ grid: the grad-$B$ drift and a mirror | `2_intermediate/external_fields_3d.py` | — |
 
 ## Where the numbers come from
 
@@ -87,4 +88,5 @@ sheath_reflection
 grazing_sheath
 collisions
 sheath_optimization
+external_fields_3d
 ```

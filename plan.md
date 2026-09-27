@@ -860,6 +860,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] **W9** model-comparison and Weibel examples on the existing kernels and shared theory. *(E01, E02, U13 and U14 closed; `parameters_and_sampling.py` and `output_and_restart.py` added; every example writes its settings, results and provenance through `jaxincell.save_run`. Section 16, W9.)*
 - [x] **W10** electron-field instability with its limiting controls. *(section 16, W10: the paper's case reproduces growth of the paper's size only with discrete ions; the exactly uniform background, where the change of frame removes the field, shows none.)*
 - [x] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering. *(section 16, W11. The optional algorithms of section 9 are deferred, not evaluated.)*
+- [x] **W13** 3-D external fields ported from `ds/3D_external_fields`: `(cells, ny, nz, 3)` external E and B gathered at x, y, z, and `magnetic_moment`. *(section 16, W13: grad-B drift, mirror bounce and the uniform limit against guiding-centre theory; flat path unchanged.)*
 - [ ] **W12** convergence, performance, documentation, review packet. *(Documentation part started: every figure in one style, set in the package as `jaxincell.style()`/`figure()`; README benchmarks grouped as 1D1V, 1D2V and 1D3V with the agreement against each reference; example and user-guide pages led by their figure and a measured-against-reference table, prose kept to the numerics pages; movies written for the web by `docs/scripts/movies.py`, 0.1-0.5 MB each, to be embedded once uploaded as PR attachments, since GitHub plays no video stored in the repository. Open: convergence and device-coverage evidence.)*
 
 ## 11. Acceptance checklist
@@ -964,7 +965,7 @@ The hypothesis to test first is that the open plane absorbs ions that gyrate bac
 - `rj/additions-to-pr`, `fix/warn-on-ignored-parameters` (#41), `collsion` (#35), `ds/OpenPMD` (#36), `rishi/mixed_BCs` (#34) and `rj/full_EM_2` (#31) are all contained here; each PR closes as merged when #42 merges.
 - #41 is also resolved in substance: `external_E`/`external_B` arrays and the `[external]` TOML table are applied in every push, and tested for gyration (tests/test_physics.py).
 - Not contained, and a lane of their own:
-  - **W13, 3-D external fields** (`ds/3D_external_fields`): external E and B on an (x, y, z) grid interpolated at the particle's y and z as well as x, plus a magnetic-moment diagnostic. It is written against `main`'s old API, so it needs a port onto `Simulation(external_E=..., external_B=...)` with a grid shape `(cx, cy, cz, 3)` and extents, not a merge.
+  - **W13, 3-D external fields** (`ds/3D_external_fields`): external E and B on an (x, y, z) grid interpolated at the particle's y and z as well as x, plus a magnetic-moment diagnostic. It is written against `main`'s old API, so it needs a port onto `Simulation(external_E=..., external_B=...)` with a grid shape `(cx, cy, cz, 3)` and extents, not a merge. **Done**, §16 W13.
   - `ds/source_particles`: superseded by `Source` and the wall ledger.
   - Research branches outside the scope of #42: `rj/gr` (a general-relativistic Boris push), `rj/momentum`, `rj/full_EM`, `rj/full_EM_PIC`, `woolford_comparisons` (PyPIC3D comparison), `multifidelity`, `bump_on_tail`, `merge_exact_conservation_magnetic2`, and the paper branches `JOSS` and `lma/JOSS`. Stale: `development`, `rj/fix_ghost`, `rj/fft_position_velocity`, `lma/enegy_conservation_to_main`, `XYJeff23-patch-1`.
 
@@ -975,7 +976,7 @@ The hypothesis to test first is that the open plane absorbs ions that gyrate bac
 4. W11 (algorithm audit, source-free implicit electrostatic, collision time-centering, ~15 %).
 5. W10 (electron-field instability, ~5 %).
 6. W12 (convergence and device coverage, then the review packet, ~45 %).
-7. W13 (the 3-D external-field port).
+7. ~~W13 (the 3-D external-field port).~~ Done 2026-09-27, §16 W13.
 
 ## 15. Integration of main (#44–#50)
 
@@ -1270,3 +1271,42 @@ test of the wake picture); sixteen realisations instead of four; collisions and 
 also break the change of frame. Docs: `docs/examples/electron_field.md` from
 `docs/scripts/fig_electron_field.py` (in make_all.py; runs the example); README 1D1V row;
 CI Examples job runs `electron_field --quick`.
+
+### W13: external fields on an (x, y, z) grid (2026-09-27)
+
+Ported from `ds/3D_external_fields` (six commits on old `main`), not merged; the contributor is
+credited with a `Co-authored-by` trailer. Numbers from office CPU, double precision.
+
+**API.** `external_E` and `external_B` take either the existing `(cells, 3)` array or
+`(cells, ny, nz, 3)`. No new class and no extents argument: `y` and `z` are already periodic over
+`Domain.length_y`/`length_z` (`wrap_positions`), so the grid spans those, `ny`, `nz` centres each,
+and its `x` cells are the domain's. Both E and B on a grid sit on the centres (the flat E stays on
+the faces). `_core.gather_xyz` is the S2 gather as a tensor product along x, y, z, with the `x`
+ghosts of `with_ghosts`; `ny = nz = 1` reproduces `gather` to round-off. Flat and grid fields can
+be mixed. The shape is checked at construction. `Simulation.external_fields_at(x)` returns the
+external E, B anywhere. The `[external]` TOML table stays uniform.
+
+**Magnetic moment.** Not in the step (the branch added a per-step `mus` output, a cost on every
+run): `magnetic_moment(out, simulation)` post-processes stored particles, `p_perp^2/(2 m B)` against
+the external B at each particle, zero where B = 0.
+
+**Cost.** The flat path lowers to the same StableHLO as before (md5 of the explicit step equal to
+5b11b02's with no external field and with a `(cells, 3)` B), so bit-identical and the same cost.
+Wall clock A/B/A/B at N = 1e5 on 4 pinned cores, office at load ~10 from other lanes: no field
+154 → 151 ns, flat B 159 → 162 ns per particle-step (medians of 3; noise). A `(cells, 4, 4, 3)` B:
+367 ns (27-point gather). The plan's 41 ns was an idle machine; re-time with the runtime figures.
+
+**Tests** (`tests/test_external_xyz.py`, 10, ~30 s): grad-B drift at L = 20 rho within 0.3 % of
+`v_perp rho/2L`, the remainder falling 4.0x when L doubles (FLR, `(rho/L)^2`); z-varying field →
+uniform linearly in the amplitude (ratio 10.0 for 1e-2 vs 1e-3), `(cells,1,1,3)` equals flat to
+1e-12 rho; mirror at 45 deg turns at y = L to 1e-3, mu spread < 1e-4 while B doubles; E on a grid
+in both schemes; relativistic and zero-field mu; shape errors.
+
+**Example** `2_intermediate/external_fields_3d.py` (40 s, `--quick` 20 s, in CI's quick list),
+page `docs/examples/external_fields_3d.md`, README row. Full preset: drift +1.15/+0.28/+0.07 % at
+L/rho = 10/20/40; mirror turning points 1.7323/1.0001/0.5774 against cot(theta)
+1.7321/1.0000/0.5774; mu spread 7e-6 to 2e-5.
+
+**Left.** Self-consistent fields remain 1-D in x (by design). A time-dependent external field is
+still out of scope (user guide). The branch's other edits (energy of the external field in the
+diagnostics, grid bookkeeping) have no counterpart to port.
