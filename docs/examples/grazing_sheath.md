@@ -112,27 +112,51 @@ to `run.json`, and the reference is drawn dashed on the figure.
 
 ### The rehearsal: $m_i/m_e = 400$ at 5°, $\gamma = 0.54$
 
-Default preset, three ion transits, 5.4 h on one A4000; GYRAZE reference at $\epsilon =
+Default preset, three ion transits, 5.6 h on one A4000; GYRAZE reference at $\epsilon =
 \lambda_D/\rho_B = 0.25$, where the reference's dropped orders are large.
 
 | quantity | this code | GYRAZE | tolerance | verdict |
 |---|---|---|---|---|
-| Debye-sheath drop $[T_e/e]$ | −0.588 | −0.526 | 0.20 | pass |
-| mean ion impact energy $[T_e]$ | 4.43 | 4.67 | 0.66 | pass |
-| wall potential $[T_e/e]$ | −1.03 | −1.68 | 2.9 (noise 0.81) | pass, uninformative |
-| presheath potential, max diff | 0.89 | — | 2.9 | pass, uninformative |
-| ion flux $[n_0\sqrt{T_e/m_e}]$ | 0.0074 | 0.0070 | 0.0003 | fail (+6 %) |
-| ion density, max diff $[n_0]$ | 0.44 | — | 0.40 | fail |
-| electron density, max diff $[n_0]$ | 0.44 | — | 0.40 | fail |
+| Debye-sheath drop $[T_e/e]$ | −0.647 | −0.526 | 0.23 | pass |
+| mean ion impact energy $[T_e]$ | 4.83 | 4.67 | 0.51 | pass |
+| wall potential $[T_e/e]$ | −1.60 | −1.68 | 1.75 (noise 0.43) | pass, weak |
+| presheath potential, max diff | 0.87 | — | 1.80 (noise 0.50) | pass, weak |
+| ion flux $[n_0\sqrt{T_e/m_e}]$ | 0.00684 | 0.00695 | 0.00011 | fail by 5 % of the allowance (−1.6 %, 3.2 SE) |
+| ion density, max diff $[n_0]$ | 0.039 | — | 0.21 | pass |
+| electron density, max diff $[n_0]$ | 0.036 | — | 0.21 | pass |
 
 ![Rehearsal against GYRAZE](../_static/figures/grazing_rehearsal.png)
 
-The Debye sheath and the impact energy agree. The magnetic presheath does not: the ion density
-at the entrance plane is 0.82 $n_0$, the potential rises about 0.8 $T_e/e$ above the plane,
-ions slow along $\mathbf B$ to half the reference flow, and the density piles up to 1.4 $n_0$.
-The likely cause, not yet tested: the open entrance plane absorbs ions that gyrate back across
-it within one gyroradius, so the plane is not the neutral, field-free entrance GYRAZE assumes.
-The matched run waits on a fix of the entrance treatment.
+The densities through the magnetic presheath now follow the reference to 0.04 $n_0$, the ion
+flow towards the wall is $0.098\,c_s$ at the plane, which is the entrance distribution's own
+$1.5958\,\sqrt{T_i/m_i}\sin\alpha$, and the flux $n u_x$ is constant through the presheath.
+The ion flux is 1.6 % under the reference, 3.2 standard errors against an allowance of 3,
+with no model allowance declared for it. The potential still wanders by up to 0.8 $T_e/e$
+over the presheath, but its standard error there is 0.5 $T_e/e$: in a quasineutral layer the
+potential is set by a charge imbalance far below the densities' noise, so it is the noisiest
+number of the seven.
+
+**What was wrong before.** The first rehearsal started the box cold, the particles at rest.
+Ions with no parallel velocity are exactly what the Chodura condition says the entrance has
+none of; they leave only as the presheath field pulls them, far slower than a transit, and
+after three transits they had piled the density up to 1.4 $n_0$, raised the potential
+0.8 $T_e/e$ above the plane and halved the mean flow. The box now starts at the entrance
+plane's state, with velocities drawn from the reservoirs the sources emit from. Two cheap
+runs at 0.6 transits and 20 markers a cell isolated it: from rest, the ion flux was a third
+of the reference and both density rows failed; from the reservoirs, all seven rows passed.
+The open plane was not the cause: in both, 72–77 % of the ion weight injected leaves back
+through it, which is the half-space reservoir working as intended — an ion that gyrates out
+is replaced by the fresh crossings the source draws from the same distribution.
+
+| rehearsal, three transits | cold start | reservoir start |
+|---|---|---|
+| wall potential $[T_e/e]$ | −1.03 | −1.60 |
+| Debye-sheath drop $[T_e/e]$ | −0.588 | −0.647 |
+| mean ion impact energy $[T_e]$ | 4.43 | 4.83 |
+| ion flux $[n_0\sqrt{T_e/m_e}]$ | 0.0074 | 0.00684 |
+| ion density, max diff $[n_0]$ | 0.44 | 0.039 |
+| electron density, max diff $[n_0]$ | 0.44 | 0.036 |
+| presheath potential, max diff $[T_e/e]$ | 0.89 | 0.87 |
 
 ## How to run
 

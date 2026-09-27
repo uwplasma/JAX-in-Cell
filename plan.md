@@ -1160,3 +1160,59 @@ README 1D1V rows for both new examples and the filter ratio; CI Examples job run
 scripts.
 
 Left for other lanes: G04 and G09 (W12); the `sampling` rename of section 7.
+
+### W8: the entrance plane, found and fixed (2026-09-27)
+
+**Cause: the cold initial load, not the open plane.** The example filled a quarter of each pool
+at `t = 0` with particles at rest (`Species` with no `vth`). Ions with `v_par = 0` are what the
+Chodura condition excludes from the entrance; in the presheath's weak field they leave far slower
+than a transit. After three transits they were the extra 0.4 `n_0` of the pile-up, and the
+potential rose to confine electrons around them.
+
+Evidence, two runs on office GPU 0 at the rehearsal's physical parameters (`--gamma=0.5377
+--markers=20 --transits=0.6`), identical but for the start. Scratch diagnostics in
+`office:~/w8/diag/{cold,reservoir}/run.log`:
+
+| 0.6 transits | cold start | reservoir start |
+|---|---|---|
+| ion flux / reference | 0.0023 / 0.0070 (fail) | 0.0070 / 0.0070 (pass) |
+| ion, electron density max diff | 0.70, 0.69 (fail) | 0.055, 0.052 (pass) |
+| mean impact energy | 4.05 | 4.60 (ref 4.67) |
+| injected ion weight leaving back through the plane | 77 % | 72 % |
+| electrons leaving back through the plane | 98.6 % | 98.3 % |
+
+The plane re-absorbs about three quarters of the ions it emits in **both** runs, and the
+reservoir start still meets every tolerance. So the re-absorption is the half-space reservoir
+working as intended, not a defect: a gyrating ion that leaves is replaced by the fresh crossings
+drawn from the same distribution. No buffer, re-emission or `phi' = 0` change is needed, and no
+package code changed.
+
+**Fix** (`examples/3_advanced/grazing_sheath.py`, commit `80fb5ec`; the runs used the same change as `77a80cc` before a rebase): the initial slots take
+their velocities from the same reservoirs the sources emit from (`Species(v=...)`).
+
+**Rehearsal at full preset after the fix** (`office:~/w8/rehearsal-77a80cc`, 5.6 h, GPU 0):
+
+| quantity | before (cold) | after | GYRAZE | tolerance | after |
+|---|---|---|---|---|---|
+| wall potential | -1.034 | -1.601 | -1.679 | 1.75 | pass |
+| Debye-sheath drop | -0.588 | -0.647 | -0.526 | 0.23 | pass |
+| presheath potential max diff | 0.89 | 0.87 | -- | 1.80 | pass |
+| ion density max diff | 0.44 | 0.039 | -- | 0.21 | pass |
+| electron density max diff | 0.44 | 0.036 | -- | 0.21 | pass |
+| mean impact energy | 4.43 | 4.83 | 4.67 | 0.51 | pass |
+| ion flux | 0.0074 | 0.00684 | 0.00695 | 0.000106 | fail (diff 0.000111, 3.2 SE) |
+
+Flow at the plane 0.098 `c_s`, the entrance value, with `n u_x` constant through the presheath.
+Open: the flux is 1.6 % low at 3.2 SE against a 3 SE allowance with no model term. Candidates are
+the first cell's 0.82 `n_0` deficit at the plane (a deposit edge, outside the compared region)
+and the `O(alpha)` difference between GYRAZE's flux along B times `sin alpha` and a full-orbit
+normal flux; neither is tested. The presheath potential's standard error, 0.5 `T_e/e`, makes that
+row weak.
+
+**Matched run launched** after this, judged close enough to proceed since it tests the same
+physics inside the reference's range: `office:~/w8/matched-77a80cc`, PID 979146, started
+2026-09-27 16:24 on GPU 0 from `~/w8/code-77a80cc`, `--matched --gamma=0.6009
+--reference=~/gyraze-runs/matched-M900-a4-gDS0.2`, 8.39e6 steps, 12-43 h. Collect: `done` appears
+in that directory when it exits; read the tail of `run.log` and `grazing_sheath_matched/run.json`,
+then add its table and figure (PIL, ~1600 px, 128 colours) to `grazing_sheath.md`. Next: the 3 and
+5 degree scan, which needs `--angle`.
