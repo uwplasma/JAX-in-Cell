@@ -29,7 +29,9 @@ W_P = \sum_p \frac{m_p |\mathbf v_p|^2}{2},
 as `electric`, `magnetic` and `kinetic`, with `kinetic_<name>` per species and `total`
 their sum. With `Solver(relativistic=True)` the kinetic energy becomes
 $\sum_p (\gamma_p - 1)m_pc^2$, which is the quantity the relativistic pusher conserves;
-the diagnostic follows the solver automatically.
+the diagnostic follows the solver automatically. {doc}`../examples/relativistic_two_stream`
+runs one problem with each pusher and shows that each conserves its own energy and not the
+other's.
 
 `energy_error` is $|W(t) - W(0)|/W(0)$ for $W$ = `total`, the single most informative
 number about a run. A bounded oscillation of a few parts in $10^{4}$ is what the explicit

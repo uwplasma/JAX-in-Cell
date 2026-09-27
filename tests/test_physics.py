@@ -462,6 +462,23 @@ def test_electrostatic_solvers_agree_and_both_satisfy_gauss(quiet_two_stream):
     assert np.abs(np.asarray(gauss.E[:, :, 0]) - field).max() < 1e-3 * np.abs(field).max()
 
 
+@pytest.mark.parametrize("solver", [Solver(filter_passes=0, field_solver="gauss"),
+                                    Solver(filter_passes=0, model="electrostatic")])
+def test_a_current_carrying_beam_is_not_slowed_by_a_mean_field(solver):
+    """A cold beam through immobile ions carries a net current in a periodic box. With E_x from
+    Gauss's law there is no uniform field, so nothing may decelerate it; with the mean current
+    left in the Ampere half step the push saw one, and the beam lost about (omega_pe dt)^2/2 of
+    its velocity per step, 6 % here."""
+    length, cells = 1.0, 64
+    omega_pe = 0.05 * c * cells / length
+    density = omega_pe ** 2 * epsilon_0 * mass_electron / e_charge ** 2
+    beam = Species.electrons(n=512, density=density, vth=(0, 0, 0), drift=(0.05 * c, 0, 0), sampling="quiet")
+    ions = Species.ions(n=512, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
+    out = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [beam, ions], solver).run(50)
+    v = np.asarray(out.v[:, :512, 0]).mean(axis=1)
+    assert abs(v[-1] / v[0] - 1) < 1e-10
+
+
 def test_relativistic_run_conserves_the_energy_the_pusher_conserves():
     """With `relativistic=True` the kinetic energy is sum (gamma - 1) m c^2, and
     the diagnostic has to follow the solver: reporting the Newtonian energy for a

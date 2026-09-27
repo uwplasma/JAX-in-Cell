@@ -23,6 +23,7 @@ starts, so that a smoke run is not quoted as a measurement.
 | {doc}`landau_damping` | a wave damped without collisions, at $k\lambda_D = 0.5$ | `1_basic/landau_damping.py` | `landau_damping.toml` |
 | {doc}`langmuir_wave` | the kinetic dispersion relation scanned in $k$ | `1_basic/langmuir_wave.py` | `langmuir_wave.toml` |
 | {doc}`two_stream` | growth, saturation and the phase-space vortex | `1_basic/two_stream.py` | `two_stream.toml` |
+| {doc}`relativistic_two_stream` | beams at $0.8c$ with the relativistic Boris pusher on and off | `docs/scripts/fig_relativistic.py` | — |
 | {doc}`bump_on_tail` | a beam-driven wave and the quasilinear plateau | `2_intermediate/bump_on_tail.py` | `bump_on_tail.toml` |
 | {doc}`wall_reflection` | a wall returns the flux average of its reflection law | `2_intermediate/wall_reflection.py` | — |
 | {doc}`conservation` | energy, momentum and charge in both schemes | `3_advanced/conservation.py` | `conservation_implicit.toml` |
@@ -66,6 +67,7 @@ jaxincell examples/input.toml
 landau_damping
 langmuir_wave
 two_stream
+relativistic_two_stream
 bump_on_tail
 wall_reflection
 conservation

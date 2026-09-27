@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve().parent
 SCRIPTS = [
     "fig_schematics.py",
     "fig_two_stream.py",
+    "fig_relativistic.py",
     "fig_landau_damping.py",
     "fig_bump_on_tail.py",
     "fig_weibel.py",

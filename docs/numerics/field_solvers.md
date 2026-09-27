@@ -34,6 +34,16 @@ insensitive to an accumulated error in $J_x$ but also to any physics that lives 
 longitudinal field between deposits. It is useful as a cross-check, and for problems
 started from a charge distribution rather than from a field.
 
+The particles are pushed in the field of the middle of the step, which is still the one
+Ampere's law advanced over the first half step. In a periodic box that half step leaves out
+the mean current $\langle J_x\rangle$: the Gauss solve holds $\langle E_x\rangle = 0$ at
+the end of every step, and with the mean current in the half step the push would see a
+uniform field that no stored step shows. A beam carrying a net current through immobile
+ions then slowed by about $(\omega_{pe}\Delta t)^2/2$ per step, 6 % in 50 steps at
+$\omega_{pe}\Delta t = 0.05$; without it the beam keeps its velocity to round-off, as in an
+electrostatic run. The continuity current fixes the rest of $E_x$, so the half-step field
+is the Gauss field of the half-step density.
+
 ### Solving it
 
 **Walls.** A cumulative sum gives the field up to one constant,

@@ -792,10 +792,21 @@ class Simulation:
         the time of the density it is given, and leaves the transverse components and the
         plasma's own magnetic field alone: with :math:`\\mathbf E = -\\nabla\\phi` in one
         dimension there is nothing else to solve, and the light-wave time-step limit goes with
-        it. An electromagnetic run takes the symmetric half step of Maxwell's equations."""
+        it. An electromagnetic run takes the symmetric half step of Maxwell's equations.
+
+        With ``field_solver="gauss"`` in a periodic box the mean of :math:`J_x` is left out of
+        the Ampere half steps. The Gauss solve gives :math:`\\langle E_x\\rangle = 0` at the end
+        of every step, but the push uses :math:`E_x` after the first half step, and the mean
+        current there would give it a uniform part: a beam carrying a net current through heavy
+        ions then slowed by about :math:`(\\omega_{pe}\\Delta t)^2/2` per step, 6 % in 50 steps at
+        :math:`\\omega_{pe}\\Delta t = 0.05`. The continuity current fixes the rest of
+        :math:`E_x`, so the half-step field is then exactly the Gauss field of the half-step
+        density."""
         d, bc = self.domain, self.domain.field_bc
         if self.solver.electrostatic:
             return E.at[:, 0].set(E_x_from_rho(rho, d.dx, bc, self._electrode_field(wall, overlap))), B
+        if self.solver.field_solver == "gauss" and bc[0] == 0:
+            J = J.at[:, 0].add(-jnp.mean(J[:, 0]))
         E, B = half_step_fields(E, B, J, dt_half, d.dx, bc, electric_first)
         if self.solver.field_solver == "gauss" and not electric_first:
             E = E.at[:, 0].set(E_x_from_rho(rho, d.dx, bc))

@@ -140,6 +140,7 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 | [Landau damping](https://jax-in-cell.readthedocs.io/en/latest/examples/landau_damping.html) | kinetic root at $k\lambda_D=0.5$ | rate 0.7 %, frequency 0.8 % | `1_basic/landau_damping.py` · `landau_damping.toml` |
 | [Langmuir waves](https://jax-in-cell.readthedocs.io/en/latest/examples/langmuir_wave.html) | kinetic root, $k\lambda_D = 0.05$ to $0.5$ | 0.4 % at worst | `1_basic/langmuir_wave.py` · `langmuir_wave.toml` |
 | [Two-stream](https://jax-in-cell.readthedocs.io/en/latest/examples/two_stream.html) | kinetic growth rate | 3.3 % seeded, 2.8 % mean over the unstable range | `1_basic/two_stream.py` · `two_stream.toml` |
+| [Relativistic two-stream](https://jax-in-cell.readthedocs.io/en/latest/examples/relativistic_two_stream.html) | cold relativistic growth rate, relativistic Boris on and off | 0.8 % relativistic, 1.1 % non-relativistic; energy of each pusher's own equations to 7e-4 and 3e-3 | `docs/scripts/fig_relativistic.py` |
 | [Bump on tail](https://jax-in-cell.readthedocs.io/en/latest/examples/bump_on_tail.html) | kinetic growth rate, quasilinear plateau | 6.3 % | `2_intermediate/bump_on_tail.py` · `bump_on_tail.toml` |
 | [Partly reflecting wall](https://jax-in-cell.readthedocs.io/en/latest/examples/wall_reflection.html) | flux average of the reflection law | 2e-4 | `2_intermediate/wall_reflection.py` |
 | [Conservation](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html) | energy, momentum and the Gauss law | implicit: energy 3e-16, Gauss law 7e-15 | `3_advanced/conservation.py` · `conservation_implicit.toml` |
@@ -159,6 +160,10 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 <tr>
 <td width="50%"><img src="docs/_static/figures/explicit_implicit.png" alt="Landau damping and two-stream growth with the explicit and implicit schemes, and their energy errors"></td>
 <td width="50%"><img src="docs/_static/figures/runtime_resolution.png" alt="Runtime on a CPU and a GPU against particle count, and growth rate against drift for three particle counts"></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/_static/figures/relativistic_two_stream.png" alt="Relativistic two-stream instability with the relativistic Boris pusher on and off"></td>
+<td width="50%"></td>
 </tr>
 </table>
 
