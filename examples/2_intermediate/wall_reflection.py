@@ -22,6 +22,7 @@ energy that come back are compared with the two formulas for several widths u.
 """
 
 import os
+from pathlib import Path
 
 # Double precision is the default, and what the conservation checks rely on. Run with
 # JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
@@ -31,7 +32,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import Domain, Simulation, Solver, Species, quiet_start
+from jaxincell import Domain, Simulation, Solver, Species, figure, quiet_start, save_run
 
 sigma, length, n, restitution = 1e6, 1e-2, 200_000, 0.8          # m/s, m, particles, e
 domain = Domain(length=length, cells=64, dt_over_dx_c=50.0, particle_bc="absorbing", field_bc="absorbing",
@@ -60,21 +61,21 @@ for s, r, e, theory in zip(widths, returned, energy, flux_average):
           f"distribution average {s / np.sqrt(s ** 2 + 1):.4f}) and {e:.4f} of the energy "
           f"(theory {restitution ** 2 * theory ** 2:.4f})")
 
-fig, axes = plt.subplots(1, 3, figsize=(12, 3.6))
+fig, axes = figure(3)
 fine = np.linspace(0.1, 4.5, 200)
 axes[0].plot(fine, fine ** 2 / (fine ** 2 + 1), "k-", label=r"flux average $u^2/(u^2+\sigma^2)$")
 axes[0].plot(fine, fine / np.sqrt(fine ** 2 + 1), "k:", label=r"distribution average")
 axes[0].plot(widths, returned, "o", label="simulation")
 axes[0].set(xlabel=r"width of the law $u/\sigma$", ylabel="fraction of the particles returned",
             title="the wall samples the flux")
-axes[0].legend(frameon=False)
+axes[0].legend()
 
 axes[1].plot(fine, restitution ** 2 * (fine ** 2 / (fine ** 2 + 1)) ** 2, "k-",
              label=rf"$e^2[u^2/(u^2+\sigma^2)]^2$, $e={restitution}$")
 axes[1].plot(widths, energy, "o", label="simulation")
 axes[1].set(xlabel=r"$u/\sigma$", ylabel="fraction of the normal energy flux returned",
             title="restitution takes the rest")
-axes[1].legend(frameon=False)
+axes[1].legend()
 
 bins = np.linspace(0, 4, 41)
 arrived, _ = np.histogram(speed / sigma, bins)
@@ -87,6 +88,12 @@ axes[2].plot(centres, scale * centres * np.exp(-centres ** 2 / 2) * np.exp(-cent
              label=r"$R(v)\,v f(v)$")
 axes[2].plot(centres, scale * centres * np.exp(-centres ** 2 / 2), "k--", label=r"$v f(v)$, all that arrives")
 axes[2].set(xlabel=r"impact speed $|v_x|/\sigma$", ylabel="particles", title=r"slow ones come back ($u=\sigma$)")
-axes[2].legend(frameon=False)
-plt.tight_layout()
+axes[2].legend()
+fig.tight_layout()
+save_run(Path.cwd() / "wall_reflection", "wall_reflection",
+         dict(sigma=sigma, length=length, n=n, restitution=restitution, steps=steps, widths=widths),
+         dict(returned=returned, flux_average=flux_average, energy=energy,
+              energy_theory=restitution ** 2 * flux_average ** 2,
+              max_deviation=float(np.max(np.abs(np.array(returned) - flux_average)))),
+         figure=fig)
 plt.show()

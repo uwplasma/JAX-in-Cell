@@ -26,7 +26,6 @@ Run with `--quick` for a smoke preset (fewer particles, a six-wavelength box, a 
 run): same physics, more noise, not a measurement.
 """
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -39,7 +38,7 @@ os.environ.setdefault("JAX_ENABLE_X64", "1")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, figure, mass_electron, provenance,
+from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, figure, mass_electron, save_run,
                        quiet_start, elementary_charge as e_charge, speed_of_light as c)
 from jaxincell.theory import weibel_rate
 
@@ -138,8 +137,6 @@ axes[2].legend()
 fig.tight_layout()
 
 # --- the record --------------------------------------------------------------------------------
-folder = Path.cwd() / ("weibel_quick" if quick else "weibel")
-folder.mkdir(exist_ok=True)
 settings = dict(ratio=ratio, density=density, vth_x=vth_x, narrow=narrow, wide=wide, store_every=store_every,
                 fit_start=fit_start, fit_energy=fit_energy, good_fit=good_fit, quick=quick)
 summary = dict(gain_min_below_cutoff=float(gain[below].min()), gain_max_above_cutoff=float(gain[~below].max()),
@@ -147,9 +144,6 @@ summary = dict(gain_min_below_cutoff=float(gain[below].min()), gain_max_above_cu
                k_over_kc=kk.tolist(), measured=measured.tolist(), kinetic=theory.tolist(), r2=r2.tolist(),
                modes_compared=int(compared.sum()), mean_deviation_percent=float(deviation.mean()),
                max_deviation_percent=float(deviation.max()))
-(folder / "run.json").write_text(json.dumps(provenance(example="weibel", settings=settings, results=summary),
-                                            indent=1))
-np.savez(folder / "modes.npz", t_narrow=t_a, B_narrow=B_a, t_wide=t_b, B_wide=B_b)
-fig.savefig(folder / "figure.png")
-print(f"\nwrote {folder}/run.json, modes.npz and figure.png")
+save_run(Path.cwd() / ("weibel_quick" if quick else "weibel"), "weibel", settings, summary, figure=fig,
+         t_narrow=t_a, B_narrow=B_a, t_wide=t_b, B_wide=B_b)
 plt.show()

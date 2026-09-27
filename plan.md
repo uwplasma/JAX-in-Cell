@@ -857,7 +857,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] **W6** plots and movies: evolving weighted populations, diagnostic histories, bounded memory, headless tests.
 - [x] **W7** repair the four existing sheath and optimisation examples and their documentation. *(S15, S16, S04's second half, G05, U12 and S20 closed; every number on the four pages is from a run of the preset the page names, and the convergence table is a script.)*
 - [ ] **W8** grazing-incidence benchmark, then a controlled finite-ordering extension. *(GYRAZE pinned and reproduced; matched case moved to `M=900, gamma=0.2, alpha=4 deg`; `Source(every=k)` built and tested; references for the rehearsal, the matched case and the 3 and 5 degree scan generated with manifests in `~/local/gyraze-runs` and on office; the example compares seven quantities against predeclared tolerances; two source-read traps found -- GYRAZE's `gamma` is at the Debye-sheath entrance and its axes are `rho_B` and `rho_e` -- so the matched runs need `--gamma=0.5377` and `0.6009`; next: the three A4000 runs in 8.1, then the scan.)*
-- [ ] **W9** model-comparison and Weibel examples on the existing kernels and shared theory.
+- [x] **W9** model-comparison and Weibel examples on the existing kernels and shared theory. *(E01, E02, U13 and U14 closed; `parameters_and_sampling.py` and `output_and_restart.py` added; every example writes its settings, results and provenance through `jaxincell.save_run`. Section 16, W9.)*
 - [ ] **W10** electron-field instability with its limiting controls.
 - [x] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering. *(section 16, W11. The optional algorithms of section 9 are deferred, not evaluated.)*
 - [ ] **W12** convergence, performance, documentation, review packet. *(Documentation part started: every figure in one style, set in the package as `jaxincell.style()`/`figure()`; README benchmarks grouped as 1D1V, 1D2V and 1D3V with the agreement against each reference; example and user-guide pages led by their figure and a measured-against-reference table, prose kept to the numerics pages; movies written for the web by `docs/scripts/movies.py`, 0.1-0.5 MB each, to be embedded once uploaded as PR attachments, since GitHub plays no video stored in the repository. Open: convergence and device-coverage evidence.)*
@@ -865,21 +865,21 @@ plots. Re-run dependent benchmarks after any underlying correction.
 ## 11. Acceptance checklist
 
 - [x] Work is on `research-release`; `rj/additions-to-pr` untouched; no main writes, merges, force pushes or releases. *(holds through W8; re-check at the end.)*
-- [ ] Every S/G/U row reproduced or marked resolved with evidence, then fixed with a test that fails on the old code. *(39 of 45; G04, G09, U13, U14, E01 and E02 remain, and belong to W9 and W12.)*
+- [ ] Every S/G/U row reproduced or marked resolved with evidence, then fixed with a test that fails on the old code. *(39 of 45; G04, G09, U13, U14, E01 and E02 remain, and belong to W9 and W12.)* *(W9 closed U13, U14, E01 and E02: 43 of 45, with G04 and G09 left to W12.)*
 - [x] Component-wise and drifting or field-aligned source sampling; supported-source contracts complete. *(W2, and W8's `model="sampled"` for a reservoir that is none of the closed forms.)*
 - [x] Source, cloud, collector, current and energy/momentum transfers derived and independently verified. *(W2; `charge_balance` is the independent check and found a defect in W2's own overlap accounting.)*
 - [x] Event-based impact spectra and event-aware derivative checks; hard-count limitation retained. *(W2's `Impacts` and `_at_impact`; G02 is the derivative check.)*
 - [x] Overflow invalidates a run; cutoff error measured; `active=0` safe. *(S09's `validate()`, S10's `Wall.truncated`, and a test that starts from an empty box.)*
 - [x] Windows, coordinates, fluence-versus-current labels and statistical uncertainties corrected everywhere. *(S01, U10, and the fluence and scatter reporting of W7's examples.)*
 - [x] Pure JAX runner and host-owned progress both work; repeated-run, AD and restart tests pass; verbose equals silent. *(W4.)*
-- [ ] One parameter vocabulary with a migration path; README parameter tutorial exists. *(U09 gave the vocabulary and the release notes the migration; the tutorial is W9's `parameters_and_sampling.py`.)*
+- [ ] One parameter vocabulary with a migration path; README parameter tutorial exists. *(U09 gave the vocabulary and the release notes the migration; the tutorial is W9's `parameters_and_sampling.py`.)* *(W9: the tutorial exists and the README points to it; the box stays open for the `sampling` names of section 7, `low_noise` for `quiet`, which no lane has taken.)*
 - [x] TOML/CLI covers every shipped workflow with strict validation. *(W5.)*
 - [x] Native archive and exact checkpoint work; openPMD read back independently. *(W5; a restart through a file is bit-identical to one through memory.)*
 - [x] Energy, charge and momentum panels restored with truthful open-system residuals; movies weight evolving populations. *(W6.)*
-- [ ] Existing examples retained and corrected, with saved data and provenance. *(the four sheath and optimisation examples in W7; the rest are W9's.)*
+- [x] Existing examples retained and corrected, with saved data and provenance. *(the four sheath and optimisation examples in W7; the rest are W9's.)* *(W9: done, every example ends in `save_run`.)*
 - [ ] Matched GYRAZE case with real reference data, uncertainty, and a documented finite-ordering study.
-- [ ] Weibel linear growth verified mode by mode; PR #43's nonlinear preset ported and preserved.
-- [ ] Explicit/implicit, collisional/collisionless, filtered/unfiltered and relativistic comparisons demonstrated.
+- [x] Weibel linear growth verified mode by mode; PR #43's nonlinear preset ported and preserved. *(W9: 7.2 % mean, 18.0 % worst over 8 of 11 unstable modes.)*
+- [x] Explicit/implicit, collisional/collisionless, filtered/unfiltered and relativistic comparisons demonstrated. *(W9's `compare_models.py`.)*
 - [x] Independent-target sheath inference with real statistical uncertainty. *(W7's G05: 0.3264 against 0.35 on a residual of 0.0512, and an error bar of +-0.0207 that is a scatter and not a grid.)*
 - [ ] Electron-field example with verified inputs, limiting controls and an honest interpretation.
 - [ ] Source-free implicit ES and collision time-centering done; optional algorithms have implement/defer evidence.
@@ -1112,3 +1112,51 @@ docstring on office (CI uses 3.12); full suite left to CI.
 4. The remaining existing examples' saved data and provenance (section 11), and the
    filtered/unfiltered pair at a wavelength the filter does act on (mode 1 of 64 cells is
    untouched by two passes, which the page says).
+
+#### W9, second pass: the four open items (2026-09-27)
+
+1. **E01 closed.** `jaxincell.theory.damped_mode(t, amplitude, above=5)`: the floor is the
+   median of the maxima from the first one that is not below its predecessor, and only the
+   maxima before it and above five times it are fitted; a run that never reaches the floor is
+   refused. On the example's setup (150000 particles): 500 steps is refused (the maxima never
+   stop falling), 800 and 1200 steps both give **gamma -0.1531, omega 1.4120** against
+   -0.1534 and 1.4157 (0.2 % and 0.3 %), floor 45.6 V/m, 7 maxima. The example, the figure and
+   `test_landau_damping_matches_the_kinetic_root` all run 800 steps through the same function
+   (the test now fails on the old fixed-fraction floor at 800 steps, which gave -0.1433).
+   Found on the way: `landau_root` could return the backward twin -conj(omega) at some k
+   (the figure's kinetic curve dipped to -1.1 at k lambda_D 0.25 and 0.31); it now returns the
+   forward root, with a test.
+2. **`1_basic/parameters_and_sampling.py`**: T_e = 10 eV, n = 1e18 m^-3, derived v_th,
+   omega_pe, lambda_D checked against `Simulation.plasma_frequency()`/`debye_length()`;
+   the same plasma loaded `random`, `lattice`, `quiet`. Density spread per cell 0.108 /
+   2.5e-3 / 4.4e-3 against the Poisson 1/sqrt(100) = 0.100 for random; temperature error
+   -1.2e-2 / -1.2e-2 / -1.1e-3 against +-1.8e-2 for random velocities; field noise at the end
+   3.4e-5 / 3.3e-6 / 9.9e-7 J/m^2. ~30 s on a CPU; in CI.
+3. **`2_intermediate/output_and_restart.py`**: 400 two-stream steps in one go against 200 +
+   `save_state` + `load_state` + 200: `t`, `E`, `B`, `x`, `v` bit-identical. openPMD series
+   written and read back with openpmd-api: field difference 0, coordinates from
+   offset + (i + position) dx within 1e-18 m of `out.faces`; skipped with a message when
+   openpmd-api is absent. ~20 s; in CI.
+4. **Provenance for every example.** `jaxincell.save_run(folder, example, settings, results,
+   figure=None, **arrays)` writes `run.json` (settings, results, `provenance()`), `data.npz`
+   and `figure.png`; tested in `tests/test_config_and_outputs.py`. Every example that lacked
+   a record now ends in it (landau_damping, langmuir_wave, two_stream, bump_on_tail,
+   collisions, wall_reflection, conservation, optimize_two_stream, weibel, compare_models,
+   and the two new ones); their figures moved to `jaxincell.figure()`. Hard-coded theory
+   numbers replaced by `jaxincell.theory`: langmuir's kinetic roots, bump-on-tail's 0.1463
+   (Newton on the populations, same value; measured 0.1370, -6.3 %), and
+   optimize_two_stream's "about 0.70", now the kinetic optimum of the warm beams,
+   k v0/omega_pe = 0.708 (ascent 0.699, -1.2 %).
+5. **Filtered/unfiltered where the filter acts.** `compare_models.py` adds a cold
+   oscillation at k dx = pi/2 with 0 and 2 passes: frequency ratio **0.7097 against
+   sqrt(G) = 0.7071 (+0.37 %)**, G the compensated binomial transfer function; panel (d).
+   The mode-1 pair stays, as the check that the filter leaves long waves alone.
+
+Docs: `parameters_and_sampling.md`, `output_and_restart.md`, the filter pair on
+`compare_models.md`, E01 prose on `landau_damping.md`; `docs/scripts/common.run_example`
+runs an example in a scratch folder and hands back its `run.json` and figure, used by
+`fig_compare_models.py`, `fig_parameters_and_sampling.py` and `fig_output_and_restart.py`.
+README 1D1V rows for both new examples and the filter ratio; CI Examples job runs both new
+scripts.
+
+Left for other lanes: G04 and G09 (W12); the `sampling` rename of section 7.

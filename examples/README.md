@@ -17,6 +17,7 @@ They are ordered by how much of the code they use, not by how interesting they a
 |---|---|---|---|
 | `two_stream.py` | two counter-streaming beams go unstable | the cold-beam growth rate, Buneman (1959) | ~1 min |
 | `langmuir_wave.py` | the frequency of an electron plasma wave against `k` | the kinetic dispersion relation | ~30 s |
+| `parameters_and_sampling.py` | physical and numerical inputs, derived scales, and three loadings | the Poisson spread of random loading | ~30 s |
 | `landau_damping.py` | a wave damped by resonant electrons, with no collisions | the least-damped kinetic root | ~30 s |
 | `sheath_unmagnetized.py` | a maintained source-to-collector sheath | the kinetic floating potential, in closed form | ~2 min |
 
@@ -26,6 +27,7 @@ They are ordered by how much of the code they use, not by how interesting they a
 |---|---|---|---|
 | `bump_on_tail.py` | a beam on the tail of a Maxwellian drives a wave | the kinetic growth rate | ~1 min |
 | `weibel.py` | a temperature anisotropy grows a magnetic field: the cutoff, then every mode of a twelve-wavelength box | the transverse kinetic root, mode by mode | a few min on a GPU; `--quick` ~2 min |
+| `output_and_restart.py` | save, restart and openPMD round trip | the uninterrupted run, bit for bit | ~20 s |
 | `compare_models.py` | one two-stream problem with seven solver settings | the kinetic growth rate; energy conservation | ~2 min on a GPU; `--quick` ~2 min |
 | `collisions.py` | Coulomb slowing-down and perpendicular diffusion | the NRL formulary rates | ~20 s |
 | `wall_reflection.py` | a velocity-dependent wall, through its flux average | `u^2/(u^2+sigma^2)`, in closed form | ~20 s |

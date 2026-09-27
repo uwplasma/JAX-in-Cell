@@ -79,7 +79,8 @@ jobs:
     - name: Run the fastest examples
       run: |
         for script in 2_intermediate/collisions 2_intermediate/wall_reflection \
-                      3_advanced/conservation 1_basic/langmuir_wave; do
+                      3_advanced/conservation 1_basic/langmuir_wave \
+                      1_basic/parameters_and_sampling 2_intermediate/output_and_restart; do
           echo "::group::examples/$script.py"
           python "examples/$script.py"
           echo "::endgroup::"

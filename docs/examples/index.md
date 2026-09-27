@@ -20,6 +20,8 @@ starts, so that a smoke run is not quoted as a measurement.
 
 | case | what it shows | script | input file |
 |---|---|---|---|
+| {doc}`parameters_and_sampling` | physical and numerical inputs, derived scales, and three loadings | `1_basic/parameters_and_sampling.py` | — |
+| {doc}`output_and_restart` | a restart from disk that is bit-identical, and an openPMD round trip | `2_intermediate/output_and_restart.py` | — |
 | {doc}`landau_damping` | a wave damped without collisions, at $k\lambda_D = 0.5$ | `1_basic/landau_damping.py` | `landau_damping.toml` |
 | {doc}`langmuir_wave` | the kinetic dispersion relation scanned in $k$ | `1_basic/langmuir_wave.py` | `langmuir_wave.toml` |
 | {doc}`two_stream` | growth, saturation and the phase-space vortex | `1_basic/two_stream.py` | `two_stream.toml` |
@@ -65,6 +67,8 @@ jaxincell examples/input.toml
 ```{toctree}
 :hidden:
 
+parameters_and_sampling
+output_and_restart
 landau_damping
 langmuir_wave
 two_stream

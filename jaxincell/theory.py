@@ -113,7 +113,9 @@ def landau_root(k_lambda_D, wp=1.0):
     At :math:`k\\lambda_D = 0.5` it is :math:`\\omega/\\omega_{pe} = 1.4156 - 0.1533i`.
     """
     species = [{"wp": wp, "u": 0.0, "vth": np.sqrt(2.0)}]   # lambda_D = 1 at wp = 1
-    return most_unstable_root(lambda w: electrostatic_epsilon(w, k_lambda_D, species), (0.5, 3.0), (-1.5, 0.05))
+    root = most_unstable_root(lambda w: electrostatic_epsilon(w, k_lambda_D, species), (0.5, 3.0), (-1.5, 0.05))
+    # roots come in pairs omega and -conj(omega), equally damped; Newton may land on either
+    return complex(abs(root.real), root.imag)
 
 
 def purely_growing_roots(func, scale, gamma_max=1.0, samples=2000):
@@ -171,3 +173,36 @@ def weibel_rate(k, wp, vthx, anisotropy):
     rad/s; 0 at and above the marginal wavenumber :math:`k_c c = \\omega_p\\sqrt{A-1}`."""
     pops = [{"wp": wp, "vthx": vthx, "A": anisotropy}]
     return max(purely_growing_roots(lambda w: weibel_dispersion(w, k, pops), wp, gamma_max=0.5), default=0.0)
+
+
+def damped_mode(t, amplitude, above=5.0):
+    """Rate and frequency of a damped oscillation that decays into a noise floor, from the maxima
+    of its modulus ``amplitude(t)``: the slope of its logarithm through them, and pi over their
+    mean spacing, since successive maxima of a modulus are half a period apart.
+
+    The floor is measured where the amplitude stops falling -- the median of the maxima from
+    the first one that is not below its predecessor -- rather than over a fixed fraction of the
+    run, so the answer does not depend on how long the run went on after the wave died. Only
+    the maxima before that point and above ``above`` times the floor are fitted.
+
+    Returns:
+        tuple: ``(rate, frequency, indices, floor)``; ``indices`` are the maxima used.
+
+    Raises:
+        ValueError: when the maxima never stop falling (the run ended before the floor, which
+            is then unknown) or fewer than three stand above it.
+    """
+    t, amplitude = np.asarray(t), np.asarray(amplitude)
+    i = np.arange(1, amplitude.size - 1)
+    peaks = i[(amplitude[1:-1] > amplitude[:-2]) & (amplitude[1:-1] > amplitude[2:])]
+    tops = amplitude[peaks]
+    rises = np.nonzero(tops[1:] >= tops[:-1])[0]
+    if rises.size == 0:
+        raise ValueError("the maxima never stop falling: run longer, until the mode reaches its noise floor")
+    end = rises[0] + 1
+    floor = float(np.median(tops[end:]))
+    used = peaks[:end][tops[:end] > above * floor]
+    if used.size < 3:
+        raise ValueError(f"only {used.size} maxima stand above {above:g} times the noise floor")
+    rate = np.polyfit(t[used], np.log(amplitude[used]), 1)[0]
+    return float(rate), float(np.pi / np.mean(np.diff(t[used]))), used, floor

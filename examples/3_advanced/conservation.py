@@ -18,6 +18,7 @@ quotes: a quiet two-stream run of 400 steps.
 """
 
 import os
+from pathlib import Path
 
 # Double precision is the default, and what the conservation checks rely on. Run with
 # JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
@@ -28,7 +29,7 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import Domain, Simulation, Solver, Species, diagnostics, speed_of_light as c
+from jaxincell import Domain, Simulation, Solver, Species, diagnostics, figure, save_run, speed_of_light as c
 
 ERRORS = {"energy_error": "energy", "momentum_error": "momentum", "gauss_residual": "charge"}
 
@@ -43,17 +44,22 @@ def run(algorithm, walls):
     d = diagnostics(output)
     largest = "".join(f"   {name} {float(np.max(d[key])):.1e}" for key, name in ERRORS.items())
     print(f"{algorithm:8s} {walls:9s} largest errors:{largest}   {time.perf_counter() - start:.1f} s")
+    results[f"{algorithm}_{walls}"] = {name: float(np.max(d[key])) for key, name in ERRORS.items()}
     return np.asarray(output.t), d
 
 
-fig, axes = plt.subplots(1, 3, figsize=(11, 3.5))
+results = {}
+fig, axes = figure(3)
 for algorithm, color in (("explicit", "tab:blue"), ("implicit", "tab:red")):
     for walls, style in (("periodic", "-"), ("absorbing", "--")):
         t, d = run(algorithm, walls)
         for ax, (key, name) in zip(axes, ERRORS.items()):
             if walls == "periodic" or key == "gauss_residual":      # the walls take energy and momentum away
-                ax.semilogy(t * 1e9, np.asarray(d[key]) + 1e-17, style, color=color, label=f"{algorithm}, {walls}")
+                ax.semilogy(t * 1e9, np.asarray(d[key]) + 1e-17, style, lw=2, color=color,
+                            label=f"{algorithm}, {walls}")
             ax.set(xlabel="t (ns)", title=f"{name} error")
-axes[2].legend(frameon=False)
-plt.tight_layout()
+axes[2].legend()
+fig.tight_layout()
+save_run(Path.cwd() / "conservation", "conservation", dict(particles=4000, steps=400, dt_over_dx_c=4.5),
+         results, figure=fig)
 plt.show()

@@ -25,13 +25,19 @@ fit through them (dashed) and the kinetic rate (dotted), above the noise floor (
 
 Both parts come from the maxima of $|E_k(t)|$: their spacing gives the frequency, because
 successive maxima of a modulus are half a period apart, and their envelope gives the rate.
-{{ landau_peaks_used }} maxima are used.
+{{ landau_peaks_used }} maxima are used: those before the amplitude stops falling and above
+five times the noise floor, which {func}`jaxincell.theory.damped_mode` measures where the
+decay stops ({{ landau_floor }} V/m here) rather than over a fixed stretch of the run. With a
+floor averaged over the last fifth of a run the answer depended on the run length: the fit
+went from $-0.1523$ at 500 steps to $-0.1433$ at 800. Measured where the decay stops, 800 and
+1200 steps give the same rate to four digits.
 
 ## The setup
 
 | | |
 |---|---|
 | cells | {{ landau_cells }} |
+| steps | {{ landau_steps }} |
 | particles | {{ landau_particles }} |
 | $\omega_{pe}\Delta t$ | {{ landau_omega_pe_dt }} |
 | seed | $ak$ = {{ landau_seed_ak }} |

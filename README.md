@@ -114,6 +114,13 @@ gradient = jax.grad(lambda s: jnp.sum(s.run(200, seed=0).E ** 2))(simulation)
 print(gradient.species[0].drift, gradient.domain.length)
 ```
 
+`examples/1_basic/parameters_and_sampling.py` is the tutorial on the inputs: physical ones
+in SI units, numerical ones (cells per Debye length, $\omega_{pe}\Delta t$, particles per
+cell), the scales derived from them, and what `sampling="random"`, `"lattice"` and `"quiet"`
+do to the noise. `examples/2_intermediate/output_and_restart.py` saves a run, restarts it
+bit for bit, and writes and reads back openPMD. Every example leaves a folder with its
+settings, results and provenance (`jaxincell.save_run`).
+
 `jax.grad` differentiates the initial sampling, the deposition, the field solve, the
 Boris rotation and the boundary conditions — the whole run, with no adjoint to write
 and no finite differences anywhere.
@@ -146,7 +153,9 @@ regenerates with the figures. Where a TOML file is listed the run needs no Pytho
 | [Conservation](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html) | energy, momentum and the Gauss law | implicit: energy 3e-16, Gauss law 7e-15 | `3_advanced/conservation.py` · `conservation_implicit.toml` |
 | [Optimisation](https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html) | fastest-growing drift from linear theory | 0.1 % after 12 ascent steps | `3_advanced/optimize_two_stream.py` |
 | [Explicit and implicit](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html#at-a-larger-step) | kinetic Landau and two-stream rates, implicit step 4 times the explicit one | implicit: rates 1.6 % and 3.0 %, energy 1e-16 and 9e-13 | `docs/scripts/fig_explicit_implicit.py` |
-| [Seven solver settings](https://jax-in-cell.readthedocs.io/en/latest/examples/compare_models.html) | kinetic two-stream rate with electrostatic, Gauss, Ampere, implicit, filtered, relativistic and collisional settings | electrostatic, Gauss, filtered and collisional identical to the reference (3.3 %); implicit 3.1 % with energy to 3e-16; relativistic 1.1 % from its own reference | `2_intermediate/compare_models.py` |
+| [Seven solver settings](https://jax-in-cell.readthedocs.io/en/latest/examples/compare_models.html) | kinetic two-stream rate with electrostatic, Gauss, Ampere, implicit, filtered, relativistic and collisional settings | electrostatic, Gauss, filtered and collisional identical to the reference (3.3 %); implicit 3.1 % with energy to 3e-16; relativistic 1.1 % from its own reference; at $k\Delta x=\pi/2$ the filter lowers the frequency by 0.710 against $\sqrt{G}=0.707$ | `2_intermediate/compare_models.py` |
+| [Parameters and sampling](https://jax-in-cell.readthedocs.io/en/latest/examples/parameters_and_sampling.html) | Poisson spread of random loading, $1/\sqrt{N_{\rm cell}}$ | random 0.11 against 0.10; lattice 2.5e-3, quiet 4.4e-3; field noise 34:3.3:1 | `1_basic/parameters_and_sampling.py` |
+| [Output and restart](https://jax-in-cell.readthedocs.io/en/latest/examples/output_and_restart.html) | the uninterrupted run; openPMD read back with `openpmd-api` | bit-identical; field 0, coordinates 1e-18 m | `2_intermediate/output_and_restart.py` |
 | [Particle count](https://jax-in-cell.readthedocs.io/en/latest/user_guide/performance.html#gpus-and-tpus) | kinetic two-stream rate at seven drifts | 3.1 % mean with 16 000 pseudo-electrons, 15.9 % with 1000 | `docs/scripts/fig_runtime.py` |
 
 <table>

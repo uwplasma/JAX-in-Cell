@@ -10,7 +10,8 @@ populations ({func}`jaxincell.theory.two_stream_rate`), which knows nothing of t
 :alt: Growth of the seeded two-stream mode, its rate against kinetic theory and the energy error for seven solver settings
 
 (a) The seeded mode for every setting, with the kinetic root (dashed). (b) Each fitted rate
-against its reference. (c) The relative error of the total energy.
+against its reference. (c) The relative error of the total energy. (d) A cold oscillation
+at $k\Delta x = \pi/2$ with and without two filter passes.
 ```
 
 ## What is measured against what
@@ -36,7 +37,13 @@ What the table shows:
 * **The implicit scheme conserves energy to round-off**, where the explicit leapfrog drifts
   by about $10^{-4}$ through saturation, at the same step and the same rate.
 * **Two filter passes leave mode 1 alone**: the binomial filter damps the short wavelengths
-  only.
+  only. Where it does act it acts as designed: a cold oscillation at $k\Delta x = \pi/2$
+  oscillates at {{ compare_filter_unfiltered }} $\omega_{pe}$ unfiltered and
+  {{ compare_filter_filtered }} $\omega_{pe}$ with two passes, a ratio of
+  {{ compare_filter_ratio }} against $\sqrt{G(k)}$ = {{ compare_filter_sqrt_g }}
+  ({{ compare_filter_deviation }} %), $G$ the transfer function of {doc}`../numerics/filtering`
+  (panel d). The filter smooths the charge, so the restoring field, and so $\omega^2$, carry
+  one factor of $G$.
 * **The relativistic push lowers the rate** by the longitudinal mass $\gamma_0^3$ of beams
   at $0.17c$; its reference is the kinetic root times the cold relativistic reduction at
   the same $k$.
@@ -57,5 +64,5 @@ python examples/2_intermediate/compare_models.py --quick    # fewer particles, n
 ```
 
 It writes `compare_models/run.json` (settings, every rate, energy error and timing,
-provenance), `compare_models/curves.npz` and its figure; `docs/scripts/fig_compare_models.py`
+provenance), `compare_models/data.npz` and its figure; `docs/scripts/fig_compare_models.py`
 runs it and reads it back for this page.

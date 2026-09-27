@@ -107,14 +107,6 @@ def maxima(amplitude, above=0.0):
     return i[(amplitude[1:-1] > amplitude[:-2]) & (amplitude[1:-1] > amplitude[2:]) & (amplitude[1:-1] > above)]
 
 
-def rate_and_frequency(t, amplitude, above=0.0):
-    """Growth rate and angular frequency from the maxima of |E_k(t)|: the slope of
-    ln|E_k| through them and pi over their mean spacing, since successive maxima
-    of a modulus are half a period apart."""
-    i = maxima(amplitude, above)
-    return np.polyfit(t[i], np.log(amplitude[i]), 1)[0], np.pi / np.mean(np.diff(t[i])), i
-
-
 def phase_space_hist(ax, x, v, box_length, v_max, weights=None, bins=(70, 90), cmap="viridis"):
     """Weighted histogram of (x/L, v) for one species at one time. The colour
     scale saturates at the 99.5th percentile of the occupied bins so that a few
@@ -134,3 +126,30 @@ def maxwellian_populations(simulation):
     dispersion solvers want (:func:`jaxincell.theory.populations`)."""
     from jaxincell.theory import populations
     return populations(simulation)
+
+
+def run_example(relative, *args):
+    """Run ``examples/<relative>.py`` in a scratch folder, as someone would from the command line,
+    and return its ``run.json`` and the matplotlib figure it drew: a documentation page and the
+    example it describes are then one run, not two that look alike."""
+    import json
+    import os
+    import runpy
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    import matplotlib.pyplot as plt
+
+    script = Path(__file__).resolve().parents[2] / "examples" / f"{relative}.py"
+    here, argv = Path.cwd(), sys.argv
+    with tempfile.TemporaryDirectory() as folder:
+        try:
+            os.chdir(folder)
+            sys.argv = [str(script), *args]
+            runpy.run_path(str(script), run_name="__main__")
+            run = json.loads((Path(folder) / script.stem / "run.json").read_text())
+        finally:
+            os.chdir(here)
+            sys.argv = argv
+    return run, plt.gcf()

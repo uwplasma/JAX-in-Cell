@@ -11,6 +11,8 @@ from jaxincell import theory  # noqa: E402
 def test_the_landau_root_is_the_classical_one():
     """omega/omega_pe = 1.4157 - 0.1533 i at k lambda_D = 0.5 (Canosa, J. Plasma Phys. 8, 187, 1972)."""
     assert abs(theory.landau_root(0.5) - (1.4157 - 0.1533j)) < 2e-4
+    # the backward-wave twin -conj(omega) is as damped; the forward one is returned at every k
+    assert all(theory.landau_root(k).real > 0.9 for k in (0.25, 0.31))   # where it once was not
 
 
 def test_the_derivatives_of_Z_are_those_of_its_differential_equation():
@@ -63,3 +65,20 @@ def test_newton_and_the_root_search_reject_what_is_not_a_root():
     assert theory.most_unstable_root(lambda w: (np.nan, 1.0), (0, 1), (0, 1), n_real=2, n_imag=2) is None
     # every start converges to the one root, which is kept once
     assert theory.most_unstable_root(lambda w: (w - 1j, 1.0), (0, 1), (0, 1), n_real=2, n_imag=2) == 1j
+
+
+def test_the_damped_mode_fit_measures_its_floor_where_the_decay_stops():
+    """A damped cosine that sinks into a constant floor: the fit recovers the rate and the
+    frequency however long the tail, and refuses a run that never reached the floor."""
+    t = np.linspace(0, 60, 6001)
+    # the noise adds to the mode with an unrelated phase, so in quadrature
+    wave = np.cos(1.4 * t) * 2000 * np.exp(-0.15 * t)
+    amplitude = np.sqrt(wave ** 2 + (40 * (1 + 0.3 * np.sin(7.3 * t) ** 2)) ** 2)
+    for end in (3001, 6001):
+        rate, frequency, used, floor = theory.damped_mode(t[:end], amplitude[:end])
+        assert rate == pytest.approx(-0.15, rel=0.03) and frequency == pytest.approx(1.4, rel=0.01)
+        assert 40 < floor < 60 and used.size >= 3
+    with pytest.raises(ValueError, match="run longer"):
+        theory.damped_mode(t[:1000], np.abs(np.cos(1.4 * t[:1000])) * np.exp(-0.15 * t[:1000]))
+    with pytest.raises(ValueError, match="only"):
+        theory.damped_mode(t, amplitude, above=100.0)

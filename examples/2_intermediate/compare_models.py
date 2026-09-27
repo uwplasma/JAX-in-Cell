@@ -9,7 +9,10 @@ explicit electromagnetic leapfrog with no filter:
 
 * model="electrostatic" and field_solver="gauss": E_x from the charge rather than from Ampere's law;
 * algorithm="implicit": the energy-conserving Crank-Nicolson scheme, at the same step;
-* filter_passes=2: binomial smoothing of the sources, which damps short wavelengths only;
+* filter_passes=2: binomial smoothing of the sources, which damps short wavelengths only --
+  so mode 1 must not notice it, and a second, separate pair checks that it does act where it
+  should: a cold plasma oscillation at k dx = pi/2, whose frequency the filter lowers by
+  sqrt(G(k)), G the filter's transfer function (0.5 there, for two passes);
 * relativistic=True: the relativistic Boris push (the beams move at 0.17 c, so the cold
   theory lowers the rate by the longitudinal mass gamma^3, a percent or two);
 * Collisions(): Takizuka-Abe binary collisions, whose rate here is ten million times below
@@ -23,7 +26,6 @@ total energy, and the wall time of the run. Run with `--quick` for fewer particl
 same comparison, noisier.
 """
 
-import json
 import os
 import sys
 import time
@@ -35,7 +37,7 @@ os.environ.setdefault("JAX_ENABLE_X64", "1")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, figure, provenance,
+from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnostics, figure, save_run,
                        speed_of_light as c)
 from jaxincell.theory import two_stream_rate
 
@@ -114,8 +116,31 @@ for name in variants:
     print(f"{name:>13}: gamma/omega_pe = {rate:.4f} against {r['reference']:.4f} ({r['deviation_percent']:+.1f} %), "
           f"energy error {r['energy_error']:.1e}, {seconds:.1f} s")
 
+# --- the filter where it acts: a cold oscillation at k dx = pi/2 -----------------------------------
+mode_short = cells // 4
+k_dx = 2 * np.pi * mode_short / cells
+passes = 2
+G = (0.5 + 0.5 * np.cos(k_dx)) ** passes * ((1 + passes / 2) - (passes / 2) * np.cos(k_dx))
+short = {}
+for passes_used in (0, passes):
+    cold = Species.electrons(n=particles, density=density, vth=(0, 0, 0), sampling="quiet",
+                             perturbation_mode=mode_short,
+                             perturbation_amplitude=1e-3 * length / (2 * np.pi * mode_short))
+    out = Simulation(domain, [cold, ions], Solver(model="electrostatic", filter_passes=passes_used)).run(
+        steps, seed=0, store_particles=False)
+    ts = np.asarray(out.t) * omega_pe
+    a = np.abs(np.fft.rfft(np.asarray(out.E[:, :, 0]), axis=1)[:, mode_short])
+    peaks = np.nonzero((a[1:-1] > a[:-2]) & (a[1:-1] > a[2:]))[0] + 1
+    short[passes_used] = (ts, a, np.pi / np.mean(np.diff(ts[peaks])))
+ratio = short[passes][2] / short[0][2]
+print(f"\nat k dx = pi/2: filtered over unfiltered frequency {ratio:.4f}, sqrt(G) = {np.sqrt(G):.4f} "
+      f"({100 * (ratio / np.sqrt(G) - 1):+.2f} %)")
+filter_pair = dict(k_dx=k_dx, frequency_unfiltered=short[0][2],
+                   frequency_filtered=short[passes][2], ratio=ratio, sqrt_G=np.sqrt(G))
+
 # --- the figure ------------------------------------------------------------------------------------
-fig, axes = figure(3)
+fig, axes = figure(2, 2)
+axes = axes.ravel()
 colors = plt.cm.tab10(np.arange(len(variants)))
 for (name, (t, amplitude, error)), color in zip(curves.items(), colors):
     axes[0].semilogy(t, amplitude, color=color, lw=2, label=name)
@@ -132,18 +157,20 @@ axes[1].axvline(0, color="k", lw=1)
 axes[1].invert_yaxis()
 axes[1].set(xlabel="rate against its reference (%)", title="growth rate")
 axes[2].set(xlabel=r"$t\,\omega_{pe}$", ylabel=r"$|\mathcal{E}/\mathcal{E}_0-1|$", title="total energy")
+for passes_used, color in ((0, colors[0]), (passes, colors[4])):
+    ts, a, w = short[passes_used]
+    axes[3].plot(ts, a / a.max(), color=color, lw=2, label=f"{passes_used} passes: $\\omega={w:.3f}\\,\\omega_{{pe}}$")
+axes[3].set(xlabel=r"$t\,\omega_{pe}$", ylabel=r"$|E_k|$, normalised", xlim=(0, t_end),
+            title=rf"$k\Delta x=\pi/2$: ratio {ratio:.3f}, $\sqrt{{G}}$ = {np.sqrt(G):.3f}")
+axes[3].set_ylim(0, 1.45)
+axes[3].legend(loc="upper center", ncol=2, fontsize=13)
 fig.tight_layout()
 
 # --- the record ------------------------------------------------------------------------------------
-folder = Path.cwd() / ("compare_models_quick" if quick else "compare_models")
-folder.mkdir(exist_ok=True)
 settings = dict(particles=particles, length=length, cells=cells, density=density, drift=drift, vth=vth,
                 seed_ak=seed_ak, dt_over_dx_c=dt_over_dx_c, t_end=t_end, steps=steps,
                 variants={n: repr(s) for n, s in variants.items()}, quick=quick)
-(folder / "run.json").write_text(json.dumps(provenance(example="compare_models", settings=settings,
-                                                       results=dict(kinetic=kinetic, runs=results)), indent=1))
-np.savez(folder / "curves.npz", **{f"{n}_{q}": v for n, arrays in curves.items()
-                                   for q, v in zip(("t", "E1", "energy_error"), arrays)})
-fig.savefig(folder / "figure.png")
-print(f"\nwrote {folder}/run.json, curves.npz and figure.png")
+save_run(Path.cwd() / ("compare_models_quick" if quick else "compare_models"), "compare_models", settings,
+         dict(kinetic=kinetic, runs=results, filter_pair=filter_pair), figure=fig,
+         **{f"{n}_{q}": v for n, arrays in curves.items() for q, v in zip(("t", "E1", "energy_error"), arrays)})
 plt.show()

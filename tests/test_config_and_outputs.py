@@ -519,3 +519,24 @@ def test_figure_lays_out_panels_in_the_package_style():
     jaxincell.style()
     assert matplotlib.rcParams["axes.linewidth"] == 3.0
     matplotlib.rcdefaults()
+
+
+def test_save_run_writes_the_record_an_example_leaves(tmp_path):
+    """run.json with settings, results and provenance; data.npz; the figure, when given."""
+    import json
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from jaxincell import save_run
+    fig = plt.figure()
+    results = {"rate": np.float64(0.5), "rates": np.array([1.0, 2.0])}
+    folder = save_run(tmp_path / "run", "demo", {"n": 3}, results, figure=fig, t=np.arange(3))
+    record = json.loads((folder / "run.json").read_text())
+    assert record["example"] == "demo" and record["settings"] == {"n": 3} and record["results"]["rate"] == 0.5
+    assert record["results"]["rates"] == [1.0, 2.0]
+    assert "jax" in record and np.load(folder / "data.npz")["t"].tolist() == [0, 1, 2]
+    assert (folder / "figure.png").exists()
+    bare = save_run(tmp_path / "bare", "demo", {}, {})
+    assert not (bare / "data.npz").exists() and not (bare / "figure.png").exists()

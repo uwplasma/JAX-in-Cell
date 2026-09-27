@@ -1,8 +1,10 @@
 """Landau damping at k lambda_D = 0.5 and the Bohm-Gross dispersion relation."""
 import numpy as np
-from common import (C_ELECTRONS, C_FIT, C_THEORY, figure, maxima, panel_label, rate_and_frequency, record,
+from common import (C_ELECTRONS, C_FIT, C_THEORY, figure, maxima, panel_label, record,
                     savefig)
 from dispersion import landau_root
+
+from jaxincell.theory import damped_mode
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron,
                        elementary_charge as e_charge, speed_of_light as c)
@@ -13,7 +15,10 @@ OMEGA_PE = 0.05 * c * CELLS / LENGTH                     # gives omega_pe dt = 0
 DENSITY = OMEGA_PE ** 2 * epsilon_0 * mass_electron / e_charge ** 2
 
 
-def run(k_lambda_d, particles=PARTICLES, seed_ak=SEED_AK, steps=500):
+STEPS = 800                                           # the example's; the floor is measured, so more changes nothing
+
+
+def run(k_lambda_d, particles=PARTICLES, seed_ak=SEED_AK, steps=STEPS):
     electrons = Species.electrons(n=particles, density=DENSITY, sampling="quiet",
                                   vth=(k_lambda_d / K * np.sqrt(2) * OMEGA_PE, 0, 0),
                                   perturbation_amplitude=seed_ak / K, perturbation_mode=1)
@@ -25,8 +30,7 @@ def run(k_lambda_d, particles=PARTICLES, seed_ak=SEED_AK, steps=500):
 
 
 t, amplitude = run(0.5)
-floor = amplitude[int(0.8 * amplitude.size):].mean()
-gamma, omega, peaks = rate_and_frequency(t, amplitude, above=5 * floor)
+gamma, omega, peaks, floor = damped_mode(t, amplitude)
 root = landau_root(0.5)
 
 fig, axes = figure(2)
@@ -39,8 +43,8 @@ axes[0].semilogy(span, amplitude[peaks][0] * np.exp(root.imag * (span - span[0])
                  label=fr"kinetic: $\gamma={root.imag:.4f}\,\omega_{{pe}}$")
 axes[0].axhline(floor, color="0.6", lw=2, label="noise floor")
 axes[0].set(xlabel=r"$t\,\omega_{pe}$", ylabel=r"$|E_k|$ (V/m)",
-            title=r"Landau damping, $k\lambda_D=0.5$", ylim=(0.3 * floor, 3 * amplitude.max()))
-axes[0].legend(loc="lower left", ncol=2)
+            title=r"Landau damping, $k\lambda_D=0.5$", ylim=(0.3 * floor, 30 * amplitude.max()))
+axes[0].legend(loc="upper right", ncol=2, fontsize=13)
 panel_label(axes[0], "a")
 
 scan = np.array([0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5])
@@ -61,7 +65,7 @@ axes[1].plot(fine, np.sqrt(1 + 3 * fine ** 2), "--", color="0.5", label=r"Bohm-G
 axes[1].plot(fine, [landau_root(k).real for k in fine], "-", color=C_THEORY, label="kinetic root")
 axes[1].plot(scan, measured, "o", color=C_ELECTRONS, label="JAX-in-Cell")
 axes[1].set(xlabel=r"$k\lambda_D$", ylabel=r"$\omega/\omega_{pe}$", title="Langmuir wave frequency")
-axes[1].legend(loc="upper left")
+axes[1].legend(loc="lower right")
 panel_label(axes[1], "b")
 fig.tight_layout()
 savefig(fig, "landau_damping")
@@ -74,5 +78,5 @@ record(landau_k_lambda_D=0.5,
        landau_omega_measured=round(float(omega), 4), landau_omega_theory=round(float(root.real), 4),
        landau_omega_deviation_percent=round(float(100 * abs(omega - root.real) / root.real), 1),
        landau_particles=PARTICLES, landau_seed_ak=SEED_AK, landau_cells=CELLS,
-       landau_peaks_used=int(peaks.size), landau_omega_pe_dt=0.05,
+       landau_peaks_used=int(peaks.size), landau_steps=STEPS, landau_floor=round(floor, 1), landau_omega_pe_dt=0.05,
        landau_dispersion_max_deviation_percent=round(float(np.max(dispersion_deviation)), 1))

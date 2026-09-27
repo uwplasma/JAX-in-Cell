@@ -14,6 +14,7 @@ variance of the scattering angle is fixed by matching nu_perp.
 """
 
 import os
+from pathlib import Path
 
 # Double precision is the default, and what the conservation checks rely on. Run with
 # JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
@@ -24,7 +25,7 @@ import numpy as np
 import jax.numpy as jnp
 from jax import random
 
-from jaxincell import epsilon_0, mass_electron, elementary_charge as e_charge
+from jaxincell import epsilon_0, figure, mass_electron, save_run, elementary_charge as e_charge
 from jaxincell._collisions import collide
 
 density, coulomb_log, v_beam, n = 1e20, 12.5, 3e7, 60000
@@ -50,14 +51,18 @@ nu_slow = -np.polyfit(t, np.log(v_parallel), 1)[0]
 nu_perp = np.polyfit(t, v_perp2, 1)[0] / v_beam ** 2
 print(f"nu_slow / 2 nu_0 = {nu_slow / (2 * nu_0):.3f}    nu_perp / 2 nu_0 = {nu_perp / (2 * nu_0):.3f}")
 
-fig, (left, right) = plt.subplots(1, 2, figsize=(10, 3.8))
-left.plot(t * nu_0, v_parallel / v_beam, "o", ms=3, label="JAX-in-Cell")
+fig, (left, right) = figure(2)
+left.plot(t * nu_0, v_parallel / v_beam, "o", ms=6, label="JAX-in-Cell")
 left.plot(t * nu_0, np.exp(-2 * nu_0 * t), "k-", label=r"$e^{-\nu_s t}$")
 left.set(xlabel=r"$t\,\nu_0$", ylabel=r"$\langle v_x\rangle / v_{beam}$")
-left.legend(frameon=False)
-right.plot(t * nu_0, v_perp2 / v_beam ** 2, "o", ms=3, label="JAX-in-Cell")
+left.legend()
+right.plot(t * nu_0, v_perp2 / v_beam ** 2, "o", ms=6, label="JAX-in-Cell")
 right.plot(t * nu_0, 2 * nu_0 * t, "k-", label=r"$\nu_\perp t$")
 right.set(xlabel=r"$t\,\nu_0$", ylabel=r"$\langle v_\perp^2\rangle / v_{beam}^2$")
-right.legend(frameon=False)
-plt.tight_layout()
+right.legend()
+fig.tight_layout()
+save_run(Path.cwd() / "collisions", "collisions",
+         dict(density=density, coulomb_log=coulomb_log, v_beam=v_beam, n=n, dt=dt, steps=steps),
+         dict(nu_slow_over_2nu0=nu_slow / (2 * nu_0), nu_perp_over_2nu0=nu_perp / (2 * nu_0)),
+         figure=fig, t=t, v_parallel=v_parallel, v_perp2=v_perp2)
 plt.show()

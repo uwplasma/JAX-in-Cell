@@ -27,6 +27,8 @@ SCRIPTS = [
     "fig_bump_on_tail.py",
     "fig_weibel.py",
     "fig_compare_models.py",
+    "fig_parameters_and_sampling.py",
+    "fig_output_and_restart.py",
     "fig_conservation.py",
     "fig_explicit_implicit.py",
     "fig_boundaries.py",

@@ -12,6 +12,7 @@ from jaxincell import (Collisions, Domain, Simulation, Solver, Source, Species, 
                        speed_of_light as c)
 from jaxincell._collisions import collide
 from jaxincell._core import boris, boris_relativistic, smooth
+from jaxincell.theory import damped_mode
 from conftest import electron_plasma, growth_rate, mode_amplitude, rate_and_frequency
 
 # Real part of the least-damped root omega/omega_pe of 1 + [1 + zeta Z(zeta)]/(k lambda_D)^2 = 0,
@@ -88,10 +89,10 @@ def test_landau_damping_matches_the_kinetic_root():
     k = 2 * np.pi / L
     vth_over_c = 0.5 / k * np.sqrt(2) * (0.05 * c * cells / L) / c
     sim, omega_pe = electron_plasma(150000, L, cells, 0.05, vth_over_c, amplitude_k=0.01)
-    out = sim.run(500, seed=0, store_particles=False)
-    amplitude = np.abs(mode_amplitude(out, 1))
-    floor = amplitude[int(0.8 * amplitude.size):].mean()
-    gamma, omega = rate_and_frequency(np.asarray(out.t) * omega_pe, amplitude, above=5 * floor)
+    # long enough that the wave has sunk into the noise: damped_mode measures the floor there
+    # (E01: a floor averaged over the last fifth of a 500-step run was still the decaying wave)
+    out = sim.run(800, seed=0, store_particles=False)
+    gamma, omega, _, _ = damped_mode(np.asarray(out.t) * omega_pe, np.abs(mode_amplitude(out, 1)))
     assert abs(gamma / LANDAU_ROOT.imag - 1) < 0.05
     assert abs(omega / LANDAU_ROOT.real - 1) < 0.02
 

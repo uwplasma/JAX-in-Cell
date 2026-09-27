@@ -78,7 +78,7 @@ jaxincell inputs/weibel.toml
 ```
 
 The example writes `weibel/run.json` (settings, every fitted rate, provenance),
-`weibel/modes.npz` and its figure. The figure above comes from `docs/scripts/fig_weibel.py`:
+`weibel/data.npz` and its figure. The figure above comes from `docs/scripts/fig_weibel.py`:
 panel (a) is the example's four-wavelength box, panel (b) the seeded single-mode runs, and
 panel (c) the example's own wide-box run, which the script runs and reads back. The kinetic
 root is {func}`jaxincell.theory.weibel_rate`.

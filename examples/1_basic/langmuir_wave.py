@@ -22,6 +22,7 @@ a per cent or more at k lambda_D >= 0.25.
 """
 
 import os
+from pathlib import Path
 
 # Double precision is the default, and what the conservation checks rely on. Run with
 # JAX_ENABLE_X64=0, or change the "1" below to "0", for single precision.
@@ -30,12 +31,12 @@ os.environ.setdefault("JAX_ENABLE_X64", "1")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mass_electron,
+from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, figure, mass_electron, save_run,
                        elementary_charge as e_charge, speed_of_light as c)
+from jaxincell.theory import landau_root
 
-# Real part of the least-damped kinetic root, omega/omega_pe, from the Faddeeva function
-# (docs/scripts/dispersion.py, landau_root)
-KINETIC = {0.05: 1.0038, 0.10: 1.0152, 0.15: 1.0348, 0.20: 1.0640, 0.25: 1.1057, 0.30: 1.1598}
+# the real part of the least-damped kinetic root, omega/omega_pe, at each k lambda_D
+KINETIC = {kld: landau_root(kld).real for kld in (0.05, 0.10, 0.15, 0.20, 0.25, 0.30)}
 
 length, cells, seed_ak, steps = 1.0, 32, 1e-2, 1600
 k = 2 * np.pi / length
@@ -62,12 +63,17 @@ for kld, kinetic in KINETIC.items():
           f"{100 * (measured[-1] / (kinetic * grid) - 1):+.2f} %        {np.sqrt(1 + 3 * kld ** 2) * grid:.4f}")
 
 fine = np.linspace(0, 0.32, 100)
-plt.figure(figsize=(5.5, 4))
-plt.plot(fine, np.sqrt(1 + 3 * fine ** 2), "k--", label=r"Bohm-Gross, $\omega^2=\omega_{pe}^2(1+3k^2\lambda_D^2)$")
-plt.plot(list(KINETIC), list(KINETIC.values()), "ks", mfc="none", label="kinetic root")
-plt.plot(list(KINETIC), np.array(measured) / grid, "o", label="JAX-in-Cell, grid factor divided out")
-plt.xlabel(r"$k\lambda_D$")
-plt.ylabel(r"$\omega/\omega_{pe}$")
-plt.legend(frameon=False)
-plt.tight_layout()
+fig, ax = figure()
+ax.plot(fine, np.sqrt(1 + 3 * fine ** 2), "k--", label=r"Bohm-Gross, $\omega^2=\omega_{pe}^2(1+3k^2\lambda_D^2)$")
+ax.plot(list(KINETIC), list(KINETIC.values()), "ks", ms=10, mfc="none", label="kinetic root")
+ax.plot(list(KINETIC), np.array(measured) / grid, "o", ms=8, label="JAX-in-Cell, grid factor divided out")
+ax.set(xlabel=r"$k\lambda_D$", ylabel=r"$\omega/\omega_{pe}$")
+ax.legend()
+fig.tight_layout()
+deviation = 100 * (np.array(measured) / (np.array(list(KINETIC.values())) * grid) - 1)
+save_run(Path.cwd() / "langmuir_wave", "langmuir_wave",
+         dict(length=length, cells=cells, seed_ak=seed_ak, steps=steps, particles=20000),
+         dict(k_lambda_d=list(KINETIC), measured=measured, kinetic=list(KINETIC.values()), grid_factor=grid,
+              max_deviation_percent=float(np.abs(deviation).max())),
+         figure=fig)
 plt.show()

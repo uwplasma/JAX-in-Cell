@@ -65,6 +65,29 @@ def provenance(**extra):
             "backend": jax.default_backend(), "git": git(), **extra}
 
 
+def save_run(folder, example, settings, results, figure=None, **arrays):
+    """Write what an example measured beside what produced it, and return the folder.
+
+    ``run.json`` holds ``settings`` (what the run was asked for), ``results`` (what it measured)
+    and :func:`provenance`; ``data.npz`` holds ``arrays``, the numbers behind the figure; and
+    ``figure.png`` the figure, when one is given. Every example ends with this, so a number on a
+    page can be traced to the folder of the run that produced it.
+    """
+    import json
+    from pathlib import Path
+
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "run.json").write_text(json.dumps(provenance(example=example, settings=settings, results=results),
+                                                indent=1, default=lambda value: np.asarray(value).tolist()))
+    if arrays:
+        np.savez(folder / "data.npz", **{name: np.asarray(value) for name, value in arrays.items()})
+    if figure is not None:
+        figure.savefig(folder / "figure.png")
+    print(f"wrote {folder}: run.json" + (", data.npz" if arrays else "") + (", figure.png" if figure else ""))
+    return folder
+
+
 def save_state(path, state, simulation=None):
     """Write ``state`` to ``path`` (``.npz`` appended if it has no suffix) and return the path.
 
