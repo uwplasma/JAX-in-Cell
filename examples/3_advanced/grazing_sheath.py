@@ -277,12 +277,19 @@ domain = Domain(length=length, cells=cells, time_step=time_step,
 impacts = Impacts(energy_max=20.0 * electron_temperature * e_charge, energy_bins=40, angle_bins=30)
 energies = 0.5 * (np.asarray(impacts.energy_edges)[:-1] + np.asarray(impacts.energy_edges)[1:]) / e_charge
 angles = 0.5 * (np.asarray(impacts.angle_edges)[:-1] + np.asarray(impacts.angle_edges)[1:])
+# The box starts full, at the entrance plane's own state: the first quarter of each pool spread
+# over it with velocities drawn from the reservoirs the sources emit from. A box that starts
+# cold, its particles at rest, holds ions with no parallel velocity, which the Chodura condition
+# says the entrance has none of: they leave only as the presheath field pulls them, far slower
+# than a transit, and they piled the density up to 1.4 n_0 and raised the potential 0.8 T_e/e
+# above the plane after three transits (grazing_sheath.md, "The rehearsal").
 electrons = Species("electrons", capacity_electrons, -1.0, mass_electron, density,
+                    v=np.resize(electron_reservoir, (capacity_electrons, 3)),
                     active=capacity_electrons // 4, sampling="quiet",
                     source=Source(density=density, samples=electron_reservoir, emit=emit_electrons,
                                   every=every_electrons))
 ions = Species("ions", capacity_ions, 1.0, mass_ratio * mass_electron, density,
-               active=capacity_ions // 4, sampling="quiet",
+               v=np.resize(ion_reservoir, (capacity_ions, 3)), active=capacity_ions // 4, sampling="quiet",
                source=Source(density=density, samples=ion_reservoir, emit=emit_ions, every=every_ions))
 out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"),
                  external_B=external_B, impacts=impacts).run(
