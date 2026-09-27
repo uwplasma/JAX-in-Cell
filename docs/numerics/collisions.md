@@ -1,8 +1,8 @@
 # Coulomb collisions
 
 Passing a {class}`~jaxincell.Collisions` object to a
-{class}`~jaxincell.Simulation` adds binary Coulomb collisions after the particle
-push, by the Monte Carlo scheme of Takizuka and Abe {cite}`takizuka1977`.
+{class}`~jaxincell.Simulation` adds binary Coulomb collisions to the particle
+push ([where in the step](#where-in-the-step)), by the Monte Carlo scheme of Takizuka and Abe {cite}`takizuka1977`.
 
 ```python
 from jaxincell import Collisions, Simulation
@@ -130,6 +130,71 @@ density through the number of its collisions. The plain $\min(n_a, n_b)$ is wron
 soon as the shorter list also carries the smaller weight: at four times fewer and four
 times lighter particles, it makes both species scatter four times too slowly.
 
+## Where in the step
+
+The explicit step carries the position at half-integer times and the velocity at integer
+times. One step is a kick centred at $t^{n+1/2}$ followed by two half drifts,
+
+```{math}
+\mathbf u^{n+1} = \mathbf u^{n} + \Delta t\,\tfrac{q}{m}\mathbf F(x^{n+1/2}), \qquad
+x^{n+1} = x^{n+1/2} + \tfrac12\Delta t\, v^{n+1}, \qquad
+x^{n+3/2} = x^{n+1} + \tfrac12\Delta t\, v^{n+1},
+```
+
+with the two half drifts merged into one in the code and the Boris rotation inside the kick. The collision operator $C$ changes velocities at fixed positions and conserves the
+kinetic energy of every pair. It is inserted where both of its arguments are defined at the
+same time, between the two half drifts:
+
+```{math}
+:label: collision-split
+\mathbf u^{n+1}_{\rm kicked} = K\,\mathbf u^n, \qquad
+x^{n+1} = x^{n+1/2} + \tfrac12\Delta t\, v^{n+1}_{\rm kicked}, \qquad
+\mathbf u^{n+1} = C(x^{n+1})\,\mathbf u^{n+1}_{\rm kicked}, \qquad
+x^{n+3/2} = x^{n+1} + \tfrac12\Delta t\, v^{n+1}.
+```
+
+The particles are paired in the cells of $x^{n+1}$, and the energy $\sum_p w_p(\tfrac12 m_p v_p^2 + q_p\phi(x_p))$
+at $t^{n+1}$ is unchanged by the scattering, because the positions are. Between collisions the
+leapfrog keeps its own bounded, second-order energy error.
+
+Scattering at $x^{n+1/2}$ right after the kick, as the code did before, moves the integer-time position $x^{n+1} = x^{n+3/2} - \tfrac12\Delta t\,v^{n+1}$ with
+the scattered velocity, and every collision changes the energy by
+$\tfrac12\Delta t\sum_p q_p\mathbf E(x_p)\cdot\Delta\mathbf v_p = \tfrac12\Delta t\,\Delta\mathbf p_a\cdot
+(q_a\mathbf E_a/m_a - q_b\mathbf E_b/m_b)$, which vanishes only for equal charge-to-mass ratios
+in equal fields. Splitting the kick instead, $K(\Delta t/2)\,C\,K(\Delta t/2)$, is not an option
+for a magnetised run: two Boris rotations of $\Delta t/2$ turn by
+$4\arctan(\Omega\Delta t/4)$, not the $2\arctan(\Omega\Delta t/2)$ of one, so the gyration
+phase would change with the collision model. {eq}`collision-split` leaves the kick alone.
+
+The test (`tests/test_collisions.py`) is an isolated oscillator: electrons and a species of
+25 electron masses and the same charge in one harmonic well
+$E_x = k(x - x_0)$, all inside one cell, so that every collision between the two is exact,
+at $\nu/\omega \approx 0.1$ over sixteen periods. The largest relative energy error is
+
+| $\omega\Delta t$ | 0.4 | 0.2 | 0.1 |
+|---|---|---|---|
+| collisionless | $1.07\times10^{-3}$ | $2.45\times10^{-4}$ | $4.54\times10^{-5}$ |
+| collisions at $x^{n+1}$ | $1.01\times10^{-3}$ | $1.96\times10^{-4}$ | $3.86\times10^{-5}$ |
+| collisions at $x^{n+1/2}$ (before) | 22.1 | 6.83 | 1.53 |
+
+second order with {eq}`collision-split` and at the collisionless level; the earlier placement
+multiplied the energy by 23 at $\omega\Delta t = 0.4$.
+
+In a homogeneous thermal plasma the self-consistent field is small and the placement hardly
+matters. Electrons and ions of 25 electron masses, 20000 each on 64 cells with self-collisions
+only, $\ln\Lambda = 10^4$ ($\nu_{ee}/\omega_{pe}\approx 0.05$), for $200/\omega_{pe}$: the total
+energy moves by $3\times10^{-5}$ at $\omega_{pe}\Delta t = 0.4$ and $1\times10^{-5}$ at $0.1$,
+against $1\times10^{-5}$ collisionless, either way. With electron-ion collisions as well it
+moves by $6.7\times10^{-3}$ and $2.5\times10^{-3}$, and in a relaxation run ($T_i = 4T_e$) by
+$9.0\times10^{-4}$ and $2.8\times10^{-4}$. That drift is the operator's own, not the splitting's:
+a particle of the shorter list in a cell collides several times from the same start
+velocities ([two species](#two-species)), whose energy error is second order in the angle,
+so first order in $\Delta t$ per unit time, as measured.
+
+The implicit scheme collides after its step, with $x^{n+1}$ and $\mathbf u^{n+1}$ both at
+$t^{n+1}$, so the scattering there too leaves the conserved energy unchanged; the splitting
+is of first order, as in the explicit scheme before this correction, but exact in energy.
+
 ## The Coulomb logarithm
 
 Left at `None`, $\ln\Lambda$ is the NRL electron-ion expression {cite}`nrl2019`,
@@ -179,7 +244,8 @@ at 50 000 cells and 100 000 particles; within a species every live particle take
 part in exactly one collision or two half collisions, and one step conserves momentum
 and energy to round-off, at 2, 3, 4, 10 and 100 particles per cell; with unequal
 numbers and weights each species scatters off the density of the other to within
-the statistical error; and gradients stay finite for identical velocities.
+the statistical error; gradients stay finite for identical velocities; and the
+oscillator of [where in the step](#where-in-the-step) keeps its collisionless energy error.
 
 ## Time step
 

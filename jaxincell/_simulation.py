@@ -988,13 +988,21 @@ class Simulation:
         # push with the fields at t^{n+1/2}
         fields = self._fields_at(x_half, E, B, rho_half)
         u = self._accelerate(u, fields, qm, dt)
-        u = self._collide_momenta(k_collide, x_half, u, w, qm, m, dt)
+        # Collisions act at t^{n+1}, where the velocity lives, on the particles at x^{n+1}: the
+        # drift is split around them, x^{n+1/2} -> x^{n+1} at the kicked velocity and on at the
+        # scattered one (docs/numerics/collisions.md). A pair then keeps its kinetic plus
+        # potential energy exactly; scattered at x^{n+1/2}, the integer-time position moved with
+        # the new velocity and the energy jumped by (dt/2) q E . dv at every collision.
+        v_kicked = self._velocity(u)
+        x_integer = wrap_positions(x_half + 0.5 * dt * v_kicked, w, box, d.particle_bc, dx)
+        u = self._collide_momenta(k_collide, x_integer, u, w, qm, m, dt)
         v = self._velocity(u)
-        x_free = x_half + dt * v
+        displacement = 0.5 * dt * (v_kicked + v)
+        x_free = x_half + displacement
         incident = qm                     # the wall zeroes it for what it collects; the impact had it
         x_next_half, u_out, w, qm, hits = apply_particle_bc(x_free, u, w, qm, box, d.particle_bc, d.restitution,
                                                             self._reflection(v), dx, self._weight_floor(),
-                                                            displacement=dt * v[:, 0])
+                                                            displacement=displacement[:, 0])
         u_out = self._thermalise(k_wall, x_free, u_out)
         # The ledger records the state the particle arrived in, which is its state at the
         # crossing and not at the end of the step it overshot to. The two differ by the part

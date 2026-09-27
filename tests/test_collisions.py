@@ -197,3 +197,42 @@ def test_gradients_through_collisions_stay_finite_for_identical_velocities():
     grads = jax.grad(lambda *a: run(*a).sum(), argnums=(0, 1, 2))(jnp.asarray(v), jnp.ones(2 * n), 10.0)
     assert all(np.isfinite(np.asarray(g)).all() for g in grads)
     assert np.array_equal(np.asarray(run(jnp.asarray(v), jnp.ones(2 * n), 10.0, ((0, 0), (1, 1)))), v)
+
+
+def _oscillators_energy_error(omega_dt, collisions, n=1000, periods=16.0, heavy=25.0):
+    """Electrons and a heavier negative species in one harmonic well E_x = k (x - x0), all
+    inside one cell so that every collision between the two conserves the pair's energy
+    exactly. Returns the largest relative error of sum(m v^2/2 + e k (x - x0)^2/2) at the
+    integer times, where the velocity lives."""
+    length, omega = 0.5, 1e9
+    k = omega ** 2 * mass_electron / e_charge
+    rng = np.random.default_rng(0)
+    x, v = np.zeros((n, 3)), rng.normal(0.0, 5e5, (n, 3))
+    x0, x[:, 0] = length / 128, length / 128 + rng.uniform(-1e-3, 1e-3, n)
+    species = [Species("electrons", n, -1.0, mass_electron, 1e10, x=x, v=v),
+               Species("heavy", n, -1.0, heavy * mass_electron, 1e10, x=x, v=v / np.sqrt(heavy))]
+    domain = Domain(length=length, cells=64, time_step=omega_dt / omega)
+    well = np.zeros((64, 3))
+    well[:, 0] = k * (np.asarray(domain.grid) + domain.dx / 2 - x0)
+    pairs = Collisions(coulomb_log=1e11, pairs=(("electrons", "heavy"),)) if collisions else None
+    steps = 40 * int(round(2 * np.pi * periods / omega_dt / 40))
+    out = Simulation(domain, species, Solver(model="electrostatic"), pairs, external_E=well).run(
+        steps, store_every=steps // 40)
+    mass = np.r_[np.full(n, mass_electron), np.full(n, heavy * mass_electron)]
+    energy = np.sum(np.asarray(out.weight) * (0.5 * mass * np.sum(np.asarray(out.v) ** 2, axis=-1)
+                                              + 0.5 * e_charge * k * (np.asarray(out.x)[:, :, 0] - x0) ** 2), axis=1)
+    return float(np.max(np.abs(energy / energy[0] - 1)))
+
+
+def test_collisions_at_the_integer_time_keep_the_leapfrog_energy_error():
+    """The explicit step kicks u^n -> u^{n+1} in the field at x^{n+1/2}, so the velocity lives at
+    integer times. Scattering there, at x^{n+1} = x^{n+1/2} + dt v^{n+1}/2, leaves the kinetic plus
+    potential energy of every pair unchanged, and a strongly collisional run (nu/omega ~ 0.1,
+    all collisions exact) keeps the leapfrog's own second-order error: at most the collisionless
+    one and falling by more than three when the step halves (1.0e-3, 2.0e-4, 3.9e-5 at omega dt =
+    0.4, 0.2, 0.1). Scattering at x^{n+1/2}, as the code once did, moved the integer-time position
+    by dt dv/2 and multiplied the energy of the same run by 23, 7.8 and 2.5
+    (docs/numerics/collisions.md)."""
+    coarse, fine = (_oscillators_energy_error(omega_dt, True) for omega_dt in (0.4, 0.2))
+    assert coarse < 1.5 * _oscillators_energy_error(0.4, False)
+    assert coarse > 3 * fine
