@@ -17,7 +17,8 @@ for relativistic in (True, False):
                      Solver(relativistic=relativistic)).run(steps)
 ```
 
-The full script is `docs/scripts/fig_relativistic.py`; its values are listed below.
+The full script is `examples/2_intermediate/relativistic_two_stream.py` (about a minute on a
+CPU); `docs/scripts/fig_relativistic.py` runs it for this page, and its values are listed below.
 
 ## Set-up
 

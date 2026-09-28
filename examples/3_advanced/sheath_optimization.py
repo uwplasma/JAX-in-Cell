@@ -400,14 +400,14 @@ axes[0].tick_params(which="both", right=False)       # each vertical axis keeps 
 twin.tick_params(which="both", left=False)
 twin.plot(r_history, "s--", color="C1")
 twin.axhline(r_reference, ls=":", color="k")
-twin.set_ylabel("r", color="C1")
+twin.set_ylabel("collector reflectivity $r$ (squares)", color="C1")
 
 axes[1].plot(fine, held_out_curve, "-", color="0.6", label="held-out loss (scan)")
 axes[1].axvline(r_reference, ls=":", color="k", label="reference")
 axes[1].axvline(r_final, ls="--", color="C0", label="recovered")
 axes[1].set(xlabel="collector reflectivity r", ylabel="loss", yscale="log",
             title="the loss the optimiser never saw")
-axes[1].legend(frameon=False)
+axes[1].legend(frameon=False, loc="upper right")
 
 axes[2].plot(steps_of_h, [abs(d / reverse - 1) for d in differences], "o-")
 axes[2].axhline(abs(forward / reverse - 1) + 1e-16, ls="--", color="k",

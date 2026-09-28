@@ -82,7 +82,7 @@ axes[0].axhline(PHI_WALL, ls="--", lw=2, color=C_THEORY, label="kinetic referenc
 axes[0].plot(0.0, measured.mean(), "o", ms=9, color=C_ELECTRONS)
 axes[0].set(xlabel=r"distance from the collector ($\lambda_D$)", ylabel=r"$e\phi/T_e$",
             xlim=(distance.max(), -0.3), title="the sheath a source holds up")
-axes[0].legend(loc="lower left")
+axes[0].legend(loc="center left")
 panel_label(axes[0], "a")
 
 centres = (LENGTH / 2 - np.asarray(simulation.domain.grid)) / DEBYE
@@ -98,11 +98,11 @@ panel_label(axes[1], "b")
 for horizon, colour in zip((5, 25, 100), (COLORS["blue"], COLORS["green"], COLORS["vermillion"])):
     axes[2].plot(STEPS_OF_H, curves[horizon][2], "o-", ms=9, color=colour, label=f"{horizon} steps")
 axes[2].axhline(2e-16, ls=":", lw=2, color=C_THEORY)
-axes[2].text(3e-2, 3e-16, "forward vs reverse mode", color=C_THEORY)
+axes[2].text(1.5e-7, 4e-16, "forward vs reverse mode", color=C_THEORY)
 axes[2].set(xscale="log", yscale="log", xlabel=r"finite-difference step in $r$",
             ylabel=r"$|\,\mathrm{FD}/\mathrm{AD} - 1\,|$", ylim=(1e-17, 5),
             title="the gradient, and how far it is smooth")
-axes[2].legend(loc="lower left")
+axes[2].legend(loc="lower right", bbox_to_anchor=(1.0, 0.1))
 panel_label(axes[2], "c")
 plt.tight_layout()
 savefig(fig, "sheath_source")

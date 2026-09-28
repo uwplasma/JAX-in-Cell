@@ -9,11 +9,12 @@ at three gradient lengths, and a magnetic mirror at three pitch angles.
 :alt: Grad-B drift of the guiding centre, mirror bounce orbits, and the magnetic moment through the bounce
 
 The example's own output, written to `external_fields_3d/figure.png` beside `run.json` and
-`data.npz`. Left: the guiding centre (solid), the orbit (faint) and the analytic drift
-(dashed) in $\mathbf B = B_0(1 + y/L)\hat{\mathbf x}$. Middle: the position along a mirror,
-with the analytic turning points $\pm L\cot\theta$ dashed. Right: the magnetic moment,
-constant to $2\times10^{-5}$ while the field at the electron changes by up to a factor four
-(dotted, right axis).
+`data.npz` (`docs/scripts/fig_external_fields.py` runs it for this page). Left: the relative
+error of the guiding-centre drift in $\mathbf B = B_0(1 + y/L)\hat{\mathbf x}$ against
+$v_\perp\rho/2L$, falling as $(\rho/L)^2$ (dashed), the finite-Larmor-radius order. Middle:
+the position along a mirror, turning at the analytic $\pm L\cot\theta$ (dashed). Right: the
+magnetic moment, constant to $2\times10^{-5}$ while the field at the electron changes by up
+to a factor four (dotted, right axis).
 ```
 
 ## What is measured against what

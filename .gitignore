@@ -18,6 +18,7 @@ jaxincell/version.py
 *.png
 !docs/_static/*.png
 !docs/_static/figures/*.png
+!docs/_static/readme/*.png
 
 # the record an example writes beside wherever it was run
 /sheath_unmagnetized*/

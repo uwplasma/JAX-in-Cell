@@ -21,29 +21,21 @@ Runs on CPU, GPU and TPU, compiles the whole time loop, and is differentiable en
 
 ## What it does
 
-JAX-in-Cell advances charged pseudo-particles in one spatial dimension and three
-velocity components under the Lorentz force, and advances the electric and magnetic
-fields on a staggered (Yee) grid with Maxwell's equations. It provides
+JAX-in-Cell pushes charged pseudo-particles in one spatial dimension and three velocity
+components, and advances the fields on a staggered (Yee) grid. It has
 
-* an explicit leapfrog integrator with the Boris pusher (non-relativistic or
-  relativistic), a charge-conserving current deposit that keeps the discrete Gauss law
-  satisfied to round-off, and a compensated digital filter;
-* an implicit Crank-Nicolson integrator solved by Picard iteration, which conserves
-  both energy and charge to round-off and has no time-step limit;
-* binary Coulomb collisions (Takizuka-Abe), verified against the Fokker-Planck
-  relaxation rates;
-* periodic, reflective and absorbing boundaries, chosen separately for particles and
-  fields, with a radiating condition on the fields and absorbing walls treated as
-  short-circuited conductors, so that a plasma against them forms a sheath;
-* any number of species, each with its own density, drift, temperature anisotropy,
-  seed and, if needed, a hand-built phase space;
-* gradients of any output with respect to any physical input through `jax.grad`, and
-  re-execution with new inputs without recompilation.
+* an explicit leapfrog with the Boris pusher (non-relativistic or relativistic) and a
+  charge-conserving deposit, and an implicit Crank-Nicolson scheme that conserves energy and
+  charge to round-off with no time-step limit;
+* electromagnetic and electrostatic models, a compensated digital filter, and binary Coulomb
+  collisions;
+* periodic, reflecting, absorbing and partly reflecting walls, particle sources, and floating
+  collectors, so a plasma against a wall forms its own sheath;
+* external electric and magnetic fields on an $(x, y, z)$ grid;
+* gradients of any output with respect to any physical input through `jax.grad`.
 
-Everything runs as one XLA program on whatever device JAX finds.
-
-Every rate it quotes is checked against a closed-form or linear kinetic result rather than
-against another simulation: see [benchmarks](#benchmarks).
+The whole run is one XLA program on a CPU, GPU or TPU. Every result below is checked against
+a closed-form or linear kinetic result, not against another simulation.
 
 ## Install
 
@@ -63,18 +55,9 @@ For a GPU, install the matching JAX wheel first (for example `pip install -U "ja
 
 ### Precision
 
-Runs are in double precision unless `JAX_ENABLE_X64=0` is set before JAX is imported.
-Every script in `examples/` sets the variable at its top, so its precision is written in
-the script and can be switched from the shell:
-
-```bash
-JAX_ENABLE_X64=0 python examples/1_basic/two_stream.py
-```
-
-Single precision reproduces the growth rates, frequencies and sheath of the examples;
-what it gives up is conservation to round-off. It is not automatically faster: on a CPU
-the two cost about the same, and on the RTX A4000 we tested a single-precision run was
-many times slower, because of how CUDA scatters in float32
+Runs are in double precision unless `JAX_ENABLE_X64=0` is set before JAX is imported; every
+example sets it at its top. Single precision reproduces the rates and sheaths but not
+conservation to round-off, and is not faster on the GPUs tested
 ([performance](https://jax-in-cell.readthedocs.io/en/latest/user_guide/performance.html)).
 
 ## Run
@@ -114,98 +97,139 @@ gradient = jax.grad(lambda s: jnp.sum(s.run(200, seed=0).E ** 2))(simulation)
 print(gradient.species[0].drift, gradient.domain.length)
 ```
 
-`examples/1_basic/parameters_and_sampling.py` is the tutorial on the inputs: physical ones
-in SI units, numerical ones (cells per Debye length, $\omega_{pe}\Delta t$, particles per
-cell), the scales derived from them, and what `sampling="random"`, `"lattice"` and `"quiet"`
-do to the noise. `examples/2_intermediate/output_and_restart.py` saves a run, restarts it
-bit for bit, and writes and reads back openPMD. Every example leaves a folder with its
-settings, results and provenance (`jaxincell.save_run`).
-
-`jax.grad` differentiates the initial sampling, the deposition, the field solve, the
-Boris rotation and the boundary conditions — the whole run, with no adjoint to write
-and no finite differences anywhere.
+`examples/1_basic/parameters_and_sampling.py` is the tutorial on the inputs and
+`examples/2_intermediate/output_and_restart.py` on saving, restarting and openPMD. Every
+example leaves a folder with its settings, results and provenance.
 
 ## Benchmarks
 
-Each case is checked against a closed-form or linear kinetic result. The numbers below come
-from `docs/_static/figures/measurements.json`, which `python docs/scripts/make_all.py`
-regenerates with the figures. Where a TOML file is listed the run needs no Python:
-`jaxincell inputs/<file>.toml`.
+Each case is checked against a closed-form or linear kinetic result, not against another
+simulation. Click a figure for its documentation page; the numbers come from
+`docs/_static/figures/measurements.json`, regenerated with the figures by
+`python docs/scripts/make_all.py`. The thumbnails are panels of the documentation's figures
+(`docs/scripts/readme_figures.py`).
 
 ### 1D1V: electrostatic, one velocity component
 
 <table>
 <tr>
-<td width="33%"><img src="docs/_static/figures/landau_damping.png" alt="Landau damping"></td>
-<td width="33%"><img src="docs/_static/figures/two_stream.png" alt="Two-stream instability"></td>
-<td width="33%"><img src="docs/_static/figures/bump_on_tail.png" alt="Bump-on-tail instability"></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/landau_damping.html"><img src="docs/_static/readme/landau_damping.png" width="100%" alt="Landau damping"></a><br>
+<b>Landau damping</b>: rate 0.2 %, frequency 0.3 % from the kinetic root at $k\lambda_D = 0.5$; Langmuir waves to 0.5 % over $k\lambda_D$ 0.05–0.5.<br>
+<a href="examples/1_basic/landau_damping.py"><code>1_basic/landau_damping.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/landau_damping.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/two_stream.html"><img src="docs/_static/readme/two_stream.png" width="100%" alt="Two-stream"></a><br>
+<b>Two-stream</b>: growth rate 2.8 % from kinetic theory, mean over the unstable range.<br>
+<a href="examples/1_basic/two_stream.py"><code>1_basic/two_stream.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/two_stream.html">docs</a></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/relativistic_two_stream.html"><img src="docs/_static/readme/relativistic_two_stream.png" width="100%" alt="Relativistic two-stream"></a><br>
+<b>Relativistic two-stream</b>: beams at 0.8 c: rate 0.8 % from cold relativistic theory; each Boris pusher conserves its own energy.<br>
+<a href="examples/2_intermediate/relativistic_two_stream.py"><code>2_intermediate/relativistic_two_stream.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/relativistic_two_stream.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/bump_on_tail.html"><img src="docs/_static/readme/bump_on_tail.png" width="100%" alt="Bump on tail"></a><br>
+<b>Bump on tail</b>: growth rate 6.3 % from the kinetic root, then the quasilinear plateau.<br>
+<a href="examples/2_intermediate/bump_on_tail.py"><code>2_intermediate/bump_on_tail.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/bump_on_tail.html">docs</a></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/compare_models.html"><img src="docs/_static/readme/compare_models.png" width="100%" alt="Seven solver settings"></a><br>
+<b>Seven solver settings</b>: one two-stream problem: electrostatic, Gauss, filtered, collisional identical (3.3 %); implicit 3.1 %; relativistic 1.1 %.<br>
+<a href="examples/2_intermediate/compare_models.py"><code>2_intermediate/compare_models.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/compare_models.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/electron_field.html"><img src="docs/_static/readme/electron_field.png" width="100%" alt="Electron-field instability"></a><br>
+<b>Electron-field instability</b>: growth in a uniform field (Beving et al. 2023); peak at 1.14× eq. 12; the growth is set by the discrete ions.<br>
+<a href="examples/3_advanced/electron_field.py"><code>3_advanced/electron_field.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/electron_field.html">docs</a></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/output_and_restart.html"><img src="docs/_static/readme/output_and_restart.png" width="100%" alt="Output and restart"></a><br>
+<b>Output and restart</b>: a restart from disk is bit-identical; openPMD read back to 1e-18 m.<br>
+<a href="examples/2_intermediate/output_and_restart.py"><code>2_intermediate/output_and_restart.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/output_and_restart.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/parameters_and_sampling.html"><img src="docs/_static/readme/parameters_and_sampling.png" width="100%" alt="Parameters and sampling"></a><br>
+<b>Parameters and sampling</b>: random loading at the Poisson $1/\sqrt{N}$ (0.11 vs 0.10); lattice and quiet starts 30× quieter.<br>
+<a href="examples/1_basic/parameters_and_sampling.py"><code>1_basic/parameters_and_sampling.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/parameters_and_sampling.html">docs</a></td>
 </tr>
 </table>
 
-| case | checked against | agreement | run |
-|---|---|---|---|
-| [Landau damping](https://jax-in-cell.readthedocs.io/en/latest/examples/landau_damping.html) | kinetic root at $k\lambda_D=0.5$ | rate 0.7 %, frequency 0.8 % | `1_basic/landau_damping.py` · `landau_damping.toml` |
-| [Langmuir waves](https://jax-in-cell.readthedocs.io/en/latest/examples/langmuir_wave.html) | kinetic root, $k\lambda_D = 0.05$ to $0.5$ | 0.4 % at worst | `1_basic/langmuir_wave.py` · `langmuir_wave.toml` |
-| [Two-stream](https://jax-in-cell.readthedocs.io/en/latest/examples/two_stream.html) | kinetic growth rate | 3.3 % seeded, 2.8 % mean over the unstable range | `1_basic/two_stream.py` · `two_stream.toml` |
-| [Relativistic two-stream](https://jax-in-cell.readthedocs.io/en/latest/examples/relativistic_two_stream.html) | cold relativistic growth rate, relativistic Boris on and off | 0.8 % relativistic, 1.1 % non-relativistic; energy of each pusher's own equations to 7e-4 and 3e-3 | `docs/scripts/fig_relativistic.py` |
-| [Bump on tail](https://jax-in-cell.readthedocs.io/en/latest/examples/bump_on_tail.html) | kinetic growth rate, quasilinear plateau | 6.3 % | `2_intermediate/bump_on_tail.py` · `bump_on_tail.toml` |
-| [Electron-field instability](https://jax-in-cell.readthedocs.io/en/latest/examples/electron_field.html) | Beving et al. (2023): growth in a uniform field, eq. 10 and the fastest wavenumber of eq. 12; the change of frame that removes the field from a uniform background | $d\ln\langle\mathcal E\rangle/dt$: helium 2.09e-2, frozen ions 1.56e-2 against the paper's 7.9e-3 and 2.9e-2 from eq. 10; uniform background none (-2e-5), driven equals undriven moved by $at^2/2$ to 5e-3; peak at 1.14 times eq. 12, and the late energy falls 2.3-2.5 times per fourfold increase in ion markers: the growth is set by the discrete ions | `3_advanced/electron_field.py` |
-| [Partly reflecting wall](https://jax-in-cell.readthedocs.io/en/latest/examples/wall_reflection.html) | flux average of the reflection law | 2e-4 | `2_intermediate/wall_reflection.py` |
-| [Conservation](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html) | energy, momentum and the Gauss law | implicit: energy 3e-16, Gauss law 7e-15 | `3_advanced/conservation.py` · `conservation_implicit.toml` |
-| [Optimisation](https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html) | fastest-growing drift from linear theory | 0.1 % after 12 ascent steps | `3_advanced/optimize_two_stream.py` |
-| [Explicit and implicit](https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html#at-a-larger-step) | kinetic Landau and two-stream rates, implicit step 4 times the explicit one | implicit: rates 1.6 % and 3.0 %, energy 1e-16 and 9e-13 | `docs/scripts/fig_explicit_implicit.py` |
-| [Seven solver settings](https://jax-in-cell.readthedocs.io/en/latest/examples/compare_models.html) | kinetic two-stream rate with electrostatic, Gauss, Ampere, implicit, filtered, relativistic and collisional settings | electrostatic, Gauss, filtered and collisional identical to the reference (3.3 %); implicit 3.1 % with energy to 3e-16; relativistic 1.1 % from its own reference; at $k\Delta x=\pi/2$ the filter lowers the frequency by 0.710 against $\sqrt{G}=0.707$ | `2_intermediate/compare_models.py` |
-| [Parameters and sampling](https://jax-in-cell.readthedocs.io/en/latest/examples/parameters_and_sampling.html) | Poisson spread of random loading, $1/\sqrt{N_{\rm cell}}$ | random 0.11 against 0.10; lattice 2.5e-3, quiet 4.4e-3; field noise 34:3.3:1 | `1_basic/parameters_and_sampling.py` |
-| [Output and restart](https://jax-in-cell.readthedocs.io/en/latest/examples/output_and_restart.html) | the uninterrupted run; openPMD read back with `openpmd-api` | bit-identical; field 0, coordinates 1e-18 m | `2_intermediate/output_and_restart.py` |
-| [Particle count](https://jax-in-cell.readthedocs.io/en/latest/user_guide/performance.html#gpus-and-tpus) | kinetic two-stream rate at seven drifts | 3.1 % mean with 16 000 pseudo-electrons, 15.9 % with 1000 | `docs/scripts/fig_runtime.py` |
+### Conservation and time integration
 
 <table>
 <tr>
-<td width="33%"><img src="docs/_static/figures/conservation.png" alt="Energy, momentum and charge conservation"></td>
-<td width="33%"><img src="docs/_static/figures/autodiff.png" alt="Gradients through the solver"></td>
-<td width="33%"><img src="docs/_static/figures/two_stream_scan.png" alt="Growth rate across the unstable range"></td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="50%"><img src="docs/_static/figures/explicit_implicit.png" alt="Landau damping and two-stream growth with the explicit and implicit schemes, and their energy errors"></td>
-<td width="50%"><img src="docs/_static/figures/runtime_resolution.png" alt="Runtime on a CPU and a GPU against particle count, and growth rate against drift for three particle counts"></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html"><img src="docs/_static/readme/conservation.png" width="100%" alt="Energy, momentum, charge"></a><br>
+<b>Energy, momentum, charge</b>: implicit scheme: energy 3e-16, Gauss law 7e-15; explicit: Gauss law to round-off.<br>
+<a href="examples/3_advanced/conservation.py"><code>3_advanced/conservation.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html"><img src="docs/_static/readme/explicit_implicit.png" width="100%" alt="Explicit and implicit"></a><br>
+<b>Explicit and implicit</b>: at 4× the explicit step the implicit scheme keeps Landau and two-stream rates (1.6 %, 3.0 %) and energy to 1e-12.<br>
+<a href="examples/3_advanced/conservation.py"><code>3_advanced/conservation.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/conservation.html">docs</a></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/_static/figures/relativistic_two_stream.png" alt="Relativistic two-stream instability with the relativistic Boris pusher on and off"></td>
-<td width="50%"><img src="docs/_static/figures/compare_models.png" alt="One two-stream problem with seven solver settings"></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/invariants.html"><img src="docs/_static/readme/invariants.png" width="100%" alt="What the integrators conserve"></a><br>
+<b>What the integrators conserve</b>: implicit electrostatic energy at round-off after 6 Picard iterations; collisions keep the leapfrog's $\Delta t^2$ energy error.<br>
+<a href="examples/3_advanced/invariants.py"><code>3_advanced/invariants.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/invariants.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/collisions.html"><img src="docs/_static/readme/collisions.png" width="100%" alt="Coulomb collisions"></a><br>
+<b>Coulomb collisions</b>: Takizuka-Abe against four Fokker-Planck relaxation rates, 2.5 % at worst.<br>
+<a href="examples/2_intermediate/collisions.py"><code>2_intermediate/collisions.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/collisions.html">docs</a></td>
 </tr>
 </table>
 
 ### 1D2V: a magnetic field the plasma grows itself
 
-<p align="center"><img src="docs/_static/figures/weibel.png" width="70%" alt="Weibel instability"></p>
-
-| case | checked against | agreement | run |
-|---|---|---|---|
-| [Weibel](https://jax-in-cell.readthedocs.io/en/latest/examples/weibel.html) | transverse kinetic dispersion relation, and the marginal wavenumber $k_cc=\omega_{pe}\sqrt{T_z/T_x-1}$ | seeded single modes: 6.0 % mean, 9.2 % worst over the 5 of 7 that grow cleanly; one unseeded 12-wavelength box, mode by mode: 7.2 % mean, 18.0 % worst over 8 of 11 unstable modes | `2_intermediate/weibel.py` · `weibel.toml` |
-
-### 1D3V: sheaths, oblique fields and collisions
-
 <table>
 <tr>
-<td width="33%"><img src="docs/_static/figures/sheath_source.png" alt="A maintained sheath"></td>
-<td width="33%"><img src="docs/_static/figures/sheath_magnetized.png" alt="A sheath in an oblique magnetic field"></td>
-<td width="33%"><img src="docs/_static/figures/sheath_optimization.png" alt="A wall's reflectivity recovered from its sheath"></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/weibel.html"><img src="docs/_static/readme/weibel.png" width="100%" alt="Weibel instability"></a><br>
+<b>Weibel instability</b>: every mode of an unseeded 12-wavelength box against the transverse kinetic dispersion relation: 7.2 % mean.<br>
+<a href="examples/2_intermediate/weibel.py"><code>2_intermediate/weibel.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/weibel.html">docs</a></td>
+<td width="50%"></td>
 </tr>
 </table>
 
-| case | checked against | agreement | run |
-|---|---|---|---|
-| [Unmagnetized sheath](https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_unmagnetized.html) | kinetic sheath theory: wall potential, densities, current balance | potential 0.6 %, densities 2 %, net current 0.02 % of the ion current | `1_basic/sheath_unmagnetized.py` · `sheath_unmagnetized.toml` |
-| [Oblique magnetic field](https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_magnetized.html) | Chodura: a magnetic presheath, and entry along the field | impact energy within a few per cent of the field-parallel sound speed | `2_intermediate/sheath_magnetized.py` · `sheath_magnetized.toml` |
-| [Grazing incidence](https://jax-in-cell.readthedocs.io/en/latest/examples/grazing_sheath.html) | GYRAZE's own entrance distribution and manifest | sampled distribution to a fraction of a per cent | `3_advanced/grazing_sheath.py` |
-| [Sheath drop with reflection](https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_reflection.html) | Hobbs and Wesson, with and without electron reflection | 2.0 % | `2_intermediate/sheath_reflection.py` |
-| [External fields across the box](https://jax-in-cell.readthedocs.io/en/latest/examples/external_fields_3d.html) | guiding-centre theory: grad-$B$ drift and mirror turning points, $\mu$ conserved | drift within $(\rho/L)^2$, 0.07 % at $L = 40\rho$; turning points 0.01 %; $\mu$ to $2\times10^{-5}$ | `2_intermediate/external_fields_3d.py` |
-| [Collisions](https://jax-in-cell.readthedocs.io/en/latest/examples/collisions.html) | Fokker-Planck relaxation rates | 2.5 % at worst of four rates | `2_intermediate/collisions.py` · `collisions.toml` |
-| [Inverse problem](https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_optimization.html) | a wall's reflectivity recovered from the sheath it holds | gradients agree with finite differences to 8-10 digits | `3_advanced/sheath_optimization.py` |
+### Sheaths and walls
 
+<table>
+<tr>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_unmagnetized.html"><img src="docs/_static/readme/sheath_unmagnetized.png" width="100%" alt="Unmagnetized sheath"></a><br>
+<b>Unmagnetized sheath</b>: floating potential 0.6 % and densities 2 % from kinetic sheath theory; net current 0.02 %.<br>
+<a href="examples/1_basic/sheath_unmagnetized.py"><code>1_basic/sheath_unmagnetized.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_unmagnetized.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_magnetized.html"><img src="docs/_static/readme/sheath_magnetized.png" width="100%" alt="Oblique magnetic field"></a><br>
+<b>Oblique magnetic field</b>: Chodura's magnetic presheath: ions enter along the field, reach $c_s$ normal to the wall.<br>
+<a href="examples/2_intermediate/sheath_magnetized.py"><code>2_intermediate/sheath_magnetized.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_magnetized.html">docs</a></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_reflection.html"><img src="docs/_static/readme/sheath_reflection.png" width="100%" alt="Sheath with reflection"></a><br>
+<b>Sheath with reflection</b>: sheath drop against Hobbs and Wesson, with and without electron reflection, 2.0 %.<br>
+<a href="examples/2_intermediate/sheath_reflection.py"><code>2_intermediate/sheath_reflection.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_reflection.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/wall_reflection.html"><img src="docs/_static/readme/wall_reflection.png" width="100%" alt="Partly reflecting wall"></a><br>
+<b>Partly reflecting wall</b>: returns the flux average of its reflection law to 2e-4.<br>
+<a href="examples/2_intermediate/wall_reflection.py"><code>2_intermediate/wall_reflection.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/wall_reflection.html">docs</a></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/grazing_sheath.html"><img src="docs/_static/readme/grazing_sheath.png" width="100%" alt="Grazing-incidence sheath"></a><br>
+<b>Grazing-incidence sheath</b>: against GYRAZE at 5°: six of seven quantities within tolerance after the entrance fix; the matched run is pending.<br>
+<a href="examples/3_advanced/grazing_sheath.py"><code>3_advanced/grazing_sheath.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/grazing_sheath.html">docs</a></td>
+<td width="50%"></td>
+</tr>
+</table>
+
+### Magnetised plasma and external fields
+
+<table>
+<tr>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/external_fields_3d.html"><img src="docs/_static/readme/external_fields_mirror.png" width="100%" alt="Magnetic mirror"></a><br>
+<b>Magnetic mirror</b>: turning points at $L\cot\theta$ to 0.01 %, $\mu$ constant to 2e-5 while $B$ changes fourfold.<br>
+<a href="examples/2_intermediate/external_fields_3d.py"><code>2_intermediate/external_fields_3d.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/external_fields_3d.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/external_fields_3d.html"><img src="docs/_static/readme/external_fields_drift.png" width="100%" alt="Grad-B drift"></a><br>
+<b>Grad-B drift</b>: guiding-centre drift within $(\rho/L)^2$ of $v_\perp\rho/2L$: 0.07 % at $L = 40\rho$.<br>
+<a href="examples/2_intermediate/external_fields_3d.py"><code>2_intermediate/external_fields_3d.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/external_fields_3d.html">docs</a></td>
+</tr>
+</table>
+
+### Optimisation
+
+<table>
+<tr>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_optimization.html"><img src="docs/_static/readme/sheath_optimization.png" width="100%" alt="Inverse problem"></a><br>
+<b>Inverse problem</b>: a wall's reflectivity recovered from the sheath it holds, 0.326 against 0.35; gradients match finite differences to 8–10 digits.<br>
+<a href="examples/3_advanced/sheath_optimization.py"><code>3_advanced/sheath_optimization.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_optimization.html">docs</a></td>
+<td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html"><img src="docs/_static/readme/optimize_two_stream.png" width="100%" alt="Gradients through the run"></a><br>
+<b>Gradients through the run</b>: `jax.grad` of the growth rate agrees with finite differences; 12 ascent steps find the fastest-growing drift to 0.1 %.<br>
+<a href="examples/3_advanced/optimize_two_stream.py"><code>3_advanced/optimize_two_stream.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html">docs</a></td>
+</tr>
+</table>
 ### Speed
 
 <p align="center"><img src="docs/_static/figures/scaling.png" width="70%" alt="Cost per particle and per cell"></p>

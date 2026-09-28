@@ -23,6 +23,8 @@ SCRIPTS = [
     "fig_schematics.py",
     "fig_two_stream.py",
     "fig_relativistic.py",
+    "fig_external_fields.py",
+    "fig_invariants.py",
     "fig_landau_damping.py",
     "fig_bump_on_tail.py",
     "fig_weibel.py",
@@ -44,6 +46,8 @@ SCRIPTS = [
 ]
 # sheath_convergence.py is deliberately not in that list: it is twelve full sheath runs and takes
 # about half an hour, where everything above takes minutes. Name it on the command line to run it.
+# fig_grazing.py is not either: it reads GYRAZE comparison runs that take hours on a GPU, and
+# takes their folders on the command line (its docstring).
 
 
 if __name__ == "__main__":

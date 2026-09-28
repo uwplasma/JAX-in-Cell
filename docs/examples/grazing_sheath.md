@@ -125,7 +125,16 @@ Default preset, three ion transits, 5.6 h on one A4000; GYRAZE reference at $\ep
 | ion density, max diff $[n_0]$ | 0.039 | — | 0.21 | pass |
 | electron density, max diff $[n_0]$ | 0.036 | — | 0.21 | pass |
 
-![Rehearsal against GYRAZE](../_static/figures/grazing_rehearsal.png)
+```{figure} ../_static/figures/grazing_rehearsal.png
+:width: 100%
+:alt: Potential and ion density through the magnetic presheath from a cold and a reservoir start against GYRAZE, and the seven compared quantities as a fraction of their tolerances
+
+The rehearsal before (grey, cold start) and after (blue, reservoir start) the entrance-plane
+fix, against GYRAZE (dashed). (a) The potential from the entrance plane to the wall. (b) The
+ion density: the cold start piles ions up to 1.4 $n_0$; the reservoir start follows the
+reference. (c) Each of the seven compared quantities as $|$difference$|$/tolerance, so a bar
+under the dashed line passes. `docs/scripts/fig_grazing.py` draws it from the two runs' folders.
+```
 
 The densities through the magnetic presheath now follow the reference to 0.04 $n_0$, the ion
 flow towards the wall is $0.098\,c_s$ at the plane, which is the entrance distribution's own
@@ -157,6 +166,18 @@ is replaced by the fresh crossings the source draws from the same distribution.
 | ion density, max diff $[n_0]$ | 0.44 | 0.039 |
 | electron density, max diff $[n_0]$ | 0.44 | 0.036 |
 | presheath potential, max diff $[T_e/e]$ | 0.89 | 0.87 |
+
+### The matched run: $m_i/m_e = 900$ at 4°
+
+Inside the reference's range of validity, $\epsilon$ and $\alpha$ both small, against
+`matched-M900-a4-gDS0.2` (`--matched --gamma=0.6009`, 8.4 million steps).
+
+| quantity | this code | GYRAZE | tolerance | verdict |
+|---|---|---|---|---|
+| all seven | *pending: the run is in progress* | | | |
+
+When it finishes, `docs/scripts/fig_grazing.py --matched=RUN --matched-reference=DIR` adds its
+figure and table here.
 
 ## How to run
 

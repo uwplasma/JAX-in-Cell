@@ -111,27 +111,32 @@ for angle in pitch_angles:
           f"while B changes by a factor {1 / np.sin(theta) ** 2:.2f}")
 
 # --- the figure -------------------------------------------------------------------------------
+# (a) the drift's error against L/rho, next to (rho/L)^2; (b) the bounce, with the turning points
+# L cot(theta) dashed; (c) mu through the bounce, with the field the electron sees dotted
 fig, axes = figure(3)
-field_axis = axes[2].twinx()
-for ratio, d in drift.items():
-    line, = axes[0].plot(d["t"], d["particle_z"], lw=0.6, alpha=0.4)
-    axes[0].plot(d["t"], d["z"], color=line.get_color(), label=rf"$L/\rho = {ratio}$")
-    axes[0].plot(d["t"], d["analytic_z"], "k--", lw=1)
-axes[0].plot([], [], "k--", lw=1, label=r"$v_\perp\rho/2L$")
-axes[0].set(xlabel=r"time ($2\pi/\Omega$)", ylabel=r"$z/\rho$", title=r"grad-$B$ drift: guiding centre and orbit")
+ratios = np.array(sorted(drift))
+deviation = np.array([abs(drift[r]["measured"] / drift[r]["analytic"] - 1) for r in ratios])
+axes[0].loglog(ratios, deviation, "o-", label="measured")
+if len(ratios) > 1:
+    axes[0].loglog(ratios, 1.0 / ratios ** 2, "k--", lw=1.5, label=r"$(\rho/L)^2$")
+axes[0].set(xlabel=r"$L/\rho$", ylabel=r"$|v_d/(v_\perp\rho/2L) - 1|$", title=r"grad-$B$ drift")
+axes[0].set_xticks(ratios, [str(r) for r in ratios])
+axes[0].minorticks_off()
 axes[0].legend(frameon=False)
+field_axis = axes[2].twinx()
 for angle, m in mirror.items():
     line, = axes[1].plot(m["t"], m["y"], label=rf"$\theta = {angle:.0f}^\circ$")
-    axes[1].axhline(m["analytic_turning"], color=line.get_color(), ls="--", lw=1)
-    axes[1].axhline(-m["analytic_turning"], color=line.get_color(), ls="--", lw=1)
-    axes[2].plot(m["t"], 1e5 * (m["mu"] - 1), label=rf"$\theta = {angle:.0f}^\circ$")
+    for sign in (1, -1):
+        axes[1].axhline(sign * m["analytic_turning"], color=line.get_color(), ls="--", lw=1)
+    axes[2].plot(m["t"], 1e5 * (m["mu"] - 1), color=line.get_color())
     field_axis.plot(m["t"], m["B"], color=line.get_color(), ls=":", lw=1)
 axes[1].set(xlabel=r"time ($2\pi/\Omega$)", ylabel=r"$y/L$", title=r"mirror bounce; dashed: $\pm L\cot\theta$")
 axes[1].legend(frameon=False, loc="lower right")
 axes[2].set(xlabel=r"time ($2\pi/\Omega$)", ylabel=r"$10^5\,(\mu/\mu_0 - 1)$",
-            title=r"$\mu$ (solid) while $B/B_0$ (dotted) changes")
-field_axis.set(ylabel=r"$B/B_0$ at the electron", ylim=(0.9, 4.5))
-axes[2].legend(frameon=False)
+            title=r"$\mu$ (solid); $B/B_0$ at the electron (dotted)")
+field_axis.set(ylabel=r"$B/B_0$", ylim=(0.9, 4.5))
+field_axis.grid(False)
+# the colours are those of (b)
 plt.tight_layout()
 
 folder = Path.cwd() / ("external_fields_3d_quick" if quick else "external_fields_3d")
