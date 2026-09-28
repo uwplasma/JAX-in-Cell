@@ -240,7 +240,7 @@ simulation. Click a figure for its documentation page; the numbers come from
 | explicit step, 200 000 particles | 39 ns per particle per step |
 | implicit step, 8 Picard iterations | 890 ns per particle per step |
 | 1024 cells, 40 000 particles | 1.9 ms per step |
-| two-stream, 256 000 pseudo-electrons, 900 steps | 20.7 s on the CPU, 4.99 s on an NVIDIA RTX A4000 (4.2×) |
+| two-stream, 256 000 pseudo-electrons, 900 steps | 20.7 s on the laptop CPU, 4.31 s on an NVIDIA RTX A4000 (4.8×) |
 
 Measured on a shared laptop CPU (Apple M3 Max, JAX 0.11, load about 10), so an idle machine is
 faster; `docs/scripts/fig_scaling.py` reproduces it, and the same code runs on a GPU or TPU
