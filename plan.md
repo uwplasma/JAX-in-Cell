@@ -1266,8 +1266,15 @@ wave standing still in the ion frame: the Cherenkov wake of the ions' charge noi
 through resonance by the accelerating electrons. The growth reproduced here is of the
 paper's size, but it is not evidence for the Fried continuum instability.
 
-**Left open:** the ion macro-particle-count scaling of the helium growth (the decisive
-test of the wake picture); sixteen realisations instead of four; collisions and walls, which
+**Ion-count control** (scratch, `~/w10/scan/scan.py` on office: the example with the frozen
+ions' count changed, seed 0, 400 electrons per cell, one realisation each): mean <E> over
+t omega_pe 160-180 of 1.19e-4 / 5.28e-5 / 2.11e-5 J/m^3 at 100 / 400 / 1600 ions per cell,
+from 1.05e-5 / 1.16e-5 / 5.1e-6 at the start (gains 11 / 4.6 / 4.2): the level falls 2.3-2.5
+times per fourfold increase in ion markers, so the growth is set by the discrete ions and not
+by the electrons in the field; weaker than the 1/N_i of a linear wake, which is unexplained.
+
+**Left open:** why the ion-count scaling is N_i^-0.6 rather than N_i^-1; the same scan for
+mobile helium and with more realisations; sixteen realisations instead of four; collisions and walls, which
 also break the change of frame. Docs: `docs/examples/electron_field.md` from
 `docs/scripts/fig_electron_field.py` (in make_all.py; runs the example); README 1D1V row;
 CI Examples job runs `electron_field --quick`.

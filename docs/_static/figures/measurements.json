@@ -79,7 +79,7 @@
     },
     "fig_electron_field.py": {
       "backend": "gpu",
-      "git": "1bb1383c749d75f75c9bc13b28dece2ab5a17bea-dirty",
+      "git": "fd4452f44b5dc0d5dbc4a4e8e92ef74f8cacb983-dirty",
       "jax": "0.10.2",
       "jax_enable_x64": true,
       "jaxincell": "unknown",

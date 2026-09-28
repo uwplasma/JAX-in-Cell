@@ -54,10 +54,15 @@ the continuum limit of the same setup, the uniform background, shows none. Its r
 {{ efi_helium_rate }}, is of the size the paper reports for the same fit ({{ efi_paper }})
 and below $2\gamma$ of eq. 10 ({{ efi_theory }}).
 
-What is not settled by this page: whether the growth in the helium run scales with the
-number of ion macro-particles per cell, as the wake picture implies; and whether a physical, non-discrete ion noise level, far
-below 400 per cell, would still drive it. Collisions and walls, which also break the change
-of frame, are not included.
+The ion count decides the level. The same frozen-ion run (seed 0, 400 electrons per cell)
+with 100, 400 and 1600 ion macro-particles per cell reaches a mean fluctuation energy of
+1.19e-4, 5.28e-5 and 2.11e-5 J/m$^3$ over $t\omega_{pe}$ = 160-180, from starting levels of
+1.05e-5, 1.16e-5 and 5.1e-6: a factor of 2.3 to 2.5 lower for every fourfold increase in
+ions, and a gain that falls from 11 to 4.2. An instability of the electrons in the field
+would not care how many ion markers there are. The scaling is weaker than the $1/N_i$ of a
+purely linear wake, which is not explained here, and four realisations are fewer than the
+paper's sixteen. Collisions and walls, which also break the change of frame, are not
+included.
 
 ## The setup
 
