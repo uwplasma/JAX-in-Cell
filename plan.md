@@ -141,12 +141,12 @@ plainly for that reason.
 | G01 | **fixed (W3)** | `pytest.approx(x, rel=...)` keeps its default `abs=1e-12`, and `np.allclose` its default `atol=1e-8`. Three assertions in `tests/test_gradients.py` compare SI quantities of order `1e-19` to `1e-25` and therefore pass with **zero and with the wrong sign**. | The suite was audited by wrapping both functions and logging every comparison whose expected value the default absolute tolerance swallows: **24 sites, of which 19 were vacuous** -- times of 1e-10 s, masses of 7e-27 kg, a time step of 2e-13 s compared at `rel=1e-15`, wall energies of 1e-19 J. Each now says what absolute tolerance it means, and the wrapper stays in `conftest.py` as a guard, so a silent default on an SI-scale quantity is refused rather than found again later. `test_gradients.discriminating` asserts in so many words that zero and the wrong sign are rejected. |
 | G02 | **fixed (W3)**, and it found a defect in the ledger | In `test_the_impact_energy_...` the particle never reaches the wall: `wall.arrived = 0.0`, `energy_in = 0.0`. The run is 0.80 ns against a 2.26 ns transit. It passes only because of G01. The "analytic impact control" reported in PR #42 tests nothing. | The run is long enough (2800 steps against a 2546-step transit), the impact is asserted before any energy is looked at, and every quantity is in the natural units of the problem. With the control actually running it showed that **the ledger recorded a wall impact at the end of the step the particle overshot to**: the value was off by 1e-4, but the derivative by 32 %, and the 32 % did not fall with the time step, because it was taken at a fixed step index rather than at the crossing -- the missing `dtau/dtheta` term. `Simulation._at_impact` runs the same pusher backwards over the part of the step that follows the impact; the value error falls to 5e-9 and the derivative error to 2e-5, both converging with the step. See S19. |
 | G03 | **fixed (W3)** | The charge-sheet invariant compares a `1.35e-23` V/m field using `np.allclose` with default `atol=1e-8`. Zero and the wrong sign both pass. Sparse storage can also step over the cloud overlap. | The field is in units of the sheet's own, every step is stored, and the start is swept across a cell in five sub-cell offsets so the crossing happens at every phase. The bound is 1e-11 of the sheet's field, and the test says in an assertion that zero and the wrong sign do not meet it. That the cloud term is needed at all is S06's test, which fails by 5.20e10 V/m without it. |
-| G04 | open | Forward/reverse/small-h agreement verifies one realised map, not an ensemble, continuum or stationary response. | Keep the derivative support matrix of section 4.3 and demonstrate each advertised response separately. |
+| G04 | **resolved (W12)** | Forward/reverse/small-h agreement verifies one realised map, not an ensemble, continuum or stationary response. | The support matrix of section 4.3 is a table on `user_guide/differentiation.md`, each row naming its test or saying that nothing is claimed (stationary, continuum). The ensemble row gained `test_the_mean_over_realisations_has_the_derivative_of_the_mean`: the gradient of an 8-seed mean against central differences of the mean at 4 and 16 times the branch-keeping step, within 3 standard errors. |
 | G05 | **fixed (W7)** | The optimisation builds one target on the training seeds and another on the held-out seeds, so both are exactly zero at the reference by construction. That is a plumbing self-test, not out-of-sample prediction. | Both are run and both are labelled. The paired target is kept and called what it is -- a self-test of the differentiated chain, whose minimum is at the reference by construction -- and a third set of realisations, used for neither training nor validation, supplies an independent target that nothing made zero. On the full preset the self-test recovers the reference exactly, to four decimals, while the inference lands at 0.3264 -- an error of **0.0236** on a residual loss of **0.0512**, which is the noise the model could not fit; the quick preset gives 0.0030 against 0.0879. The difference between those two numbers is the whole point of the row, and `--oblique` makes it plainer still: there the self-test still recovers 0.3500 exactly and the inference **walks to the bound**, 0.5000 against 0.35, with a held-out error bar of +-0.1131 against +-0.0207 field-free and two of four realisations pinned at a bound. A self-test that passes beside an inference that fails is what the two targets exist to show. |
 | G06 | **fixed (W3)** | `np.linspace(0.02, 0.50, 25)` has spacing 0.02 and does not contain `r_reference = 0.35`; its nearest point is 0.34. The reported "uncertainty 0.01" is the distance to a grid point. | Three separate things, and they were one: the scan's spacing, which is printed; the minimum, refined off the grid by a parabola through the three lowest samples; and the scatter of that minimum **between realisations**, which is the only one of the three that is an uncertainty and is now a standard error over the held-out seeds. The grid is anchored on the reference so that a scan which does not contain the answer cannot report the distance to its nearest node as an error bar. |
 | G07 | **fixed (W3)** | The loop can leave the final accepted point out of `history`, and "the step is below the uncertainty of the control" is a hard-coded threshold reported as convergence. | The point the loop ends on is evaluated and recorded, so the best point returned is one the optimiser stood on; on the quick preset that alone moves the recovered control from 0.0096 to 0.0030 of the reference. Three named tolerances -- projected gradient, step, relative fall -- each with its own message, and the gradient is projected onto the admissible interval so that a slope pushing out of a bound is not read as a direction. A line search out of halvings reports **stalled**, which is not converged. |
 | G08 | **fixed (W3)** | The response window is `25 * 0.15 = 3.75` inverse electron plasma frequencies, about 0.60 oscillations. The documentation calls it "about four electron plasma periods". | The script prints both, the docstring and the documentation say both, and both say that 0.60 of an oscillation is the beginning of a response and not a settled one. A window quoted in periods when it is inverse frequencies is `2 pi` longer than it sounds. |
-| G09 | open | Source clipping, slot selection, sorting, accept/reject collisions and the weight floor all add derivative discontinuities. | Test and document each. No blanket claim that ensemble-averaged branchwise AD repairs missing event terms. |
+| G09 | **resolved (W12)** | Source clipping, slot selection, sorting, accept/reject collisions and the weight floor all add derivative discontinuities. | Each branch is a row of the table "Where the program branches" on `user_guide/differentiation.md` with its test; the collision sort, pairing and angle gained `test_collisions_have_the_derivative_of_the_realised_pairing` (AD against a 1e-6 central difference to 1e-5, forward against reverse to 1e-10). The operator has no accept/reject step. The page says that averaging over realisations does not restore the jumps. |
 
 ### 2.3 Interface, progress, plots, export
 
@@ -861,12 +861,12 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] **W10** electron-field instability with its limiting controls. *(section 16, W10: the paper's case reproduces growth of the paper's size only with discrete ions; the exactly uniform background, where the change of frame removes the field, shows none.)*
 - [x] **W11** algorithm audit; source-free implicit electrostatic; collision time-centering. *(section 16, W11. The optional algorithms of section 9 are deferred, not evaluated.)*
 - [x] **W13** 3-D external fields ported from `ds/3D_external_fields`: `(cells, ny, nz, 3)` external E and B gathered at x, y, z, and `magnetic_moment`. *(section 16, W13: grad-B drift, mirror bounce and the uniform limit against guiding-centre theory; flat path unchanged.)*
-- [ ] **W12** convergence, performance, documentation, review packet. *(Documentation part started: every figure in one style, set in the package as `jaxincell.style()`/`figure()`; README benchmarks grouped as 1D1V, 1D2V and 1D3V with the agreement against each reference; example and user-guide pages led by their figure and a measured-against-reference table, prose kept to the numerics pages; movies written for the web by `docs/scripts/movies.py`, 0.1-0.5 MB each, to be embedded once uploaded as PR attachments, since GitHub plays no video stored in the repository. Open: convergence and device-coverage evidence.)*
+- [ ] **W12** convergence, performance, documentation, review packet. *(Documentation part started: every figure in one style, set in the package as `jaxincell.style()`/`figure()`; README benchmarks grouped as 1D1V, 1D2V and 1D3V with the agreement against each reference; example and user-guide pages led by their figure and a measured-against-reference table, prose kept to the numerics pages; movies written for the web by `docs/scripts/movies.py`, 0.1-0.5 MB each, to be embedded once uploaded as PR attachments, since GitHub plays no video stored in the repository. Open: convergence and device-coverage evidence.)* *(2026-09-28: convergence, device and precision matrix, G04 and G09 done, section 16 W12; open: re-timing on an idle machine, memory.)*
 
 ## 11. Acceptance checklist
 
 - [x] Work is on `research-release`; `rj/additions-to-pr` untouched; no main writes, merges, force pushes or releases. *(holds through W8; re-check at the end.)*
-- [ ] Every S/G/U row reproduced or marked resolved with evidence, then fixed with a test that fails on the old code. *(39 of 45; G04, G09, U13, U14, E01 and E02 remain, and belong to W9 and W12.)* *(W9 closed U13, U14, E01 and E02: 43 of 45, with G04 and G09 left to W12.)*
+- [x] Every S/G/U row reproduced or marked resolved with evidence, then fixed with a test that fails on the old code. *(39 of 45; G04, G09, U13, U14, E01 and E02 remain, and belong to W9 and W12.)* *(W9 closed U13, U14, E01 and E02: 43 of 45, with G04 and G09 left to W12.)* *(W12: G04 and G09 resolved, 45 of 45.)*
 - [x] Component-wise and drifting or field-aligned source sampling; supported-source contracts complete. *(W2, and W8's `model="sampled"` for a reservoir that is none of the closed forms.)*
 - [x] Source, cloud, collector, current and energy/momentum transfers derived and independently verified. *(W2; `charge_balance` is the independent check and found a defect in W2's own overlap accounting.)*
 - [x] Event-based impact spectra and event-aware derivative checks; hard-count limitation retained. *(W2's `Impacts` and `_at_impact`; G02 is the derivative check.)*
@@ -1317,3 +1317,52 @@ L/rho = 10/20/40; mirror turning points 1.7323/1.0001/0.5774 against cot(theta)
 **Left.** Self-consistent fields remain 1-D in x (by design). A time-dependent external field is
 still out of scope (user guide). The branch's other edits (energy of the external field in the
 diagnostics, grid bookkeeping) have no counterpart to port.
+
+### W12: convergence, device coverage, derivative matrix (2026-09-28)
+
+Numbers from office, JAX 0.10.2, double precision unless stated.
+
+**Convergence** (`docs/scripts/convergence.py`, in make_all.py, figure `convergence.png`, section
+"Convergence" of `numerics/verification.md`). Cold plasma oscillation, frequency fitted over twelve
+periods, Richardson orders from consecutive halvings:
+- time step, omega_pe dt 0.4 -> 0.05: orders 2.02, 2.01 (expected 2); error at 0.4 is 6.76e-3
+  against (0.4)^2/24 = 6.67e-3;
+- cell size, k dx 0.20 -> 0.025 at omega_pe dt 0.02: 2.00, 2.00 (expected 2);
+- particle count, 2000 -> 128000, random load: field noise energy slope -1.04 (expected -1).
+
+Energy error against the step was tried and dropped: on the cold oscillation it fell 4.1x, then
+9.5x, then not at all (0.0335, 8.1e-3, 8.5e-4, 9.4e-4), and on the two-stream run at a fixed
+grid it rose slightly as the step fell (1.2e-4 to 2.0e-4, Courant 4.5 to 0.56), a level the
+grid sets. The energy order of the integrator stays W11's isolated-oscillator measurement.
+
+**Device and precision coverage** (`docs/scripts/device_matrix.py`, table on
+`user_guide/performance.md`): two-stream, 64000 electrons, 900 steps, warm, best of three.
+
+| | seconds | gamma/omega_pe (root 0.2899) | energy error |
+|---|---|---|---|
+| CPU (8 pinned cores, load 37), f64 | 24.35 | 0.2902 | 1.96e-4 |
+| CPU, f32 | 14.66 | 0.2902 | 1.97e-4 |
+| A4000 (GPU 1), f64 | 1.21 | 0.2902 | 1.96e-4 |
+| A4000, f32 | 126.5 | 0.2902 | 1.96e-4 |
+
+Test suite on GPU 1, double precision: 300 passed, 3 skipped, 3 failed (1 h at load 30-80).
+The three failures are the bit-identity tests (`test_a_progress_meter_reports_without_changing_the_run`,
+`test_a_state_written_to_disk_restarts_the_run_it_came_from`,
+`test_a_source_that_emits_every_step_is_the_source_it_was`): the GPU scatter-add is not
+deterministic, so split and whole runs agree to round-off, not bit for bit. Documented on the
+performance page; the tests are unchanged (CI is CPU). The suite is double precision by
+contract, so float32 coverage is the matrix above.
+
+**Runtime figure.** GPU 1 re-timed: 4.31 s at 256000 electrons (was 4.99). CPU re-timed on
+8 pinned cores of the Xeon W-2295 at load 71.5: 102 s, recorded with its load on the page; not
+an idle-machine number. Office load stayed at 30-90 through the lane (other sessions' jobs), and
+a 20-minute wait for load below 15 found none. `fig_scaling.py` was stopped after an hour at
+load 65-90, so the 39 ns (explicit) and 886 ns (implicit) per particle-step on the page are still
+the earlier laptop measurement, labelled as such.
+
+**Derivative matrix**: G04 and G09, section 2.2.
+
+**Not done.** Idle re-timing of `fig_scaling.py` and of the CPU runtime curve; memory
+reporting (section 11); the `sampling="quiet"` to `low_noise` rename of section 7 (it touches
+the README and example pages, which another lane owns; unassigned). W12 stays open on the idle
+re-timing.

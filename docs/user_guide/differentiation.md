@@ -153,3 +153,32 @@ The practical consequences, all of which the sheath example follows:
 * **Say what the measurement can resolve.** A response smaller than the scatter between
   realisations is not identifiable however good the gradient is; the scan the sheath
   example prints before optimising is there to say so.
+
+## What each kind of derivative is checked against
+
+| observable | what is claimed | test in `tests/` |
+|---|---|---|
+| a smooth sensor at a fixed time, one realisation | forward equals reverse; a small central difference agrees | `test_gradients.py::test_forward_and_reverse_mode_agree_through_a_maintained_sheath`, `::test_the_gradient_is_the_derivative_of_the_discrete_map_at_a_small_enough_step`, `test_api.py::test_gradient_matches_central_finite_difference` |
+| the same sensor averaged over realisations | the gradient of the mean agrees with differences of the mean at steps 4 and 16 times larger, within the scatter between realisations | `test_gradients.py::test_the_mean_over_realisations_has_the_derivative_of_the_mean` |
+| one particle crossing a wall | the derivative at the crossing, with the $d\tau/d\theta$ term, against the trajectory's own algebra | `test_gradients.py::test_the_impact_energy_a_prescribed_field_gives_and_its_derivative` |
+| a hard count or a sharp bin | none: the branchwise derivative is zero and is not the expected flux | `test_gradients.py::test_a_functional_that_counts_particles_has_no_branchwise_derivative` |
+| a long-time stationary average | none: the horizon table above | |
+| continuum limit | none at a fixed particle count and grid | |
+
+## Where the program branches
+
+Each of these makes the run piecewise smooth in its parameters. The gradient is the derivative
+of the branch the run took; the jumps between branches are not in it, and averaging over
+realisations does not put them back.
+
+| branch | derivative | test in `tests/` |
+|---|---|---|
+| a source's quantile inversion (a fixed number of bisections) | exact, by implicit differentiation of the inverted quantile | `test_sources.py::test_the_quantile_of_the_drifting_flux_is_inverted_and_differentiated_exactly` |
+| the slots a source refills (`top_k` of the weights) | a relabelling of particles, which weighted moments do not see; a sheath fed through it is differentiable in its reservoir | `test_sources.py::test_a_sheath_fed_every_k_steps_is_differentiable_in_the_reservoir` |
+| the sort, pairing and scattering angle of collisions | the derivative with the realised pairing; a small difference agrees | `test_gradients.py::test_collisions_have_the_derivative_of_the_realised_pairing` |
+| identical velocities in a collision | finite, where the scattering frame is undefined | `test_collisions.py::test_gradients_through_collisions_stay_finite_for_identical_velocities` |
+| a wall's weight floor, `Source.min_weight` | the truncated weight is reported, not differentiated; `Wall.truncated` bounds what it leaves out | `test_sources.py::test_the_cutoff_budget_falls_with_the_cutoff` |
+| a particle crossing a wall inside a step | the crossing time is differentiated | `test_gradients.py::test_the_impact_energy_a_prescribed_field_gives_and_its_derivative` |
+
+The collision operator has no accept-or-reject step: every pair scatters, by an angle whose
+variance is the only parameter-dependent part.

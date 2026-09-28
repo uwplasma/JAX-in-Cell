@@ -18,7 +18,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from jaxincell import (Domain, Simulation, Solver, Source, Species, epsilon_0, mass_electron, potential,
+from jaxincell import (Collisions, Domain, Simulation, Solver, Source, Species, epsilon_0, mass_electron, potential,
                        quiet_start, elementary_charge as e_charge, speed_of_light as c)
 from jaxincell._core import apply_particle_bc
 
@@ -264,3 +264,61 @@ def test_a_functional_that_counts_particles_has_no_branchwise_derivative():
         h = 0.3 * drift
         response = float((collected(drift + h, n) - collected(drift - h, n)) / (2 * h))
         assert response == pytest.approx(1e-12 * elapsed, rel=0.15, abs=0)
+
+
+# --- the derivative support matrix: the rows the tests above do not cover ---------------------
+
+def _collisional(vth):
+    electrons = Species.electrons(n=256, density=DENSITY, vth=(vth, vth, vth), sampling="random")
+    ions = Species.ions(n=256, density=DENSITY, vth=(0.5 * vth, 0.5 * vth, 0.5 * vth), mass_ratio=1.0,
+                        sampling="random")
+    return Simulation(box(cells=8), [electrons, ions], Solver(model="electrostatic"), Collisions(coulomb_log=1e4))
+
+
+def test_collisions_have_the_derivative_of_the_realised_pairing():
+    """The collision operator sorts particles by cell, pairs neighbours in that order and
+    scatters each pair by an angle drawn from the seed: three places where the program
+    branches. For a fixed seed the sort and the pairing are locally constant in a smooth
+    parameter, so the gradient is the derivative of the map with the realised pairing, and a
+    central difference small enough to keep it agrees. The change of pairing that a larger
+    step causes contributes nothing to the gradient; that is the support-changing term of
+    section 4.3 of the plan, not an error."""
+    def energy(vth):
+        out = _collisional(vth).run(10, seed=3, store_every=10)
+        return jnp.sum(out.v[-1, 256:] ** 2) / (256 * SIGMA ** 2)
+
+    f = jax.jit(energy)
+    gradient = float(jax.jit(jax.grad(energy))(SIGMA)) * SIGMA
+    difference = float(f(SIGMA * (1 + 1e-6)) - f(SIGMA * (1 - 1e-6))) / 2e-6
+    discriminating(difference, gradient, rel=1e-5)
+    forward = float(jax.jvp(energy, (SIGMA,), (SIGMA,))[1])
+    assert forward == pytest.approx(gradient, rel=1e-10)
+
+
+def test_the_mean_over_realisations_has_the_derivative_of_the_mean():
+    """The derivative of a finite-time expectation. With common random numbers the gradient of
+    the ensemble mean is the mean of the gradients; it estimates the expected response only
+    where the mean is smooth on the scale of the perturbation, so central differences of the
+    mean at steps 4 and 16 times larger than one that keeps every realisation's branches must
+    agree with it within the scatter between realisations. The objective is the seeded mode of
+    a two-stream run at a fixed time in its linear phase."""
+    seeds = jnp.arange(8)
+
+    def sensor(drift, seed):
+        electrons = Species.electrons(n=4000, density=DENSITY, vth=(0.1 * SIGMA, 0, 0), drift=(drift, 0, 0),
+                                      plus_minus=True, sampling="random", perturbation_mode=1,
+                                      perturbation_amplitude=1e-3 * 10 * DEBYE)
+        ions = Species.ions(n=4000, density=DENSITY, electrons=electrons, sampling="random")
+        out = Simulation(box(cells=32), [electrons, ions], Solver(model="electrostatic")).run(
+            100, seed=seed, store_every=100, store_particles=False)
+        return jnp.log(jnp.abs(jnp.fft.rfft(out.E[-1, :, 0])[1]) ** 2)
+
+    mean = jax.jit(lambda d: jnp.mean(jax.vmap(lambda s: sensor(d, s))(seeds)))
+    drift = SIGMA
+    each = np.asarray(jax.jit(jax.vmap(jax.grad(sensor), in_axes=(None, 0)))(drift, seeds)) * SIGMA
+    gradient, error = each.mean(), each.std(ddof=1) / np.sqrt(each.size)
+    assert gradient == pytest.approx(float(jax.grad(mean)(drift)) * SIGMA, rel=1e-10)
+    assert abs(gradient) > 3 * error                               # a response the ensemble resolves
+    for h in (4e-3, 1.6e-2):
+        difference = float(mean(drift * (1 + h)) - mean(drift * (1 - h))) / (2 * h)
+        assert abs(difference - gradient) < 3 * error

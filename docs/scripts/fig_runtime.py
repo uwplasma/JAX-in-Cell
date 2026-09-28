@@ -65,7 +65,7 @@ def time_backend():
            **{f"runtime_{kind}_seconds": [round(value, 4) for value in timings],
               f"runtime_{kind}_device": device_name(backend), f"runtime_{kind}_jax_version": jax.__version__,
               f"runtime_{kind}_platform": f"{platform.system()} {platform.machine()}",
-              f"runtime_{kind}_threads": os.cpu_count(),
+              f"runtime_{kind}_cores": len(getattr(os, "sched_getaffinity", lambda _: range(os.cpu_count()))(0)),
               f"runtime_{kind}_load": round(os.getloadavg()[0], 1)})
     return kind
 

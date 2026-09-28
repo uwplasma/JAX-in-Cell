@@ -37,6 +37,7 @@ grow at all.
 | Conservation | 1D1V | the exact laws | energy {{ energy_error_max_implicit_8 }}, Gauss law {{ gauss_residual_max_implicit }} (implicit) |
 | Explicit against implicit | 1D1V | kinetic rates of Landau damping and two-stream, implicit step {{ schemes_step_ratio }} times the explicit one | implicit: rates {{ schemes_landau_gamma_deviation_percent_implicit }} % and {{ schemes_two_stream_gamma_deviation_percent_implicit }} %, energy {{ schemes_landau_energy_error_implicit }} and {{ schemes_two_stream_energy_error_implicit }} |
 | Particle count | 1D1V | kinetic two-stream rate over seven drifts | {{ resolution_mean_deviation_percent_16000 }} % mean with 16000 pseudo-electrons, {{ resolution_mean_deviation_percent_1000 }} % with 1000 |
+| Convergence | 1D1V | orders of the scheme in step, cell and particle count | {{ convergence_dt_orders }}, {{ convergence_dx_orders }} (expected 2); {{ convergence_noise_order }} (expected $-1$) |
 | Weibel | 1D2V | transverse kinetic root, marginal wavenumber | {{ weibel_mean_deviation_percent }} % mean, {{ weibel_max_deviation_percent }} % worst |
 | Maintained sheath | 1D3V | kinetic sheath theory | {{ source_sheath_phi_wall_deviation_percent }} % in the wall potential |
 | Sheath drop with reflection | 1D3V | Hobbs and Wesson | {{ sheath_drop_deviation_percent }} % |
@@ -254,6 +255,38 @@ The implicit scheme keeps its energy at a larger step too: at {{ schemes_step_ra
 the explicit step it holds Landau damping to {{ schemes_landau_energy_error_implicit }} and
 the two-stream run to {{ schemes_two_stream_energy_error_implicit }}, with both rates as
 close to the kinetic roots as the explicit ones ({doc}`../examples/conservation`).
+
+## Convergence
+
+A benchmark that agrees at one resolution says nothing about the order of the scheme. Each
+panel refines one parameter and measures the order against the one the discretisation
+predicts (`docs/scripts/convergence.py`).
+
+```{figure} ../_static/figures/convergence.png
+:width: 100%
+:alt: Frequency error of a cold plasma oscillation against the time step and the cell size, and field noise energy against particle count
+
+(a) Frequency of a cold plasma oscillation, mode 1 of 64 cells, against $\omega_{pe}\Delta t$,
+measured from the extrapolated limit; the dashed line is the leapfrog phase error
+$(\omega_{pe}\Delta t)^2/24$ with no fitted constant. (b) The same oscillation at a fixed
+wavelength on 32 to 256 cells, $\omega_{pe}\Delta t = 0.02$. (c) Mean field energy of a randomly
+loaded thermal plasma against the number of electrons.
+```
+
+| refined | observable | expected order | measured |
+|---|---|---|---|
+| time step, $\omega_{pe}\Delta t = 0.4 \to 0.05$ | oscillation frequency | 2 | {{ convergence_dt_orders }} |
+| cell size, $k\Delta x = 0.20 \to 0.025$ | oscillation frequency | 2 | {{ convergence_dx_orders }} |
+| particle count, 2000 to 128000 | field noise energy | $-1$ | {{ convergence_noise_order }} |
+
+The orders of (a) and (b) are Richardson estimates from consecutive halvings, so they need no
+exact reference; the frequency is fitted over twelve periods rather than read from peaks,
+which resolves errors far below one step. At $\omega_{pe}\Delta t = 0.4$ the frequency is off
+by {{ convergence_dt_error_at_0_4 }}, the size of $(0.4)^2/24$. The energy error is second
+order in the step on an isolated oscillator ({doc}`collisions`); in a plasma at a fixed grid it
+stops falling at a level the grid sets, so it does not isolate the integrator. The rates of the
+benchmarks converge with particle count as the summary's particle-count row shows, and the
+sheath's own resolution study is on {doc}`../examples/sheath_unmagnetized`.
 
 ## Reproducibility
 

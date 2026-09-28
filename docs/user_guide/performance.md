@@ -82,18 +82,37 @@ against $kv_0/\omega_{pe}$ with {{ resolution_counts }} pseudo-electrons, fitted
 | GPU, {{ runtime_gpu_device }} | {{ runtime_gpu_seconds_largest }} s |
 | GPU over CPU | {{ runtime_gpu_speedup_largest }}× faster |
 
-Both machines were shared when they were timed (load averages {{ runtime_cpu_load }} on
-the laptop and {{ runtime_gpu_load }} on the host of the GPU), so the CPU curve is
-noisier than an idle machine would give. Panel (b) is the price of fewer particles: the
+The host was shared when it was timed (load averages {{ runtime_cpu_load }} during the CPU
+runs and {{ runtime_gpu_load }} during the GPU ones), so the CPU curve is slower and noisier
+than an idle machine would give; the CPU runs were pinned to {{ runtime_cpu_cores }} cores. Panel (b) is the price of fewer particles: the
 growth rate is off the kinetic root by {{ resolution_mean_deviation_percent_1000 }} % on
 average with 1000 pseudo-electrons, {{ resolution_mean_deviation_percent_4000 }} % with
 4000 and {{ resolution_mean_deviation_percent_16000 }} % with 16000, and most at the
 small drifts, where the rate is lowest. `docs/scripts/fig_runtime.py` draws the figure; run
 on a GPU it records that device's timings, and on a CPU it times the CPU and reads them.
 
-Measure before choosing single precision ({doc}`units`) for speed. On a CPU the two cost
-about the same, and on the NVIDIA RTX A4000 we tested, with JAX 0.10.2, a single-precision
-run was many times slower than a double-precision one.
+## Devices and precision
+
+The same two-stream run with {{ device_particles }} pseudo-electrons, {{ runtime_steps }} steps,
+in both precisions on both devices (`docs/scripts/device_matrix.py`, warm, best of three):
+
+| | seconds | growth rate / $\omega_{pe}$ | energy error |
+|---|---|---|---|
+| CPU, float64 | {{ device_cpu_f64_seconds }} | {{ device_cpu_f64_gamma }} | {{ device_cpu_f64_energy_error }} |
+| CPU, float32 | {{ device_cpu_f32_seconds }} | {{ device_cpu_f32_gamma }} | {{ device_cpu_f32_energy_error }} |
+| GPU, float64 | {{ device_gpu_f64_seconds }} | {{ device_gpu_f64_gamma }} | {{ device_gpu_f64_energy_error }} |
+| GPU, float32 | {{ device_gpu_f32_seconds }} | {{ device_gpu_f32_gamma }} | {{ device_gpu_f32_energy_error }} |
+
+The kinetic root is {{ device_theory_gamma }}. Single precision gives the same rate and energy
+error here. On the CPU it was 1.7 times faster (a shared host, load {{ device_cpu_load }}); on
+the {{ device_gpu_name }} it is about a hundred times slower. The deposit's
+float32 scatter-add is the likely cause; it has not been profiled. Measure before choosing
+single precision ({doc}`units`).
+
+The test suite runs in double precision on both devices. On the GPU a scatter-add sums in an
+order that changes from call to call, so two identical runs agree to round-off rather than bit
+for bit, and the tests that assert bit-identity (a run split by the progress meter or by a
+restart against the run taken whole) hold on a CPU only.
 
 ## Apple silicon
 

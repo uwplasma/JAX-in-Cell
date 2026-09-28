@@ -41,6 +41,8 @@ SCRIPTS = [
     "fig_collisions.py",
     "audit_invariants.py",
     "fig_autodiff.py",
+    "convergence.py",
+    "device_matrix.py",
     "fig_scaling.py",
     "fig_runtime.py",
 ]
