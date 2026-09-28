@@ -30,8 +30,8 @@ def theory(k):
 
 
 def simulate(length, cells, steps, n=20000, seed_amplitude=0.0, seed_mode=1, store_every=10,
-             store_particles=False, sampling="quiet"):
-    # `sampling` here is the velocities' own: "quiet" takes them from the quadrature, anything
+             store_particles=False, sampling="low_noise"):
+    # `sampling` here is the velocities' own: "low_noise" takes them from the quadrature, anything
     # else redraws them at random, which is what leaves a noise floor for the survey to grow from
     """A bi-Maxwellian, optionally with a coherent transverse current
     v_z += d v_thz sin(k x) that seeds one magnetic mode.
@@ -41,11 +41,11 @@ def simulate(length, cells, steps, n=20000, seed_amplitude=0.0, seed_mode=1, sto
     out of, so the survey of the cutoff uses random velocities instead.
     """
     x, v = (np.array(a) for a in quiet_start(n, length, vth=VTH))   # writable: the seed goes in below
-    if sampling != "quiet":
+    if sampling != "low_noise":
         v = np.random.default_rng(0).standard_normal((n, 3)) * np.asarray(VTH) / np.sqrt(2)
     v[:, 2] += seed_amplitude * VTH[2] * np.sin(2 * np.pi * seed_mode * x[:, 0] / length)
     electrons = Species.electrons(n=n, density=DENSITY, vth=VTH).replace(x=x, v=v)
-    ions = Species.ions(n=n // 4, density=DENSITY, mass_ratio=1e6, vth=(0, 0, 0), sampling="quiet")
+    ions = Species.ions(n=n // 4, density=DENSITY, mass_ratio=1e6, vth=(0, 0, 0), sampling="low_noise")
     return Simulation(Domain(length=length, cells=cells, dt_over_dx_c=0.5), [electrons, ions],
                       Solver(filter_passes=0)).run(steps, seed=0, store_every=store_every,
                                                    store_particles=store_particles)

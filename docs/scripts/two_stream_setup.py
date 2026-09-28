@@ -16,9 +16,9 @@ def build(drift=DRIFT, n=20000, solver=None, dt_over_dx_c=4.5):
     """Two counter-streaming quiet beams of ``n`` electrons on ``n/2`` mobile protons, with
     mode 1 seeded by a displacement of amplitude a k = 1e-4."""
     electrons = Species.electrons(n=n, density=DENSITY, vth=(VTH, 0, 0), drift=(drift, 0, 0),
-                                  plus_minus=True, sampling="quiet", perturbation_mode=1,
+                                  plus_minus=True, sampling="low_noise", perturbation_mode=1,
                                   perturbation_amplitude=SEED_AK * LENGTH / (2 * np.pi))
-    ions = Species.ions(n=n // 2, density=DENSITY, electrons=electrons, sampling="quiet")
+    ions = Species.ions(n=n // 2, density=DENSITY, electrons=electrons, sampling="low_noise")
     return Simulation(Domain(length=LENGTH, cells=CELLS, dt_over_dx_c=dt_over_dx_c), [electrons, ions],
                       solver or Solver(filter_passes=0))
 

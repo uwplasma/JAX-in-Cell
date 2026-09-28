@@ -19,10 +19,10 @@ STEPS = 800                                           # the example's; the floor
 
 
 def run(k_lambda_d, particles=PARTICLES, seed_ak=SEED_AK, steps=STEPS):
-    electrons = Species.electrons(n=particles, density=DENSITY, sampling="quiet",
+    electrons = Species.electrons(n=particles, density=DENSITY, sampling="low_noise",
                                   vth=(k_lambda_d / K * np.sqrt(2) * OMEGA_PE, 0, 0),
                                   perturbation_amplitude=seed_ak / K, perturbation_mode=1)
-    ions = Species.ions(n=particles // 8, density=DENSITY, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
+    ions = Species.ions(n=particles // 8, density=DENSITY, mass_ratio=1e9, vth=(0, 0, 0), sampling="low_noise")
     out = Simulation(Domain(length=LENGTH, cells=CELLS, dt_over_dx_c=1.0), [electrons, ions],
                      Solver(filter_passes=0)).run(steps, seed=0, store_particles=False)
     amplitude = np.abs(np.fft.rfft(np.asarray(out.E[:, :, 0]), axis=1)[:, 1]) / CELLS

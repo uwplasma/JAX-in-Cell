@@ -28,8 +28,8 @@ from jaxincell import (Domain, Simulation, Solver, Species, figure, load_state, 
 
 steps, half = 400, 200
 electrons = Species.electrons(n=8000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(5e7, 0, 0), plus_minus=True,
-                              sampling="quiet", perturbation_amplitude=5e-7, perturbation_mode=1)
-ions = Species.ions(n=8000, density=4.37e17, electrons=electrons, sampling="quiet")
+                              sampling="low_noise", perturbation_amplitude=5e-7, perturbation_mode=1)
+ions = Species.ions(n=8000, density=4.37e17, electrons=electrons, sampling="low_noise")
 simulation = Simulation(Domain(length=0.01, cells=64, dt_over_dx_c=4.5), [electrons, ions], Solver())
 
 whole = simulation.run(steps, seed=0, store_every=10)

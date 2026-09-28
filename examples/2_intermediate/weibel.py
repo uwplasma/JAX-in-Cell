@@ -69,7 +69,7 @@ def run(wavelengths, particles, cells, steps):
     x, _ = quiet_start(particles, length, vth=vth)
     v = np.random.default_rng(0).standard_normal((particles, 3)) * np.asarray(vth) / np.sqrt(2)
     electrons = Species.electrons(n=particles, density=density, vth=vth).replace(x=x, v=v)
-    ions = Species.ions(n=particles // 4, density=density, mass_ratio=1e6, vth=(0, 0, 0), sampling="quiet")
+    ions = Species.ions(n=particles // 4, density=density, mass_ratio=1e6, vth=(0, 0, 0), sampling="low_noise")
     simulation = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=0.5), [electrons, ions],
                             Solver(filter_passes=0))
     output = simulation.run(steps, seed=0, store_every=store_every, store_particles=False)

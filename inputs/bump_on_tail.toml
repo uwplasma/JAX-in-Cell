@@ -23,7 +23,7 @@ charge = -1
 mass = "electron"
 density = 1.121992e15
 vth = [1.221465e7, 0.0, 0.0]
-sampling = "quiet"
+sampling = "low_noise"
 perturbation_amplitude = 6.366198e-5
 perturbation_mode = 5
 
@@ -35,7 +35,7 @@ mass = "electron"
 density = 3.470079e13
 vth = [8.550252e6, 0.0, 0.0]
 drift = [6.107323e7, 0.0, 0.0]
-sampling = "quiet"
+sampling = "low_noise"
 
 [[species]]
 name = "ions"
@@ -45,7 +45,7 @@ mass = "electron"
 mass_ratio = 1e9
 density = 1.156693e15
 vth = [0.0, 0.0, 0.0]
-sampling = "quiet"
+sampling = "low_noise"
 
 [run]
 steps = 2400

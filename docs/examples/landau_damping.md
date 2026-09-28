@@ -41,7 +41,7 @@ went from $-0.1523$ at 500 steps to $-0.1433$ at 800. Measured where the decay s
 | particles | {{ landau_particles }} |
 | $\omega_{pe}\Delta t$ | {{ landau_omega_pe_dt }} |
 | seed | $ak$ = {{ landau_seed_ak }} |
-| sampling | `sampling="quiet"` |
+| sampling | `sampling="low_noise"` |
 
 The quiet start is what makes the measurement possible: the wave has to be followed over
 three e-foldings before it disappears into the discrete-particle noise, and a random start

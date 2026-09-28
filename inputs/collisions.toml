@@ -26,7 +26,7 @@ mass = "electron"
 density = 1e20
 vth = [1e5, 1e5, 1e5]
 drift = [3e7, 0.0, 0.0]
-sampling = "quiet"
+sampling = "low_noise"
 
 [[species]]
 name = "background"
@@ -35,7 +35,7 @@ charge = -1
 mass = "electron"
 density = 1e20
 vth = [3e5, 3e5, 3e5]
-sampling = "quiet"
+sampling = "low_noise"
 
 [[species]]
 name = "ions"
@@ -45,7 +45,7 @@ mass = "electron"
 mass_ratio = 1e9
 density = 2e20
 vth = [0.0, 0.0, 0.0]
-sampling = "quiet"
+sampling = "low_noise"
 
 [run]
 steps = 200

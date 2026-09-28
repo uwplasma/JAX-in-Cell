@@ -28,7 +28,7 @@ density = 4.37e17
 vth = [1.499e7, 0.0, 0.0]
 drift = [5e7, 0.0, 0.0]
 plus_minus = true
-sampling = "quiet"
+sampling = "low_noise"
 perturbation_amplitude = 5e-7
 perturbation_mode = 1
 
@@ -39,7 +39,7 @@ charge = 1
 mass = "proton"
 density = 4.37e17
 vth = [3.5e5, 0.0, 0.0]
-sampling = "quiet"
+sampling = "low_noise"
 
 [run]
 steps = 400

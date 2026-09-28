@@ -873,7 +873,7 @@ plots. Re-run dependent benchmarks after any underlying correction.
 - [x] Overflow invalidates a run; cutoff error measured; `active=0` safe. *(S09's `validate()`, S10's `Wall.truncated`, and a test that starts from an empty box.)*
 - [x] Windows, coordinates, fluence-versus-current labels and statistical uncertainties corrected everywhere. *(S01, U10, and the fluence and scatter reporting of W7's examples.)*
 - [x] Pure JAX runner and host-owned progress both work; repeated-run, AD and restart tests pass; verbose equals silent. *(W4.)*
-- [ ] One parameter vocabulary with a migration path; README parameter tutorial exists. *(U09 gave the vocabulary and the release notes the migration; the tutorial is W9's `parameters_and_sampling.py`.)* *(W9: the tutorial exists and the README points to it; the box stays open for the `sampling` names of section 7, `low_noise` for `quiet`, which no lane has taken.)*
+- [x] One parameter vocabulary with a migration path; README parameter tutorial exists. *(U09 gave the vocabulary and the release notes the migration; the tutorial is W9's `parameters_and_sampling.py`.)* *(W9: the tutorial exists and the README points to it; the box stays open for the `sampling` names of section 7, `low_noise` for `quiet`, which no lane has taken.)* *(Closed by the rename lane of section 16: `sampling="low_noise"`.)*
 - [x] TOML/CLI covers every shipped workflow with strict validation. *(W5.)*
 - [x] Native archive and exact checkpoint work; openPMD read back independently. *(W5; a restart through a file is bit-identical to one through memory.)*
 - [x] Energy, charge and momentum panels restored with truthful open-system residuals; movies weight evolving populations. *(W6.)*
@@ -1366,3 +1366,18 @@ the earlier laptop measurement, labelled as such.
 reporting (section 11); the `sampling="quiet"` to `low_noise` rename of section 7 (it touches
 the README and example pages, which another lane owns; unassigned). W12 stays open on the idle
 re-timing.
+
+**Rename lane: `sampling="quiet"` to `"low_noise"` (section 7).** Done as a clean rename with no
+alias and no DeprecationWarning. Evidence: `main` and the PyPI release 0.1.1 have no `sampling`
+parameter at all (`git grep sampling origin/main -- jaxincell` finds nothing); the three-state
+`sampling` exists only on this unreleased branch, so no external code can pass `"quiet"`.
+Section 7's "accept legacy names during migration" applies to released names, and an alias for a
+spelling that never shipped would be migration code with no one to migrate. `"quiet"` is now
+rejected with the list of accepted values (test in `test_config_and_outputs.py`). Changed:
+`_config.py` (validation, docstring), `_simulation.py`, every `inputs/*.toml`, the examples,
+`docs/scripts`, the doc pages, the measurement keys `sampling_low_noise_*`, and the tests. The
+function `quiet_start` keeps its name: it is the technique's own name, not a parameter value.
+The README precision paragraph now states the W12 matrix (CPU float32 1.7 times faster on a
+loaded host, GPU float32 about a hundred times slower, unprofiled) and links the performance
+table. The showcase movies (`docs/scripts/movies.py`) were re-rendered on GPU 1 and their mid and
+late frames inspected.

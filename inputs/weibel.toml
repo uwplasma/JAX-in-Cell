@@ -38,7 +38,7 @@ mass = "electron"
 mass_ratio = 1e6
 density = 1e15
 vth = [0.0, 0.0, 0.0]
-sampling = "quiet"
+sampling = "low_noise"
 
 [run]
 steps = 4000

@@ -471,7 +471,7 @@ class Species:
             booleans, ``quiet`` and ``random_positions``, of which one combination -- both
             true -- silently meant the first:
 
-            * ``"quiet"``, the quiet start: equally spaced positions and velocities at the
+            * ``"low_noise"``, the quiet start: equally spaced positions and velocities at the
               quantiles of the Maxwellian, ordered by a bit-reversed sequence, which is what
               makes the discrete-particle noise low enough to follow a Landau decay over
               three e-foldings;
@@ -510,8 +510,8 @@ class Species:
         if _template(self):
             return
         _require(self.n > 0, "a species needs at least one particle")
-        _require(self.sampling in ("quiet", "lattice", "random"),
-                 f"sampling is 'quiet', 'lattice' or 'random', not {self.sampling!r}")
+        _require(self.sampling in ("low_noise", "lattice", "random"),
+                 f"sampling is 'low_noise', 'lattice' or 'random', not {self.sampling!r}")
         object.__setattr__(self, "active", self.n if self.active is None else int(self.active))
         _require(0 <= self.active <= self.n, f"active must be between 0 and n = {self.n}, not {self.active}")
         for name in ("charge", "mass", "density", "perturbation_amplitude", "perturbation_mode"):

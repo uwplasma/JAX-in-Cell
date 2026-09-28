@@ -23,10 +23,10 @@ DENSITY = OMEGA_PE ** 2 * epsilon_0 * mass_electron / e_charge ** 2
 
 
 def landau(solver, courant):
-    electrons = Species.electrons(n=PARTICLES, density=DENSITY, sampling="quiet",
+    electrons = Species.electrons(n=PARTICLES, density=DENSITY, sampling="low_noise",
                                   vth=(K_LAMBDA_D / K * np.sqrt(2) * OMEGA_PE, 0, 0),
                                   perturbation_amplitude=SEED_AK / K, perturbation_mode=1)
-    ions = Species.ions(n=PARTICLES // 8, density=DENSITY, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
+    ions = Species.ions(n=PARTICLES // 8, density=DENSITY, mass_ratio=1e9, vth=(0, 0, 0), sampling="low_noise")
     return Simulation(Domain(length=LENGTH, cells=CELLS, dt_over_dx_c=courant), [electrons, ions], solver)
 
 

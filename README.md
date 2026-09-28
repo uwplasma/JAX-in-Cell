@@ -57,8 +57,10 @@ For a GPU, install the matching JAX wheel first (for example `pip install -U "ja
 
 Runs are in double precision unless `JAX_ENABLE_X64=0` is set before JAX is imported; every
 example sets it at its top. Single precision reproduces the rates and sheaths but not
-conservation to round-off, and is not faster on the GPUs tested
-([performance](https://jax-in-cell.readthedocs.io/en/latest/user_guide/performance.html)).
+conservation to round-off. It is not uniformly faster: on a loaded CPU host float32 took 14.7 s
+against 24.4 s in float64 (1.7 times faster), while on the GPU tested it was about a hundred
+times slower than float64 (not yet profiled); see the device and precision table in
+[performance](https://jax-in-cell.readthedocs.io/en/latest/user_guide/performance.html#devices-and-precision).
 
 ## Run
 

@@ -61,9 +61,9 @@ variants = {                          # name: the one switch changed from the re
 
 # --- the shared setup -----------------------------------------------------------------
 electrons = Species.electrons(n=particles, density=density, vth=(vth, 0, 0), drift=(drift, 0, 0),
-                              plus_minus=True, sampling="quiet", perturbation_mode=1,
+                              plus_minus=True, sampling="low_noise", perturbation_mode=1,
                               perturbation_amplitude=seed_ak * length / (2 * np.pi))
-ions = Species.ions(n=particles // 2, density=density, electrons=electrons, sampling="quiet")
+ions = Species.ions(n=particles // 2, density=density, electrons=electrons, sampling="low_noise")
 domain = Domain(length=length, cells=cells, dt_over_dx_c=dt_over_dx_c)
 
 
@@ -123,7 +123,7 @@ passes = 2
 G = (0.5 + 0.5 * np.cos(k_dx)) ** passes * ((1 + passes / 2) - (passes / 2) * np.cos(k_dx))
 short = {}
 for passes_used in (0, passes):
-    cold = Species.electrons(n=particles, density=density, vth=(0, 0, 0), sampling="quiet",
+    cold = Species.electrons(n=particles, density=density, vth=(0, 0, 0), sampling="low_noise",
                              perturbation_mode=mode_short,
                              perturbation_amplitude=1e-3 * length / (2 * np.pi * mode_short))
     out = Simulation(domain, [cold, ions], Solver(model="electrostatic", filter_passes=passes_used)).run(

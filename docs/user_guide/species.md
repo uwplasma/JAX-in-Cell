@@ -29,7 +29,7 @@ gives an immobile neutralising background.
 | `perturbation_amplitude` | amplitude $a$ of the displacement $x \to x + a\sin(2\pi m x/L)$ | `0.0` |
 | `perturbation_mode` | mode number $m$ of that displacement | `0.0` |
 | `plus_minus` | negate $v_x$ on every second particle: two counter-streaming beams (static) | `False` |
-| `sampling` | how the initial phase space is drawn: `"quiet"`, `"lattice"` or `"random"` (static) | `"lattice"` |
+| `sampling` | how the initial phase space is drawn: `"low_noise"`, `"lattice"` or `"random"` (static) | `"lattice"` |
 | `x`, `v` | arrays of shape `(n, 3)` replacing the generated phase space | `None` |
 | `reflection` | fraction of each particle an absorbing wall sends back: a number, a function of the normal impact speed in m/s, or a `(left, right)` pair | `0.0` |
 
@@ -76,11 +76,11 @@ Species.electrons(..., perturbation_mode=1,
 
 | `sampling` | positions | velocities |
 |---|---|---|
-| `"quiet"` | an even lattice | the quantiles of the Maxwellian, in a bit-reversed order |
+| `"low_noise"` | an even lattice | the quantiles of the Maxwellian, in a bit-reversed order |
 | `"lattice"` (the default) | an even lattice | drawn at random |
 | `"random"` | uniformly at random | drawn at random |
 
-* `"quiet"` drops the noise floor by orders of magnitude, which is what makes a growth
+* `"low_noise"` drops the noise floor by orders of magnitude, which is what makes a growth
   rate measurable over more than a couple of e-foldings: the right choice for anything
   compared against linear theory.
 * It is the wrong one when the noise itself is the point — a survey of unseeded modes

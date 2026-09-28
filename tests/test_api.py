@@ -139,8 +139,8 @@ def test_a_progress_meter_reports_without_changing_the_run(capsys):
     import io
 
     domain = Domain(length=1e-2, cells=16, dt_over_dx_c=1.0)
-    electrons = Species.electrons(n=2000, density=1e14, vth=(1e6, 0, 0), sampling="quiet")
-    ions = Species.ions(n=500, density=1e14, mass_ratio=1e9, vth=0.0, sampling="quiet")
+    electrons = Species.electrons(n=2000, density=1e14, vth=(1e6, 0, 0), sampling="low_noise")
+    ions = Species.ions(n=500, density=1e14, mass_ratio=1e9, vth=0.0, sampling="low_noise")
     sim = Simulation(domain, [electrons, ions], Solver())
 
     silent = sim.run(60, seed=3, store_every=5)
@@ -356,7 +356,7 @@ def test_the_plot_draws_the_particles_each_frame_has(tmp_path):
     domain = Domain(length=1e-2, cells=32, dt_over_dx_c=40.0,
                     particle_bc="absorbing", field_bc=("open", "absorbing"))
     species = Species("electrons", 400, -1.0, mass_electron, 1e14, (sigma, 0, 0), active=200,
-                      sampling="quiet", source=Source(density=1e12, vth=(sigma,) * 3, emit=4))
+                      sampling="low_noise", source=Source(density=1e12, vth=(sigma,) * 3, emit=4))
     out = Simulation(domain, [species], Solver(model="electrostatic")).run(40, seed=0, store_every=4)
 
     particles = _Particles(out)
@@ -536,8 +536,8 @@ def test_collisions_default_to_every_pair_and_the_formulary_logarithm():
     """`Collisions()` with no arguments collides every combination and takes the
     Coulomb logarithm from the lightest negatively charged species, rather than needing
     either spelled out."""
-    electrons = Species.electrons(n=800, density=1e20, vth=(2e6, 2e6, 2e6), sampling="quiet")
-    ions = Species.ions(n=800, density=1e20, electrons=electrons, sampling="quiet")
+    electrons = Species.electrons(n=800, density=1e20, vth=(2e6, 2e6, 2e6), sampling="low_noise")
+    ions = Species.ions(n=800, density=1e20, electrons=electrons, sampling="low_noise")
     domain = Domain(length=1e-4, cells=8, dt_over_dx_c=1.0)
     quiet = Simulation(domain, [electrons, ions], Solver()).run(20, seed=0)
     collided = Simulation(domain, [electrons, ions], Solver(),

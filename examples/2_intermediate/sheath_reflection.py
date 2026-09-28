@@ -131,9 +131,9 @@ capacity, emit = 110000, 12
 maintained = Simulation(
     maintained_domain,
     [Species("electrons", capacity, -1.0, mass_electron, density, (v_th_e,) * 3, active=particles,
-             sampling="quiet", source=Source(density=density, vth=(v_th_e,) * 3, emit=emit)),
+             sampling="low_noise", source=Source(density=density, vth=(v_th_e,) * 3, emit=emit)),
      Species("ions", capacity, 1.0, mass_ratio * mass_electron, density, (v_th_i,) * 3, (c_s, 0, 0),
-             active=particles, sampling="quiet",
+             active=particles, sampling="low_noise",
              source=Source(density=density, vth=(v_th_i,) * 3, drift=(c_s, 0, 0), emit=emit,
                            model="drifting"))],
     solver).run(steps, store_every=100, store_particles=False, moments="flux").validate()

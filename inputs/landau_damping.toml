@@ -27,7 +27,7 @@ charge = -1
 mass = "electron"
 density = 2.891734e14    # omega_pe^2 eps_0 m_e / e^2, at omega_pe = 9.593359e8 rad/s
 vth = [1.079632e8, 0.0, 0.0]     # k lambda_D = 0.5
-sampling = "quiet"       # the noise floor sets how many e-foldings are measurable
+sampling = "low_noise"       # the noise floor sets how many e-foldings are measurable
 perturbation_amplitude = 1.591549e-3   # a displacement: a k = 0.01
 perturbation_mode = 1
 
@@ -39,7 +39,7 @@ mass = "electron"
 mass_ratio = 1e9         # an immobile neutralising background
 density = 2.891734e14
 vth = [0.0, 0.0, 0.0]
-sampling = "quiet"
+sampling = "low_noise"
 
 [run]
 steps = 500

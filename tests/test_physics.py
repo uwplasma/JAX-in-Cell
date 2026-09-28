@@ -147,7 +147,7 @@ def test_weibel_growth_is_confined_to_the_unstable_wavenumbers():
     x, v = quiet_start(n, L, vth=vth)
     v = v.at[:, 2].add(1e-2 * vth[2] * sum(jnp.sin(2 * jnp.pi * m * x[:, 0] / L) for m in range(1, 9)))
     electrons = Species.electrons(n=n, density=n_e, vth=vth).replace(x=x, v=v)
-    ions = Species.ions(n=n // 4, density=n_e, mass_ratio=1e6, vth=(0.0, 0.0, 0.0), sampling="quiet")
+    ions = Species.ions(n=n // 4, density=n_e, mass_ratio=1e6, vth=(0.0, 0.0, 0.0), sampling="low_noise")
     sim = Simulation(Domain(length=L, cells=128, dt_over_dx_c=0.5), [electrons, ions], Solver(filter_passes=0))
     out = sim.run(3000, seed=0, store_every=20)
     t = np.asarray(out.t) * omega_pe
@@ -179,7 +179,7 @@ def two_stream(algorithm, steps, n=3000, drift=6e7, sampling="lattice", **solver
 def quiet_two_stream():
     """One quiet two-stream run read by two tests: the number of steps is static, so
     every distinct run is a compilation of its own."""
-    return two_stream("explicit", 300, n=4000, drift=5e7, sampling="quiet")
+    return two_stream("explicit", 300, n=4000, drift=5e7, sampling="low_noise")
 
 
 def test_explicit_scheme_has_bounded_energy_error_and_an_exact_gauss_law():
@@ -241,7 +241,7 @@ def test_the_implicit_gauss_law_holds_along_its_derivative():
     parameter, so it holds for the derivative too: the derivative of div E with respect to
     the electron drift is the derivative of rho/eps0, on a random combination of cells."""
     e = Species.electrons(n=300, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), reflection=0.5)
-    i = Species.ions(n=300, density=1e17, vth=(0.0, 0.0, 0.0), sampling="quiet")
+    i = Species.ions(n=300, density=1e17, vth=(0.0, 0.0, 0.0), sampling="low_noise")
     domain = Domain(length=1e-2, cells=16, dt_over_dx_c=2.0, particle_bc="absorbing", field_bc="absorbing")
     sim = Simulation(domain, [e, i], Solver(algorithm="implicit", picard_iterations=4))
     cells = jnp.asarray(np.random.default_rng(0).normal(size=15))
@@ -311,7 +311,8 @@ def test_a_wall_returns_the_flux_average_of_its_reflection_law():
     def law(speed):
         return jnp.exp(-speed ** 2 / (2 * sigma ** 2))
 
-    electrons = Species.electrons(n=n, density=1e6, vth=(np.sqrt(2) * sigma, 0, 0), sampling="quiet", reflection=law)
+    electrons = Species.electrons(n=n, density=1e6, vth=(np.sqrt(2) * sigma, 0, 0), sampling="low_noise",
+                                  reflection=law)
     out = Simulation(domain, [electrons], Solver()).run(steps, seed=0, store_every=steps)
     w = np.asarray(out.weight[-1])
     w0 = w.max()                                     # the weight of a particle that met no wall
@@ -404,8 +405,8 @@ def test_collisions_through_the_simulation_conserve_momentum_and_isotropise():
     """Wired into a run, the collision operator leaves the total momentum alone
     and relaxes an anisotropic temperature towards isotropy."""
     n, density = 4000, 1e21
-    electrons = Species.electrons(n=n, density=density, vth=(3e6, 3e6, 1e6), sampling="quiet")
-    ions = Species.ions(n=n, density=density, electrons=electrons, sampling="quiet")
+    electrons = Species.electrons(n=n, density=density, vth=(3e6, 3e6, 1e6), sampling="low_noise")
+    ions = Species.ions(n=n, density=density, electrons=electrons, sampling="low_noise")
     simulation = Simulation(Domain(length=2e-5, cells=16, dt_over_dx_c=1.0), [electrons, ions],
                             Solver(filter_passes=0), Collisions(coulomb_log=1e4))
     out = simulation.run(300, seed=0)
@@ -439,9 +440,9 @@ def test_gauss_law_holds_at_every_wall_with_and_without_filtering(particle_bc, f
     Two absorbing walls are conductors short-circuited to each other, so the far one
     also stays at the potential of the near one.
     """
-    e = Species.electrons(n=2000, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), sampling="quiet",
+    e = Species.electrons(n=2000, density=1e17, vth=(0.02 * c, 0, 0), drift=(0.05 * c, 0, 0), sampling="low_noise",
                           reflection=reflection)
-    i = Species.ions(n=2000, density=1e17, electrons=e, sampling="quiet")
+    i = Species.ions(n=2000, density=1e17, electrons=e, sampling="low_noise")
     domain = Domain(length=1e-2, cells=32, dt_over_dx_c=1.0, particle_bc=particle_bc, field_bc=field_bc)
     out = Simulation(domain, [e, i], Solver(algorithm, filter_passes=filter_passes,
                                             filter_strides=(1, 2))).run(120, seed=0)
@@ -479,7 +480,7 @@ def test_electrostatic_solvers_agree_and_both_satisfy_gauss(quiet_two_stream):
     agree to the discretisation error, and both must satisfy the discrete Gauss
     law: one by construction, the other because the current conserves charge."""
     ampere = quiet_two_stream
-    gauss = two_stream("explicit", 300, n=4000, drift=5e7, sampling="quiet", field_solver="gauss")
+    gauss = two_stream("explicit", 300, n=4000, drift=5e7, sampling="low_noise", field_solver="gauss")
     for out in (ampere, gauss):
         assert float(np.asarray(diagnostics(out)["gauss_residual"]).max()) < 1e-10
     field = np.asarray(ampere.E[:, :, 0])
@@ -496,8 +497,8 @@ def test_a_current_carrying_beam_is_not_slowed_by_a_mean_field(solver):
     length, cells = 1.0, 64
     omega_pe = 0.05 * c * cells / length
     density = omega_pe ** 2 * epsilon_0 * mass_electron / e_charge ** 2
-    beam = Species.electrons(n=512, density=density, vth=(0, 0, 0), drift=(0.05 * c, 0, 0), sampling="quiet")
-    ions = Species.ions(n=512, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
+    beam = Species.electrons(n=512, density=density, vth=(0, 0, 0), drift=(0.05 * c, 0, 0), sampling="low_noise")
+    ions = Species.ions(n=512, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="low_noise")
     out = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [beam, ions], solver).run(50)
     v = np.asarray(out.v[:, :512, 0]).mean(axis=1)
     assert abs(v[-1] / v[0] - 1) < 1e-10
@@ -508,9 +509,9 @@ def test_relativistic_run_conserves_the_energy_the_pusher_conserves():
     the diagnostic has to follow the solver: reporting the Newtonian energy for a
     relativistic run would show a spurious drift where there is none."""
     def run(relativistic, steps):
-        e = Species.electrons(n=2000, density=1e17, vth=(0.3 * c, 0, 0), sampling="quiet",
+        e = Species.electrons(n=2000, density=1e17, vth=(0.3 * c, 0, 0), sampling="low_noise",
                               perturbation_amplitude=1e-5, perturbation_mode=1)
-        i = Species.ions(n=2000, density=1e17, electrons=e, sampling="quiet")
+        i = Species.ions(n=2000, density=1e17, electrons=e, sampling="low_noise")
         return Simulation(Domain(length=0.05, cells=32, dt_over_dx_c=1.0), [e, i],
                           Solver(relativistic=relativistic)).run(steps, seed=0)
 
@@ -539,8 +540,8 @@ def test_an_external_magnetic_field_magnetises_the_plasma():
     B0, cells, length, n = 5e-4, 32, 1.0, 2000
     omega_c = e_charge * B0 / mass_electron
     # tenuous and cold, so that the self-consistent fields do not compete
-    e = Species.electrons(n=n, density=1e6, vth=(0, 0, 0), drift=(0, 1e5, 0), sampling="quiet")
-    i = Species.ions(n=n, density=1e6, mass_ratio=1e9, vth=(0, 0, 0), sampling="quiet")
+    e = Species.electrons(n=n, density=1e6, vth=(0, 0, 0), drift=(0, 1e5, 0), sampling="low_noise")
+    i = Species.ions(n=n, density=1e6, mass_ratio=1e9, vth=(0, 0, 0), sampling="low_noise")
     external = np.zeros((cells, 3))
     external[:, 0] = B0
     domain = Domain(length=length, cells=cells, dt_over_dx_c=1.0)
@@ -647,10 +648,10 @@ def test_the_electrons_of_a_maintained_sheath_are_the_kinetic_mapping_of_the_sou
     domain = Domain(length=length, cells=cells, time_step=0.1 / omega_pe,
                     particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, density, (v_th, 0, 0),
-                        active=capacity // 4, sampling="quiet",
+                        active=capacity // 4, sampling="low_noise",
                         source=Source(density=amplitude * density, vth=(v_th,) * 3, emit=emit))
     ions = Species("ions", capacity, 1.0, mass_ratio * mass_electron, density, 0.0, (beam * sigma, 0, 0),
-                   active=capacity // 4, sampling="quiet",
+                   active=capacity // 4, sampling="low_noise",
                    source=Source(density=density, vth=0.0, drift=(beam * sigma, 0, 0), emit=emit))
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(
         steps, seed=0, store_every=steps // stored, store_particles=True, moments="flux").validate()

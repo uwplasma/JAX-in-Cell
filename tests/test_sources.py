@@ -620,9 +620,9 @@ def test_the_current_a_floating_collector_closes_on_is_the_real_one():
     and J is an internal transport measured from the source plane rather than a current."""
     domain = box(cells=48, particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", 12000, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA,) * 3,
-                        active=3000, sampling="quiet", source=maxwellian_source(12, density=1.1149 * DENSITY))
+                        active=3000, sampling="low_noise", source=maxwellian_source(12, density=1.1149 * DENSITY))
     ions = Species("ions", 12000, 1.0, 1836 * mass_electron, DENSITY, 0.0, (0.2 * SIGMA, 0, 0),
-                   active=3000, sampling="quiet",
+                   active=3000, sampling="low_noise",
                    source=Source(density=DENSITY, vth=0.0, drift=(0.2 * SIGMA, 0, 0), emit=12))
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(
         200, store_every=1, store_particles=False)
@@ -650,8 +650,8 @@ def test_the_electrode_closure_and_a_symmetry_plane_agree_when_nothing_crosses()
         fields = []
         for field_bc in (("reflective", "absorbing"), ("open", "absorbing")):
             domain = box(cells=cells, particle_bc=("reflective", "absorbing"), field_bc=field_bc)
-            electrons = Species.electrons(n=8000, density=DENSITY, vth=(np.sqrt(2) * SIGMA, 0, 0), sampling="quiet")
-            ions = Species.ions(n=8000, density=DENSITY, mass_ratio=400.0, vth=0.0, sampling="quiet")
+            electrons = Species.electrons(n=8000, density=DENSITY, vth=(np.sqrt(2) * SIGMA, 0, 0), sampling="low_noise")
+            ions = Species.ions(n=8000, density=DENSITY, mass_ratio=400.0, vth=0.0, sampling="low_noise")
             out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(300, store_particles=False)
             fields.append(np.asarray(out.E[-1, :, 0]))
         errors.append(np.max(np.abs(fields[0] - fields[1])) / np.max(np.abs(fields[0])))
@@ -675,7 +675,7 @@ def test_the_electrostatic_model_leaves_the_transverse_fields_alone_but_keeps_th
     field = 0.05
     B = jnp.zeros((16, 3)).at[:, 2].set(field)
     omega_c = e_charge * field / mass_electron
-    electrons = Species.electrons(n=200, density=1e6, vth=0.0, drift=(0.0, 1e5, 0.0), sampling="quiet")
+    electrons = Species.electrons(n=200, density=1e6, vth=0.0, drift=(0.0, 1e5, 0.0), sampling="low_noise")
     domain = box(cells=16, steps_per_plasma_period=200.0)
     out = Simulation(domain, [electrons], Solver(model="electrostatic"), external_B=B).run(60, store_every=1)
     assert float(jnp.max(jnp.abs(out.B))) == 0.0
@@ -698,9 +698,9 @@ def test_the_two_field_models_agree_between_walls_and_differ_by_the_mean_field_i
     mean to zero. Here the quiet start's own noise builds a mean field of a few volts per
     metre over eight plasma periods. Neither is wrong; they are different conventions, and
     a comparison between them has to be of the fluctuating field."""
-    electrons = Species.electrons(n=4000, density=DENSITY, vth=(0.3 * SIGMA, 0, 0), sampling="quiet",
+    electrons = Species.electrons(n=4000, density=DENSITY, vth=(0.3 * SIGMA, 0, 0), sampling="low_noise",
                                   perturbation_amplitude=1e-6, perturbation_mode=1)
-    ions = Species.ions(n=1000, density=DENSITY, mass_ratio=1e9, vth=0.0, sampling="quiet")
+    ions = Species.ions(n=1000, density=DENSITY, mass_ratio=1e9, vth=0.0, sampling="low_noise")
 
     def final_field(model, steps_per_period, **domain):
         out = Simulation(box(cells=32, steps_per_plasma_period=steps_per_period, **domain),
@@ -786,8 +786,8 @@ def test_the_ten_moments_give_a_temperature_tensor_without_a_particle_history():
     sigma = np.sqrt(2.0 * e_charge / mass_electron)                  # 2 eV along x
     vth = (np.sqrt(2) * sigma, sigma, 0.0)                           # 2 eV, 1 eV, cold
     domain = Domain(length=1e-2, cells=16, dt_over_dx_c=1.0)
-    electrons = Species.electrons(n=40000, density=DENSITY, vth=vth, sampling="quiet")
-    ions = Species.ions(n=4000, density=DENSITY, mass_ratio=1e9, vth=0.0, sampling="quiet")
+    electrons = Species.electrons(n=40000, density=DENSITY, vth=vth, sampling="low_noise")
+    ions = Species.ions(n=4000, density=DENSITY, mass_ratio=1e9, vth=0.0, sampling="low_noise")
     sim = Simulation(domain, [electrons, ions], Solver(model="electrostatic"))
     out = sim.run(20, store_every=5, moments="full")
     assert out.moments.shape[1:] == (2, len(Simulation.MOMENTS), 16)
@@ -826,7 +826,7 @@ def test_a_window_of_the_running_sums_is_a_difference_over_a_difference():
     that profile exactly, whatever the stride."""
     domain = box(cells=16, particle_bc="absorbing", field_bc="reflective")
     # uncharged, so it feels no field and deposits none: its profile is the same at every step
-    frozen = Species("frozen", 400, 0.0, 1e-10, 1e-12, sampling="quiet")
+    frozen = Species("frozen", 400, 0.0, 1e-10, 1e-12, sampling="low_noise")
     sim = Simulation(domain, [frozen], Solver(model="electrostatic"))
     out = sim.run(60, store_every=10, moments=True, store_particles=False)
     profile = np.asarray(out.moments[0]) / float(out.steps[0])          # the first interval
@@ -852,8 +852,8 @@ def test_the_streaming_moments_are_the_deposit_and_need_no_particle_history():
     they are there when the particles are not, which is what makes a mean over every step
     of a long window affordable."""
     domain = box(cells=32, particle_bc=("thermal", "absorbing"), field_bc=("reflective", "absorbing"))
-    electrons = Species.electrons(n=2000, density=DENSITY, vth=(np.sqrt(2) * SIGMA, 0, 0), sampling="quiet")
-    ions = Species.ions(n=2000, density=DENSITY, mass_ratio=400.0, electrons=electrons, sampling="quiet")
+    electrons = Species.electrons(n=2000, density=DENSITY, vth=(np.sqrt(2) * SIGMA, 0, 0), sampling="low_noise")
+    ions = Species.ions(n=2000, density=DENSITY, mass_ratio=400.0, electrons=electrons, sampling="low_noise")
     sim = Simulation(domain, [electrons, ions], Solver(model="electrostatic"))
     stored = sim.run(2, store_every=1, moments=True)
     direct = sim.moments(stored.x[0], stored.v[0], stored.weight[0])
@@ -928,10 +928,10 @@ def test_a_maintained_sheath_reaches_the_kinetic_floating_potential():
     phi_wall = float(floating_potential(beam_speed))
     domain = box(cells=cells, particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA, 0, 0),
-                        active=capacity // 4, sampling="quiet",
+                        active=capacity // 4, sampling="low_noise",
                         source=maxwellian_source(emit, density=float(source_density(phi_wall)) * DENSITY))
     ions = Species("ions", capacity, 1.0, mass_ratio * mass_electron, DENSITY, 0.0, (beam_speed * SIGMA, 0, 0),
-                   active=capacity // 4, sampling="quiet",
+                   active=capacity // 4, sampling="low_noise",
                    source=Source(density=DENSITY, vth=0.0, drift=(beam_speed * SIGMA, 0, 0), emit=emit))
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(
         steps, seed=0, store_every=steps // 60, store_particles=False, moments=True)
@@ -956,7 +956,7 @@ def test_only_some_species_need_a_source():
     domain = box(cells=32, particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", 4000, -1.0, mass_electron, 0.0,
                         source=maxwellian_source(10, density=1e-4 * DENSITY))
-    ions = Species.ions(n=500, density=1e-4 * DENSITY, mass_ratio=1e9, vth=0.0, sampling="quiet")
+    ions = Species.ions(n=500, density=1e-4 * DENSITY, mass_ratio=1e9, vth=0.0, sampling="low_noise")
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(300, store_particles=False)
     injected = np.asarray(out.wall.injected)[-1]
     assert injected[0].sum() > 0 and injected[1].sum() == 0.0
@@ -1145,9 +1145,9 @@ def test_a_source_that_emits_every_step_is_the_source_it_was(monkeypatch):
     rounding error and fails this."""
     domain = box(cells=24, particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", 3000, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA,) * 3,
-                        active=800, sampling="quiet", source=maxwellian_source(6, density=1.1149 * DENSITY))
+                        active=800, sampling="low_noise", source=maxwellian_source(6, density=1.1149 * DENSITY))
     ions = Species("ions", 3000, 1.0, 1836 * mass_electron, DENSITY, 0.0, (0.2 * SIGMA, 0, 0),
-                   active=800, sampling="quiet",
+                   active=800, sampling="low_noise",
                    source=Source(density=DENSITY, vth=0.0, drift=(0.2 * SIGMA, 0, 0), emit=6))
     external_B = jnp.zeros((24, 3)).at[:, 2].set(0.1 * OMEGA_PE * mass_electron / e_charge)
 
@@ -1294,10 +1294,10 @@ def test_the_charge_closes_with_a_source_that_emits_every_k_steps():
     the same thing to both."""
     domain = box(cells=32, particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", 4000, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA,) * 3,
-                        active=1000, sampling="quiet",
+                        active=1000, sampling="low_noise",
                         source=maxwellian_source(12, density=1.1149 * DENSITY, every=2))
     ions = Species("ions", 4000, 1.0, 1836 * mass_electron, DENSITY, 0.0, (0.2 * SIGMA, 0, 0),
-                   active=1000, sampling="quiet",
+                   active=1000, sampling="low_noise",
                    source=Source(density=DENSITY, vth=0.0, drift=(0.2 * SIGMA, 0, 0), emit=15, every=5))
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(
         120, store_every=1, store_particles=False)

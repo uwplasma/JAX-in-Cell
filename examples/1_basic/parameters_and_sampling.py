@@ -17,7 +17,7 @@ lambda_D = v_th / (sqrt(2) omega_pe) = sqrt(eps0 T / (n e^2)).
   about sqrt(2/N): noise that the field sees at once.
 * "lattice", the default: equally spaced positions and random velocities. The density is
   uniform to round-off; the velocities keep their sampling noise.
-* "quiet": equally spaced positions and velocities at the quantiles of the Maxwellian.
+* "low_noise": equally spaced positions and velocities at the quantiles of the Maxwellian.
   Both moments are exact up to the discreteness of the quantiles, and the field starts
   orders of magnitude quieter: the loading for following small, linear signals.
 
@@ -58,7 +58,7 @@ print(f"v_th = sqrt(2T/m) = {v_th:.4e} m/s,  omega_pe = {omega_pe:.4e} rad/s,  l
 print(f"{cells} cells, {n} particles, {steps} steps of {dt_omega_pe / omega_pe:.3e} s\n")
 
 results, energy = {}, {}
-for sampling in ("random", "lattice", "quiet"):
+for sampling in ("random", "lattice", "low_noise"):
     electrons = Species.electrons(n=n, density=density, vth=(v_th, 0, 0), sampling=sampling)
     ions = Species.ions(n=n, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="lattice")
     simulation = Simulation(Domain(length=debye_lengths * debye, cells=cells, time_step=dt_omega_pe / omega_pe),

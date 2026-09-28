@@ -143,10 +143,10 @@ def entrance(radians):
 def run(B, drift, seed=0):
     """The same plasma at whatever external field and entrance drift are given."""
     electrons = Species("electrons", capacity, -1.0, mass_electron, density, (np.sqrt(2) * spread,) * 3,
-                        active=capacity // 4, sampling="quiet",
+                        active=capacity // 4, sampling="low_noise",
                         source=Source(density=density, vth=(np.sqrt(2) * spread,) * 3, emit=emit_electrons))
     ions = Species("ions", capacity, 1.0, ion_mass, density, (np.sqrt(2) * ion_spread,) * 3,
-                   drift, active=capacity // 4, sampling="quiet",
+                   drift, active=capacity // 4, sampling="low_noise",
                    source=Source(density=density, vth=(np.sqrt(2) * ion_spread,) * 3, drift=drift,
                                  emit=emit_ions, model="drifting"))
     return Simulation(domain, [electrons, ions], Solver(model="electrostatic"), external_B=B,

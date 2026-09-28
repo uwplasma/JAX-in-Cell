@@ -35,9 +35,9 @@ k = 2 * np.pi / length
 
 def simulation(drift):
     electrons = Species.electrons(n=8000, density=density, vth=(0.05 * c, 0, 0), drift=(drift, 0, 0),
-                                  plus_minus=True, sampling="quiet", perturbation_amplitude=5e-7,
+                                  plus_minus=True, sampling="low_noise", perturbation_amplitude=5e-7,
                                   perturbation_mode=1)
-    ions = Species.ions(n=8000, density=density, electrons=electrons, sampling="quiet")
+    ions = Species.ions(n=8000, density=density, electrons=electrons, sampling="low_noise")
     return Simulation(Domain(length=length, cells=cells, dt_over_dx_c=4.5), [electrons, ions],
                       Solver(filter_passes=0))
 

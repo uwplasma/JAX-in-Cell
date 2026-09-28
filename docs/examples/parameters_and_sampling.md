@@ -20,7 +20,7 @@ velocities, and with the quiet start. No wave is seeded: all of it is loading no
 |---|---|---|---|
 | `"random"` | {{ sampling_random_density }} | {{ sampling_random_temperature }} | {{ sampling_random_energy }} |
 | `"lattice"` (default) | {{ sampling_lattice_density }} | {{ sampling_lattice_temperature }} | {{ sampling_lattice_energy }} |
-| `"quiet"` | {{ sampling_quiet_density }} | {{ sampling_quiet_temperature }} | {{ sampling_quiet_energy }} |
+| `"low_noise"` | {{ sampling_low_noise_density }} | {{ sampling_low_noise_temperature }} | {{ sampling_low_noise_energy }} |
 | random sampling predicts | $1/\sqrt{N_{\rm cell}}$ = {{ sampling_predicted_density }} | $\pm\sqrt{2/N}$ = {{ sampling_predicted_temperature }} | — |
 
 Random positions fill the cells as a Poisson process, so the density spread is the

@@ -31,10 +31,10 @@ def wall_potential(cells=120, per_period=10.0, capacity=120000, emit=120, transi
     domain = Domain(length=length, cells=cells, time_step=dt,
                     particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA, 0, 0),
-                        active=capacity // 4, sampling="quiet",
+                        active=capacity // 4, sampling="low_noise",
                         source=Source(density=AMPLITUDE * DENSITY, vth=(np.sqrt(2) * SIGMA,) * 3, emit=emit))
     ions = Species("ions", capacity, 1.0, MASS_RATIO * mass_electron, DENSITY, 0.0, (BEAM * SIGMA, 0, 0),
-                   active=capacity // 4, sampling="quiet",
+                   active=capacity // 4, sampling="low_noise",
                    source=Source(density=DENSITY, vth=0.0, drift=(BEAM * SIGMA, 0, 0), emit=emit))
     out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(
         steps, seed=seed, store_every=steps // stored, store_particles=False).validate()

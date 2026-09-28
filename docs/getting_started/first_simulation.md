@@ -124,6 +124,6 @@ agreement with kinetic theory across the unstable range.
 |---|---|
 | `drift` | moves along the growth-rate curve |
 | `n` | the noise floor falls as $1/\sqrt N$ |
-| `sampling="quiet"` | the noise floor falls much faster |
+| `sampling="low_noise"` | the noise floor falls much faster |
 | `Solver(algorithm="implicit")` | the energy error drops to round-off |
 | `cells` | the finite-grid instability appears when $\Delta x$ passes $\lambda_D$ |

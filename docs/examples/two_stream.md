@@ -74,7 +74,7 @@ animation. Uncomment the last line to write an MP4 instead.
 ## Things to try
 
 * Change `drift` and watch the growth rate move along the scan curve above.
-* Set `sampling="quiet"` on the electrons: the noise floor drops by orders of magnitude
+* Set `sampling="low_noise"` on the electrons: the noise floor drops by orders of magnitude
   and the linear phase becomes long enough to fit properly.
 * Switch to `Solver(algorithm="implicit")` and watch the energy error fall to round-off
   ({doc}`conservation`).

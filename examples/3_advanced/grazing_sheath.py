@@ -285,11 +285,11 @@ angles = 0.5 * (np.asarray(impacts.angle_edges)[:-1] + np.asarray(impacts.angle_
 # above the plane after three transits (grazing_sheath.md, "The rehearsal").
 electrons = Species("electrons", capacity_electrons, -1.0, mass_electron, density,
                     v=np.resize(electron_reservoir, (capacity_electrons, 3)),
-                    active=capacity_electrons // 4, sampling="quiet",
+                    active=capacity_electrons // 4, sampling="low_noise",
                     source=Source(density=density, samples=electron_reservoir, emit=emit_electrons,
                                   every=every_electrons))
 ions = Species("ions", capacity_ions, 1.0, mass_ratio * mass_electron, density,
-               v=np.resize(ion_reservoir, (capacity_ions, 3)), active=capacity_ions // 4, sampling="quiet",
+               v=np.resize(ion_reservoir, (capacity_ions, 3)), active=capacity_ions // 4, sampling="low_noise",
                source=Source(density=density, samples=ion_reservoir, emit=emit_ions, every=every_ions))
 out = Simulation(domain, [electrons, ions], Solver(model="electrostatic"),
                  external_B=external_B, impacts=impacts).run(

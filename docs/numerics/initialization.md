@@ -42,7 +42,7 @@ $\lambda_D = v_{th}/(\sqrt2\,\omega_p)$. `drift` adds $u$ per component.
 standard deviation $v_{th}/\sqrt2$ using the run's PRNG key, so `seed` changes the
 realisation.
 
-**Quiet start** (`sampling="quiet"`). The velocity of particle $p$ is placed at a quantile
+**Quiet start** (`sampling="low_noise"`). The velocity of particle $p$ is placed at a quantile
 of the Maxwellian,
 
 ```{math}
