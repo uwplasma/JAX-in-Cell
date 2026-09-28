@@ -211,10 +211,10 @@
     },
     "fig_sheath_source.py": {
       "backend": "cpu",
-      "git": "a82b71823c87b953877cd78fa8211e5d593880f7-dirty",
+      "git": "fd78c64ea717f2ddd6e175fb580b89a187e57c75-dirty",
       "jax": "0.10.2",
       "jax_enable_x64": true,
-      "jaxincell": "unknown",
+      "jaxincell": "0.1.dev435+ga82b71823.d20260928",
       "numpy": "2.4.6",
       "platform": "Linux x86_64",
       "python": "3.11.15",

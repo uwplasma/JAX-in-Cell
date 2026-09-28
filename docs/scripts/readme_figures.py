@@ -33,7 +33,7 @@ PANELS = {
     "conservation": ("conservation", 3, 1, 0, 0),
     "invariants": ("invariants", 3, 1, 1, 0),
     "weibel": ("weibel", 3, 1, 2, 0),
-    "sheath_unmagnetized": ("sheath_source", 3, 1, 1, 0),
+    "sheath_unmagnetized": ("sheath_source", 3, 1, 0, 0),
     "sheath_magnetized": ("sheath_magnetized", 3, 1, 1, 0),
     "sheath_reflection": ("sheath", 3, 1, 2, 0),
     "wall_reflection": ("wall_reflection", 3, 1, 0, 0),

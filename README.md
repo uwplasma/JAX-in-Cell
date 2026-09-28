@@ -223,13 +223,14 @@ simulation. Click a figure for its documentation page; the numbers come from
 <table>
 <tr>
 <td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_optimization.html"><img src="docs/_static/readme/sheath_optimization.png" width="100%" alt="Inverse problem"></a><br>
-<b>Inverse problem</b>: a wall's reflectivity recovered from the sheath it holds, 0.326 against 0.35; gradients match finite differences to 8–10 digits.<br>
+<b>Inverse problem</b>: a wall's reflectivity recovered from the sheath it holds, 0.344 ± 0.021 against 0.35 on held-out data; gradients match finite differences to 8–10 digits.<br>
 <a href="examples/3_advanced/sheath_optimization.py"><code>3_advanced/sheath_optimization.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/sheath_optimization.html">docs</a></td>
 <td width="50%" valign="top"><a href="https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html"><img src="docs/_static/readme/optimize_two_stream.png" width="100%" alt="Gradients through the run"></a><br>
-<b>Gradients through the run</b>: `jax.grad` of the growth rate agrees with finite differences; 12 ascent steps find the fastest-growing drift to 0.1 %.<br>
+<b>Gradients through the run</b>: <code>jax.grad</code> of the growth rate agrees with finite differences; 12 ascent steps find the fastest-growing drift to 0.1 %.<br>
 <a href="examples/3_advanced/optimize_two_stream.py"><code>3_advanced/optimize_two_stream.py</code></a> · <a href="https://jax-in-cell.readthedocs.io/en/latest/examples/optimize_two_stream.html">docs</a></td>
 </tr>
 </table>
+
 ### Speed
 
 <p align="center"><img src="docs/_static/figures/scaling.png" width="70%" alt="Cost per particle and per cell"></p>
