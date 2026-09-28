@@ -37,6 +37,17 @@ components, and advances the fields on a staggered (Yee) grid. It has
 The whole run is one XLA program on a CPU, GPU or TPU. Every result below is checked against
 a closed-form or linear kinetic result, not against another simulation.
 
+<table align="center">
+<tr>
+<td><img src="docs/_static/movies/two_stream.avif" width="100%" alt="Two-stream instability"></td>
+<td><img src="docs/_static/movies/bump_on_tail.avif" width="100%" alt="Bump-on-tail instability"></td>
+</tr>
+<tr>
+<td><img src="docs/_static/movies/weibel.avif" width="100%" alt="Weibel instability"></td>
+<td><img src="docs/_static/movies/sheath_unmagnetized.avif" width="100%" alt="Sheath at a floating wall"></td>
+</tr>
+</table>
+
 ## Install
 
 ```bash
@@ -247,13 +258,6 @@ simulation. Click a figure for its documentation page; the numbers come from
 Measured on a shared laptop CPU (Apple M3 Max, JAX 0.11, load about 10), so an idle machine is
 faster; `docs/scripts/fig_scaling.py` reproduces it, and the same code runs on a GPU or TPU
 without change.
-
-Bump-on-tail instability with periodic (left) and reflective (right) walls:
-
-<table align="center"><tr>
-<td><video src="https://github.com/user-attachments/assets/5f085f92-cb65-4765-b586-19e727bd2aab" controls width="100%"></video></td>
-<td><video src="https://github.com/user-attachments/assets/9f33bac8-319e-4aba-91fb-befc64bca70e" controls width="100%"></video></td>
-</tr></table>
 
 ## Run one from a file
 

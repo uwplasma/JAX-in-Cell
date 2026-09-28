@@ -12,6 +12,7 @@ jaxincell/version.py
 .DS_Store
 .vscode/
 *.mp4
+!docs/_static/movies/*.avif
 *.npz
 *.h5
 *.bp

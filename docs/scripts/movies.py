@@ -181,6 +181,28 @@ def sheath():
     return fig, update, range(t.size)
 
 
+def avif(path, width=960, fps=12, budget=300_000):
+    """An animated AVIF of the MP4 for the README, which plays images but not repository videos:
+    960 px at 12 frames a second, at the highest quality of 40, 35, 30, 25 that fits the budget."""
+    import io
+    import subprocess
+    from PIL import Image
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-vf", f"fps={fps},scale={width}:-2:flags=lanczos",
+                          "-f", "image2pipe", "-vcodec", "png", "-"], capture_output=True, check=True).stdout
+    starts, i = [], raw.find(b"\x89PNG")
+    while i >= 0:
+        starts.append(i)
+        i = raw.find(b"\x89PNG", i + 1)
+    frames = [Image.open(io.BytesIO(raw[a:b])).convert("RGB") for a, b in zip(starts, starts[1:] + [None])]
+    out = path.with_suffix(".avif")
+    for quality in (40, 35, 30, 25):
+        frames[0].save(out, save_all=True, append_images=frames[1:], duration=1000 // fps, loop=0,
+                       quality=quality, speed=6)
+        if out.stat().st_size < budget:
+            break
+    return out
+
+
 MOVIES = {"two_stream": two_stream, "bump_on_tail": bump_on_tail, "weibel": weibel, "sheath_unmagnetized": sheath}
 
 if __name__ == "__main__":
@@ -196,3 +218,5 @@ if __name__ == "__main__":
                 writer.grab_frame()
         plt.close(fig)
         print(f"wrote {path.relative_to(ROOT)} ({path.stat().st_size / 1024:.0f} kB, {len(frames)} frames)")
+        web = avif(path)
+        print(f"wrote {web.relative_to(ROOT)} ({web.stat().st_size / 1024:.0f} kB)")
