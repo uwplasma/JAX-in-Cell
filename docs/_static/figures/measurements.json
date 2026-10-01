@@ -68,14 +68,14 @@
     },
     "fig_collisions.py": {
       "backend": "cpu",
-      "git": "6575ffcef05a5137a23c5d97e0f46eddf17f583d-dirty",
-      "jax": "0.11.1",
+      "git": "645f8311850173db125e7fecee2a03ebf7875756",
+      "jax": "0.11.0",
       "jax_enable_x64": true,
-      "jaxincell": "0.2.dev179+g7a6cfb453.d20260922",
-      "numpy": "2.5.3",
+      "jaxincell": "0.1",
+      "numpy": "2.5.1",
       "platform": "Darwin arm64",
-      "python": "3.12.9",
-      "scipy": "1.18.1"
+      "python": "3.13.7",
+      "scipy": "1.18.0"
     },
     "fig_compare_models.py": {
       "backend": "gpu",
