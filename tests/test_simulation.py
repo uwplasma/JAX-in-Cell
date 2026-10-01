@@ -942,8 +942,6 @@ def test_simulation_run_delegates_to_simulation(monkeypatch):
     assert calls[-1] is runtime_input_parameters
 
 
-
-
 # Explicit initial position/velocity overrides are deferred until Simulation.run()
 # grows a public initial-state override API again.
 #
