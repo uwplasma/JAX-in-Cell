@@ -274,7 +274,8 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
     charge_to_mass_ratios = charge_mass_integer_lookup[species_integer_index].reshape((-1,1))
 
     speed_limit = 0.99 * speed_of_light
-    velocities = jnp.where(jnp.abs(velocities) >= speed_limit, jnp.sign(velocities) * speed_limit, velocities)
+    speed = jnp.linalg.norm(velocities, axis=1, keepdims=True) if solver_parameters["relativistic"] else jnp.abs(velocities)
+    velocities *= jnp.minimum(1.0, speed_limit / jnp.maximum(speed, speed_limit))
 
     return {
         "positions": positions,
