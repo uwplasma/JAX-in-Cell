@@ -445,6 +445,10 @@ class Simulation:
         self.build_domain()
         self.initialize_particles()
         self.initialize_fields()
+        if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
+            bool(jnp.any(field != 0)) for field in (self.external_electric_field, self.external_magnetic_field)
+        ):
+            raise ValueError("Implicit CN does not apply prescribed grid fields; use the explicit solver.")
         self.build_hash_values()
 
     def clean_runtime_input_parameters(self, input_parameters=None):

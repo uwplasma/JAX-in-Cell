@@ -157,6 +157,15 @@ def test_cn_rejects_unsupported_boundary_and_relativistic_inputs(key):
         Simulation(p)
 
 
+@pytest.mark.parametrize("kind,component", [("electric", "E"), ("magnetic", "B")])
+def test_cn_rejects_ignored_prescribed_grid_fields(kind, component):
+    p = small_simulation_parameters(total_steps=1)
+    p["solver_parameters"]["time_evolution_algorithm"] = 1
+    p["external_field_parameters"] = {f"external_{kind}_field": {component: jnp.ones((8, 3))}}
+    with pytest.raises(ValueError, match="does not apply prescribed grid fields"):
+        Simulation(p)
+
+
 def test_simulation_shapes_and_basic_consistency():
     total_steps = 10
     number_grid_points = 8
