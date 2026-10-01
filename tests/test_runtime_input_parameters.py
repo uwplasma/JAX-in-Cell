@@ -1,9 +1,11 @@
 from copy import deepcopy
 
+import jax
 import jax.numpy as jnp
 import pytest
 
 from jaxincell import Simulation
+from jaxincell._constants import speed_of_light
 from jaxincell._parameters._sections import PARAMETER_SECTIONS
 from jaxincell._parameters._species_parameters import resolve_species_references
 from jaxincell._routing import build_runtime_parameter_sections
@@ -485,3 +487,50 @@ def test_runtime_input_parameters_accept_the_deprecated_Debye_length_name():
     with pytest.warns(DeprecationWarning):
         cleaned = sim.clean_runtime_input_parameters({"electrons": {"electrons0": {"grid_points_per_Debye_length": 1.5}}})
     assert cleaned["species_parameters"]["electrons"]["_electrons0"] == {"dx_over_Debye_length": 1.5}
+
+
+@pytest.mark.parametrize("via_setter", [False, True])
+@pytest.mark.parametrize("labeled", [False, True])
+@pytest.mark.parametrize("canonical", [False, True])
+def test_initial_Debye_alias_keeps_differentiable_input(via_setter, labeled, canonical):
+    parameters = base_simulation_parameters()
+    values = {"grid_points_per_Debye_length": 1.5}
+    if canonical:
+        values["dx_over_Debye_length"] = 0.5
+    inputs = {"electrons": {"electrons0": values} if labeled else values}
+    original = deepcopy(inputs)
+    with pytest.warns(DeprecationWarning, match="dx_over_Debye_length"):
+        if via_setter:
+            sim = Simulation(parameters)
+            sim.input_parameters = inputs
+        else:
+            parameters["input_parameters"] = inputs
+            sim = Simulation(parameters)
+    expected = 0.5 if canonical else 1.5
+    exposed = sim.input_parameters["electrons"]
+    if labeled:
+        exposed = exposed["electrons0"]
+    assert set(exposed) == {"dx_over_Debye_length"}
+    assert scalar(exposed["dx_over_Debye_length"]) == expected
+    assert scalar(sim.species_parameters["electrons"]["_electrons0"]["dx_over_Debye_length"]) == expected
+    assert inputs == original
+
+
+@pytest.mark.parametrize("canonical", [False, True])
+def test_runtime_Debye_alias_gradient_and_canonical_precedence(canonical):
+    parameters = base_simulation_parameters()
+    parameters["species_parameters"]["electrons"]["electrons0"]["weight"] = 0.0
+    sim = Simulation(parameters)
+
+    def plasma_frequency(alias):
+        values = {"grid_points_per_Debye_length": alias}
+        if canonical:
+            values["dx_over_Debye_length"] = 0.5
+        return sim.run({"electrons": {"electrons0": values}})["plasma_frequency"]
+
+    with pytest.warns(DeprecationWarning, match="dx_over_Debye_length"):
+        value, gradient = jax.value_and_grad(plasma_frequency)(1.5)
+    # omega_pe = vth / (sqrt(2) * lambda_D), with lambda_D = dx / g.
+    slope = 0.01 * speed_of_light / (jnp.sqrt(2) * sim.dx)
+    assert scalar(value) == pytest.approx(scalar(slope) * (0.5 if canonical else 1.5))
+    assert scalar(gradient) == pytest.approx(0.0 if canonical else scalar(slope))

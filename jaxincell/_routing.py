@@ -83,7 +83,7 @@ def route_nested_initial_species_parameters(input_parameters, parameters, differ
                 if species_label is not None
                 else _get_initial_species_target_labels(parameters, species_type)
             )
-            for key, value in species_values.items():
+            for key, value in rename_deprecated_species_parameters({**species_values}).items():
                 input_path = (
                     (species_type, key)
                     if species_label is None
