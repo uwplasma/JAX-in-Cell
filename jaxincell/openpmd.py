@@ -42,7 +42,7 @@ __all__ = ["write_openpmd"]
 _DIMS = {"E": dict(L=1, M=1, T=-3, I=-1), "B": dict(M=1, T=-2, I=-1), "J": dict(L=-2, I=1),
          "rho": dict(L=-3, T=1, I=1), "position": dict(L=1), "positionOffset": dict(L=1),
          "momentum": dict(L=1, M=1, T=-1), "weighting": {}, "charge": dict(T=1, I=1), "mass": dict(M=1)}
-_FACES = ("E", "J")  # on the right face of each cell; B and rho are on the centres
+_FACES = ("E", "J", "external_E")  # flat E/J on right faces; tensors and B/rho on centres
 
 
 def _describe(io, record, name, particle=False):
@@ -70,18 +70,22 @@ def _constant(io, component, value, count):
     component.unit_SI = 1.0
 
 
-def _write_meshes(io, it, out, s, keep):
-    for name in ("E", "B", "J", "rho"):
-        data, mesh = np.asarray(getattr(out, name)[s], dtype=np.float64), it.meshes[name]
-        mesh.geometry, mesh.axis_labels, mesh.grid_unit_SI = io.Geometry.cartesian, ["x"], 1.0
+def _write_meshes(io, it, out, s, keep, external):
+    records = [(name, np.asarray(getattr(out, name)[s], dtype=np.float64), (float(out.length),))
+               for name in ("E", "B", "J", "rho")] + external
+    for name, data, lengths in records:
+        mesh = it.meshes[name]
+        mesh.geometry, mesh.axis_labels, mesh.grid_unit_SI = io.Geometry.cartesian, list("xyz"[:len(lengths)]), 1.0
         # x_i = (offset + (i + position) * spacing); position is in [0, 1) from the lower corner,
         # so a centre is 0.5 and the right face of cell i is the lower corner of cell i + 1
-        faces = name in _FACES
-        mesh.grid_spacing = [float(out.dx)]
-        mesh.grid_global_offset = [-0.5 * float(out.length) + (float(out.dx) if faces else 0.0)]
-        _describe(io, mesh, name)
-        for label, column in zip("xyz", data.T) if data.ndim == 2 else [(io.Record_Component.SCALAR, data)]:
-            mesh[label].position = [0.0 if faces else 0.5]
+        faces = name in _FACES and data.ndim == 2
+        spacing = [length / cells for length, cells in zip(lengths, data.shape)]
+        mesh.grid_spacing = spacing
+        mesh.grid_global_offset = [-0.5 * length + (spacing[0] if faces else 0.0) for length in lengths]
+        _describe(io, mesh, name.removeprefix("external_"))
+        components = zip("xyz", np.moveaxis(data, -1, 0)) if data.ndim > 1 else [(io.Record_Component.SCALAR, data)]
+        for label, column in components:
+            mesh[label].position = [0.0 if faces else 0.5] * len(lengths)
             _store(io, mesh[label], column, keep)
 
 
@@ -114,7 +118,7 @@ def _write_particles(io, it, out, s, area, keep):
             _constant(io, sp[rec][io.Record_Component.SCALAR], values[first], count)
 
 
-def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0):
+def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, simulation=None):
     """Write ``out`` to the openPMD series ``path`` and return the path.
 
     Args:
@@ -125,14 +129,31 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0):
         particles: Write the per-species particle records (skipped when ``out.x is None``).
         area: Transverse area in m^2 that the one-dimensional run stands for; ``weighting`` is
             ``out.weight * area``, a number of physical particles (see the module docstring).
+        simulation: The simulation that produced ``out``, to include its static prescribed
+            fields as separate ``external_E``/``external_B`` meshes. Flat E/B keep their face/centre
+            staggering; 3D tensors are centred with the domain's x/y/z periods. No field histories
+            are added to ``out``. Omitted fields are not written, and ``meshes=False`` skips them.
 
     Raises:
         ImportError: If the optional dependency ``openpmd-api`` is missing.
+        ValueError: If the supplied simulation's x geometry differs from the output.
     """
     try:
         import openpmd_api as io
     except ImportError as exc:
         raise ImportError("write_openpmd needs the optional openpmd-api: pip install openpmd-api") from exc
+    external = []
+    if simulation is not None:
+        d = simulation.domain
+        if d.cells != len(out.grid) or not np.allclose((d.length, d.dx), (out.length, out.dx), rtol=1e-12, atol=0):
+            raise ValueError("simulation geometry does not match the output's cells, length and dx")
+        for name in ("external_E", "external_B") if meshes else ():
+            field = getattr(simulation, name)
+            if field is not None:
+                data = np.asarray(field, dtype=np.float64)
+                lengths = (float(d.length),) if data.ndim == 2 else (
+                    float(d.length), float(d.length_y), float(d.length_z))
+                external.append((name, data, lengths))
     root, ext = os.path.splitext(os.fspath(path))
     path = root + (ext or ".json")
     series = io.Series(path, io.Access.create)
@@ -141,7 +162,7 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0):
         it, keep = series.iterations[s], []
         it.time, it.dt, it.time_unit_SI = float(out.t[s]), float(out.dt), 1.0
         if meshes:
-            _write_meshes(io, it, out, s, keep)
+            _write_meshes(io, it, out, s, keep, external)
         if particles and out.x is not None:
             _write_particles(io, it, out, s, area, keep)
         series.flush()

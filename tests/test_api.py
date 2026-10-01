@@ -443,6 +443,81 @@ def test_openpmd_export_round_trips():
         series.close()
 
 
+def test_openpmd_exports_the_prescribed_fields_that_turn_the_particles(tmp_path):
+    io = pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+
+    d = Domain(length=0.01, cells=8, time_step=1e-10)
+    x, v = jnp.zeros((4, 3)), jnp.tile(jnp.array([1000., 0., 0.]), (4, 1))
+    e = Species.electrons(n=4, density=1., vth=(0., 0., 0.), x=x, v=v)
+    i = Species.ions(n=4, density=1., electrons=e, x=x, v=v)
+    E, B = jnp.zeros((8, 3)), jnp.tile(jnp.array([0., 0., 1e-3]), (8, 1))
+    sim = Simulation(d, [e, i], external_E=E, external_B=B)
+    out = sim.run(1)
+    angle = 2 * np.arctan(elementary_charge * 1e-3 * d.dt / (2 * mass_electron))
+    assert np.allclose(np.asarray(out.v[0, 0]), [1000 * np.cos(angle), 1000 * np.sin(angle), 0], rtol=1e-12)
+    series = io.Series(write_openpmd(out, tmp_path / "magnetized.json", simulation=sim), io.Access.read_only)
+    it = series.iterations[0]
+    assert set(it.meshes) == {"E", "B", "J", "rho", "external_E", "external_B"}
+    written, self_B = it.meshes["external_B"]["z"].load_chunk(), it.meshes["B"]["z"].load_chunk()
+    series.flush()
+    assert np.array_equal(written, np.asarray(B[:, 2])) and not np.any(self_B)
+    for name, want in (("external_E", out.faces), ("external_B", out.grid)):
+        mesh, component = it.meshes[name], it.meshes[name]["z"]
+        where = mesh.grid_global_offset[0] + (np.arange(d.cells) + component.position[0]) * mesh.grid_spacing[0]
+        assert np.allclose(where, np.asarray(want), rtol=1e-12, atol=1e-14)
+        assert mesh.grid_unit_SI == component.unit_SI == 1.
+    series.close()
+    path = write_openpmd(out, tmp_path / "particles.json", meshes=False, simulation=sim)
+    series = io.Series(path, io.Access.read_only)
+    assert not len(series.iterations[0].meshes)
+    series.close()
+
+
+def test_openpmd_prescribed_tensors_keep_xyz_values_units_and_coordinates(tmp_path):
+    io = pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+
+    d = Domain(length=0.01, cells=8, time_step=1e-12, length_y=0.02, length_z=0.03)
+    E = jnp.arange(8 * 2 * 3 * 3, dtype=float).reshape(8, 2, 3, 3) * 1e-6
+    sim = small_simulation(n=4).replace(domain=d, external_E=E, external_B=2 * E)
+    out = sim.run(2, store_particles=False)
+    series = io.Series(write_openpmd(out, tmp_path / "tensor.json", simulation=sim), io.Access.read_only)
+    for step in series.iterations:
+        for name, data, units in (("external_E", E, [1, 1, -3, -1, 0, 0, 0]),
+                                  ("external_B", 2 * E, [0, 1, -2, -1, 0, 0, 0])):
+            mesh = series.iterations[step].meshes[name]
+            assert list(mesh.axis_labels) == ["x", "y", "z"]
+            assert list(mesh.unit_dimension) == units and mesh.grid_unit_SI == 1.
+            for axis, label in enumerate("xyz"):
+                component = mesh[label]
+                written = component.load_chunk()
+                series.flush()
+                assert np.array_equal(written, np.asarray(data[..., axis])) and component.unit_SI == 1.
+                for dim, (cells, length) in enumerate(zip(data.shape[:-1], (d.length, d.length_y, d.length_z))):
+                    offset, spacing = mesh.grid_global_offset[dim], mesh.grid_spacing[dim]
+                    where = offset + (np.arange(cells) + component.position[dim]) * spacing
+                    assert np.allclose(where, -length / 2 + (np.arange(cells) + 0.5) * length / cells, atol=1e-15)
+    series.close()
+
+
+@pytest.mark.parametrize("mismatch", ["cells", "length", "dx"])
+def test_openpmd_rejects_mismatched_simulation_geometry_before_creating_a_file(tmp_path, mismatch):
+    pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+
+    sim = small_simulation(n=4)
+    out = sim.run(1, store_particles=False)
+    if mismatch == "dx":
+        out = out.replace(dx=out.dx * 2)
+    else:
+        sim = sim.replace(domain=sim.domain.replace(**{mismatch: getattr(sim.domain, mismatch) * 2}))
+    path = tmp_path / "wrong.json"
+    with pytest.raises(ValueError, match="simulation geometry does not match"):
+        write_openpmd(out, path, simulation=sim)
+    assert not path.exists()
+
+
 def test_courant_warning_fires_only_when_a_light_wave_can_be_seeded():
     """Stepping above c dt = dx is safe for an electrostatic run and diverges as
     soon as the particles carry transverse velocity, so the warning has to
