@@ -1,10 +1,14 @@
+import jax.numpy as jnp
 import pytest
 
+from jaxincell import Simulation
+from jaxincell._constants import elementary_charge, mass_electron
 from jaxincell._parameters._external_field_parameters import (
     clean_and_initialize_external_field_parameters,
     DEFAULT_EXTERNAL_FIELD_PARAMETERS,
     build_external_field_hash,
 )
+from tests.helpers import base_simulation_parameters
 
 def test_clean_and_initialize_external_field_parameters_defaults_and_float_conversion():
     """Test jaxincell._parameters._external_field_parameters.clean_and_initialize_external_field_parameters.
@@ -90,3 +94,22 @@ def test_external_field_defaults_do_not_warn(recwarn):
     clean_and_initialize_external_field_parameters(
         {"external_electric_field_amplitude": 0.0, "external_electric_field_wavenumber": 3.0})
     assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []
+
+
+def test_ignored_analytic_option_does_not_disable_supplied_grid_field():
+    parameters = base_simulation_parameters()
+    for species in parameters["species_parameters"].values():
+        for values in species.values():
+            values["initial_positions"] = jnp.zeros((2, 3))
+            values["initial_velocities"] = jnp.zeros((2, 3))
+    parameters["external_field_parameters"] = {
+        "external_electric_field_amplitude": 1000.0,
+        "external_electric_field": {"E": jnp.tile(jnp.array([1.0, 0.0, 0.0]), (4, 1))},
+    }
+    with pytest.warns(UserWarning, match="external_electric_field_amplitude.*not applied") as caught:
+        sim = Simulation(parameters)
+    assert "Supplied grid arrays still apply" in str(caught[0].message)
+    output = sim.run()
+    # A uniform 1 V/m grid field, rather than the ignored 1000 V/m option, accelerates electrons.
+    expected = -elementary_charge / mass_electron * sim.dt
+    assert jnp.allclose(output["velocities"][0, :2, 0], expected, rtol=1e-12, atol=1e-12)

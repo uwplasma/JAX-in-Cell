@@ -42,14 +42,7 @@ def clean_and_initialize_external_field_parameters(external_field_parameters, in
     return external_field_parameters
 
 def warn_if_external_field_request_is_ignored(external_field_parameters):
-    """Warn when a requested external field would silently not be applied.
-
-    The analytic and callable forms of the external field are accepted and
-    validated, but no code path applies them: a run that asks for one through
-    these parameters gets no external field at all, with nothing in the output to
-    say so. Until they are implemented, say so at setup time and point at the
-    array form, which is applied.
-    """
+    """Warn about unsupported analytic field options; supplied grid arrays still apply."""
     ignored = [
         name for name, requested in (
             ("external_electric_field_amplitude",
@@ -66,9 +59,9 @@ def warn_if_external_field_request_is_ignored(external_field_parameters):
         return
     warnings.warn(
         f"{', '.join(ignored)} set but not applied: this release does not build an "
-        "external field from an amplitude, a wavenumber or a function, so the "
-        "simulation will run with no external field. Supply the field on the grid "
-        "instead, for example external_field_parameters={'external_magnetic_field': "
+        "external field from an amplitude, a wavenumber or a function. "
+        "Supplied grid arrays still apply, for example "
+        "external_field_parameters={'external_magnetic_field': "
         "{'B': array of shape (number_grid_points, 3)}}.",
         UserWarning,
         stacklevel=3,
