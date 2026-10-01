@@ -144,6 +144,19 @@ def assert_simulation_output_contract(
     output["positions"].block_until_ready()
 
 
+@pytest.mark.parametrize("key", ["particle_BC_left", "particle_BC_right", "field_BC_left", "field_BC_right", "relativistic"])
+def test_cn_rejects_unsupported_boundary_and_relativistic_inputs(key):
+    p = small_simulation_parameters(total_steps=1)
+    p["solver_parameters"]["time_evolution_algorithm"] = 1
+    section = "solver_parameters" if key == "relativistic" else "domain_parameters"
+    p[section][key] = True if key == "relativistic" else 1
+    if key != "relativistic":
+        kind = key.split("_")[0]
+        p[section][f"{kind}_BC_left"] = p[section][f"{kind}_BC_right"] = 1
+    with pytest.raises(ValueError, match="Implicit CN supports"):
+        Simulation(p)
+
+
 def test_simulation_shapes_and_basic_consistency():
     total_steps = 10
     number_grid_points = 8
