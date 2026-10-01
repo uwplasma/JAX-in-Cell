@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+from ._utils import build_parameter_hash
 from .._constants import mass_proton, mass_electron
 from ._species_definitions import (
     SPECIES_AXES,
@@ -210,22 +211,4 @@ def clean_and_initialize_species_parameters(species_parameters, input_parameters
     return species_parameters
 
 def build_species_hash(species_parameters):
-    hash_list_pre_species = ['nonspeciesdata']
-    for key, value in species_parameters.items():
-        if key not in SPECIES_TYPES:
-            hash_list_pre_species.append(str(key))
-            hash_list_pre_species.append(str(value))
-    hash_pre_species = "".join(hash_list_pre_species)
-
-    species_hashes = []
-    for species_type in SPECIES_TYPES:
-        species_hash_list = [species_type]
-        for species_label, sp in species_parameters[species_type].items():
-            species_hash = [str(species_label)]
-            for key, value in sp.items():
-                species_hash.append(str(key))
-                species_hash.append(str(value))
-            species_hash_list.append("".join(species_hash))
-        species_hashes.append(str(tuple(species_hash_list)))
-
-    return str((hash_pre_species, *species_hashes))
+    return build_parameter_hash(species_parameters)

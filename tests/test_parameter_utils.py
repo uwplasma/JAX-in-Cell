@@ -1,4 +1,5 @@
 from jaxincell._parameters._utils import build_parameter_hash, overlay_parameter_defaults
+import numpy as np
 
 
 def test_overlay_parameter_defaults_precedence_and_no_input_case():
@@ -88,3 +89,13 @@ def test_build_parameter_hash_is_stable_and_order_documented():
     assert build_parameter_hash(parameters) != build_parameter_hash(changed_key_parameters)
     assert build_parameter_hash(parameters) != build_parameter_hash(reordered_parameters)
     assert build_parameter_hash({"alpha": 1.0}) == "alpha1.0"
+
+
+def test_parameter_hash_includes_array_interiors_shape_and_dtype():
+    array = np.zeros((512, 3))
+    original = build_parameter_hash({"species": {"x": array}})
+    changed = array.copy()
+    changed[256, 0] = 1
+    assert str(array) == str(changed)
+    for value in (changed, array.reshape(256, 6), array.astype(np.float32)):
+        assert build_parameter_hash({"species": {"x": value}}) != original

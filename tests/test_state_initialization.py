@@ -828,6 +828,17 @@ def test_initialize_field_state_default_and_provided_external_fields():
     assert jnp.allclose(reflecting_state["fields"][0][:, 0], expected_E_x)
 
 
+@pytest.mark.parametrize("axis", ["x", "y", "z"])
+def test_quiet_counterstreams_pair_samples_without_sign_bias(axis):
+    species = electron_species(**{f"vth_over_c_{axis}": 0.02, f"drift_speed_{axis}": 1e6,
+                                  f"quiet_velocities_{axis}": True, f"velocity_plus_minus_{axis}": True})
+    _, velocities = initialize_species_phase_space(species, 1, 2, 4096, (1., 1., 1.))
+    v = np.asarray(velocities)[:, "xyz".index(axis)]
+    np.testing.assert_array_equal(v[::2], -v[1::2])
+    assert abs(v.mean()) < 1e-9
+    assert np.mean(v < 0) == 0.5
+
+
 def test_quiet_velocities_are_seed_free_gaussian_quantiles():
     """quiet_velocities_*: velocities at Gaussian quantiles in van der Corput order, one base per axis, so the
     sample mean and spread match the drift and thermal speed closely and no seed enters."""

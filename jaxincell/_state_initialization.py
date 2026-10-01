@@ -80,7 +80,11 @@ def initialize_species_phase_space(species, seed_position, seed_velocity, number
         )
 
         if species[f"quiet_velocities_{axis}"]:  # quiet start: Gaussian quantiles in van der Corput order
-            unit_normal = jnp.sqrt(2) * erfinv(2 * van_der_corput(number_particles, (2, 3, 5)[axis_index]) - 1)
+            quantiles = van_der_corput((number_particles + 1) // 2 if species[f"velocity_plus_minus_{axis}"] else number_particles,
+                                      (2, 3, 5)[axis_index])
+            if species[f"velocity_plus_minus_{axis}"]:
+                quantiles = jnp.repeat(quantiles, 2)[:number_particles]
+            unit_normal = jnp.sqrt(2) * erfinv(2 * quantiles - 1)
         else:
             unit_normal = normal(PRNGKey(seed_velocity + axis_index + 4), shape=(number_particles,))
         axis_velocities = species[f"vth_over_c_{axis}"] * speed_of_light / jnp.sqrt(2) * unit_normal
