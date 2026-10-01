@@ -83,11 +83,9 @@ def E_from_Gauss_1D_Cartesian(charge_density, dx, periodic=False):
     Returns:
         array: The electric field at each grid point due to the particles, shape (G,).
     """
-    # Construct divergence matrix for solving Gauss' Law
-    divergence_matrix = jnp.diag(jnp.ones(len(charge_density)))-jnp.diag(jnp.ones(len(charge_density)-1),k=-1)
-    
-    # Solve for the electric field using Gauss' law in the 1D case
-    E_field_from_Gauss = (dx / epsilon_0) * jnp.linalg.solve(divergence_matrix, charge_density)
+    # E_i - E_{i-1} = dx rho_i / epsilon_0, with zero field at the left face.
+    E_field_from_Gauss = (dx / epsilon_0) * jnp.cumsum(
+        charge_density, dtype=jnp.result_type(charge_density, jnp.dtype(float)))
     # A periodic divergence matrix (corner entry -1) is singular: Gauss's law fixes E only up
     # to a constant. The cumulative sum above fixes E at the left edge instead; <E> = 0 is the
     # physical gauge of a periodic box, and the choice the FFT solvers make.
