@@ -200,7 +200,7 @@ def test_simulation_shapes_and_basic_consistency():
     diagnostics(output)
 
     for key in ["positions", "velocities", "masses", "charges"]:
-        assert key not in output
+        assert key in output
 
     for key in [
         "position_electrons",
