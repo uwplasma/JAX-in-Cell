@@ -10,6 +10,11 @@ used for deposit and gather. Its distinguishing property is that the total energ
 conserved to round-off once the iteration has converged, independently of the time
 step.
 
+The implemented CN path supports Newtonian particles and periodic particle/field
+boundaries. Other combinations are rejected; use the explicit path for wall studies.
+Its orbit current does not satisfy discrete charge continuity. Energy conservation
+does not establish Gauss's law or orbit accuracy.
+
 ## Discrete equations
 
 Given $\mathbf E^n$, $\mathbf B^n$, $x^n$, $\mathbf v^n$, the scheme seeks
@@ -22,13 +27,19 @@ $\mathbf E^{n+1}$, $\mathbf B^{n+1}$, $x^{n+1}$, $\mathbf v^{n+1}$ that satisfy
 ```
 
 ```{math}
-\mathbf E^{n+1} = \mathbf E^n + \Delta t\left(c^2\nabla\times\mathbf B^{n+1/2} - \frac{\bar{\mathbf J} - \langle\bar{\mathbf J}\rangle}{\epsilon_0}\right),
+\mathbf E^{n+1} = \mathbf E^n + \Delta t\left(c^2\nabla\times\mathbf B^{n+1/2} - \frac{\bar{\mathbf J}}{\epsilon_0}\right),
 ```
 
 where $\bar{\mathbf J}$ is the current averaged over the particle orbits during the
-step, and $\langle\cdot\rangle$ is the spatial mean. Subtracting the mean current
-removes the $k = 0$ component, which in a periodic box is not constrained by Gauss's
-law and would otherwise accumulate a uniform electric field from any net drift.
+step. Maxwell's equations retain the spatially uniform current: removing it
+suppresses the corresponding electric-field response and breaks particle-field work.
+
+Exact CN stability requires solving these equations. The implemented unrelaxed
+Picard iteration has vacuum Fourier multiplier
+$-(c\Delta t/\Delta x)^2\sin^2(k\Delta x/2)$, so its transverse iteration contracts
+only below unit modulus. Increasing the iteration cap cannot repair a divergent
+iterate. Check timestep and iteration refinement; the cap alone is not a convergence
+guarantee.
 
 The particles are advanced over $N_{sub}$ sub-steps of length $\Delta\tau = \Delta t/N_{sub}$
 in the time-centred fields. For sub-step $\nu$, with $\mathbf E^{n+1/2}$ and
