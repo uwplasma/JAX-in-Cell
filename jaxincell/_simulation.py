@@ -1134,7 +1134,7 @@ class Simulation:
                 # Both sides of the ledger refer to the crossing; correcting only arrival
                 # would make an elastic wall appear to exchange energy.
                 _, u_returned, _, _, _ = apply_particle_bc(x_free, u_impact, ws, incident, box, d.particle_bc,
-                                                          d.restitution, reflection, dx, self._weight_floor())
+                                                           d.restitution, reflection, dx, self._weight_floor())
                 u_bounced = self._thermalise(k_sub, x_free, u_bounced)
                 if 3 in d.particle_bc:
                     thermal_hit = ((x_free[:, 0] < -L / 2) & (d.particle_bc[0] == 3)
