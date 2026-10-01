@@ -214,7 +214,7 @@ def test_implicit_impact_energy_and_event_derivatives_converge(side):
                               x=jnp.zeros((1, 3)), v=jnp.array([[side * speed, 0., 0.]]))
             external = jnp.zeros((16, 3)).at[:, 0].set(side * field)
             return Simulation(domain, [species], Solver(algorithm="implicit", model="electrostatic",
-                                                       picard_iterations=2, substeps=2), external_E=external).run(
+                                                        picard_iterations=2, substeps=2), external_E=external).run(
                 steps, store_every=steps, store_particles=False)
 
         def energy(field, speed):
