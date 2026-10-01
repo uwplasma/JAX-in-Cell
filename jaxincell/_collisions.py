@@ -128,31 +128,30 @@ def _within(key, v, start, n, cell, n_cells, dx, *args):
 
 
 def _between(key, v, block_a, block_b, cell_a, cell_b, n_cells, dx, *args):
-    """Collisions between two species, the longer list driving cell by cell."""
+    """Disjoint random pairs between two species, with the sampled pair density."""
+    if block_a[1] > block_b[1]:
+        block_a, block_b, cell_a, cell_b = block_b, block_a, cell_b, cell_a
     (start_a, n_a), (start_b, n_b) = block_a, block_b
     weight = args[0]
     k_a, k_b, k_scatter = random.split(key, 3)
-    order_a, sorted_a, first_a, count_a = _shuffle_by_cell(k_a, cell_a, n_cells)
+    order_a, sorted_a, first_a, _ = _shuffle_by_cell(k_a, cell_a, n_cells)
     order_b, sorted_b, first_b, count_b = _shuffle_by_cell(k_b, cell_b, n_cells)
     ia, ib = start_a + order_a, start_b + order_b
-    rank_a, rank_b = jnp.arange(n_a) - first_a[sorted_a], jnp.arange(n_b) - first_b[sorted_b]
-    # every particle of a takes the partner of its rank in b, cycled; the particles of b left
-    # over in cells where b is the longer list take theirs from a
+    rank_a = jnp.arange(n_a) - first_a[sorted_a]
+    # Match each rank once. Random ordering samples the longer list without replacement;
+    # the pair density below accounts for the particles left unmatched in either species.
     on_b = count_b[sorted_a]
-    partner_a = ib[jnp.minimum(first_b[sorted_a] + rank_a % jnp.maximum(on_b, 1), n_b - 1)]
-    on_a = count_a[sorted_b]
-    partner_b = ia[jnp.minimum(first_a[sorted_b] + rank_b % jnp.maximum(on_a, 1), n_a - 1)]
-    i, j = jnp.concatenate([ia, ib]), jnp.concatenate([partner_a, partner_b])
-    active = jnp.concatenate([on_b > 0, (on_a > 0) & (rank_b >= on_a)])
+    i, j = ia, ib[jnp.minimum(first_b[sorted_a] + rank_a, n_b - 1)]
+    active = rank_a < on_b
     cells = jnp.concatenate([sorted_a, sorted_b])
     # densities of the cell: n_a, n_b and n_ab = sum over its pairs of min(w_i, w_j)
     zeros_a, zeros_b = jnp.zeros(n_a), jnp.zeros(n_b)
     columns = jnp.zeros((n_cells + 1, 3)).at[cells].add(jnp.stack([
         jnp.concatenate([weight[ia], zeros_b]), jnp.concatenate([zeros_a, weight[ib]]),
-        jnp.where(active, jnp.minimum(weight[i], weight[j]), 0.0)], axis=1)) / dx
+        jnp.concatenate([jnp.where(active, jnp.minimum(weight[i], weight[j]), 0.0), zeros_b])], axis=1)) / dx
     has_pairs = columns[:, 2] > 0
     density = columns[:, 0] * (columns[:, 1] / jnp.where(has_pairs, columns[:, 2], 1.0))
-    return _scatter(k_scatter, v, i, j, active, density[cells], 1.0, *args)
+    return _scatter(k_scatter, v, i, j, active, density[sorted_a], 1.0, *args)
 
 
 def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx, length, n_cells):
