@@ -63,11 +63,11 @@ def run(mode):
                               "number_grid_points": NX, "total_steps": STEPS},
         "species_parameters": {
             "electrons": {"electrons0": {
-                "number_pseudoparticles": N, "grid_points_per_Debye_length": 1.1,
+                "number_pseudoparticles": N, "dx_over_Debye_length": 1.1,
                 "vth_over_c_x": VTH_X, "vth_over_c_z": VTH_Z,
                 "initial_positions": xe, "initial_velocities": ve}},
             "ions": {"ions0": {
-                "number_pseudoparticles": N, "grid_points_per_Debye_length": 1.1,
+                "number_pseudoparticles": N, "dx_over_Debye_length": 1.1,
                 "mass_over_proton_mass": 1, "vth_over_c_x": VTH_IX, "vth_over_c_z": VTH_IZ,
                 "initial_positions": xi, "initial_velocities": vi}}},
         "solver_parameters": {"field_solver": 0, "filter_passes": 0, "print_info": False},
