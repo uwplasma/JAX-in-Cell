@@ -173,12 +173,12 @@ def resolve_species_references(species_parameters):
     return species_parameters
 
 def rename_deprecated_species_parameters(values):
-    """Accept the old name of a renamed parameter, with a DeprecationWarning."""
+    """Accept deprecated names with a warning; canonical names take precedence."""
     for old, new in DEPRECATED_SPECIES_PARAMETERS.items():
         if old in values:
             warnings.warn(f"'{old}' is deprecated, use '{new}' (the same value, dx / lambda_D).",
                           DeprecationWarning, stacklevel=4)
-            values[new] = values.pop(old)
+            values.setdefault(new, values.pop(old))
     return values
 
 def clean_and_initialize_species_parameters(species_parameters, input_parameters=None):
