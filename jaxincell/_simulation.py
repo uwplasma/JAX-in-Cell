@@ -302,7 +302,7 @@ class Simulation:
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
-            "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
+            "time_array":  (jnp.arange(total_steps) + 1) * dt,
             "grid": grid,
             "dt": dt,
             "plasma_frequency": plasma_frequency,
@@ -514,7 +514,7 @@ class Simulation:
     # Getters and setters from here on
     @property
     def domain_parameters(self):
-        return self._domain_parameters
+        return deepcopy(self._domain_parameters)
     
     @domain_parameters.setter
     def domain_parameters(self, new_domain_parameters):
@@ -522,7 +522,7 @@ class Simulation:
 
     @property
     def species_parameters(self):
-        return self._species_parameters
+        return deepcopy(self._species_parameters)
     
     @species_parameters.setter
     def species_parameters(self, new_species_parameters):
@@ -530,7 +530,7 @@ class Simulation:
     
     @property
     def external_field_parameters(self):
-        return self._external_field_parameters
+        return deepcopy(self._external_field_parameters)
     
     @external_field_parameters.setter
     def external_field_parameters(self, new_external_field_parameters):
@@ -538,7 +538,7 @@ class Simulation:
 
     @property
     def source_parameters(self):
-        return self._source_parameters
+        return deepcopy(self._source_parameters)
     
     @source_parameters.setter
     def source_parameters(self, new_source_parameters):
@@ -546,7 +546,7 @@ class Simulation:
     
     @property
     def solver_parameters(self):
-        return self._solver_parameters
+        return deepcopy(self._solver_parameters)
     
     @solver_parameters.setter
     def solver_parameters(self, new_solver_parameters):

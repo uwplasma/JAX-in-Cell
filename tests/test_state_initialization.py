@@ -11,6 +11,7 @@ from jaxincell._constants import (
     speed_of_light,
 )
 from jaxincell._fields import E_from_Gauss_1D_Cartesian
+from jaxincell._particles import boris_step_relativistic
 from jaxincell._parameters._domain_parameters import clean_and_initialize_domain_parameters
 from jaxincell._parameters._external_field_parameters import clean_and_initialize_external_field_parameters
 from jaxincell._parameters._solver_parameters import clean_and_initialize_solver_parameters
@@ -568,7 +569,8 @@ def test_initialize_particle_state_preserves_extra_species_seed_schedule():
     assert jnp.allclose(particle_state["velocities"][second_extra_slice], expected_second_extra_velocities)
 
 
-def test_initialize_particle_state_multi_species_lookups_and_speed_clipping():
+@pytest.mark.parametrize("relativistic", [False, True])
+def test_initialize_particle_state_multi_species_lookups_and_speed_clipping(relativistic):
     """Test jaxincell._state_initialization.initialize_particle_state.
 
     Cases covered:
@@ -577,7 +579,7 @@ def test_initialize_particle_state_multi_species_lookups_and_speed_clipping():
     - velocities at or above the speed limit are clipped to 0.99 * speed_of_light.
     """
     domain = domain_parameters(length=4.0, number_grid_points=4)
-    solver = solver_parameters(seed=42)
+    solver = solver_parameters(seed=42, relativistic=relativistic)
     domain_state = build_domain_state(domain)
     species_parameters = {
         "electrons": {
@@ -724,8 +726,16 @@ def test_initialize_particle_state_multi_species_lookups_and_speed_clipping():
     assert scalar(particle_state["charge_mass_lookup"]["ions._ions1"]) == pytest.approx(
         2.0 * elementary_charge / (3.0 * mass_proton)
     )
-    assert scalar(particle_state["velocities"][2, 0]) == pytest.approx(0.99 * speed_of_light)
-    assert scalar(particle_state["velocities"][2, 1]) == pytest.approx(-0.99 * speed_of_light)
+    limit = 0.99 * speed_of_light / (np.sqrt(2) if relativistic else 1)
+    assert scalar(particle_state["velocities"][2, 0]) == pytest.approx(limit)
+    assert scalar(particle_state["velocities"][2, 1]) == pytest.approx(-limit)
+    if relativistic:
+        _, pushed = boris_step_relativistic(
+            domain_state["dt"], particle_state["positions"], particle_state["velocities"],
+            particle_state["charges"], particle_state["masses"],
+            jnp.zeros_like(particle_state["velocities"]), jnp.zeros_like(particle_state["velocities"]))
+        assert bool(jnp.all(jnp.isfinite(pushed)))
+        assert float(jnp.max(jnp.linalg.norm(pushed, axis=1))) <= 0.99 * speed_of_light * (1 + 1e-14)
     assert scalar(particle_state["vth_electrons"]) == pytest.approx(0.0)
     assert scalar(particle_state["vth_electrons_over_c"]) == pytest.approx(0.0)
     assert scalar(particle_state["charge_electrons"]) == pytest.approx(-elementary_charge)
@@ -826,6 +836,17 @@ def test_initialize_field_state_default_and_provided_external_fields():
     reflecting = domain_parameters(length=4.0, number_grid_points=4, field_BC_left=1, field_BC_right=1)
     reflecting_state = initialize_field_state(reflecting, solver, external_defaults, domain_state, particle_state)
     assert jnp.allclose(reflecting_state["fields"][0][:, 0], expected_E_x)
+
+
+@pytest.mark.parametrize("axis", ["x", "y", "z"])
+def test_quiet_counterstreams_pair_samples_without_sign_bias(axis):
+    species = electron_species(**{f"vth_over_c_{axis}": 0.02, f"drift_speed_{axis}": 1e6,
+                                  f"quiet_velocities_{axis}": True, f"velocity_plus_minus_{axis}": True})
+    _, velocities = initialize_species_phase_space(species, 1, 2, 4096, (1., 1., 1.))
+    v = np.asarray(velocities)[:, "xyz".index(axis)]
+    np.testing.assert_array_equal(v[::2], -v[1::2])
+    assert abs(v.mean()) < 1e-9
+    assert np.mean(v < 0) == 0.5
 
 
 def test_quiet_velocities_are_seed_free_gaussian_quantiles():
