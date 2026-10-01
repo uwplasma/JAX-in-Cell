@@ -124,6 +124,51 @@ def test_species_too_small_to_pair_are_left_alone():
     assert abs((new[1:] ** 2).sum() / (v[1:] ** 2).sum() - 1) < 1e-12
 
 
+@pytest.mark.parametrize("mass_ratio", [1.0, 10.0])
+def test_unequal_cell_counts_conserve_energy_and_momentum(mass_ratio):
+    """A particle reused by simultaneous pairs used to receive their summed kicks,
+    creating kinetic energy even with equal weights. Disjoint pairs must conserve
+    each cell through large angles, for either longer species and empty cells."""
+    rng = np.random.default_rng(9)
+    cell_a, x_a = _cells([1, 9, 2, 18, 0, 1], rng)
+    cell_b, x_b = _cells([9, 1, 18, 2, 1, 0], rng)
+    n_a, n_b = len(cell_a), len(cell_b)
+    cell, x = np.r_[cell_a, cell_b], jnp.concatenate([x_a, x_b])
+    v = jnp.asarray(rng.normal(0.0, 1e6, (n_a + n_b, 3)))
+    mass = np.r_[np.full(n_a, mass_electron), np.full(n_b, mass_ratio * mass_electron)]
+    weight = np.full(n_a + n_b, 1e18)
+    weight[np.flatnonzero(cell == 2)[0]] = 0.0
+    charge = jnp.asarray(np.r_[np.full(n_a, -e_charge), np.full(n_b, e_charge)])
+    new = np.asarray(jax.jit(lambda v: collide(
+        random.PRNGKey(10), x, v, jnp.asarray(weight), jnp.asarray(mass), charge,
+        ((0, n_a), (n_a, n_b)), ((0, 1),), 10.0, 1e-8, 1 / 6, 1.0, 6))(v))
+    wm = weight * mass
+    momentum = [_per_cell(cell, 6, wm[:, None] * u) for u in (np.asarray(v), new)]
+    energy = [_per_cell(cell, 6, wm * (u ** 2).sum(axis=1)) for u in (np.asarray(v), new)]
+    assert np.max(np.abs(momentum[1] - momentum[0])) < 1e-12 * np.max(np.abs(momentum[0]))
+    assert np.max(np.abs(energy[1] / energy[0] - 1)) < 1e-12
+    alone = (cell == 4) | (cell == 5) | (weight == 0)
+    assert np.array_equal(new[alone], np.asarray(v)[alone])
+
+
+@pytest.mark.parametrize("dt_factor", [1.0, 0.5])
+def test_minority_beam_slows_and_diffuses_at_the_full_background_density(dt_factor):
+    """A 1:9 beam must see the full background, even though only a random ninth of
+    it is paired. Both initial rates follow the Fokker-Planck small-angle limit."""
+    n_a, n_b, u, density, coulomb_log = 8192, 9 * 8192, 1e6, 1e20, 10.0
+    v = jnp.zeros((n_a + n_b, 3)).at[:n_a, 0].set(u)
+    nu_0 = e_charge ** 4 * density * coulomb_log / (4 * np.pi * epsilon_0 ** 2 * mass_electron ** 2 * u ** 3)
+    dt = dt_factor * 1e-4 / nu_0
+    new = np.asarray(jax.jit(lambda v: collide(
+        random.PRNGKey(11), jnp.zeros_like(v), v, jnp.full(n_a + n_b, density / n_b),
+        jnp.full(n_a + n_b, mass_electron), jnp.full(n_a + n_b, -e_charge),
+        ((0, n_a), (n_a, n_b)), ((0, 1),), coulomb_log, dt, 1.0, 1.0, 1))(v))
+    slowing = (u - new[:n_a, 0].mean()) / (u * dt)
+    diffusion = (new[:n_a, 1:] ** 2).sum(axis=1).mean() / (u ** 2 * dt)
+    assert abs(slowing / (2 * nu_0) - 1) < 0.05
+    assert abs(diffusion / (2 * nu_0) - 1) < 0.05
+
+
 @pytest.mark.parametrize("n_a, w_a, n_b, w_b", [
     (40_000, 1.0, 40_000, 1.0), (40_000, 1.0, 10_000, 4.0), (40_000, 1.0, 10_000, 0.25), (10_000, 0.25, 40_000, 1.0)])
 def test_each_species_scatters_off_the_density_of_the_other(n_a, w_a, n_b, w_b):
