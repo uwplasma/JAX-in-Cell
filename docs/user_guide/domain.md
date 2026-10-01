@@ -7,10 +7,10 @@ and the boundary conditions.
 |---|---|---|---|---|
 | `length` | `1e-2` | float | yes | Box length $L$ in metres along $x$. The box spans $[-L/2, L/2]$. |
 | `length_y`, `length_z` | `0` | float | yes | Periodic extent in $y$ and $z$; `0` means "same as `length`". Only used to wrap the $y$ and $z$ coordinates of particles. |
-| `number_grid_points` | `50` | int | no | Number of cells $N_x$ along $x$. |
+| `number_grid_points` | `50` | int | no | Number of cells $N_x \ge 2$ along $x$. |
 | `number_grid_points_y`, `number_grid_points_z` | `0` | int | no | Accepted for future use; `0` is replaced by `3`. No field is defined on a $y$ or $z$ grid. |
 | `total_steps` | `350` | int | no | Number of time steps. Every step is stored in the output. |
-| `timestep_over_spatialstep_times_c` | `1.0` | float | yes | $c\,\Delta t/\Delta x$. |
+| `timestep_over_spatialstep_times_c` | `1.0` | float | yes | Finite, positive $c\,\Delta t/\Delta x$. |
 | `particle_BC_left`, `particle_BC_right` | `0` | int | no | Particle boundary condition at $x=-L/2$ and $x=+L/2$: `0` periodic, `1` reflective, `2` absorbing. |
 | `field_BC_left`, `field_BC_right` | `0` | int | no | Field boundary condition: `0` periodic, `1` reflective, `2` absorbing. |
 
@@ -57,3 +57,7 @@ the physically consistent combinations are the diagonal ones: periodic with peri
 reflective with reflective, absorbing with absorbing. {doc}`boundaries` describes what
 each condition does to particles and fields, and {doc}`../numerics/boundaries` gives the
 ghost-cell formulas.
+
+A periodic left boundary requires a periodic right boundary of the same kind, for
+both particles and fields. Different nonperiodic wall types on the two sides remain
+supported.
