@@ -195,6 +195,96 @@ def test_the_impact_energy_a_prescribed_field_gives_and_its_derivative():
     discriminating(float(jax.jvp(arrival, (field_hat, speed_hat), (0.0, 1.0))[1]), speed_hat, 1e-3)
 
 
+@pytest.mark.parametrize("side", [-1, 1])
+def test_implicit_impact_energy_and_event_derivatives_converge(side):
+    """At either wall K = v0^2/2 + E/2, dK/dv0 = v0 and dK/dE = 1/2.
+
+    Unit mass and charge make the per-particle comparisons order one. A tiny
+    density removes self-fields; normalising by its weight must not hide a missing
+    impact. The coarse/fine steps used to give dK/dv0 = 1.425/1.415625.
+    """
+    errors = []
+    for dt, tolerance in [(0.025, 1.5e-3), (0.00625, 6e-5)]:
+        domain = Domain(length=1., cells=16, time_step=dt,
+                        particle_bc="absorbing", field_bc="absorbing")
+        weight, steps = 1e-30, round(.6 / dt)
+
+        def run(field, speed):
+            species = Species("test", 1, 1 / e_charge, 1., weight,
+                              x=jnp.zeros((1, 3)), v=jnp.array([[side * speed, 0., 0.]]))
+            external = jnp.zeros((16, 3)).at[:, 0].set(side * field)
+            return Simulation(domain, [species], Solver(algorithm="implicit", model="electrostatic",
+                                                       picard_iterations=2, substeps=2), external_E=external).run(
+                steps, store_every=steps, store_particles=False)
+
+        def energy(field, speed):
+            return run(field, speed).wall.energy_in[-1, 0, 0 if side < 0 else 1] / weight
+
+        out = run(1., 1.)
+        assert float(out.wall.collected[-1, 0, 0 if side < 0 else 1]) / weight == pytest.approx(1., rel=1e-12)
+        assert float(jnp.sum(out.state.w)) == 0.
+        assert float(jnp.max(jnp.abs(out.E))) < 1e-17
+        value, gradient = jax.jit(jax.value_and_grad(energy, argnums=(0, 1)))(1., 1.)
+        discriminating(float(value), 1., tolerance / 10)
+        discriminating(float(gradient[0]), .5, tolerance)
+        discriminating(float(gradient[1]), 1., tolerance)
+        forward = jax.jvp(energy, (1., 1.), (0., 1.))[1]
+        assert float(forward) == pytest.approx(float(gradient[1]), rel=1e-12)
+        errors.append(abs(float(gradient[1]) - 1.))
+    assert errors[1] < errors[0] / 4
+
+
+@pytest.mark.parametrize("boundary,reflection,restitution", [("reflective", 1., 1.), ("absorbing", .4, .8)])
+def test_implicit_wall_ledger_uses_the_impact_time_on_both_sides(boundary, reflection, restitution):
+    """The normal energy at the wall is one, with an unchanged tangential 1/8.
+
+    A specular wall returns it all; a partially reflecting one returns R times
+    (e^2 + 1/8). Correcting arrival while retaining the end-step return breaks this.
+    """
+    weight, dt = 1e-30, .025
+    domain = Domain(length=1., cells=16, time_step=dt, particle_bc=boundary,
+                    field_bc="absorbing", restitution=restitution)
+    species = Species("test", 1, 1 / e_charge, 1., weight, reflection=reflection,
+                      x=jnp.zeros((1, 3)), v=jnp.array([[1., .3, -.4]]))
+    external = jnp.zeros((16, 3)).at[:, 0].set(1.)
+    out = Simulation(domain, [species], Solver(algorithm="implicit", model="electrostatic",
+                                               picard_iterations=2, substeps=2), external_E=external).run(
+        24, store_every=24, store_particles=False)
+    wall = out.wall
+    discriminating(float(wall.energy_in[-1, 0, 1]) / weight, 1.125, 2e-5)
+    discriminating(float(wall.energy_out[-1, 0, 1]) / weight,
+                   reflection * (restitution ** 2 + .125), 2e-5)
+    assert float(wall.arrived[-1, 0, 1]) / weight == pytest.approx(1., rel=1e-12)
+    assert float(wall.collected[-1, 0, 1]) / weight == pytest.approx(1. - reflection, rel=1e-12, abs=1e-14)
+    if boundary == "reflective":
+        assert float(wall.energy_out[-1, 0, 1] / wall.energy_in[-1, 0, 1]) == pytest.approx(1., rel=1e-14)
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+def test_a_mid_drift_impact_retains_its_event_time_derivative(side):
+    """The chosen dyadic values put the crossing at exactly half the drift.
+
+    One half also denotes no impact. Selecting a side from that value used to
+    discard the left crossing's derivative while recording the correct energy.
+    """
+    dt, speed, weight = .125, 1.875, 1e-30
+    domain = Domain(length=1., cells=16, time_step=dt, particle_bc="absorbing", field_bc="absorbing")
+    distance = .5 * dt * (speed + .5 * dt)
+    external = jnp.zeros((16, 3)).at[:, 0].set(side)
+
+    def energy(v0):
+        species = Species("test", 1, 1 / e_charge, 1., weight,
+                          x=jnp.array([[side * (.5 - distance), 0., 0.]]), v=jnp.array([[side * v0, 0., 0.]]))
+        out = Simulation(domain, [species], Solver(algorithm="implicit", model="electrostatic",
+                                                   picard_iterations=2, substeps=1), external_E=external).run(1)
+        return out.wall.energy_in[-1, 0, 0 if side < 0 else 1] / weight
+
+    gradient = float(jax.grad(energy)(speed))
+    difference = float((energy(speed + 1e-5) - energy(speed - 1e-5)) / 2e-5)
+    discriminating(gradient, speed, 1e-12)
+    assert difference == pytest.approx(gradient, rel=1e-9)
+
+
 @pytest.mark.parametrize("offset", [0.0, 0.17, 0.41, 0.63, 0.88])
 def test_collecting_a_charge_sheet_does_not_change_the_field_behind_it(offset):
     """The electrode closure has to move the charge from the volume to the surface and not
