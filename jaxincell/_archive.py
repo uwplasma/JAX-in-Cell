@@ -26,6 +26,7 @@ import numpy as np
 __all__ = ["save_state", "load_state", "provenance"]
 
 FORMAT = 1      #: Version of the archive layout, written into every file and checked on reading.
+QUINTIC_FORMAT = 2  # an S2-only reader must refuse a state whose charge used S5
 
 
 def _fields(obj):
@@ -115,6 +116,9 @@ def save_state(path, state, simulation=None):
         arrays["counts"] = np.asarray([s.n for s in simulation.species])
         arrays["cells"] = np.asarray(simulation.domain.cells)
         arrays["algorithm"] = np.asarray(simulation.solver.algorithm)
+        if simulation.solver.shape_order == 5:
+            arrays["format"] = np.asarray(QUINTIC_FORMAT)
+            arrays["shape_order"] = np.asarray(5)
     np.savez(path, **arrays)
     return path
 
@@ -124,7 +128,7 @@ def load_state(path, simulation=None):
     :class:`~jaxincell._simulation.State`.
 
     With ``simulation``, the archive is checked against it first -- the species names and counts,
-    the cell count and the integrator -- because a state restored into a differently shaped run
+    the cell count, integrator and particle shape -- because a state restored into a differently shaped run
     fails somewhere later and less clearly. Without it, the state is returned as it stands.
 
     Raises:
@@ -136,14 +140,18 @@ def load_state(path, simulation=None):
     with np.load(str(path), allow_pickle=False) as data:
         stored = {key: data[key] for key in data.files}
     version = int(stored.pop("format", -1))
-    if version != FORMAT:
-        raise ValueError(f"{path} is a format {version} archive and this is jaxincell's format "
-                         f"{FORMAT}; it was written by a different version and is not read here")
+    if version not in (FORMAT, QUINTIC_FORMAT):
+        raise ValueError(f"{path} is a format {version} archive; this jaxincell reads formats "
+                         f"{FORMAT} and {QUINTIC_FORMAT}; it was written by a different version")
+    if version == QUINTIC_FORMAT and not np.array_equal(stored.get("shape_order"), np.asarray(5)):
+        raise ValueError("archive format 2 requires stored shape_order=5")
     if simulation is not None:
+        stored.setdefault("shape_order", np.asarray(2))  # archives predating shape selection used S2
         wanted = {"names": np.asarray([s.name for s in simulation.species]),
                   "counts": np.asarray([s.n for s in simulation.species]),
                   "cells": np.asarray(simulation.domain.cells),
-                  "algorithm": np.asarray(simulation.solver.algorithm)}
+                  "algorithm": np.asarray(simulation.solver.algorithm),
+                  "shape_order": np.asarray(simulation.solver.shape_order)}
         for key, want in wanted.items():
             if key in stored and not np.array_equal(stored[key], want):
                 raise ValueError(f"{path} was written by a run whose {key} is {stored[key].tolist()!r}, "

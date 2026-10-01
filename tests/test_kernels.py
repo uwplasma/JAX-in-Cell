@@ -11,12 +11,14 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from scipy.interpolate import BSpline
 
-from jaxincell import epsilon_0, mu_0, elementary_charge, mass_electron
+from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mu_0,
+                       elementary_charge, load_state, mass_electron, quiet_start, save_state)
 from jaxincell import speed_of_light as c
 from jaxincell._core import (E_x_from_rho, apply_particle_bc, boris, boris_relativistic,
-                             current_from_continuity, deposit, gather, half_step_fields,
-                             s2_weights, smooth, with_ghosts, wrap_positions)
+                             current_from_continuity, deposit, gather, gather_xyz, half_step_fields,
+                             s2_weights, shape_weights, smooth, with_ghosts, wrap_positions)
 
 L, G = 1.0, 32
 dx = L / G
@@ -32,6 +34,226 @@ def quadratic_spline(u):
     than taken from the code under test."""
     u = np.abs(u)
     return np.where(u <= 0.5, 0.75 - u ** 2, np.where(u <= 1.5, 0.5 * (1.5 - u) ** 2, 0.0))
+
+
+def periodic_spline_matrix(position, cells, order):
+    """Independent Cox-de Boor basis, period one, including overlapping periodic images."""
+    centre = (np.arange(cells) + .5) / cells - .5
+    offset = (np.asarray(position)[:, None, None] - centre[None, :, None]
+              + np.arange(-3, 4)[None, None, :]) * cells
+    basis = BSpline.basis_element(np.arange(order + 2) - (order + 1) / 2, extrapolate=False)
+    return np.nan_to_num(basis(offset)).sum(axis=-1)
+
+
+@pytest.mark.parametrize("order", [2, 5])
+def test_cardinal_shape_matches_independent_basis_and_moments(order):
+    """A cardinal degree-p spline convolves p+1 boxes; its variance is (p+1)/12."""
+    x = jnp.asarray(dx * np.linspace(-7, 7, 281) + x0)
+    index, weights = shape_weights(x, x0, dx, order)
+    distance = (np.asarray(x)[:, None] - x0) / dx - np.asarray(index)
+    basis = BSpline.basis_element(np.arange(order + 2) - (order + 1) / 2, extrapolate=False)
+    expected = np.nan_to_num(basis(distance))  # outside the compact support
+    np.testing.assert_allclose(weights, expected, rtol=0, atol=2e-15)
+    # SHARP's W^p integrates its degree-(p-1) raw particle shape across one cell.
+    raw = BSpline.basis_element(np.arange(order + 1) - order / 2, extrapolate=False).antiderivative()
+    integrated = (raw(np.clip(distance + .5, -order / 2, order / 2))
+                  - raw(np.clip(distance - .5, -order / 2, order / 2)))
+    np.testing.assert_allclose(weights, integrated, rtol=0, atol=2e-15)
+    assert np.min(weights) >= 0
+    np.testing.assert_allclose(np.sum(weights, axis=1), 1, rtol=0, atol=2e-15)
+    np.testing.assert_allclose(np.sum(weights * distance, axis=1), 0, rtol=0, atol=3e-15)
+    np.testing.assert_allclose(np.sum(weights * distance**2, axis=1), (order + 1) / 12,
+                               rtol=0, atol=3e-15)
+    _, slope = jax.jvp(lambda position: shape_weights(position, x0, dx, order)[1],
+                       (x,), (jnp.full_like(x, dx),))
+    np.testing.assert_allclose(slope, np.nan_to_num(basis.derivative()(distance)), rtol=0, atol=4e-15)
+
+
+@pytest.mark.parametrize("order", [2, 5])
+def test_periodic_shape_gather_is_the_deposit_transpose_for_every_component(order):
+    rng = np.random.default_rng(15)
+    x = jnp.asarray(np.r_[-L / 2, L / 2, rng.uniform(-L / 2, L / 2, 46)])
+    q, field = jnp.asarray(rng.normal(size=len(x))), jnp.asarray(rng.normal(size=(G, 6)))
+    rho = deposit(x, q, x0, dx, G, (0, 0), order)
+    gathered = gather(with_ghosts(field, (0, 0), shape_order=order), x, x0, dx, order)
+    np.testing.assert_allclose(dx * jnp.sum(rho), jnp.sum(q), rtol=0, atol=2e-14 * float(jnp.sum(abs(q))))
+    np.testing.assert_allclose(jnp.sum(q[:, None] * gathered, axis=0), dx * rho @ field,
+                               rtol=0, atol=2e-14 * float(jnp.sum(abs(q))))
+
+
+@pytest.mark.parametrize("order", [2, 5])
+def test_periodic_xyz_gather_matches_independent_tensor_product(order):
+    rng = np.random.default_rng(16)
+    n, ny, nz = 8, 3, 4
+    position = rng.uniform(-.5, .5, size=(7, 3))
+    position[:2, 0] = [-.5, .5]
+    field = jnp.asarray(rng.normal(size=(n, ny, nz, 6)))
+    matrices = [periodic_spline_matrix(position[:, axis], count, order)
+                for axis, count in enumerate((n, ny, nz))]
+    expected = np.einsum('pa,pb,pc,abcf->pf', *matrices, field)
+    ghosts = with_ghosts(field, (0, 0), shape_order=order)
+    actual = gather_xyz(ghosts, jnp.asarray(position), -.5 + .5 / n, 1 / n, (1., 1.), order)
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=5e-15)
+    flat = field[:, 0, 0]
+    scalar = with_ghosts(flat, (0, 0), shape_order=order)
+    np.testing.assert_allclose(gather_xyz(scalar[:, None, None], jnp.asarray(position),
+                                          -.5 + .5 / n, 1 / n, (1., 1.), order),
+                               gather(scalar, jnp.asarray(position[:, 0]), -.5 + .5 / n, 1 / n, order),
+                               rtol=0, atol=5e-15)
+
+
+@pytest.mark.parametrize("cells", [1, 2])
+def test_quintic_gather_wraps_all_six_centres_on_tiny_periodic_grids(cells):
+    position = jnp.asarray([-.5, -.499, .07, .499, .5])
+    field = jnp.arange(cells * 6, dtype=float).reshape(cells, 6)
+    ghosts = with_ghosts(field, (0, 0), shape_order=5)
+    np.testing.assert_array_equal(ghosts, field[jnp.arange(-3, cells + 3) % cells])
+    actual = gather(ghosts, position, -.5 + .5 / cells, 1 / cells, 5)
+    np.testing.assert_allclose(actual, periodic_spline_matrix(position, cells, 5) @ field,
+                               rtol=0, atol=5e-15)
+
+
+def test_quintic_simulation_sources_moments_and_external_gathers_use_the_selected_shape():
+    rng = np.random.default_rng(18)
+    position, velocity = jnp.asarray(rng.uniform(-.5, .5, (12, 3))), jnp.asarray(rng.normal(size=(12, 3)))
+    amount = jnp.asarray(rng.uniform(.5, 1.5, 12))
+    field = jnp.asarray(rng.normal(size=(G, 3, 4, 3)))
+    magnetic = jnp.asarray(rng.normal(size=(G, 3)))
+    sim = Simulation(Domain(L, G, dt_over_dx_c=.2, length_y=L, length_z=L), (Species.electrons(12, 1),),
+                     Solver(shape_order=5), external_E=field, external_B=magnetic)
+    matrices = [periodic_spline_matrix(position[:, axis], cells, 5)
+                for axis, cells in enumerate((G, 3, 4))]
+    old = (position[:, 0] - .01 * velocity[:, 0] + .5) % L - .5
+    rho0 = amount @ periodic_spline_matrix(old, G, 5) / dx
+    mean_current = jnp.sum(amount * velocity[:, 0]) / L
+    rho, current = sim._sources(position, velocity, amount, .01, mean_current, rho0)
+    centred = np.stack([amount * velocity[:, axis] @ matrices[0] / dx for axis in (1, 2)], axis=1)
+    np.testing.assert_allclose(rho, amount @ matrices[0] / dx, rtol=0, atol=2e-13)
+    np.testing.assert_allclose(current[:, 1:], (centred + np.roll(centred, -1, axis=0)) / 2,
+                               rtol=0, atol=2e-13)
+    np.testing.assert_allclose(jnp.mean(current[:, 0]), mean_current, rtol=0, atol=2e-13)
+    expected_moments = np.stack([amount @ matrices[0]]
+                                + [amount * velocity[:, axis] @ matrices[0] for axis in range(3)]) / dx
+    np.testing.assert_allclose(sim.moments(position, velocity, amount, 4)[0], expected_moments,
+                               rtol=0, atol=2e-13)
+    expected = np.concatenate([np.einsum('pa,pb,pc,abcf->pf', *matrices, field), matrices[0] @ magnetic], axis=1)
+    np.testing.assert_allclose(sim.external_fields_at(position), expected, rtol=0, atol=5e-15)
+    np.testing.assert_allclose(sim._fields_at(position, jnp.zeros((G, 3)), jnp.zeros((G, 3)), jnp.zeros(G)),
+                               expected, rtol=0, atol=5e-15)
+    electric = field[:, 0, 0]
+    sim = sim.replace(external_E=electric)
+    expected = np.concatenate([matrices[0] @ ((electric + np.roll(electric, 1, axis=0)) / 2),
+                               matrices[0] @ magnetic], axis=1)
+    np.testing.assert_allclose(sim.external_fields_at(position), expected, rtol=0, atol=5e-15)
+    np.testing.assert_allclose(sim._fields_at(position, jnp.zeros((G, 3)), jnp.zeros((G, 3)), jnp.zeros(G)),
+                               expected, rtol=0, atol=5e-15)
+
+
+def test_default_shape_keeps_the_quadratic_kernel_arithmetic():
+    x, q = jnp.asarray([-.5, -.499, .003, .498, .5]), jnp.asarray([1., -2., 3., -4., 5.])
+    index, weights = s2_weights(x, x0, dx)
+    legacy_deposit = jnp.zeros(G).at[index % G].add(weights * (q / dx)[:, None])
+    np.testing.assert_array_equal(deposit(x, q, x0, dx, G, (0, 0)), legacy_deposit)
+    field = jnp.arange(G * 6, dtype=float).reshape(G, 6)
+    ghosts = jnp.concatenate([field[-1:], field, field[:1]])
+    index, weights = s2_weights(x, x0 - dx, dx)
+    legacy_gather = jnp.einsum('nk,nkc->nc', weights, ghosts[jnp.clip(index, 0, G + 1)])
+    np.testing.assert_array_equal(with_ghosts(field, (0, 0)), ghosts)
+    np.testing.assert_array_equal(gather(ghosts, x, x0, dx), legacy_gather)
+
+
+@pytest.mark.parametrize("order", [2, 5])
+def test_periodic_shape_current_gauss_and_translated_force_identity(order):
+    rng = np.random.default_rng(17)
+    x = rng.uniform(-L / 2, L / 2, 64)
+    q = jnp.asarray(np.tile([1e-3, -1e-3], 32))
+    v = jnp.asarray(rng.normal(size=64)) * dx / 1e-9
+    dt = 1e-9
+    for fraction in (0., .25, .5):
+        old = jnp.asarray((x + fraction * dx + L / 2) % L - L / 2)
+        new = (old + dt * v + L / 2) % L - L / 2
+        rho0 = deposit(old, q, x0, dx, G, (0, 0), order)
+        rho1 = deposit(new, q, x0, dx, G, (0, 0), order)
+        mean = jnp.sum(q * v) / L
+        current = current_from_continuity(rho0, rho1, dt, dx, mean, (0, 0))
+        source_scale = float(jnp.max(abs((rho1 - rho0) / dt)))
+        continuity = (rho1 - rho0) / dt + (current - jnp.roll(current, 1)) / dx
+        np.testing.assert_allclose(continuity, 0, rtol=0, atol=2e-13 * source_scale)
+        np.testing.assert_allclose(jnp.mean(current), mean, rtol=0, atol=2e-13 * source_scale * L)
+        field = E_x_from_rho(rho0, dx, (0, 0))
+        advanced = field - dt * current / epsilon_0
+        gauss = (advanced - jnp.roll(advanced, 1)) / dx - (rho1 - jnp.mean(rho1)) / epsilon_0
+        np.testing.assert_allclose(gauss, 0, rtol=0, atol=3e-13 * float(jnp.max(abs(rho1))) / epsilon_0)
+        centred = .5 * (field + jnp.roll(field, 1))
+        force = q * gather(with_ghosts(centred[:, None], (0, 0), shape_order=order),
+                           old, x0, dx, order)[:, 0]
+        np.testing.assert_allclose(jnp.sum(force), 0, rtol=0, atol=2e-13 * float(jnp.sum(abs(force))))
+
+
+@pytest.mark.parametrize("order", [2, 5])
+def test_selected_shape_periodic_step_preserves_charge_gauss_and_total_impulse(order):
+    omega, count = 1e9, 24
+    density = epsilon_0 * mass_electron * omega**2 / elementary_charge**2
+    length = 2 * np.pi * c / omega
+    x, v = quiet_start(count, length, drift=(.03 * c, 0., 0.))
+    x = x.at[:, 0].add(.03 * length * jnp.sin(2 * jnp.pi * x[:, 0] / length))
+    electrons = Species.electrons(count, density).replace(x=x, v=v)
+    ions = Species("positive", count, 1, mass_electron, density, x=x + .02 * length, v=-v)
+    sim = Simulation(Domain(length, 16, time_step=.01 / omega), (electrons, ions),
+                     Solver(shape_order=order, relativistic=True))
+    step = jax.jit(sim._explicit_step)
+    for fraction in (0., .25, .5):
+        populations = tuple(sp.replace(x=sp.x.at[:, 0].add(fraction * sim.domain.dx)) for sp in sim.species)
+        initial, extra = sim.replace(species=populations).initial_state(jax.random.PRNGKey(0))
+        mass, charge = extra
+        physical = np.concatenate([np.asarray(sp.x[:, 0]) for sp in populations]) / length
+        expected = (charge * initial.w) @ periodic_spline_matrix(physical, sim.domain.cells, order) / sim.domain.dx
+        np.testing.assert_allclose(initial.rho, expected, rtol=0, atol=2e-13 * density * elementary_charge)
+        final, _ = step(initial, extra)
+        momentum = jnp.sum(mass[:, None] * initial.w[:, None] * (final.u - initial.u), axis=0)
+        np.testing.assert_allclose(momentum, 0, rtol=0, atol=2e-13 * density * mass_electron * c * length)
+        np.testing.assert_allclose(sim.domain.dx * jnp.sum(final.rho), jnp.sum(charge * final.w),
+                                   rtol=0, atol=2e-13 * density * elementary_charge * length)
+        gauss = ((final.E[:, 0] - jnp.roll(final.E[:, 0], 1)) / sim.domain.dx
+                 - (final.rho - jnp.mean(final.rho)) / epsilon_0)
+        np.testing.assert_allclose(gauss, 0, rtol=0, atol=2e-13 * density * elementary_charge / epsilon_0)
+        np.testing.assert_array_equal(final.u[:, 1:], 0)
+
+
+def test_quintic_rejects_unsupported_solver_and_walls_and_checks_restart_shape(tmp_path):
+    particle = Species.electrons(4, 1)
+    for solver, domain in ((Solver(shape_order=5, algorithm='implicit'), Domain()),
+                           (Solver(shape_order=5), Domain(particle_bc='reflective')),
+                           (Solver(shape_order=5), Domain(field_bc='reflective'))):
+        with pytest.raises(ValueError, match='shape_order=5'):
+            Simulation(domain, (particle,), solver)
+    with pytest.raises(ValueError, match='shape_order'):
+        Solver(shape_order=3)
+    with pytest.raises(ValueError, match='shape_order'):
+        shape_weights(jnp.zeros(1), x0, dx, 3)
+    with pytest.raises(ValueError, match='periodic'):
+        with_ghosts(jnp.zeros((G, 3)), (1, 1), shape_order=5)
+    sim = Simulation(Domain(cells=4), (particle,))
+    state, _ = sim.initial_state(jax.random.PRNGKey(0))
+    path = save_state(tmp_path / 'quadratic', state, sim)
+    quintic = sim.replace(solver=Solver(shape_order=5))
+    archive = dict(np.load(path))
+    assert int(archive['format']) == 1 and 'shape_order' not in archive
+    np.testing.assert_array_equal(load_state(path, sim).rho, state.rho)
+    with pytest.raises(ValueError, match='shape_order'):
+        load_state(path, quintic)
+    state5, _ = quintic.initial_state(jax.random.PRNGKey(0))
+    save_state(path, state5, quintic)
+    archive = dict(np.load(path))
+    assert int(archive['format']) == 2 and int(archive['shape_order']) == 5
+    with pytest.raises(ValueError, match='shape_order'):
+        load_state(path, sim)
+    np.testing.assert_array_equal(load_state(path, quintic).rho, state5.rho)
+    for malformed in ({key: value for key, value in archive.items() if key != 'shape_order'},
+                      {**archive, 'shape_order': np.asarray(2)}):
+        np.savez(path, **malformed)
+        with pytest.raises(ValueError, match='format 2 requires stored shape_order=5'):
+            load_state(path)  # validation also applies without a supplied simulation
 
 
 def test_shape_function_partition_of_unity_and_charge_conservation():

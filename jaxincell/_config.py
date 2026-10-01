@@ -551,7 +551,7 @@ class Species:
 
 
 @pytree_dataclass(static=("algorithm", "model", "field_solver", "relativistic", "filter_passes",
-                          "filter_strides", "picard_iterations", "substeps"))
+                          "filter_strides", "picard_iterations", "substeps", "shape_order"))
 class Solver:
     """Numerical choices.
 
@@ -578,6 +578,8 @@ class Solver:
         filter_strides: Cell offsets of the filter stencil.
         picard_iterations: Fixed-point iterations of the implicit scheme.
         substeps: Particle sub-steps per field step in the implicit scheme.
+        shape_order: B-spline degree, 2 (quadratic) or 5 (quintic). Quintic weighting
+            requires an explicit scheme and periodic particle and field boundaries.
     """
     algorithm: str = "explicit"
     model: str = "electromagnetic"
@@ -588,6 +590,7 @@ class Solver:
     filter_strides: tuple = (1,)
     picard_iterations: int = 8
     substeps: int = 2
+    shape_order: int = 2
 
     def __post_init__(self):
         _require(self.algorithm in ("explicit", "implicit"),
@@ -596,6 +599,7 @@ class Solver:
                  f"model is 'electromagnetic' or 'electrostatic', not {self.model!r}")
         _require(self.field_solver in ("ampere", "gauss"),
                  f"field_solver is 'ampere' or 'gauss', not {self.field_solver!r}")
+        _require(self.shape_order in (2, 5), "shape_order must be 2 or 5")
         _require(self.filter_passes >= 0 and self.picard_iterations >= 1 and self.substeps >= 1,
                  "filter_passes cannot be negative, and picard_iterations and substeps must be at least one")
         object.__setattr__(self, "filter_alpha", _float(self.filter_alpha))

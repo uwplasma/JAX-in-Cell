@@ -23,6 +23,17 @@ solver = Solver(algorithm="explicit", model="electromagnetic", field_solver="amp
 | `filter_strides` | cell offsets of the filter stencil | `(1,)` |
 | `picard_iterations` | fixed-point iterations of the implicit scheme | `8` |
 | `substeps` | particle sub-steps per field step, implicit only | `2` |
+| `shape_order` | B-spline degree: `2` (quadratic, three cells) or `5` (quintic, six cells); quintic requires explicit PIC with periodic particle and field boundaries | `2` |
+
+The selected shape is shared by charge and transverse-current deposition, particle
+moments and field gathering, including each coordinate of an external field grid.
+The longitudinal current follows the endpoint charge deposits and retains the mean
+current carried by the particles. See {doc}`../numerics/deposition`.
+Quintic gathers use cyclic face-to-centre averaging for flat periodic external E;
+the quadratic option preserves its existing boundary continuation.
+Pass the simulation to `save_state` to record the particle shape. Quintic states use
+archive format 2, which older quadratic-only readers reject; quadratic archives retain
+format 1. `load_state(path, simulation)` checks the saved shape before continuation.
 
 ## Which field model
 
