@@ -74,6 +74,7 @@ def _robust_vmax_clipped(
     still get too large and wash out the bulk ion dynamics visually.
     """
     a = np.abs(np.asarray(v_tn, dtype=np.float64)).ravel()
+    a = a[np.isfinite(a)]
     if a.size == 0:
         return eps
     med = float(np.median(a))
@@ -260,7 +261,7 @@ def _make_ffmpeg_writer_auto(
     return FFMpegWriter(fps=fps, codec=codec, bitrate=-1, extra_args=extra_args)
 
 
-def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray, weights: np.ndarray = None) -> np.ndarray:
+def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray) -> np.ndarray:
     """
     PDF histogram for many frames, fast-ish numpy implementation.
 
@@ -271,16 +272,16 @@ def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray, weights: n
     v = np.asarray(v_frames_n, dtype=np.float64)
     F, N = v.shape
     B = len(edges) - 1
+    if N == 0:
+        return np.zeros((F, B), dtype=np.float32)
 
     # bin index in [0, B-1]
     idx = np.searchsorted(edges, v, side="right") - 1
     idx = np.clip(idx, 0, B - 1)
-    if weights is None:
-        weights = np.ones_like(idx)
 
     counts = np.zeros((F, B), dtype=np.float32)
     f_idx = np.repeat(np.arange(F, dtype=np.int32), N)
-    np.add.at(counts, (f_idx, idx.reshape(-1)), weights.reshape(-1))
+    np.add.at(counts, (f_idx, idx.reshape(-1)), 1.0)
 
     widths = np.diff(edges).astype(np.float32)
     pdf = counts / (N * widths[None, :])
@@ -366,32 +367,40 @@ def plot(
     save_preset: Optional[str] = None,  # for libx264/libx265 hardware encoders
     save_codec: Optional[str] = None,  # e.g. "libx264", "h264_videotoolbox", "libx265", "hevc_videotoolbox"
 ):
-    """
-    Production-ready plotting/animation for JAX-in-Cell outputs.
+    """Animated overview figure of a simulation output, optionally saved to MP4.
 
-    What you get:
-      1) Heatmaps (x vs time): E, B (nonzero components), charge density.
-         - IMPORTANT: heatmap color limits are fixed over the whole run using a robust
-           percentile, so growth/decay in time is visible (no per-frame re-normalization).
+    The figure contains space-time heat maps of the non-zero field components
+    and of the charge density, the velocity distributions of electrons and ions
+    (current frame solid, initial frame dashed), and the x-v phase space of each
+    species as a two-dimensional histogram with a logarithmic colour scale.
+    Colour limits are fixed over the whole run so that growth and decay are
+    visible. Works on the raw output of ``Simulation.run`` and on the dictionary
+    after ``diagnostics``; populations of the same charge sign are drawn together.
 
-      2) Instantaneous E(x,t) overlay:
-         - For each plotted electric-field component, we draw a line on top of the heatmap.
-         - The line is normalized by a single GLOBAL robust scale over the whole run,
-           so amplitude growth is visible.
-         - Overlay axes have no ticks (prevents clashes with colorbars).
+    Args:
+        output (dict): Output of ``Simulation.run``, before or after ``diagnostics``.
+        direction (str): One or two of ``"x"``, ``"y"``, ``"z"`` (for example
+            ``"xz"``) selecting the velocity components shown in the distribution
+            and phase-space panels. The spatial axis is always x.
+        threshold (float): Field components whose largest absolute value is below
+            this are not plotted.
+        save_mp4 (str or None): File name of the MP4 to write with ``ffmpeg``;
+            ``None`` writes nothing.
+        fps (int): Frames per second of the saved file.
+        dpi (int): Resolution of the on-screen figure.
+        show (bool): Call ``matplotlib.pyplot.show``.
+        animation_interval (int): Delay between frames in milliseconds on screen.
+        save_stride (int): Keep every n-th frame in the saved file.
+        save_dpi (int or None): Resolution of the saved file; ``None`` uses ``dpi``.
+        save_crf (int or None): Constant-rate-factor quality of the encoder; ``None``
+            uses a codec-dependent default.
+        save_preset (str or None): Encoder preset for ``libx264`` and ``libx265``.
+        save_codec (str or None): Encoder name such as ``"libx264"`` or
+            ``"h264_videotoolbox"``; ``None`` uses the first available one from a
+            list that prefers hardware H.264 encoders.
 
-      3) Distribution functions f(v,t) (LAB FRAME; NO drift centering):
-         - Shown as clean line plots in their own subplot(s) (no current-density heatmap).
-         - Solid: current frame
-         - Dashed: initial (t=0), labeled "(initial)"
-
-      4) Phase space (x vs v) for electrons and ions for each requested component:
-         - Uses a robust velocity range per species per component, so ion dynamics remains visible.
-         - Uses LogNorm on counts (with +1 internally) so low-density structure is visible.
-
-    Multi-species:
-      - Uses diagnostics() legacy split if present (velocity_electrons/velocity_ions).
-      - Otherwise combines output["species"] by charge sign (q<0 as electrons, q>0 as ions).
+    Returns:
+        None. The figure is shown and/or written to ``save_mp4``.
     """
     # ----------------------------
     # Parse directions and basic arrays
@@ -511,13 +520,9 @@ def plot(
         v_edges = np.linspace(-vmax_common, vmax_common, bins_v + 1)
         v_centers = 0.5 * (v_edges[:-1] + v_edges[1:])
 
-        # Get the number of each particle in the domain
-        electrons_in_domain = np.asarray(output["particles_in_domain_over_time"][:,output["species_index"].reshape(-1) == 0])
-        ions_in_domain      = np.asarray(output["particles_in_domain_over_time"][:,output["species_index"].reshape(-1) == 1])
-
         # PDFs over rendered frames only
-        e_pdf = _pdf_over_frames_numpy(ve, v_edges, weights=electrons_in_domain)
-        i_pdf = _pdf_over_frames_numpy(vi, v_edges, weights=ions_in_domain)
+        e_pdf = _pdf_over_frames_numpy(ve, v_edges)
+        i_pdf = _pdf_over_frames_numpy(vi, v_edges)
 
         # Scale each species by its INITIAL max (axis fixed; bump/drift shows naturally)
         scale_e0 = float(max(np.max(e_pdf[0]), 1e-30))
@@ -544,14 +549,12 @@ def plot(
                 x_e[t], ve[t],
                 bins=[bins_x, bins_v],
                 range=[x_range, v_range_e],
-                weights=np.asarray(output['charges_over_time'][:,:,0])[t][:output['number_pseudoelectrons']]/output['charges_over_time'][0,0,0]
             )[0].astype(np.float32)
 
             i_counts[t] = np.histogram2d(
                 x_i[t], vi[t],
                 bins=[bins_x, bins_v],
                 range=[x_range, v_range_i],
-                weights=np.asarray(output['charges_over_time'][:,:,0])[t][output['number_pseudoelectrons']:]/output['charges_over_time'][0,output['number_pseudoelectrons'],0]
             )[0].astype(np.float32)
 
 
@@ -739,13 +742,12 @@ def plot(
     # ---- energy panel (static) ----
     # If we ran out of axes, just skip.
     axes_flat = np.ravel(axes)
-    if idx < len(axes_flat) and all(k in output for k in ("total_energy", "electric_field_energy", "kinetic_energy_electrons", "kinetic_energy_ions", "energy_lost")):
+    if idx < len(axes_flat) and all(k in output for k in ("total_energy", "electric_field_energy", "kinetic_energy_electrons", "kinetic_energy_ions")):
         ax_en = axes_flat[idx]
         ax_en.plot(time, np.asarray(output["total_energy"]), label="Total energy")
         ax_en.plot(time, np.asarray(output["kinetic_energy_electrons"]), label="Kinetic energy electrons")
         ax_en.plot(time, np.asarray(output["kinetic_energy_ions"]), label="Kinetic energy ions")
         ax_en.plot(time, np.asarray(output["electric_field_energy"]), label="Electric field energy")
-        ax_en.plot(time, np.asarray(output["energy_lost"]), label="Energy lost to particles leaving domain")
         if "magnetic_field_energy" in output and np.max(np.asarray(output["magnetic_field_energy"])) > 1e-12:
             ax_en.plot(time, np.asarray(output["magnetic_field_energy"]), label="Magnetic field energy")
 
@@ -753,8 +755,12 @@ def plot(
         te = np.asarray(output["total_energy"])
         denom = float(max(abs(te[0]), 1e-30))
         ax_en.plot(time[1:], np.abs(te[1:] - te[0]) / denom, label="Relative energy error")
+        if "gauss_error_Linf_rel" in output:
+            ax_en.plot(time, np.asarray(output["gauss_error_Linf_rel"]), label="Relative charge (Gauss's law) error")
+        if "momentum_error_rel" in output:
+            ax_en.plot(time[1:], np.asarray(output["momentum_error_rel"])[1:], label="Relative momentum change")
 
-        ax_en.set_title("Energy")
+        ax_en.set_title("Energy and conservation")
         ax_en.set_xlabel(r"Time ($\omega_{pe}^{-1}$)")
         ax_en.set_ylabel("Energy (J)")
         ax_en.set_yscale("log")

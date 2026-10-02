@@ -14,32 +14,69 @@ except ModuleNotFoundError: import pip._vendor.tomli as tomllib
 __all__ = ['Boris_step', 'CN_step']
 
 #Boris step
-def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
+def Boris_step(carry, step_index, solver_parameters, external_field_parameters, dx, dt, grid, box_size,
                       particle_BC_left, particle_BC_right,
                       field_BC_left, field_BC_right,
                       field_solver):
+    """One explicit leapfrog step with the Boris pusher.
+
+    Deposits the current from the motion ``x^n -> x^{n+1/2}``, advances the fields
+    by half a step (Ampere then Faraday), gathers the fields at the half-step
+    positions, pushes the particles with the Boris rotation, applies the boundary
+    conditions, deposits the current from the motion ``x^{n+1/2} -> x^{n+1}``,
+    advances the fields by the second half step (Faraday then Ampere) and, if
+    ``field_solver`` is not zero, replaces the longitudinal electric field by the
+    solution of Gauss's law. The two deposits are charge conserving and together
+    cover ``x^n -> x^{n+1}``, so with periodic boundaries (or reflective ones and
+    no filter) ``dE_x/dx = rho(x^{n+1}) / epsilon_0`` holds at every step to
+    round-off, as it does at ``t = 0``.
+
+    Args:
+        carry (tuple): ``(E, B, x_minus_half, x, x_plus_half, v, q, m, q_over_m)``
+            with fields of shape ``(G, 3)`` and particle arrays of shape ``(N, 3)``
+            or ``(N, 1)``.
+        step_index (int): Index of the step, unused apart from the progress bar.
+        solver_parameters (dict): Cleaned solver section (filter settings,
+            ``relativistic`` flag).
+        external_field_parameters (dict): Contains the ``external_electric_field``
+            and ``external_magnetic_field`` arrays of shape ``(G, 3)``.
+        dx (float): Cell size.
+        dt (float): Time step.
+        grid (array): Cell centres, shape ``(G,)``.
+        box_size (tuple): ``(L, L_y, L_z)``.
+        particle_BC_left, particle_BC_right (int): Particle boundary codes.
+        field_BC_left, field_BC_right (int): Field boundary codes.
+        field_solver (int): ``0`` electromagnetic, ``1`` Gauss's law by FFT.
+
+    Returns:
+        tuple: The new carry and the per-step output
+        ``(x, v, E, B, J, rho)`` at the end of the step.
+    """
 
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
 
-    # Turn on source particles if they should be turned on this iteration
-    qs         = jnp.where(parameters['step_index_to_initialize'] == step_index, parameters['initial_charges'][parameters['species_index']].reshape(-1,1), qs)
-    q_ms       = jnp.where(parameters['step_index_to_initialize'] == step_index, (qs/ms)[parameters['species_index']].reshape(-1,1), q_ms)
-    #velocities = jnp.where(parameters['step_index_to_initialize'] == step_index, parameters['source_injection_velocities'][parameters['species_index']].reshape(-1, 3), velocities)
-
-    fpasses  = parameters["filter_passes"]
-    falpha   = parameters["filter_alpha"]
-    fstrides = parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
+    fpasses  = solver_parameters["filter_passes"]
+    falpha   = solver_parameters["filter_alpha"]
+    fstrides = solver_parameters["filter_strides"]  # digital filter for ρ and J (Birdsall & Langdon style)
     
-    J = current_density(positions_minus1_2, positions, positions_plus1_2, velocities,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+    # Charge-conserving deposit over the first half step, x^n -> x^{n+1/2}, so that
+    # the change of E over the whole step matches rho(x^{n+1}) - rho(x^n) exactly.
+    def electrostatic(J):
+        # With field_solver != 0, E_x is Gauss's law with <E_x> = 0 in a periodic box, so the
+        # mean current must not change E_x in the Ampere half steps either (as in CN_step).
+        periodic = field_BC_left == 0 and field_BC_right == 0
+        return J.at[:, 0].add(-jnp.mean(J[:, 0])) if field_solver != 0 and periodic else J
+
+    J = current_density(positions, positions, positions_plus1_2, velocities,
+                qs, dx, dt / 2, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
                 filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                 field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-    E_field, B_field = field_update1(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+    E_field, B_field = field_update1(E_field, B_field, dx, dt/2, electrostatic(J), field_BC_left, field_BC_right)
     
     # Add external fields
-    total_E = E_field + parameters["external_electric_field"]
-    total_B = B_field + parameters["external_magnetic_field"]
+    total_E = E_field + external_field_parameters["external_electric_field"]
+    total_B = B_field + external_field_parameters["external_magnetic_field"]
 
     # Interpolate fields to particle positions
     def interpolate_fields(x_n):
@@ -51,36 +88,42 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
     # Particle update: Boris pusher
     positions_plus3_2, velocities_plus1 = lax.cond(
-        parameters["relativistic"],
+        solver_parameters["relativistic"],
         lambda _: boris_step_relativistic(dt, positions_plus1_2, velocities, qs, ms, E_field_at_x, B_field_at_x),
         lambda _: boris_step(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
         operand=None
     )
 
     # Apply boundary conditions
-    positions_plus3_2, velocities_plus1, qs, ms, q_ms, particles_in_domain = set_BC_particles(
+    positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
         positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
         *box_size, particle_BC_left, particle_BC_right)
     
     positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
                                     qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
-    J = current_density(positions_plus1_2, positions_plus1, positions_plus3_2, velocities_plus1,
-                qs, dx, dt, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
+    # Second half step, x^{n+1/2} -> x^{n+1}
+    J = current_density(positions_plus1_2, positions_plus1, positions_plus1, velocities_plus1,
+                qs, dx, dt / 2, grid, grid[0] - dx / 2, particle_BC_left, particle_BC_right,
                 filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                 field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-    E_field, B_field = field_update2(E_field, B_field, dx, dt/2, J, field_BC_left, field_BC_right)
+    E_field, B_field = field_update2(E_field, B_field, dx, dt/2, electrostatic(J), field_BC_left, field_BC_right)
     
     if field_solver != 0:
-        charge_density = calculate_charge_density(positions, qs, dx, grid + dx / 2, particle_BC_left, particle_BC_right,
+        # Field of the updated positions x^{n+1}, deposited on the cell centres as at t = 0.
+        charge_density = calculate_charge_density(positions_plus1, qs, dx, grid, particle_BC_left, particle_BC_right,
                                                   filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                                                   field_BC_left=field_BC_left, field_BC_right=field_BC_right)
         switcher = {
             1: E_from_Gauss_1D_FFT,
-            2: E_from_Gauss_1D_Cartesian,
+            2: partial(E_from_Gauss_1D_Cartesian, periodic=field_BC_left == 0 and field_BC_right == 0),
             3: E_from_Poisson_1D_FFT,
         }
-        E_field = E_field.at[:,0].set(switcher[field_solver](charge_density, dx))
+        E_x = switcher[field_solver](charge_density, dx)
+        if field_solver != 2:  # the FFT solves return E on the centres; E_x lives half a cell to the right
+            kx = jnp.fft.fftfreq(E_x.size, d=dx) * 2 * jnp.pi
+            E_x = jnp.fft.ifft(jnp.fft.fft(E_x) * jnp.exp(0.5j * kx * dx)).real
+        E_field = E_field.at[:,0].set(E_x)
 
     # Update positions and velocities
     positions_minus1_2, positions_plus1_2 = positions_plus1_2, positions_plus3_2
@@ -95,7 +138,7 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
     charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right,
                                               filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                                               field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-    step_data = (positions, velocities, E_field, B_field, J, charge_density, qs, particles_in_domain)
+    step_data = (positions, velocities, E_field, B_field, J, charge_density)
     
     return carry, step_data
 
@@ -103,9 +146,36 @@ def Boris_step(carry, step_index, parameters, dx, dt, grid, box_size,
 
 # Implicit Crank-Nicolson step
 @partial(jit, static_argnames=('num_substeps', 'particle_BC_left', 'particle_BC_right', 'field_BC_left', 'field_BC_right'))
-def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
+def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
                                   particle_BC_left, particle_BC_right,
                                   field_BC_left, field_BC_right, num_substeps):
+    """One implicit Crank-Nicolson step solved by Picard iteration.
+
+    Fields and particles are advanced with time-centred averages; the particles
+    take ``num_substeps`` Boris sub-steps in the mid-point fields and their
+    orbit-averaged current, minus its spatial mean, drives Ampere's law. The
+    iteration on the new electric field stops when its relative change falls
+    below ``tolerance_Picard_iterations_implicit_CN`` or after
+    ``max_number_of_Picard_iterations_implicit_CN`` iterations. Deposition and
+    interpolation use periodic wrapping; the digital filter is not applied.
+
+    Args:
+        carry (tuple): ``(E, B, x, v, q, m, q_over_m)`` with fields of shape
+            ``(G, 3)`` and particle arrays of shape ``(N, 3)`` or ``(N, 1)``.
+        step_index (int): Index of the step, unused apart from the progress bar.
+        solver_parameters (dict): Cleaned solver section (Picard tolerance and cap).
+        dx (float): Cell size.
+        dt (float): Time step.
+        grid (array): Cell centres, shape ``(G,)``.
+        box_size (tuple): ``(L, L_y, L_z)``.
+        particle_BC_left, particle_BC_right (int): Particle boundary codes.
+        field_BC_left, field_BC_right (int): Field boundary codes (used by the
+            curl operators only).
+        num_substeps (int): Particle sub-steps per field step; static.
+
+    Returns:
+        tuple: The new carry and the per-step output ``(x, v, E, B, J, rho)``.
+    """
     (E_field, B_field, positions,
     velocities, qs, ms, q_ms) = carry
     
@@ -206,8 +276,8 @@ def CN_step(carry, step_index, parameters, dx, dt, grid, box_size,
     # --- Picard Loop ---
     picard_init = (E_new, E_new, B_new, positions, positions_new, velocities, velocities_new, qs, ms, q_ms, positions_sub1_2_all_init)
     
-    tol = parameters["tolerance_Picard_iterations_implicit_CN"]
-    max_iter = parameters["max_number_of_Picard_iterations_implicit_CN"]
+    tol = solver_parameters["tolerance_Picard_iterations_implicit_CN"]
+    max_iter = solver_parameters["max_number_of_Picard_iterations_implicit_CN"]
 
     # Initial state
     state0 = (picard_init, jnp.zeros_like(E_new), jnp.array(jnp.inf), jnp.array(0))

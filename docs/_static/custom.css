@@ -1,0 +1,55 @@
+/* JAX-in-Cell documentation: small adjustments on top of pydata-sphinx-theme. */
+:root {
+  --jic-accent: #0072b2;
+}
+html[data-theme="light"] {
+  --pst-color-primary: #0b5d8f;
+  --pst-color-secondary: #c85200;
+}
+html[data-theme="dark"] {
+  --pst-color-primary: #6fb6e6;
+  --pst-color-secondary: #f0a04b;
+}
+.bd-content figure {
+  margin: 1.2rem auto 1.6rem auto;
+}
+.bd-content figure img {
+  background: white;
+  border-radius: 4px;
+}
+.bd-content figcaption {
+  font-size: 0.9rem;
+  color: var(--pst-color-text-muted);
+  text-align: left;
+  margin-top: 0.5rem;
+}
+.bd-content figcaption p {
+  margin-bottom: 0.3rem;
+}
+table.parameter-table td:first-child code,
+.bd-content table.table td:first-child code {
+  white-space: nowrap;
+}
+.bd-content table.table {
+  font-size: 0.9rem;
+}
+.bd-content .math {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.sd-card .sd-card-title {
+  font-size: 1.05rem;
+}
+.jic-hero {
+  text-align: center;
+  margin: 0 auto 1.5rem auto;
+  max-width: 48rem;
+}
+.jic-hero img {
+  width: 160px;
+  margin-bottom: 0.5rem;
+}
+.jic-hero p.lead {
+  font-size: 1.15rem;
+  color: var(--pst-color-text-muted);
+}
