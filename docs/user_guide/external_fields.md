@@ -91,6 +91,8 @@ uses one extra centre and half-weight endcaps to retain symmetry.
 `source_particles_per_second` is the rate **per grid site per unit area**. Each
 marker carries `rate * cadence * dt`, multiplied by its endcap factor. Thus the
 effective total rate is `width * rate` (or `G * rate` for the whole box).
+Batches retain their full cadence weight, including the last partial run interval;
+approximating a continuous source requires cadence and timestep refinement.
 
 Gauss's law is recomputed immediately after birth and at the end of every step.
 Periodic fields use a uniform compensating background for net charge; use matched
