@@ -34,6 +34,7 @@ ION_SPECIES_FLOAT_PARAMETERS = (
 COMMON_SPECIES_BOOLEAN_PARAMETERS = (
     *(f"random_positions_{axis}" for axis in SPECIES_AXES),
     *(f"velocity_plus_minus_{axis}" for axis in SPECIES_AXES),
+    *(f"quiet_velocities_{axis}" for axis in SPECIES_AXES),
     "seed_position_override",
 )
 INITIAL_PHASE_SPACE_PARAMETERS = ("initial_positions", "initial_velocities")

@@ -172,4 +172,10 @@ jaxincell/version.py
 *.npz
 *.mp4
 *.png
-CODEX_CONTEXT.md
+# Documentation figures, logo and icon are committed
+!docs/_static/*.png
+!docs/_static/figures/*.png
+
+# Logs of the documentation figure scripts
+docs/scripts/*.log
+docs/_static/figures/.measurements.lock
