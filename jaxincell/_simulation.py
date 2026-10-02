@@ -354,6 +354,7 @@ class Simulation:
             **source_parameters,
             **solver_parameters,
             **simulation_output,
+            "dimensions": self.dimensions,
             "domain_parameters": domain_parameters,
             "species_parameters": parameter_sections["species_parameters"],
             "external_field_parameters": external_field_parameters,
