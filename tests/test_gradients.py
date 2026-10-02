@@ -233,7 +233,57 @@ def test_impact_energy_and_event_derivatives_converge(side, algorithm):
         forward = jax.jvp(energy, (1., 1.), (0., 1.))[1]
         assert float(forward) == pytest.approx(float(gradient[1]), rel=1e-12)
         errors.append(abs(float(gradient[1]) - 1.))
-    assert errors[1] < errors[0] / 4
+    if algorithm == "implicit":
+        assert errors[1] < errors[0] / 4
+    else:
+        assert max(errors) < 1e-12
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+@pytest.mark.parametrize("distance,reflection,restitution", [(.03, 1., 1.), (.01, 1., 1.), (.01, .4, .5)])
+def test_an_accelerated_explicit_flight_turns_or_returns_at_the_physical_wall(side, distance,
+                                                                              reflection, restitution):
+    """A repelling E can turn a particle before the straight drift predicts contact.
+
+    When it reaches the wall, the first root is followed by the returned flight even
+    if the force would have brought the unreflected endpoint back inside the box.
+    """
+    weight = 1e-30
+    domain = Domain(length=1., cells=16, time_step=1., particle_bc="absorbing",
+                    field_bc="absorbing", restitution=restitution)
+
+    def run(speed, acceleration):
+        species = Species("test", 1, 1 / e_charge, 1., weight, reflection=reflection,
+                          x=jnp.array([[side * (.5 - distance), 0., 0.]]),
+                          v=jnp.array([[side * speed, 0., 0.]]))
+        external = jnp.zeros((16, 3)).at[:, 0].set(side * acceleration)
+        return Simulation(domain, [species], Solver(model="electrostatic"), external_E=external).run(1)
+
+    out = run(.2, -1.).validate()
+    ledger = out.state.wall
+    wall_side = 0 if side < 0 else 1
+    if distance == .03:
+        assert float(jnp.sum(ledger.arrived)) == 0.
+        expected_x = .5 - distance + .2 - .5
+        expected_v = -.8
+        assert float(out.state.w[0]) / weight == pytest.approx(1., rel=1e-14)
+    else:
+        incoming = np.sqrt(.2 ** 2 - 2 * distance)
+        remaining = 1 - (.2 - incoming)
+        expected_x = .5 - restitution * incoming * remaining - .5 * remaining ** 2
+        expected_v = -restitution * incoming - remaining
+        assert float(ledger.arrived[0, wall_side]) / weight == pytest.approx(1., rel=1e-14)
+        assert float(ledger.collected[0, wall_side]) / weight == pytest.approx(1 - reflection, abs=1e-14)
+        assert float(ledger.energy_in[0, wall_side]) / weight == pytest.approx(incoming ** 2 / 2, rel=1e-12)
+
+        def energy(speed, acceleration):
+            return run(speed, acceleration).state.wall.energy_in[0, wall_side] / weight
+
+        gradients = jax.jit(jax.grad(energy, argnums=(0, 1)))(.2, -1.)
+        assert float(gradients[0]) == pytest.approx(.2, rel=1e-12)
+        assert float(gradients[1]) == pytest.approx(distance, rel=1e-12)
+    assert float(out.state.x[0, 0]) == pytest.approx(side * expected_x, abs=1e-13)
+    assert float(out.state.u[0, 0]) == pytest.approx(side * expected_v, abs=1e-13)
 
 
 @pytest.mark.parametrize("boundary,reflection,restitution", [("reflective", 1., 1.), ("absorbing", .4, .8)])

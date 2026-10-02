@@ -18,6 +18,139 @@ CENTRE0 = -L / 2 + DX / 2
 WALLS = [(0, 0), (1, 1), (1, 2), (2, 1), (2, 2)]           # every pair Domain accepts
 
 
+@pytest.mark.parametrize("gap,vx,vy,gyro", [(.055, .2, 0., 4.), (.04, .2, 0., 10.),
+                                            (.00025112075, .01, -1., .2)])
+def test_magnetic_turning_before_contact_does_not_create_a_wall_impact(gap, vx, vy, gyro):
+    """The held-field Boris flight stays on the pure-B circle.
+
+    Each gap exceeds that circle's maximum excursion, including a near-grazing
+    case at small gyro angle. The endpoint quadratic used to fabricate all three.
+    """
+    species = Species("p", 1, 1 / elementary_charge, 1., 1e-30,
+                      x=jnp.array([[.5 - gap, 0., 0.]]), v=jnp.array([[vx, vy, 0.]]))
+    domain = Domain(length=1., cells=16, time_step=2., particle_bc="reflective", field_bc="absorbing")
+    external = jnp.zeros((16, 3)).at[:, 2].set(gyro)
+    sim = Simulation(domain, [species], Solver(model="electrostatic"), external_B=external)
+    st, (mass, _) = sim.initial_state(random.key(0))
+    fields = jnp.array([[0., 0., 0., 0., 0., gyro]])
+
+    def flight(x):
+        return sim._wall_drift(st.key, x, st.u, st.w, st.qm, st.wall, fields, mass, 1., 0.)
+
+    result = jax.jit(flight)(st.x)
+    assert float(jnp.sum(result[-1].arrived)) == 0.
+    expected = .5 - gap + (vx + gyro * vy / 2) / (1 + (gyro / 2) ** 2)
+    assert float(result[0][0, 0]) == pytest.approx(expected, abs=1e-14)
+    derivative = jax.jvp(flight, (st.x,), (jnp.ones_like(st.x),))[1]
+    assert all(np.isfinite(np.asarray(leaf)).all() for leaf in jax.tree.leaves(derivative))
+
+
+def test_arbitrary_held_fields_give_the_partial_boris_contact_and_its_implicit_derivative():
+    rng, n = np.random.default_rng(123), 32
+    side = jnp.where(jnp.arange(n) % 2, -1., 1.)
+    velocity = jnp.asarray(rng.normal(0., .2, (n, 3))).at[:, 0].set(side * 1.5)
+    fields = jnp.asarray(rng.normal(0., .2, (n, 6)))
+    qm = jnp.asarray(rng.uniform(-2., 2., n))
+    expected_time = jnp.asarray(rng.uniform(.07, .21, n))
+    species = Species("p", n, 0., 1., 1.)
+    sim = Simulation(Domain(length=1., cells=8, time_step=.6, particle_bc="absorbing", field_bc="absorbing"),
+                     [species], Solver(model="electrostatic"), external_B=jnp.zeros((8, 3)))
+
+    def displacement(t, F):
+        pushed = sim._accelerate(velocity, F, qm, t[:, None])
+        return t * sim._mean_velocity(velocity, pushed)[:, 0]
+
+    x = jnp.zeros((n, 3)).at[:, 0].set(side / 2 - displacement(expected_time, fields))
+
+    def contact(F):
+        return sim._wall_contact(x, velocity, F, qm, .3)
+
+    _, hit, time, wall, unresolved = jax.jit(contact)(fields)
+    np.testing.assert_array_equal(hit, np.ones(n, bool))
+    np.testing.assert_array_equal(wall, np.where(np.asarray(side) < 0, 0, 1))
+    assert not np.any(unresolved)
+    np.testing.assert_allclose(time, expected_time, rtol=1e-12, atol=0.)
+    tangent = jnp.zeros_like(fields).at[:, 0].set(1.)
+    slope = jax.jvp(lambda t: displacement(t, fields), (expected_time,), (jnp.ones(n),))[1]
+    response = jax.jvp(lambda F: displacement(expected_time, F), (fields,), (tangent,))[1]
+    derivative = jax.jvp(lambda F: contact(F)[2], (fields,), (tangent,))[1]
+    np.testing.assert_allclose(derivative, -response / slope, rtol=1e-10, atol=1e-14)
+
+
+@pytest.mark.parametrize("gyro,gap", [(4., .01), (10., .015)])
+def test_magnetic_impact_uses_the_partial_boris_circle_and_retains_its_gradient(gyro, gap):
+    weight, speed = 1e-30, .2
+    species = Species("p", 1, 1 / elementary_charge, 1., weight,
+                      x=jnp.array([[.5 - gap, 0., 0.]]), v=jnp.array([[speed, 0., 0.]]))
+    domain = Domain(length=1., cells=16, time_step=2., particle_bc="reflective", field_bc="absorbing")
+    sim = Simulation(domain, [species], Solver(model="electrostatic"), external_B=jnp.zeros((16, 3)))
+    st, (mass, _) = sim.initial_state(random.key(0))
+
+    def flight(v, B):
+        fields = jnp.array([[0., 0., 0., 0., 0., B]])
+        return sim._wall_drift(st.key, st.x, jnp.array([[v, 0., 0.]]), st.w, st.qm,
+                               st.wall, fields, mass, 1., 0.)
+
+    wall = jax.jit(flight)(speed, gyro)[-1]
+    assert float(wall.arrived[0, 1]) / weight == pytest.approx(1., rel=1e-14)
+    assert float(wall.momentum[0, 1, 0]) / (2 * weight) == pytest.approx(np.sqrt(speed ** 2 - (gyro * gap) ** 2),
+                                                                         rel=1e-12)
+
+    def energy(v, B):
+        return flight(v, B)[-1].energy_in[0, 1] / weight
+
+    derivative = jax.jit(jax.grad(energy, argnums=(0, 1)))(speed, gyro)
+    assert float(derivative[0]) == pytest.approx(speed, rel=1e-12)
+    assert float(derivative[1]) == pytest.approx(0., abs=1e-14)
+
+    def normal(v, B):
+        return flight(v, B)[-1].momentum[0, 1, 0] / (2 * weight)
+
+    derivative = jax.jit(jax.grad(normal, argnums=(0, 1)))(speed, gyro)
+    incoming = np.sqrt(speed ** 2 - (gyro * gap) ** 2)
+    assert float(derivative[0]) == pytest.approx(speed / incoming, rel=1e-11)
+    assert float(derivative[1]) == pytest.approx(-gyro * gap ** 2 / incoming, rel=1e-11)
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+def test_a_particle_resting_on_an_absorbing_wall_is_collected_before_outward_acceleration(side):
+    weight = 1e-30
+    species = Species("p", 1, 1 / elementary_charge, 1., weight,
+                      x=jnp.array([[side / 2, 0., 0.]]), v=jnp.zeros((1, 3)))
+    domain = Domain(length=1., cells=16, time_step=.1, particle_bc="absorbing", field_bc="absorbing")
+    external = jnp.zeros((16, 3)).at[:, 0].set(side)
+    out = Simulation(domain, [species], Solver(model="electrostatic"), external_E=external).run(1).validate()
+    assert float(out.state.wall.collected[0, 0 if side < 0 else 1]) / weight == pytest.approx(1., rel=1e-14)
+    assert float(jnp.sum(out.state.wall.energy_in)) == 0.
+    assert float(jnp.sum(out.state.w)) == 0.
+
+
+def test_a_returned_accelerated_flight_cannot_hide_a_second_contact_inside_its_endpoint():
+    """After reflection the parabola dips past the opposite wall and returns inside."""
+    species = Species("p", 1, 1 / elementary_charge, 1., 1e-30,
+                      x=jnp.array([[.4, 0., 0.]]), v=jnp.array([[5.8, 0., 0.]]))
+    domain = Domain(length=1., cells=16, time_step=2., particle_bc="reflective", field_bc="absorbing")
+    sim = Simulation(domain, [species], Solver(model="electrostatic"))
+    st, (mass, _) = sim.initial_state(random.key(0))
+    fields = jnp.array([[12., 0., 0., 0., 0., 0.]])
+    result = sim._wall_drift(st.key, st.x, st.u, st.w, st.qm, st.wall, fields, mass, 1., 0.)
+    assert not np.isfinite(float(result[0][0, 0]))
+
+
+@pytest.mark.parametrize("magnetic", [False, True])
+def test_a_zero_restitution_return_at_rest_does_not_create_repeated_wall_contacts(magnetic):
+    weight = 1e-30
+    species = Species("p", 1, 0., 1., weight, reflection=.4,
+                      x=jnp.array([[.4, 0., 0.]]), v=jnp.array([[.2, 0., 0.]]))
+    domain = Domain(length=1., cells=16, time_step=2., particle_bc="absorbing", field_bc="absorbing",
+                    restitution=0.)
+    external = jnp.zeros((16, 3)) if magnetic else None
+    out = Simulation(domain, [species], Solver(model="electrostatic"), external_B=external).run(1).validate()
+    assert float(out.state.wall.arrived[0, 1]) / weight == pytest.approx(1., rel=1e-13)
+    assert float(out.state.w[0]) / weight == pytest.approx(.4, rel=1e-13)
+    assert float(out.state.x[0, 0]) == pytest.approx(.5, abs=1e-13)
+
+
 def left_wall_value(F, s, bc):
     """F_{-1/2}, which the grid does not store, from the first cell of the difference equation."""
     return F[-1] if bc == (0, 0) else F[0] - DX * s[0]
@@ -209,8 +342,8 @@ CODES = {0: "periodic", 1: "reflective", 2: "absorbing"}
 
 def field_on_sheets(positions, bc, length=L, cells=CELLS):
     """E_x that sheets of electrons at rest, one pseudo-particle each, feel from their own
-    fields and those of their images, read off the first explicit step: from rest nothing
-    moves before the push, so the velocity after one step is (q/m) E dt exactly. Returns
+    fields and their images, gathered at their supplied physical positions. This tests
+    the field/gather independently of the subsequent accelerated half flight. Returns
     the fields at the sheets and the surface charge sigma of one sheet."""
     n = len(positions)
     x = np.zeros((n, 3))
@@ -219,10 +352,9 @@ def field_on_sheets(positions, bc, length=L, cells=CELLS):
     electrons = Species.electrons(n=n, density=density).replace(x=x, v=np.zeros((n, 3)))
     walls = tuple(CODES[code] for code in bc)
     sim = Simulation(Domain(length=length, cells=cells, particle_bc=walls, field_bc=walls), [electrons], Solver())
-    out = sim.run(1, seed=0)
-    qm = electrons.charge_si / electrons.mass
+    state, _ = sim.initial_state(random.key(0))
     sigma = electrons.charge_si * density * length / n
-    return np.asarray(out.v[0, :, 0]) / (qm * sim.domain.dt), sigma
+    return np.asarray(sim._fields_at(jnp.asarray(x), state.E, state.B, state.rho)[:, 0]), sigma
 
 
 @pytest.mark.parametrize("fraction", [0.0, 0.2, 0.5, 0.77])

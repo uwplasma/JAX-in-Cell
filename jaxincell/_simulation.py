@@ -36,6 +36,19 @@ _BETA2_MAX = 1 - 1e-5     # largest v^2/c^2 of a velocity entering a relativisti
 __all__ = ["Simulation", "Output", "State", "Wall", "load_toml", "quiet_start", "RUN_KEYS"]
 
 
+def _bracketed_newton(function, times, lower, upper, orientation):
+    """Eight differentiable, safeguarded Newton updates of independent scalar roots."""
+    def step(_, state):
+        t, lo, hi = state
+        value, derivative = jax.jvp(function, (t,), (jnp.ones_like(t),))
+        lo = jnp.where(value * orientation < 0, t, lo)
+        hi = jnp.where(value * orientation >= 0, t, hi)
+        trial = t - value / jnp.where(derivative != 0, derivative, 1.0)
+        return jnp.where((trial >= lo) & (trial <= hi), trial, (lo + hi) / 2), lo, hi
+
+    return lax.fori_loop(0, 8, step, (times, lower, upper))[0]
+
+
 def _implicit_fields(E, B, J, dt, dx, bc):
     """Solve the linear midpoint Maxwell equations for a prescribed current.
 
@@ -1057,36 +1070,124 @@ class Simulation:
             ln_lambda = jnp.where(jnp.any(charge < 0), coulomb_logarithm(density, kT_ev), jnp.nan)
         return collide(key, x, v, w, m, qm * m, self.blocks, pairs, ln_lambda, dt, d.dx, d.length, d.cells)
 
-    def _wall_drift(self, key, x, u, w, qm, wall, fields, m, dt, time_fraction):
-        """One physical half drift, with the wall law and ledger evaluated at the impact.
+    def _wall_contact(self, x, start, fields, qm, dt):
+        """First contact of a held-field flight; the quadratic is exact for Newtonian E.
 
-        The first drift carries momentum at its start, the second at its end. Transport
-        the returned momentum back to that time, so the full Boris kick still belongs
-        between the two drifts. At zero force the returned trajectory is exact, including
-        thermal and relativistic returns; a segment can resolve one impact per particle.
+        Magnetic/relativistic roots follow the same partial-Boris mean-velocity
+        trajectory as the position, with a bounded stationary-point/Newton solve.
+        Unresolved roots invalidate the step instead of fabricating an impact.
+        """
+        duration = jnp.broadcast_to(jnp.asarray(dt), x.shape[:1])
+        end = self._accelerate(start, fields, qm, duration[:, None])
+        signs = jnp.array([-1.0, 1.0])[:, None]
+        velocity = self._velocity(start)[:, 0]
+        acceleration = (self._velocity(end)[:, 0] - velocity) / jnp.where(duration > 0, duration, 1.0)
+        speed, force = signs * velocity, signs * acceleration
+        distance = self.domain.length / 2 - signs * x[:, 0]
+        discriminant = speed ** 2 + 2 * force * distance
+        root = jnp.sqrt(jnp.maximum(discriminant, jnp.finfo(start.dtype).tiny))
+        denominator = speed + root
+        times = jnp.where(speed >= 0, 2 * distance / jnp.where(denominator != 0, denominator, 1.0),
+                          (root - speed) / jnp.where(force != 0, force, 1.0))
+        contact = ((distance >= 0) & (discriminant >= 0) & (times >= 0) & (times <= duration)
+                   & (duration > 0) & ((speed > 0) | (force > 0)))
+        unresolved = jnp.zeros(x.shape[0], bool)
+        if self.solver.relativistic or not self.solver.electrostatic or self.external_B is not None:
+            velocity_scale = (jnp.linalg.norm(self._velocity(start), axis=1)
+                              + jnp.linalg.norm(self._velocity(end), axis=1))
+            reach = duration * (c if self.solver.relativistic else
+                                jnp.linalg.norm(start, axis=1) + duration * jnp.abs(qm)
+                                * jnp.linalg.norm(fields[:, :3], axis=1))
+            near = ((duration > 0) & (jnp.abs(x[:, 0]) <= self.domain.length / 2)
+                    & (self.domain.length / 2 - jnp.abs(x[:, 0]) <= reach))
+
+            def refine(_):
+                times, contact = initial_times, initial_contact
+                if self.solver.relativistic:
+                    def position(t):
+                        pushed = self._accelerate(start, fields, qm, t[:, None])
+                        return x[:, 0] + t * self._mean_velocity(start, pushed)[:, 0]
+                else:
+                    # Rational x displacement of the held-field Boris mean velocity.
+                    a, b = qm[:, None] * fields[:, :3], qm[:, None] * fields[:, 3:] / 2
+                    b2 = jnp.sum(b * b, axis=1)
+                    k1 = a[:, 0] / 2 + jnp.cross(start, b)[:, 0]
+                    k2 = jnp.cross(a, b)[:, 0] / 2 + b[:, 0] * jnp.sum(start * b, axis=1)
+                    k3 = b[:, 0] * jnp.sum(a * b, axis=1) / 2
+
+                    def position(t):
+                        return x[:, 0] + t * (velocity + t * (k1 + t * (k2 + t * k3))) / (1 + b2 * t ** 2)
+
+                def slope(t):
+                    return jax.jvp(position, (t,), (jnp.ones_like(t),))[1]
+
+                turn = jnp.clip(-velocity / jnp.where(acceleration != 0, acceleration, 1.0), 0, duration)
+                initial_slope = slope(jnp.zeros_like(duration))
+                turning = initial_slope * slope(duration) < 0
+                turn = _bracketed_newton(slope, turn, jnp.zeros_like(duration), duration, -initial_slope)
+                turn = jnp.where(turning, turn, 0.0)
+                unresolved = turning & near & (jnp.abs(slope(turn)) > 64 * jnp.finfo(x.dtype).eps * velocity_scale)
+                upper = jnp.where(signs * position(turn) > self.domain.length / 2, turn, duration)
+                endpoint = signs * jax.vmap(position)(upper)
+                outward = signs * jax.vmap(slope)(upper)
+                contact = ((endpoint > self.domain.length / 2)
+                           | ((endpoint == self.domain.length / 2) & (outward > 0))) & near
+                lower = jnp.zeros_like(upper)
+                times = jnp.clip(times, lower, upper)
+
+                def residual(t):
+                    return signs * jax.vmap(position)(t) - self.domain.length / 2
+
+                times = _bracketed_newton(residual, times, lower, upper, 1.0)
+                error = jnp.abs(residual(times))
+                tolerance = 64 * jnp.finfo(x.dtype).eps * self.domain.length
+                unresolved = unresolved | jnp.any(contact & (error > tolerance), axis=0)
+                return contact, times, unresolved
+
+            initial_times, initial_contact = times, contact
+            contact, times, unresolved = lax.cond(jnp.any(near), refine,
+                                                  lambda _: (contact, times, unresolved), None)
+        selected = jnp.where(contact, times, jnp.inf)
+        side = jnp.argmin(selected, axis=0)
+        hit = jnp.any(contact, axis=0)
+        time = jnp.where(hit, jnp.min(selected, axis=0), 0.0)
+        return end, hit, time, side, unresolved
+
+    def _wall_drift(self, key, x, u, w, qm, wall, fields, m, dt, time_fraction):
+        """Physical half flight with wall momenta at the contact time.
+
+        Transport the returned momentum back to its carried time for the full Boris
+        kick between halves. Newtonian uniform-E and ballistic flights are exact;
+        varying fields, magnetic/relativistic flights and event derivatives need
+        timestep refinement. Resolve at most one impact per particle per segment.
         """
         d = self.domain
         box = (d.length, d.length_y, d.length_z)
-        drift = dt * self._velocity(u)
-        free = x + drift
-        args = (box, d.particle_bc, d.restitution)
-        _, _, _, _, hits = apply_particle_bc(free, u, w, qm, *args, self._reflection(self._velocity(u)),
-                                             d.dx, self._weight_floor(), displacement=drift[:, 0])
-        hit = jnp.any(hits[0] > 0, axis=0)
-        fraction = jnp.where(hits[0][0] > 0, hits[3][0], hits[3][1])
-        interval = jnp.where(hit, (fraction - time_fraction) * dt, 0.0)[:, None]
-        incoming = self._accelerate(u, fields, qm, interval)
+        start = self._accelerate(u, fields, qm, -time_fraction * dt)
+        end, hit, time, side, unresolved = self._wall_contact(x, start, fields, qm, dt)
+        hit = hit & (w > 0)
+        interval = jnp.where(hit, time - time_fraction * dt, 0.0)[:, None]
+        incoming = jnp.where(hit[:, None], self._accelerate(start, fields, qm, time[:, None]), u)
+        impact = x + time[:, None] * self._mean_velocity(start, incoming)
+        impact = impact.at[:, 0].set(jnp.where(side == 0, -d.length / 2, d.length / 2))
+        # A particle resting on the face accelerates out at time zero. The wall law
+        # uses strict velocity at equality, so nudge only its evaluation point outward.
+        normal = lax.stop_gradient(impact[:, 0])
+        contact = impact.at[:, 0].set(impact[:, 0] + (jnp.nextafter(
+            normal, jnp.where(side == 0, -jnp.inf, jnp.inf)) - normal))
+        free = x + dt * self._mean_velocity(start, end)
         mapped, returned, w, qm, hits = apply_particle_bc(
-            free, incoming, w, qm, *args, self._reflection(self._velocity(incoming)), d.dx,
-            self._weight_floor(), displacement=drift[:, 0])
+            jnp.where(hit[:, None], contact, free), incoming, w, qm, box, d.particle_bc, d.restitution,
+            self._reflection(self._velocity(incoming)), d.dx, self._weight_floor())
         returned = self._thermalise(key, returned, hits)
         wall = self._record(wall, hits, m, incoming, returned)
         u = self._accelerate(returned, fields, qm, -interval)
-        remaining = (1 - fraction[:, None]) * dt
-        flight = self._velocity(self._accelerate(returned, fields, qm, remaining / 2))
-        bounced = x + fraction[:, None] * drift + remaining * flight
+        remaining = jnp.where(hit & (w > 0), dt - time, 0.0)
+        outgoing, second, _, _, failed = self._wall_contact(impact, returned, fields, qm, remaining)
+        bounced = impact + remaining[:, None] * self._mean_velocity(returned, outgoing)
         x = jnp.where((hit & (w > 0))[:, None], bounced, mapped)
-        x = x.at[:, 0].set(jnp.where((w > 0) & (jnp.abs(x[:, 0]) > d.length / 2), jnp.nan, x[:, 0]))
+        invalid = unresolved | failed | (hit & second) | (jnp.abs(x[:, 0]) > d.length / 2)
+        x = x.at[:, 0].set(jnp.where((w > 0) & invalid, jnp.nan, x[:, 0]))
         periods = jnp.asarray(box[1:])
         x = x.at[:, 1:].set((x[:, 1:] + periods / 2) % periods - periods / 2)
         return x, u, w, qm, wall

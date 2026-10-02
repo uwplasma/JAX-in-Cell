@@ -19,15 +19,20 @@ The first physical half drift reaches $x^{n+1/2}$ and applies any wall event the
 after the full Boris kick the second half drift reaches $x^{n+1}$ and applies its
 events. Collisions then act at this physical endpoint. A wall hit after $t^{n+1}$
 is handled on the next step: initialization consumes neither a future impact nor
-a thermal redraw. A segment resolves at most one impact per particle; a return
-that crosses the opposite wall makes the result invalid and requires a shorter step.
+a thermal redraw. A segment resolves at most one impact per particle; another contact
+during its returned flight makes the result invalid and requires a shorter step.
 
 The wall ledger uses momenta transported to the impact time in the gathered field,
 and the returned momentum is transported back to its carried time. Ballistic return
 flights, including thermal and relativistic ones, use the returned velocity rather
-than mirroring a distance at an assumed speed. In varying fields the drift and event
-time remain discrete approximations; refine the timestep for impact observables and
-their derivatives. The periodic path below retains its half-position carry.
+than mirroring a distance at an assumed speed. A held Newtonian electric field gives
+a quadratic flight: its first outward contact is used, and a particle turning before
+the wall is not reflected. Magnetic and relativistic contacts use a bounded Newton
+solve of the partial-Boris mean-velocity flight; unresolved roots invalidate the
+result. These flights approximate the physical orbit in varying or magnetic fields.
+Refine the timestep, including the gyro angle, for impact observables and derivatives;
+an event/no-event transition at grazing contact has no smooth physical derivative.
+The periodic path below retains its half-position carry.
 
 ## One step
 
