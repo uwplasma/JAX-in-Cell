@@ -635,3 +635,7 @@ class Collisions:
         if self.pairs is not None:
             object.__setattr__(self, "pairs", tuple(tuple(p) for p in self.pairs))
         object.__setattr__(self, "coulomb_log", _float(self.coulomb_log))
+        if self.coulomb_log is not None and not isinstance(self.coulomb_log, jax.core.Tracer):
+            value = np.asarray(self.coulomb_log)
+            _require(value.ndim == 0 and np.isfinite(value) and value >= 0,
+                     "coulomb_log must be None or a finite nonnegative scalar")

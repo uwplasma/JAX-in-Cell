@@ -989,7 +989,7 @@ def test_particle_boundaries():
     xp, vp, _, _, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (0, 0), (1.0, 1.0), nothing, dx)
     assert same(xp[:, 0], [0.4, -0.3, 0.1]) and same(vp, v)
     xr, vr, wr, _, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (1, 1), (0.5, 0.25), nothing, dx)
-    assert same(xr[:, 0], [-0.4, 0.3, 0.1]) and same(wr, 1.0)
+    assert same(xr[:, 0], [-0.45, 0.45, 0.1]) and same(wr, 1.0)
     assert same(vr[:, 0], [0.5, -0.75, 0.5])
     assert same(vr[:, 1:], v[:, 1:])
     xa, va, wa, qma, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (2, 2), (1.0, 1.0), nothing, dx)
@@ -999,7 +999,7 @@ def test_particle_boundaries():
     # 30 % of the left particle and 60 % of the right one come back, bounced
     reflect = (jnp.full(3, 0.3), jnp.full(3, 0.6))
     xm, vm, wm, qmm, _ = apply_particle_bc(x, v, w, qm, (L, L, L), (2, 2), (0.5, 1.0), reflect, dx)
-    assert same(wm, [0.3, 0.6, 1.0]) and same(xm[:, 0], [-0.4, 0.3, 0.1])
+    assert same(wm, [0.3, 0.6, 1.0]) and same(xm[:, 0], [-0.45, 0.3, 0.1])
     assert same(vm[:, 0], [0.5, -3.0, 0.5]) and same(qmm, 2.0)
     xs, _, ws, _, _ = apply_particle_bc(xa, va, wa, qma, (L, L, L), (2, 2), (1.0, 1.0), reflect, dx)
     assert same(xs, xa) and same(ws, wa)

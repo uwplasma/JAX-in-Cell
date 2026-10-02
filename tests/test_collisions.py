@@ -379,3 +379,9 @@ def test_maxwellian_temperature_difference_has_coupled_relaxation_rate(gamma_dt)
         return (difference(v) - difference(new)) / (dt * gamma * (ta - tb))
     ratios = np.asarray(jax.jit(jax.vmap(realization))(random.split(random.PRNGKey(22), 256)))
     assert abs(ratios.mean() - 1) < 6 * ratios.std(ddof=1) / np.sqrt(len(ratios)) + 0.02
+
+
+@pytest.mark.parametrize("value", [-1., np.nan, np.inf, [1., 2.]])
+def test_fixed_coulomb_log_rejects_invalid_values(value):
+    with pytest.raises(ValueError, match="finite nonnegative scalar"):
+        Collisions(coulomb_log=value)

@@ -410,3 +410,27 @@ def test_a_segment_with_unresolved_wall_crossings_cannot_look_valid():
     out = simulation.run(2, store_every=2, store_particles=False)
     with pytest.raises(RuntimeError, match="one wall crossing"):
         out.validate()
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+@pytest.mark.parametrize("side", [-1., 1.])
+def test_elastic_wall_records_both_energies_at_the_crossing(algorithm, side):
+    domain = Domain(length=1., cells=8, dt_over_dx_c=8*c, particle_bc="reflective",
+                    field_bc="reflective")
+    species = Species("probe", 1, .01, 1., 1e-12, x=jnp.array([[side*.35, 0., 0.]]),
+                      v=jnp.array([[side*.2, .03, 0.]]))
+    simulation = Simulation(domain, (species,), Solver(algorithm=algorithm, model="electrostatic", substeps=1),
+                            external_E=jnp.tile(jnp.array([side*.1, 0., 0.]), (8, 1)))
+    output = simulation.run(1)
+    np.testing.assert_allclose(output.wall.energy_in, output.wall.energy_out, rtol=1e-13, atol=0)
+
+
+def test_thermal_wall_exact_endpoint_redraws_and_records_the_same_returned_energy():
+    domain = Domain(length=1., cells=8, dt_over_dx_c=8*c, particle_bc="thermal", field_bc="reflective")
+    species = Species("neutral", 1, 0., 1., 1., vth=(.05, .02, .02),
+                      x=jnp.array([[.2, 0., 0.]]), v=jnp.array([[.2, 0., 0.]]))
+    output = Simulation(domain, (species,), Solver(model="electrostatic")).run(1, seed=1)
+    assert float(output.v[0, 0, 0]) < 0
+    assert float(output.v[0, 0, 0]) != -.2
+    assert float(output.wall.energy_out[0, 0, 1]) == pytest.approx(
+        float(jnp.sum(output.v[0, 0]**2)/2), rel=1e-13)

@@ -480,7 +480,7 @@ class Simulation:
                                                for s, block in zip(self.species, self.blocks)]), 0.0, 1.0)
                      for side in (0, 1))
 
-    def _thermalise(self, key, x, u):
+    def _thermalise(self, key, x, u, hits=None):
         """Redraw the velocity of every particle that crossed a thermal wall from the
         half-Maxwellian flux of its species: the normal speed from the Rayleigh
         distribution :math:`\\sigma\\sqrt{-2\\ln U}`, pointing into the box, and the
@@ -493,10 +493,12 @@ class Simulation:
                                  for s in self.species])
         k_normal, k_tangential = random.split(key)
         uniform = random.uniform(k_normal, (u.shape[0],), minval=jnp.finfo(u.dtype).tiny)
-        left = x[:, 0] < -d.length / 2
+        left = x[:, 0] < -d.length / 2 if hits is None else hits[0][0] > 0
         new = (sigma * random.normal(k_tangential, u.shape)).at[:, 0].set(
             jnp.where(left, 1.0, -1.0) * sigma[:, 0] * jnp.sqrt(-2 * jnp.log(uniform)))
         hit = (left & (d.particle_bc[0] == 3)) | ((x[:, 0] > d.length / 2) & (d.particle_bc[1] == 3))
+        if hits is not None:
+            hit = ((hits[0][0] > 0) & (d.particle_bc[0] == 3)) | ((hits[0][1] > 0) & (d.particle_bc[1] == 3))
         return jnp.where(hit[:, None], self._momentum(new), u)
 
     @staticmethod
@@ -941,7 +943,7 @@ class Simulation:
                 self._weight_floor())
             if 3 in d.particle_bc:                # the same wall law as every later step, key and all
                 key, k_wall = random.split(key)
-                u_out = self._thermalise(k_wall, x_free, u_out)
+                u_out = self._thermalise(k_wall, x_free, u_out, hits)
             wall = self._record(wall, hits, m, u, u_out)
             u = u_out
             x_integer = wrap_positions(x - 0.5 * dt * self._velocity(u), w, box, d.particle_bc, dx)
@@ -1091,14 +1093,20 @@ class Simulation:
         x_next_half, u_out, w, qm, hits = apply_particle_bc(x_free, u, w, qm, box, d.particle_bc, d.restitution,
                                                             self._reflection(v), dx, self._weight_floor(),
                                                             displacement=displacement[:, 0])
-        u_out = self._thermalise(k_wall, x_free, u_out)
+        u_out = self._thermalise(k_wall, x_free, u_out, hits)
         # The ledger records the state the particle arrived in, which is its state at the
         # crossing and not at the end of the step it overshot to. The two differ by the part
         # of the push that belongs after the impact, and the difference does not go away with
         # the time step: the derivative of the recorded energy is off by a fixed fraction,
         # 6 % in the control of test_gradients, because it is taken at a fixed step index
         # rather than at the wall. Undoing that part is the dtau/dtheta term of an event.
-        wall = self._record(wall, hits, m, self._at_impact(u, hits, fields, incident, dt), u_out)
+        u_impact = self._at_impact(u, hits, fields, incident, dt)
+        _, u_returned, _, _, _ = apply_particle_bc(x_free, u_impact, w, incident, box, d.particle_bc,
+                                                   d.restitution, self._reflection(v), dx, self._weight_floor())
+        if 3 in d.particle_bc:
+            thermal = ((hits[0][0] > 0) & (d.particle_bc[0] == 3)) | ((hits[0][1] > 0) & (d.particle_bc[1] == 3))
+            u_returned = jnp.where(thermal[:, None], u_out, u_returned)
+        wall = self._record(wall, hits, m, u_impact, u_returned)
         u = u_out
         v = self._velocity(u)
         x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
@@ -1185,10 +1193,10 @@ class Simulation:
                 # would make an elastic wall appear to exchange energy.
                 _, u_returned, _, _, _ = apply_particle_bc(x_free, u_impact, ws, incident, box, d.particle_bc,
                                                            d.restitution, reflection, dx, self._weight_floor())
-                u_bounced = self._thermalise(k_sub, x_free, u_bounced)
+                u_bounced = self._thermalise(k_sub, x_free, u_bounced, hits)
                 if 3 in d.particle_bc:
-                    thermal_hit = ((x_free[:, 0] < -L / 2) & (d.particle_bc[0] == 3)
-                                   | (x_free[:, 0] > L / 2) & (d.particle_bc[1] == 3))
+                    thermal_hit = ((hits[0][0] > 0) & (d.particle_bc[0] == 3)
+                                   | (hits[0][1] > 0) & (d.particle_bc[1] == 3))
                     u_returned = jnp.where(thermal_hit[:, None], u_bounced, u_returned)
                 wall = self._record(wall, hits, m, u_impact, u_returned)
                 u_new = u_bounced
