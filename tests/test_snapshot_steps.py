@@ -182,6 +182,23 @@ def test_sparse_histories_preserve_new_features_and_final_state(feature, schedul
         np.testing.assert_array_equal(sparse["final_state"][key], full["final_state"][key])
 
 
+@pytest.mark.parametrize("schedule", [[0], [0, 2], []])
+def test_sparse_sources_preserve_live_histories_and_final_budget(schedule):
+    from tests.test_simulation import source_simulation_parameters
+    parameters = source_simulation_parameters()
+    full = Simulation(deepcopy(parameters)).run()
+    parameters["solver_parameters"]["snapshot_steps"] = schedule
+    sparse = Simulation(parameters).run()
+    for key in ("positions", "velocities", "mus", "electric_field", "magnetic_field", "current_density", "charge_density",
+                "masses_over_time", "charges_over_time", "charge_to_mass_ratios_over_time", "weights_over_time", "alive_particles",
+                "injected_weight", "injected_charge", "injected_energy", "injected_momentum", "lost_weight", "lost_charge",
+                "lost_energy", "lost_momentum", "wall_energy_transfer", "wall_momentum_transfer", "source_field_work"):
+        np.testing.assert_array_equal(sparse[key], np.asarray(full[key])[schedule])
+    for key in full["final_state"]:
+        np.testing.assert_array_equal(sparse["final_state"][key], full["final_state"][key])
+    assert np.asarray(sparse["final_state"]["source_budget"])[0] > 0
+
+
 def _peak_gpu_bytes_in_subprocess(snapshot_steps, total_steps, number_grid_points, number_pseudoparticles, seed):
     """Run a small simulation in an isolated subprocess and return the peak
     GPU memory (bytes) JAX reported for it.

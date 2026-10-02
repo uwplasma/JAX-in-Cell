@@ -28,6 +28,9 @@ def diagnostics(output):
     else:
         gamma, kinetic_p = jnp.ones_like(v2), 0.5 * mass * v2
     momentum_p = (mass * gamma)[..., None] * velocity
+    if "weights_over_time" in output:
+        output.update(weights_electrons=output["weights_over_time"][:, esel],
+                      weights_ions=output["weights_over_time"][:, isel])
 
     # Simulation populations have identities independent of their charge, mass or weight.
     # Keep the old charge/mass grouping for dictionaries without population metadata.
@@ -43,7 +46,9 @@ def diagnostics(output):
              for label, sp in output.get("species_parameters", {}).get(kind, {}).items()]
     weights = jnp.asarray(output.get("weights", jnp.ones_like(output["masses"]))).reshape(-1)
     initial_weights = weights
-    if "masses_over_time" in output:
+    if "weights_over_time" in output:
+        weights = jnp.asarray(output["weights_over_time"])
+    elif "masses_over_time" in output:
         weights = weights * mass / jnp.where(initial_mass > 0, initial_mass, 1.)
 
     species_list = []
@@ -82,7 +87,6 @@ def diagnostics(output):
             "temperature": jnp.mean(temperature, axis=-1),
             "kinetic_energy": jnp.sum(kinetic_p[:, mask], axis=-1),
         })
-
     output["species"] = species_list
 
     E_field_over_time = output['electric_field']

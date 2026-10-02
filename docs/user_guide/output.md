@@ -2,7 +2,7 @@
 
 `Simulation.run` returns a plain dictionary. It contains the time histories, the
 particle bookkeeping, the derived quantities and a copy of every parameter section.
-The tables below use `S` for `total_steps`, `N` for the total number of pseudo-particles
+The tables below use `S` for the number of stored snapshots, `N` for the total number of pseudo-particles
 of all populations and `G` for `number_grid_points`.
 
 ## Time histories
@@ -15,11 +15,13 @@ of all populations and `G` for `number_grid_points`.
 | `magnetic_field` | `(S, G, 3)` | T | cell centres $x_i$ |
 | `current_density` | `(S, G, 3)` | A/m² | $J_x$ at cell faces, $J_y$, $J_z$ at cell centres |
 | `charge_density` | `(S, G)` | C/m³ | cell centres |
-| `time_array` | `(S,)` | s | `arange(1, S + 1) * dt` |
+| `time_array` | `(S,)` | s | `(snapshot_steps + 1) * dt` |
 
-Entry `n` of each history is the state after step `n + 1`; the initial state is
+Entry `n` is the state after the zero-based step `snapshot_steps[n]`, at
+`(snapshot_steps[n] + 1) * dt`. The default stores every step. The initial state is
 available as `initial_positions`, `initial_velocities` and `fields`
-(a tuple `(E, B)` of the initial fields). The first stored timestamp is `dt`.
+(a tuple `(E, B)` of the initial fields). `final_state` contains the completed run
+even when the snapshot schedule is empty or ends early.
 The velocities of the explicit scheme are
 defined at integer times and the stored positions are the integer-time positions
 reconstructed from the half-step ones, so the two are synchronous. The particle axis is
@@ -30,13 +32,40 @@ each particle belongs to.
 
 | key | shape | meaning |
 |---|---|---|
-| `charges` | `(N, 1)` | charge of each pseudo-particle, $q_s w_s$ (zero after absorption) |
-| `masses` | `(N, 1)` | mass of each pseudo-particle, $m_s w_s$ |
-| `charge_to_mass_ratios` | `(N, 1)` | $q_s/m_s$ (zero after absorption) |
+| `charges` | `(N, 1)` | nominal marker charge, $q_s w_s$, including reserved source slots |
+| `masses` | `(N, 1)` | nominal marker mass, $m_s w_s$ |
+| `charge_to_mass_ratios` | `(N, 1)` | nominal $q_s/m_s$ |
 | `weights` | `(N, 1)` | $w_s$ |
 | `species_integer_index` | `(N,)` | population index in input order |
 | `charge_integer_lookup`, `mass_integer_lookup`, `charge_mass_integer_lookup` | `(P,)` | per-population $q_s$, $m_s$, $q_s/m_s$ for the `P` populations |
 | `number_pseudoelectrons` | int | pseudo-particles in the first electron population |
+
+Active sources additionally return `masses_over_time`, `charges_over_time` and
+`charge_to_mass_ratios_over_time`, each `(S, N, 1)`, plus `weights_over_time` and
+`alive_particles`, each `(S, N)`. These contain the actual live state: unborn and
+absorbed markers have zero mass, charge, weight and charge/mass ratio. A partial
+wall return reduces the live weight. `source_birth_steps` is `(N,)`, with `-1` for
+initial particles and the scheduled birth step for each reserved marker.
+
+`injected_weight`, `injected_charge`, `injected_energy`, `lost_weight`, `lost_charge`,
+`lost_energy`, `wall_energy_transfer` and `source_field_work` are cumulative `(S,)`
+histories; `injected_momentum`, `lost_momentum` and `wall_momentum_transfer` are
+`(S, 3)`. Injection records the prescribed birth state. Loss records the removed
+weight's incoming kinetic energy and momentum at each physical half drift.
+Wall transfer records the full before/after kinetic energy and momentum change,
+including restitution and the impulse of reflected markers. `source_field_work`
+records the self-field energy change from the Gauss projection at birth; it does
+not include imposed-field work, outgoing electromagnetic energy, or time-integration
+error. Particle weights are numbers per unit area, charge is C/m², energy J/m²
+and momentum kg/(m s). These ledgers describe an open system; they do not by
+themselves certify a closed total-energy budget.
+
+`diagnostics` and `plot` use the live masses and weights when these histories are
+present, so dormant and absorbed slots do not appear as extra cold particles.
+With sources, `final_state["source_budget"]` retains the final 17 cumulative values
+in the same order: injected weight, charge, energy, three momentum components;
+lost weight, charge, energy, three momentum components; wall energy, three wall
+momentum components; and source field work. This remains available with no snapshots.
 
 ## Grid, time step and derived quantities
 
@@ -119,9 +148,8 @@ Charge and momentum conservation
   that row's sum of particle momentum magnitudes. {func}`jaxincell.plot` draws both relative errors on
   the energy panel, next to the relative energy error.
 
-Charges, masses and weights are supplied once rather than as time histories.
-They cannot recover past absorption or partial collection at walls; accurate
-historical wall energy and momentum balances need time-dependent weights and a ledger.
+Absorbing and mixed walls also supply actual mass and charge histories. Diagnostics
+use these live weights; source budgets separately record absorption and wall transfers.
 
 The relative energy error $|\mathcal E(t) - \mathcal E(0)|/\mathcal E(0)$ built from
 `total_energy` is the standard check of a run. The explicit scheme is expected to
@@ -132,10 +160,11 @@ does not, see {doc}`../numerics/implicit`.
 
 ## Memory
 
-Every step is stored. The phase-space histories take $2 \times 3 \times 8$ bytes per
+Every step is stored by default; `snapshot_steps` selects fewer histories without
+shortening the run. The phase-space histories take $2 \times 3 \times 8$ bytes per
 particle per step in double precision, so $10^5$ particles over $10^4$ steps need
-48 GB. Reduce `total_steps`, the particle count, or run in chunks by building the
-initial phase space of the next run from the last stored state through
+48 GB. Select fewer snapshots, reduce the particle count, or run in chunks by building the
+initial phase space of the next run from `final_state` through
 `initial_positions` and `initial_velocities`.
 
 ## Saving

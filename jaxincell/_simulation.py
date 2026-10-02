@@ -10,6 +10,8 @@ from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
 from ._collisions import collide, coulomb_logarithm
 from ._constants import mass_electron, elementary_charge, epsilon_0
+from ._fields import E_from_Gauss_1D_Cartesian
+from ._sources import calculate_charge_density
 from ._parameters._sections import (
     DIFFERENTIABLE_INPUT_PARAMETERS,
     PARAMETER_SECTIONS,
@@ -182,6 +184,7 @@ class Simulation:
             domain_parameters,
             solver_parameters,
             domain_state,
+            source_parameters,
         )
         print_simulation_information(
             domain_parameters,
@@ -249,7 +252,9 @@ class Simulation:
                 carry, step_index, solver_parameters, runtime_external_field_parameters, dxyz, dt, grid_xyz, box_size, dimensions,
                 particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver'],
                 **{key: domain_parameters[key] for key in
-                   ("mixed_BC_weight", "COR_left", "COR_right", "mixed_BC_velocity_scale")}
+                   ("mixed_BC_weight", "COR_left", "COR_right", "mixed_BC_velocity_scale")},
+                physical_masses=(particle_state["mass_integer_lookup"][particle_state["species_integer_index"]][:, None]
+                                 if source_parameters["source_term_active"] else None),
             )
         else:
             initial_carry = (
@@ -299,6 +304,39 @@ class Simulation:
             return new_carry, (*output, new_carry[7], new_carry[6]) if changing_weights else output
         step_func = collision_step
 
+        sources = source_parameters["source_term_active"]
+        if sources:
+            initial_carry = initial_carry, jnp.zeros(17)
+
+            def source_step(carry, step_index):
+                state, budget = carry
+                E, B, xm, x, xp, v, q, m, qm = state
+                born = (particle_state["source_birth_steps"] == step_index)[:, None]
+                xb, vb = particle_state["source_birth_positions"], particle_state["source_birth_velocities"]
+                q = jnp.where(born, particle_state["nominal_charges"], q)
+                m = jnp.where(born, particle_state["nominal_masses"], m)
+                qm = jnp.where(born, particle_state["nominal_charge_to_mass_ratios"], qm)
+                x, v = jnp.where(born, xb, x), jnp.where(born, vb, v)
+                xm, xp = jnp.where(born, xb - dt/2*vb, xm), jnp.where(born, xb + dt/2*vb, xp)
+
+                def birth_field(E):
+                    rho = calculate_charge_density(x, q, dx, grid, particle_BC_left, particle_BC_right,
+                                                   solver_parameters["filter_passes"], solver_parameters["filter_alpha"],
+                                                   solver_parameters["filter_strides"], field_BC_left, field_BC_right)
+                    Ex = E_from_Gauss_1D_Cartesian(rho, dx, periodic=field_BC_left == 0 and field_BC_right == 0)
+                    return E.at[:, 0].set(Ex)
+
+                E_born = lax.cond(jnp.any(born), birth_field, lambda E: E, E)
+                births = jnp.concatenate((jnp.array([jnp.sum(born * particle_state["weights"]), jnp.sum(born * q),
+                                                    jnp.sum(born * m * vb**2) / 2]),
+                                         jnp.sum(born * m * vb, axis=0)))
+                state, data = collisionless_step((E_born, B, xm, x, xp, v, q, m, qm), step_index)
+                field_work = epsilon_0 * dx / 2 * jnp.sum(E_born[:, 0]**2 - E[:, 0]**2)
+                budget += jnp.concatenate((births, data[-1], jnp.array([field_work])))
+                return (state, budget), (*data[:-1], state[7], state[6], state[8], budget)
+
+        step_func = source_step if sources else collision_step
+
         # Keep the requested snapshots in fixed-size buffers carried through the scan.
         # An unset snapshot_steps records every step.
         num_snapshots = len(self._snapshot_steps)
@@ -339,6 +377,9 @@ class Simulation:
         magnetic_field_over_time, current_density_over_time, charge_density_over_time, mus_over_time = snapshot_buffers[:7]
 
         # **Output results**
+        if sources:
+            final_carry, final_budget = final_carry
+
         electron_species = next(iter(species_parameters["electrons"].values()))
         electron_weight = particle_state["weights"][0, 0]
         plasma_frequency = (
@@ -406,6 +447,20 @@ class Simulation:
 
         if changing_weights:
             temporary_output.update(masses_over_time=snapshot_buffers[7], charges_over_time=snapshot_buffers[8])
+        if sources:
+            physical_masses = particle_state["mass_integer_lookup"][particle_state["species_integer_index"]]
+            temporary_output.update(
+                masses=particle_state["nominal_masses"], charges=particle_state["nominal_charges"],
+                charge_to_mass_ratios=particle_state["nominal_charge_to_mass_ratios"],
+                masses_over_time=snapshot_buffers[7], charges_over_time=snapshot_buffers[8], charge_to_mass_ratios_over_time=snapshot_buffers[9],
+                weights_over_time=snapshot_buffers[7][..., 0] / physical_masses,
+                alive_particles=snapshot_buffers[7][..., 0] > 0, source_birth_steps=particle_state["source_birth_steps"],
+                injected_weight=snapshot_buffers[10][:, 0], injected_charge=snapshot_buffers[10][:, 1], injected_energy=snapshot_buffers[10][:, 2],
+                injected_momentum=snapshot_buffers[10][:, 3:6], lost_weight=snapshot_buffers[10][:, 6], lost_charge=snapshot_buffers[10][:, 7],
+                lost_energy=snapshot_buffers[10][:, 8], lost_momentum=snapshot_buffers[10][:, 9:12], wall_energy_transfer=snapshot_buffers[10][:, 12],
+                wall_momentum_transfer=snapshot_buffers[10][:, 13:16], source_field_work=snapshot_buffers[10][:, 16],
+            )
+            temporary_output["final_state"]["source_budget"] = final_budget
         return temporary_output
 
     def assemble_output(self, simulation_output, input_parameters):
@@ -599,9 +654,14 @@ class Simulation:
             self._domain_parameters,
             self._solver_parameters,
             domain_state,
+            self._source_parameters,
         )
         for key, value in particle_state.items():
             setattr(self, key, value)
+        if not self._source_parameters["source_term_active"]:
+            for key in ("source_birth_steps", "source_birth_positions", "source_birth_velocities",
+                        "nominal_charges", "nominal_masses", "nominal_charge_to_mass_ratios"):
+                self.__dict__.pop(key, None)
 
     def initialize_fields(self):
         domain_state = self.current_domain_state()
