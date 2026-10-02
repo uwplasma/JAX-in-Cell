@@ -446,9 +446,11 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx, floor=0
     out = jnp.zeros_like(xx, dtype=bool)
     arrived, kept, truncated, fraction = [], [], [], []
     step = jnp.zeros_like(xx) if displacement is None else displacement
-    for code, beyond, mirror, park, e, r, face in (
-            (bc[0], xx < -L / 2, -L - xx, -L / 2 - PARK * dx, restitution[0], reflection[0], -L / 2),
-            (bc[1], xx > L / 2, L - xx, L / 2 + PARK * dx, restitution[1], reflection[1], L / 2)):
+    for code, beyond, park, e, r, face in (
+            (bc[0], (xx < -L / 2) | ((xx == -L / 2) & (vx < 0)),
+             -L / 2 - PARK * dx, restitution[0], reflection[0], -L / 2),
+            (bc[1], (xx > L / 2) | ((xx == L / 2) & (vx > 0)),
+             L / 2 + PARK * dx, restitution[1], reflection[1], L / 2)):
         arrived.append(jnp.where(beyond, w, 0.0))
         kept.append(jnp.zeros_like(w))
         truncated.append(jnp.zeros_like(w))
@@ -468,8 +470,11 @@ def apply_particle_bc(x, v, w, qm, box, bc, restitution, reflection, dx, floor=0
             w = jnp.where(beyond, returned, w)
             lost = beyond & (w <= 0)
             xx, out, beyond = jnp.where(lost, park, xx), out | lost, beyond & ~lost
-        xx = jnp.where(beyond, mirror, xx)
+        xx = jnp.where(beyond, face - e * (xx - face), xx)
         vx = jnp.where(beyond, -e * vx, vx)
+    # The impact ledger represents one crossing per segment. A second crossing
+    # requires a shorter particle step; poison it rather than silently lose an event.
+    xx = jnp.where((w > 0) & (jnp.abs(xx) > L / 2), jnp.nan, xx)
     x = x.at[:, 0].set(xx)
     v = v.at[:, 0].set(vx)
     if 2 in bc:

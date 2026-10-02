@@ -195,7 +195,10 @@ class Output:
         It reads values, so it belongs on the host: inside ``jit`` or ``grad`` there is nothing
         to read. A differentiated objective takes :attr:`overflow` out with its result instead
         and rejects the trial itself; :meth:`validate` is the host-side shortcut."""
-        spilt = float(jnp.max(jnp.asarray(self.overflow)))
+        if not all(np.all(np.isfinite(np.asarray(a))) for a in jax.tree.leaves(self.state)):
+            return ("non-finite final state: resolve at most one wall crossing per particle segment "
+                    "and converge the implicit iteration; reduce dt or increase substeps or picard_iterations.",)
+        spilt = float(jnp.max(jnp.asarray(self.state.wall.overflow)))
         if spilt <= 0:
             return ()
         return (f"a source overwrote live particles: the largest weight destroyed was {spilt:.3g}, "

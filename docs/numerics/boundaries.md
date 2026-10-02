@@ -19,11 +19,14 @@ walls recirculate it, reflective walls turn it around, absorbing walls remove
 **Periodic.** A particle leaving one end re-enters at the other,
 $x \to ((x + L/2) \bmod L) - L/2$. Nothing else changes.
 
-**Reflective.** The position is mirrored about the wall, $x \to \pm L - x$, and the
-normal velocity is multiplied by `-restitution`, which may differ between the two
-walls. At the default `restitution=1.0` this is a specular bounce, and the total energy
+**Reflective.** At wall $x_w$, the overshoot is reduced with the returned velocity:
+$x \to x_w-e(x-x_w)$ and $v_x \to -e v_x$, with $e=$ `restitution`. The two
+walls may have different coefficients. At the default `restitution=1.0` this is a specular bounce, and the total energy
 is conserved: {{ boundary_energy_error_reflective }} over the run above. Values below
-one model a lossy wall and remove energy on purpose.
+one model a lossy wall and remove energy on purpose. A particle segment must resolve
+at most one impact; reduce `dt` or increase implicit `substeps` when necessary.
+An unresolved second crossing makes the state non-finite, and `out.validate()`
+raises instead of accepting incomplete wall accounting.
 
 **Absorbing.** The particle keeps its position outside the grid but its weight, its
 charge-to-mass ratio and its velocity are set to zero, so it deposits nothing, feels

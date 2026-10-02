@@ -368,3 +368,45 @@ def test_simulation_and_run_refuse_bad_arguments_with_value_errors():
     for steps, store_every in ((10, 3), (10, 0)):
         with pytest.raises(ValueError, match="store_every"):
             sim.run(steps, store_every=store_every)
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+@pytest.mark.parametrize("side", [-1., 1.])
+@pytest.mark.parametrize("restitution", [0., .5, 1.])
+def test_inelastic_ballistic_wall_trajectory(algorithm, side, restitution):
+    """A neutral marker reaches a stationary wall and drifts at -e*v afterwards."""
+    domain = Domain(length=1., cells=8, dt_over_dx_c=8*c, particle_bc="reflective",
+                    field_bc="reflective", restitution=restitution)
+    positions = jnp.array([[side*s, 0., 0.] for s in (.35, .4, .45)])
+    velocities = jnp.tile(jnp.array([side*.2, .03, -.04]), (3, 1))
+    species = Species("neutral", 3, 0., 1., 1., x=positions, v=velocities)
+    simulation = Simulation(domain, (species,), Solver(algorithm=algorithm, model="electrostatic",
+                                                      filter_passes=0, substeps=1))
+    out = simulation.run(1).validate()
+    expected = side*(.5-restitution*(np.abs(np.asarray(positions[:, 0]))+.2-.5))
+    np.testing.assert_allclose(out.x[0, :, 0], expected, atol=2e-16)
+    np.testing.assert_allclose(out.v[0, :, 0], -side*.2*restitution, atol=2e-16)
+    np.testing.assert_allclose(out.v[0, :, 1:], velocities[:, 1:], atol=2e-16)
+    wall = 0 if side < 0 else 1
+    assert float((out.wall.energy_in-out.wall.energy_out)[0, 0, wall]) == pytest.approx(
+        .5*.2**2*(1-restitution**2), abs=2e-16)
+
+
+@pytest.mark.parametrize("side", [-1., 1.])
+def test_an_outgoing_marker_exactly_on_the_wall_hits_once(side):
+    x = jnp.array([[side*.5, 0., 0.]])
+    v = jnp.array([[side*.2, 0., 0.]])
+    ones = jnp.ones(1)
+    _, reflected, _, _, hits = apply_particle_bc(x, v, ones, ones, (1., 1., 1.),
+                                                 (1, 1), (.5, .5), (ones, ones), .1)
+    assert float(jnp.sum(hits[0])) == 1.
+    assert float(reflected[0, 0]) == -side*.1
+
+
+def test_a_segment_with_unresolved_wall_crossings_cannot_look_valid():
+    domain = Domain(length=1., cells=8, dt_over_dx_c=8*c, particle_bc="reflective", field_bc="reflective")
+    species = Species("neutral", 1, 0., 1., 1., x=jnp.array([[.4, 0., 0.]]), v=jnp.array([[3., 0., 0.]]))
+    simulation = Simulation(domain, (species,), Solver(model="electrostatic", filter_passes=0))
+    out = simulation.run(2, store_every=2, store_particles=False)
+    with pytest.raises(RuntimeError, match="one wall crossing"):
+        out.validate()
