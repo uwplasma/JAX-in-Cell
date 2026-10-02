@@ -1,5 +1,13 @@
 # Running simulations
 
+To retain an irregular history, set `solver_parameters["snapshot_steps"]` to a sequence of
+zero-based post-step indices. Index 0 is the first completed step, at `dt`. Lists and NumPy
+integer arrays are sorted and deduplicated; indices outside `[0, total_steps)` are rejected.
+`None` stores every step, while `[]` stores no histories. The simulation always completes
+`total_steps`; `output["final_state"]` contains its final fields, particles and time independently
+of the schedule. This is a final-state record, not a restart API. TOML accepts the same key
+under `[solver_parameters]`. Use an explicit sequence for irregular sampling.
+
 ## The `Simulation` object
 
 {class}`jaxincell.Simulation` is constructed from a parameter dictionary or a path to a
