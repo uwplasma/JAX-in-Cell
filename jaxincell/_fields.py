@@ -83,6 +83,8 @@ def E_from_Gauss_1D_Cartesian(charge_density, dx, periodic=False):
     Returns:
         array: The electric field at each grid point due to the particles, shape (G,).
     """
+    if periodic:
+        charge_density = charge_density - jnp.mean(charge_density)
     # Construct divergence matrix for solving Gauss' Law
     divergence_matrix = jnp.diag(jnp.ones(len(charge_density)))-jnp.diag(jnp.ones(len(charge_density)-1),k=-1)
     

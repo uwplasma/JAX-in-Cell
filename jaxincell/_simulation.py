@@ -6,6 +6,9 @@ from jax import lax, jit, config
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
+from ._constants import epsilon_0
+from ._fields import E_from_Gauss_1D_Cartesian
+from ._sources import calculate_charge_density
 from ._parameters._sections import (
     DIFFERENTIABLE_INPUT_PARAMETERS,
     PARAMETER_SECTIONS,
@@ -178,6 +181,7 @@ class Simulation:
             domain_parameters,
             solver_parameters,
             domain_state,
+            source_parameters,
         )
         print_simulation_information(
             domain_parameters,
@@ -240,7 +244,9 @@ class Simulation:
                 carry, step_index, solver_parameters, runtime_external_field_parameters, dx, dt, grid, box_size,
                 particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver'],
                 **{key: domain_parameters[key] for key in
-                   ("mixed_BC_weight", "COR_left", "COR_right", "mixed_BC_velocity_scale")}
+                   ("mixed_BC_weight", "COR_left", "COR_right", "mixed_BC_velocity_scale")},
+                physical_masses=(particle_state["mass_integer_lookup"][particle_state["species_integer_index"]][:, None]
+                                 if source_parameters["source_term_active"] else None),
             )
         else:
             initial_carry = (
@@ -254,9 +260,41 @@ class Simulation:
             )
 
         mixed_walls = particle_BC_left >= 3 or particle_BC_right >= 3
+        sources = source_parameters["source_term_active"]
+        if sources:
+            initial_carry = initial_carry, jnp.zeros(17)
+
+            def source_step(carry, step_index):
+                state, budget = carry
+                E, B, xm, x, xp, v, q, m, qm = state
+                born = (particle_state["source_birth_steps"] == step_index)[:, None]
+                xb, vb = particle_state["source_birth_positions"], particle_state["source_birth_velocities"]
+                q = jnp.where(born, particle_state["nominal_charges"], q)
+                m = jnp.where(born, particle_state["nominal_masses"], m)
+                qm = jnp.where(born, particle_state["nominal_charge_to_mass_ratios"], qm)
+                x, v = jnp.where(born, xb, x), jnp.where(born, vb, v)
+                xm, xp = jnp.where(born, xb - dt/2*vb, xm), jnp.where(born, xb + dt/2*vb, xp)
+
+                def birth_field(E):
+                    rho = calculate_charge_density(x, q, dx, grid, particle_BC_left, particle_BC_right,
+                                                   solver_parameters["filter_passes"], solver_parameters["filter_alpha"],
+                                                   solver_parameters["filter_strides"], field_BC_left, field_BC_right)
+                    Ex = E_from_Gauss_1D_Cartesian(rho, dx, periodic=field_BC_left == 0 and field_BC_right == 0)
+                    return E.at[:, 0].set(Ex)
+
+                E_born = lax.cond(jnp.any(born), birth_field, lambda E: E, E)
+                births = jnp.concatenate((jnp.array([jnp.sum(born * particle_state["weights"]), jnp.sum(born * q),
+                                                    jnp.sum(born * m * vb**2) / 2]),
+                                         jnp.sum(born * m * vb, axis=0)))
+                state, data = step_func((E_born, B, xm, x, xp, v, q, m, qm), step_index)
+                field_work = epsilon_0 * dx / 2 * jnp.sum(E_born[:, 0]**2 - E[:, 0]**2)
+                budget += jnp.concatenate((births, data[-1], jnp.array([field_work])))
+                return (state, budget), (data[:-1], state[7], state[6], state[8], budget)
 
         @scan_tqdm(total_steps)
         def simulation_step(carry, step_index):
+            if sources:
+                return source_step(carry, step_index)
             carry, data = step_func(carry, step_index)
             return carry, (data, carry[7], carry[6]) if mixed_walls else data
 
@@ -266,10 +304,10 @@ class Simulation:
 
         # Unpack results
         positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results[0] if mixed_walls else results
+        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results[0] if mixed_walls or sources else results
 
         # **Output results**
-        from ._constants import epsilon_0, mass_electron
+        from ._constants import mass_electron
         electron_species = next(iter(species_parameters["electrons"].values()))
         electron_weight = particle_state["weights"][0, 0]
         plasma_frequency = (
@@ -325,6 +363,19 @@ class Simulation:
 
         if mixed_walls:
             temporary_output.update(masses_over_time=results[1], charges_over_time=results[2])
+        if sources:
+            physical_masses = particle_state["mass_integer_lookup"][particle_state["species_integer_index"]]
+            temporary_output.update(
+                masses=particle_state["nominal_masses"], charges=particle_state["nominal_charges"],
+                charge_to_mass_ratios=particle_state["nominal_charge_to_mass_ratios"],
+                masses_over_time=results[1], charges_over_time=results[2], charge_to_mass_ratios_over_time=results[3],
+                weights_over_time=results[1][..., 0] / physical_masses,
+                alive_particles=results[1][..., 0] > 0, source_birth_steps=particle_state["source_birth_steps"],
+                injected_weight=results[4][:, 0], injected_charge=results[4][:, 1], injected_energy=results[4][:, 2],
+                injected_momentum=results[4][:, 3:6], lost_weight=results[4][:, 6], lost_charge=results[4][:, 7],
+                lost_energy=results[4][:, 8], lost_momentum=results[4][:, 9:12], wall_energy_transfer=results[4][:, 12],
+                wall_momentum_transfer=results[4][:, 13:16], source_field_work=results[4][:, 16],
+            )
         return temporary_output
 
     def assemble_output(self, simulation_output, input_parameters):
@@ -489,9 +540,14 @@ class Simulation:
             self._domain_parameters,
             self._solver_parameters,
             domain_state,
+            self._source_parameters,
         )
         for key, value in particle_state.items():
             setattr(self, key, value)
+        if not self._source_parameters["source_term_active"]:
+            for key in ("source_birth_steps", "source_birth_positions", "source_birth_velocities",
+                        "nominal_charges", "nominal_masses", "nominal_charge_to_mass_ratios"):
+                self.__dict__.pop(key, None)
 
     def initialize_fields(self):
         domain_state = self.current_domain_state()

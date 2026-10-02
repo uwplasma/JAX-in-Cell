@@ -20,6 +20,9 @@ def diagnostics(output):
         "charge_ions":        output["charges"]   [   isel],
     }
     output.update(**segregated)
+    if "weights_over_time" in output:
+        output.update(weights_electrons=output["weights_over_time"][:, esel],
+                      weights_ions=output["weights_over_time"][:, isel])
 
     # --- NEW: multi-species view, fully additive/back-compat ---
     # Group by (q, m) exact pairs
@@ -50,6 +53,8 @@ def diagnostics(output):
             "positions": pos_s,
             "velocities": vel_s,
         })
+        if "weights_over_time" in output:
+            species_list[-1]["weights"] = output["weights_over_time"][:, mask]
 
     output["species"] = species_list
 

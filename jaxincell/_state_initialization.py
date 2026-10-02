@@ -195,7 +195,8 @@ def make_particles_from_state(
 
     return out, electron_reference
 
-def initialize_particle_state(species_parameters, domain_parameters, solver_parameters, domain_state):
+def initialize_particle_state(species_parameters, domain_parameters, solver_parameters, domain_state,
+                              source_parameters=None):
     position_blocks = []
     velocity_blocks = []
     weight_blocks = []
@@ -248,6 +249,41 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
             mass_by_species.append(species_particle_state["mass"])
             charge_mass_by_species.append(species_particle_state["charge_mass"])
 
+    if source_parameters and source_parameters["source_term_active"]:
+        birth_steps = [-jnp.ones((sum(len(block) for block in position_blocks),), dtype=jnp.int32)]
+        birth_velocities = list(velocity_blocks)
+        if (solver_parameters["time_evolution_algorithm"] != 0 or
+                solver_parameters["field_solver"] != 2 or solver_parameters["relativistic"]):
+            raise ValueError("Volumetric sources require nonrelativistic Boris and field_solver=2 (Cartesian Gauss).")
+        G, T = domain_parameters["number_grid_points"], domain_parameters["total_steps"]
+        for source, population in enumerate(source_parameters["source_species"]):
+            if not 0 <= population < len(unique_species_indices):
+                raise ValueError("source_species must index the ordered electron populations followed by ions.")
+            width = source_parameters["width_of_source"][source]
+            location = source_parameters["location_of_source"][source]
+            if width > G and location != 3:
+                raise ValueError("width_of_source must not exceed number_grid_points.")
+            count = G if location == 3 else width + ((width + G) % 2 if location == 0 else 0)
+            first = (G - count) // 2 if location == 0 else G - count if location == 2 else 0
+            node_weights = jnp.ones(count)
+            if location == 0 and count != width:
+                node_weights = node_weights.at[0].set(0.5).at[-1].set(0.5)
+            cadence = source_parameters["how_often_source_should_produce_quasiparticles"][source]
+            dates = jnp.arange(0, T, cadence, dtype=jnp.int32)
+            size = len(dates) * count
+            x = jnp.tile(domain_state["grid"][first:first + count], len(dates))
+            position_blocks.append(jnp.stack((x, jnp.zeros_like(x), jnp.zeros_like(x)), axis=-1))
+            velocity = [source_parameters[f"injection_speed_{axis}"][source] for axis in SPECIES_AXES]
+            if sum(component**2 for component in velocity) >= speed_of_light**2:
+                raise ValueError("The norm of the source injection velocity must be below c.")
+            birth_velocities.append(jnp.broadcast_to(jnp.array(velocity), (size, 3)))
+            velocity_blocks.append(jnp.zeros((size, 3)))
+            weight_blocks.append((jnp.tile(node_weights, len(dates)) * domain_state["dt"] * cadence *
+                                  source_parameters["source_particles_per_second"][source])[:, None])
+            species_index.extend([unique_species_indices[population]] * size)
+            species_integer_index_blocks.append(jnp.full(size, population, dtype=jnp.int32))
+            birth_steps.append(jnp.repeat(dates, count))
+
     positions = jnp.concatenate(position_blocks, axis=0)
     velocities = jnp.concatenate(velocity_blocks, axis=0)
     weights = jnp.concatenate(weight_blocks, axis=0)
@@ -272,7 +308,7 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
     speed_limit = 0.99 * speed_of_light
     velocities = jnp.where(jnp.abs(velocities) >= speed_limit, jnp.sign(velocities) * speed_limit, velocities)
 
-    return {
+    state = {
         "positions": positions,
         "velocities": velocities,
         "weights": weights,
@@ -293,6 +329,20 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
         "vth_electrons_over_c": electron_reference["vth_electrons_over_c"],
         "charge_electrons": electron_reference["charge_electrons"],
     }
+    if source_parameters and source_parameters["source_term_active"]:
+        dates = jnp.concatenate(birth_steps)
+        state.update({
+            "source_birth_steps": dates,
+            "source_birth_positions": positions,
+            "source_birth_velocities": jnp.concatenate(birth_velocities),
+            "nominal_charges": charges,
+            "nominal_masses": masses,
+            "nominal_charge_to_mass_ratios": charge_to_mass_ratios,
+            "charges": jnp.where(dates[:, None] < 0, charges, 0),
+            "masses": jnp.where(dates[:, None] < 0, masses, 0),
+            "charge_to_mass_ratios": jnp.where(dates[:, None] < 0, charge_to_mass_ratios, 0),
+        })
+    return state
 
 def print_simulation_information(
     domain_parameters,

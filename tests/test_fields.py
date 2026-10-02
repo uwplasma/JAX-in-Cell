@@ -25,6 +25,17 @@ from jaxincell._fields import (
 )
 
 
+@pytest.mark.parametrize("G", [2, 9, 35])
+def test_cartesian_periodic_gauss_removes_uniform_charge_and_has_correct_derivative(G):
+    rho = epsilon_0 * (2 + jnp.sin(1.7 * jnp.arange(G)))
+    dx = 0.3
+    E = E_from_Gauss_1D_Cartesian(rho, dx, periodic=True)
+    assert_allclose((E - jnp.roll(E, 1)) / dx, (rho - rho.mean()) / epsilon_0, atol=2e-14)
+    assert_allclose(E.mean(), 0, atol=1e-15)
+    assert_allclose(grad(lambda offset: jnp.sum(E_from_Gauss_1D_Cartesian(rho + epsilon_0 * offset, dx, periodic=True)**2))(0.),
+                    0, atol=1e-14)
+
+
 def test_E_from_Gauss_1D_FFT_zero_mode_and_shape():
     """Test jaxincell._fields.E_from_Gauss_1D_FFT.
 
