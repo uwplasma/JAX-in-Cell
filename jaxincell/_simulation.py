@@ -467,6 +467,8 @@ class Simulation:
             ensure that the simulation state is consistent with the new parameters.
         """
         if self._solver_parameters["collisions"]:
+            if self._source_parameters["source_term_active"]:
+                raise ValueError("Coulomb collisions with particle sources are not yet validated.")
             assert self._domain_parameters["particle_BC_left"] == self._domain_parameters["particle_BC_right"] == 0, (
                 "Coulomb collisions currently require periodic particle boundaries."
             )

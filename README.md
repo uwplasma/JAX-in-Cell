@@ -169,7 +169,7 @@ binary collisions to a periodic Boris run. Every configured species collides wit
 itself and every other species. `coulomb_logarithm` fixes the nonnegative logarithm;
 omitting it uses the initial electron-ion NRL estimate, floored at 2 in cold plasma.
 That floor prevents NaNs; the weak-coupling and small-angle assumptions still apply.
-Relativistic, implicit and wall collision coupling are explicitly rejected until
+Relativistic, implicit, wall and particle-source collision coupling are explicitly rejected until
 validated. Collisions are disabled by default and do not change collisionless defaults.
 
 Equal macro weights conserve momentum and kinetic energy per collision, including
