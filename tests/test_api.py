@@ -362,11 +362,20 @@ verbose = false
             ('[[species]]\nname = "e"\nn = 4\ncharge = -1\nmass = "electron"\ndensity = 1.0\nvthh = 1.0\n',
              "has no 'vthh'"),
             ('[[species]]\nname = "e"\nn = 4\ncharge = -1\nmass = "electron"\ndensity = 1.0\n'
-             '[species.source]\ndensity = 1.0\nvth = 1.0\nemit = 1\nrate = 2\n', "has no 'rate'"),
+             '[species.source]\ndensity = 1.0\nvth = 1.0\nemit = 1\nraet = 2\n', "has no 'raet'"),
     ):
         (tmp_path / "bad.toml").write_text(bad)
         with pytest.raises(ValueError, match=message):
             load_toml(tmp_path / "bad.toml")
+
+    (tmp_path / "volume.toml").write_text(
+        '[domain]\nlength = 1.0\ncells = 4\ntime_step = 0.1\n'
+        '[solver]\nmodel = "electrostatic"\n[run]\nsteps = 3\n'
+        '[[species]]\nname = "neutral"\nn = 4\ncharge = 0.0\nmass = 1.0\ndensity = 0.0\nactive = 0\n'
+        '[species.source]\nrate = 2.0\nemit = 1\ndrift = [1.0, 0.0, 0.0]\n')
+    sim, run = load_toml(tmp_path / "volume.toml")
+    assert sim.species[0].source.model == "volume"
+    assert float(sim.run(**run).validate().state.wall.birth_budget[0, 0]) == pytest.approx(.6)
 
 
 def test_diagnostics_keys_and_species_views():
