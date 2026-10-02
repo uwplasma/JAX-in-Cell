@@ -37,8 +37,10 @@ Give the step one way or the other, not both. `dt_over_dx_c` fixes $\Delta t$ th
 grid, so refining the mesh refines the step with it; `time_step` says the seconds.
 `Domain.dt` and `Domain.courant` read back whichever was given.
 
-* **Electromagnetic problems** need $c\Delta t/\Delta x \le 1$; at exactly one the vacuum
-  wave propagates without error.
+* **Explicit electromagnetic problems** need $c\Delta t/\Delta x \le 1$; at exactly one
+  the tested discrete vacuum eigenmode translates exactly. The implicit field inversion
+  removes this linear vacuum limit, but particle convergence and phase accuracy still
+  require refinement ({doc}`../numerics/implicit`).
 * **Electrostatic problems** never excite the transverse fields, so the light-wave limit
   does not apply. The step is set by the plasma frequency or the gyro-frequency, which
   `time_step=0.1 / omega_pe` states directly where a Courant number would have to be
@@ -74,8 +76,8 @@ What each one does ({doc}`../numerics/boundaries`):
 | wall | particles | fields |
 |---|---|---|
 | `"periodic"` | recirculates | periodic |
-| `"reflective"` | mirrors the position, reverses the normal velocity | mirrored |
-| `"absorbing"` | collects the particle, all of it unless its species returns a fraction (`Species.reflection`), and parks what it keeps outside the grid | first-order Mur radiating condition, so outgoing waves leave without reflection |
+| `"reflective"` | mirrors the position, reverses the normal velocity | established asymmetric reflective ghost stencil |
+| `"absorbing"` | collects the particle, all of it unless its species returns a fraction (`Species.reflection`), and parks what it keeps outside the grid | first-order radiating ghost stencil; smooth-pulse reflection decreases with refinement |
 | `"thermal"` | mirrors the position and redraws the velocity from the half-Maxwellian of the species, standing for the plasma beyond the box | not available; use a reflective field wall |
 
 * A periodic wall needs a periodic partner, checked at construction. That and every other
@@ -94,6 +96,6 @@ What each one does ({doc}`../numerics/boundaries`):
 ## The ignorable coordinates
 
 Particles carry $y$ and $z$ positions, wrapped periodically with periods `length_y` and
-`length_z`. Nothing depends on them — the fields are functions of $x$ alone — so they
-matter only for a plot or a diagnostic. Leave them at the default unless there is a
-reason not to.
+`length_z`. Self-consistent fields depend on $x$ alone; prescribed tensor fields can
+depend on all three coordinates, so these periods also set their interpolation geometry
+({doc}`external_fields`).

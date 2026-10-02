@@ -25,14 +25,16 @@ JAX-in-Cell pushes charged pseudo-particles in one spatial dimension and three v
 components, and advances the fields on a staggered (Yee) grid. It has
 
 * an explicit leapfrog with the Boris pusher (non-relativistic or relativistic) and a
-  charge-conserving deposit, and an implicit Crank-Nicolson scheme that conserves energy and
-  charge to round-off with no time-step limit;
+  charge-conserving deposit, and an implicit Crank-Nicolson scheme with an exact field
+  inversion; energy conservation requires a converged particle solve and orbit accuracy
+  requires timestep refinement;
 * electromagnetic and electrostatic models, a compensated digital filter, and binary Coulomb
   collisions;
 * periodic, reflecting, absorbing and partly reflecting walls, particle sources, and floating
   collectors, so a plasma against a wall forms its own sheath;
 * external electric and magnetic fields on an $(x, y, z)$ grid;
-* gradients of any output with respect to any physical input through `jax.grad`.
+* gradients of smooth observables with respect to physical inputs through `jax.grad`,
+  with event and sampling limits described in the differentiation guide.
 
 The whole run is one XLA program on a CPU, GPU or TPU. Every result below is checked against
 a closed-form or linear kinetic result, not against another simulation.
