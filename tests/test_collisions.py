@@ -342,6 +342,27 @@ def test_optional_collisions_leave_zero_rate_boris_run_unchanged_to_roundoff():
     np.testing.assert_allclose(inactive["velocities"], reference["velocities"], rtol=1e-14, atol=1e-10)
 
 
+@pytest.mark.parametrize("thermal_speed_over_c", [1e-4, .01])
+def test_automatic_coulomb_log_uses_physical_electron_density_and_temperature(thermal_speed_over_c):
+    from tests.test_simulation import small_simulation_parameters
+    from jaxincell import speed_of_light
+    p = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=12)
+    for group in p["species_parameters"].values():
+        for population in group.values():
+            population.update(weight=1e15, vth_over_c_x=thermal_speed_over_c,
+                              vth_over_c_y=thermal_speed_over_c, vth_over_c_z=thermal_speed_over_c)
+    p["solver_parameters"].update(collisions=True, coulomb_logarithm=None)
+    automatic = Simulation(p).run()
+    density_cm3 = 12e15 / .01 * 1e-6
+    temperature_ev = mass_electron * (thermal_speed_over_c * speed_of_light)**2 / (2 * e_charge)
+    expected = (23 - .5*np.log(density_cm3) + 1.5*np.log(temperature_ev) if temperature_ev < 10 else
+                24 - .5*np.log(density_cm3) + np.log(temperature_ev))
+    p["solver_parameters"]["coulomb_logarithm"] = max(expected, 2.)
+    prescribed = Simulation(p).run()
+    np.testing.assert_allclose(automatic["velocities"], prescribed["velocities"], rtol=2e-14, atol=1e-9)
+    np.testing.assert_allclose(automatic["positions"], prescribed["positions"], rtol=2e-14, atol=1e-18)
+
+
 def test_boris_collisions_use_integer_positions_and_explicit_species_blocks():
     from tests.test_simulation import small_simulation_parameters
     p = small_simulation_parameters(total_steps=1, number_pseudoparticles=21)
