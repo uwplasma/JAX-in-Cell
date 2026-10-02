@@ -313,10 +313,9 @@ class Simulation:
         names = [s.name for s in self.species]
         if len(set(names)) != len(names):
             raise ValueError(f"species names must be distinct, got {names}")
-        if self.solver.shape_order == 5 and (self.solver.algorithm != "explicit"
-                                             or self.domain.particle_bc != (0, 0)
+        if self.solver.shape_order == 5 and (self.domain.particle_bc != (0, 0)
                                              or self.domain.field_bc != (0, 0)):
-            raise ValueError("shape_order=5 requires explicit PIC with periodic particle and field boundaries")
+            raise ValueError("shape_order=5 requires periodic particle and field boundaries")
         self._check_implicit()
         self._check_external()
         self._check_collisions()
@@ -1107,7 +1106,7 @@ class Simulation:
         keys = random.split(k_wall, n_sub)
 
         def deposit_x(positions, amounts):
-            return deposit(positions, amounts, d.grid[0], dx, d.cells, d.particle_bc)
+            return deposit(positions, amounts, d.grid[0], dx, d.cells, d.particle_bc, self.solver.shape_order)
 
         def substeps(E_half, B_half, orbits):
             # E_x as a potential at the particles: the transpose of the continuity current, then of the deposit

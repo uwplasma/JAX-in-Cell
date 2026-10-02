@@ -45,6 +45,246 @@ def periodic_spline_matrix(position, cells, order):
     return np.nan_to_num(basis(offset)).sum(axis=-1)
 
 
+def quintic_orbit_field(field, x, shift):
+    """Independent integral of the quartic face interpolant, in a unit periodic box.
+
+    Three Gauss points integrate each quartic piece exactly. Splitting at centre
+    knots avoids large-potential subtraction at zero/tiny shifts and periodic wraps.
+    """
+    cells = len(field)
+    faces = (np.arange(cells) + 1) / cells - .5
+    knots = (np.arange(-3 * cells, 3 * cells) + .5) / cells - .5
+    basis = BSpline.basis_element(np.arange(6) - 2.5, extrapolate=False)
+    nodes, weights = np.polynomial.legendre.leggauss(3)
+
+    def value(position):
+        offset = (np.asarray(position)[..., None, None] - faces[:, None] + np.arange(-3, 4)) * cells
+        return np.nan_to_num(basis(offset)).sum(axis=-1) @ field
+
+    result = []
+    for start, displacement in zip(x, shift):
+        if displacement == 0:
+            result.append(float(value(start)))
+            continue
+        fractions = (knots - start) / displacement
+        cuts = np.r_[0., fractions[(fractions > 0) & (fractions < 1)], 1.]
+        cuts.sort()
+        width = np.diff(cuts)
+        points = start + displacement * ((cuts[:-1, None] + cuts[1:, None]) / 2 + width[:, None] * nodes / 2)
+        result.append(float(np.sum(width * (value(points) @ weights) / 2)))
+    return np.asarray(result)
+
+
+def quintic_midpoint_orbits(field, x, u, charge, mass, dt, substeps=2):
+    """Independent frozen-field 1V relativistic secant-velocity fixed point."""
+    x, u = np.array(x), np.array(u)
+    displacement = np.zeros_like(x)
+    h = dt / substeps
+    for _ in range(substeps):
+        old_x, old_u = x.copy(), u.copy()
+        shift = h * old_u / np.hypot(1., old_u)
+        for _ in range(64):
+            new_u = old_u + h * charge / mass * quintic_orbit_field(field, old_x, shift)
+            new_shift = h * (old_u + new_u) / (np.hypot(1., old_u) + np.hypot(1., new_u))
+            residual = max(np.max(abs(new_u - u)), np.max(abs(new_shift - shift)))
+            u, shift = new_u, new_shift
+            if residual < 2e-14:
+                break
+        assert residual < 2e-14, 'independent frozen-field orbit did not close'
+        displacement += shift
+        x = (old_x + shift + .5) % 1 - .5
+    return x, u, displacement
+
+
+def implicit_quintic_box(dt=.04, iterations=8, fraction=0., transverse=False):
+    """A neutral relativistic box with fixed physical markers and a density wave."""
+    rng = np.random.default_rng(27)
+    x = rng.uniform(-.5, .5, 32)
+    velocity = rng.normal(size=(32, 3)) * .025 * c
+    if not transverse:
+        velocity[:, 1:] = 0
+    density = epsilon_0 * mass_electron * c**2 / elementary_charge**2
+    species = []
+    for name, charge, mass in (('electrons', -1, mass_electron), ('ions', 1, 1836 * mass_electron)):
+        position = x + (.035 * np.sin(2 * np.pi * x + .3) if charge < 0 else 0.) + fraction / 8
+        position = jnp.zeros((32, 3)).at[:, 0].set((position + .5) % 1 - .5)
+        species.append(Species(name, 32, charge, mass, density, x=position,
+                               v=jnp.asarray(velocity if charge < 0 else velocity / 1836)))
+    return Simulation(Domain(1., 8, time_step=dt / c), tuple(species),
+                      Solver(algorithm='implicit', shape_order=5, relativistic=True,
+                             picard_iterations=iterations))
+
+
+def test_implicit_quintic_orbit_transpose_matches_independent_integral_and_work():
+    rng = np.random.default_rng(28)
+    field = jnp.asarray(rng.normal(size=G) + .7)
+    position = jnp.asarray(np.r_[-.5, -.499, -.1, .5 - 1e-13, .3, .03, .42])
+    shift = jnp.asarray(dx * np.array([0., 1e-14, -1e-12, 1e-9, .7, -2.3, G + .2]))
+    end = (position + shift + .5) % 1 - .5
+    amount = jnp.asarray(rng.normal(size=len(position)))
+
+    def to_current(rho):
+        return current_from_continuity(jnp.zeros(G), rho, 1., dx, 0., (0, 0))
+    phi = jax.linear_transpose(to_current, jnp.zeros(G))(field)[0]
+
+    def potential(x):
+        return dx * jax.linear_transpose(lambda q: deposit(x, q, x0, dx, G, (0, 0), 5), amount)(phi)[0]
+
+    midpoint = (position + shift / 2 + .5) % 1 - .5
+    slope = jax.jvp(potential, (midpoint,), (jnp.ones_like(position),))[1]
+    small = abs(shift) < np.sqrt(np.finfo(float).eps) * dx
+    actual = jnp.where(small, slope, (potential(end) - potential(position)) / jnp.where(small, 1., shift))
+    actual += jnp.mean(field)
+    expected = quintic_orbit_field(np.asarray(field), np.asarray(position), np.asarray(shift))
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-12)
+    rho0, rho1 = (deposit(x, amount, x0, dx, G, (0, 0), 5) for x in (position, end))
+    current = current_from_continuity(rho0, rho1, 1., dx, jnp.sum(amount * shift), (0, 0))
+    np.testing.assert_allclose(jnp.mean(current), jnp.sum(amount * shift), rtol=0, atol=2e-14)
+    np.testing.assert_allclose(dx * current @ field, jnp.sum(amount * shift * expected), rtol=0, atol=2e-13)
+
+
+@pytest.mark.parametrize('fraction', [0., .25, .5])
+def test_implicit_quintic_accepted_force_current_and_fractional_grid_bias(fraction):
+    sim = implicit_quintic_box(fraction=fraction)
+    initial, (mass, charge) = sim.initial_state(jax.random.PRNGKey(0))
+    final, output = jax.jit(sim._implicit_step)(initial, (mass, charge))
+    scale = mass_electron * c**2 / elementary_charge
+    field = np.asarray((initial.E[:, 0] + final.E[:, 0]) / 2) / scale
+    x, u, shift = quintic_midpoint_orbits(
+        field, np.asarray(initial.x[:, 0]), np.asarray(initial.u[:, 0]) / c,
+        np.asarray(charge) / elementary_charge, np.asarray(mass) / mass_electron, .04)
+    weights = np.asarray(initial.w) / (sim.species[0].density * L)
+    amounts = np.asarray(charge) / elementary_charge * weights
+    np.testing.assert_allclose(final.u[:, 0] / c, u, rtol=0, atol=3e-12)
+    np.testing.assert_allclose(final.x[:, 0], x, rtol=0, atol=3e-13)
+    expected_rho = amounts @ periodic_spline_matrix(x, 8, 5) * 8
+    rho_scale = elementary_charge * sim.species[0].density
+    np.testing.assert_allclose(final.rho / rho_scale, expected_rho, rtol=0, atol=2e-14)
+    current = np.asarray(output[5][:, 0]) / (rho_scale * c)
+    np.testing.assert_allclose(current.mean(), np.sum(amounts * shift) / .04, rtol=0, atol=2e-13)
+    continuity = ((final.rho - initial.rho) / sim.domain.dt
+                  + (output[5][:, 0] - jnp.roll(output[5][:, 0], 1)) / sim.domain.dx)
+    assert float(jnp.max(abs(continuity)) / (rho_scale * c)) < 2e-12
+    impulse = np.sum(np.asarray(mass) / mass_electron * weights * np.asarray(final.u[:, 0] - initial.u[:, 0]) / c)
+    reference_impulse = np.sum(np.asarray(mass) / mass_electron * weights * (u - np.asarray(initial.u[:, 0]) / c))
+    np.testing.assert_allclose(impulse, reference_impulse, rtol=0, atol=2e-12)
+    assert abs(impulse) > 1e-12  # This mesh-conjugate force is not an exact continuum momentum map.
+
+
+def test_implicit_quintic_picard_closure_and_transverse_work_converge():
+    errors = []
+    for iterations in (2, 4, 8):
+        sim = implicit_quintic_box(dt=.2, iterations=iterations)
+        initial, extra = sim.initial_state(jax.random.PRNGKey(0))
+        final, _ = jax.jit(sim._implicit_step)(initial, extra)
+        field = np.asarray((initial.E[:, 0] + final.E[:, 0]) / 2) * elementary_charge / (mass_electron * c**2)
+        _, reference, _ = quintic_midpoint_orbits(field, np.asarray(initial.x[:, 0]), np.asarray(initial.u[:, 0]) / c,
+                                                  np.asarray(extra[1]) / elementary_charge,
+                                                  np.asarray(extra[0]) / mass_electron, .2)
+        errors.append(np.max(abs(reference - np.asarray(final.u[:, 0]) / c)))
+    assert errors[1] < errors[0] / 5 and errors[2] < errors[1] / 5
+    assert errors[2] < 2e-12
+    sim = implicit_quintic_box(transverse=True)
+    initial, (mass, charge) = sim.initial_state(jax.random.PRNGKey(0))
+    scale = mass_electron * c**2 / elementary_charge
+    initial = initial.replace(E=initial.E.at[:, 1].set(.02 * scale * jnp.cos(2 * jnp.pi * sim.domain.faces)),
+                              B=initial.B.at[:, 2].set(.1 * scale / c))
+    final, output = jax.jit(sim._implicit_step)(initial, (mass, charge))
+
+    def energy(state):
+        u = np.asarray(state.u) / c
+        gamma = np.sqrt(1 + np.sum(u**2, axis=1))
+        kinetic = np.sum(np.asarray(mass * state.w) * c**2 * np.sum(u**2, axis=1) / (gamma + 1))
+        return kinetic + epsilon_0 * sim.domain.dx / 2 * np.sum(np.asarray(state.E)**2 + c**2 * np.asarray(state.B)**2)
+
+    unit = sim.species[0].density * mass_electron * c**2
+    assert abs(energy(final) - energy(initial)) / unit < 2e-12
+    work = sim.domain.dt * sim.domain.dx * jnp.sum(output[5] * (initial.E + final.E) / 2)
+    field_loss = epsilon_0 * sim.domain.dx / 2 * jnp.sum(
+        initial.E**2 - final.E**2 + c**2 * (initial.B**2 - final.B**2))
+    np.testing.assert_allclose(work / unit, field_loss / unit, rtol=0, atol=2e-13)
+
+
+def uniform_quintic_box(dt, parameters=(1., 1., 1.)):
+    """Cold mobile species isolate the mean current and its exact midpoint phase."""
+    weight, electric, seed = parameters
+    density = epsilon_0 * mass_electron * c**2 / elementary_charge**2
+    x, _ = quiet_start(16, L)
+    electrons = Species('electrons', 16, -1, mass_electron, density * weight, x=x,
+                        v=jnp.zeros((16, 3)).at[:, 0].set(.005 * c * seed))
+    ions = Species('ions', 16, 1, 1836 * mass_electron, density * weight, x=x, v=jnp.zeros((16, 3)))
+    sim = Simulation(Domain(L, 8, time_step=dt / c), (electrons, ions),
+                     Solver(algorithm='implicit', shape_order=5, picard_iterations=8))
+    initial, _ = sim.initial_state(jax.random.PRNGKey(0))
+    scale = mass_electron * c**2 / elementary_charge
+    return sim, initial.replace(E=initial.E.at[:, 0].add(.01 * scale * electric))
+
+
+def uniform_midpoint_answer(parameters, dt, steps):
+    """Independent 2x2 Cayley map and Newtonian kinetic energy; analytic in inputs."""
+    weight, electric, seed = parameters
+    omega2 = weight * (1 + 1 / 1836)
+    generator = np.array([[0., -1.], [omega2, 0.]])
+    midpoint = np.linalg.solve(np.eye(2) - dt * generator / 2, np.eye(2) + dt * generator / 2)
+    initial = np.array([.01 * electric, -.005 * seed * weight])
+    field, current = np.linalg.matrix_power(midpoint, steps) @ initial
+    impulse = (current - initial[1]) / omega2
+    electron, ion = .005 * seed - impulse, impulse / 1836
+    return field, current, .5 * weight * (electron**2 + 1836 * ion**2)
+
+
+def test_implicit_quintic_mean_phase_refinement_and_complete_restart(tmp_path):
+    phase_errors = []
+    for dt, steps in ((.2, 8), (.1, 16)):
+        sim, initial = uniform_quintic_box(dt)
+        out = sim.run(steps, state=initial, store_particles=False, store_every=4)
+        scale = mass_electron * c**2 / elementary_charge
+        field = float(jnp.mean(out.state.E[:, 0]) / scale)
+        mass, charge = sim.per_particle
+        density = sim.species[0].density
+        current = float(jnp.sum(charge * out.state.w * out.state.u[:, 0]) / (elementary_charge * density * c * L))
+        expected_field, expected_current, _ = uniform_midpoint_answer((1., 1., 1.), dt, steps)
+        np.testing.assert_allclose([field, current], [expected_field, expected_current], rtol=0, atol=2e-13)
+        omega = np.sqrt(1 + 1 / 1836)
+        initial_phase = np.angle(.01 - .005j / omega)
+        phase_errors.append(abs(np.angle(field + 1j * current / omega) - initial_phase - omega * dt * steps))
+        if dt == .2:
+            first = sim.run(4, state=initial, store_particles=False, store_every=4)
+            path = save_state(tmp_path / 'quintic.npz', first.state, sim)
+            continued = sim.run(4, state=load_state(path, sim), store_particles=False, store_every=4)
+            for whole, resumed in zip(jax.tree.leaves(out.state), jax.tree.leaves(continued.state)):
+                np.testing.assert_array_equal(whole, resumed)
+            with pytest.raises(ValueError, match='shape_order'):
+                load_state(path, sim.replace(solver=sim.solver.replace(shape_order=2)))
+            assert abs(float(jnp.sum(charge * initial.w))) / (elementary_charge * density * L) < 2e-15
+    assert phase_errors[0] > 1e-4 and 3.9 < phase_errors[0] / phase_errors[1] < 4.1
+
+
+def test_implicit_quintic_physical_objective_ad_matches_independent_frechet_and_finite_differences():
+    def objective(parameters):
+        sim, initial = uniform_quintic_box(.1, parameters)
+        final = sim.run(4, state=initial, store_particles=False, store_every=4).state
+        field = jnp.mean(final.E[:, 0]) * elementary_charge / (mass_electron * c**2)
+        density = epsilon_0 * mass_electron * c**2 / elementary_charge**2
+        kinetic = jnp.sum(sim.per_particle[0] / mass_electron * final.w / (density * L)
+                          * jnp.sum((final.u / c)**2, axis=1) / 2)
+        return field + .3 * kinetic
+
+    point = jnp.array([1., 1., 1.])
+    reverse = np.asarray(jax.jit(jax.grad(objective))(point))
+    forward = np.array([float(jax.jvp(objective, (point,), (direction,))[1]) for direction in jnp.eye(3)])
+    independent, finite = [], []
+    measured = jax.jit(objective)
+    for direction in np.eye(3):
+        field, _, kinetic = uniform_midpoint_answer(np.asarray(point, dtype=complex) + 1e-30j * direction, .1, 4)
+        independent.append(np.imag(field + .3 * kinetic) / 1e-30)
+        finite.append(float(measured(point + 1e-5 * direction) - measured(point - 1e-5 * direction)) / 2e-5)
+    assert min(abs(reverse)) > 1e-6
+    np.testing.assert_allclose(reverse, independent, rtol=2e-9, atol=0)
+    np.testing.assert_allclose(forward, reverse, rtol=2e-10, atol=0)
+    np.testing.assert_allclose(finite, reverse, rtol=2e-8, atol=0)
+
+
 @pytest.mark.parametrize("order", [2, 5])
 def test_cardinal_shape_matches_independent_basis_and_moments(order):
     """A cardinal degree-p spline convolves p+1 boxes; its variance is (p+1)/12."""
@@ -222,9 +462,10 @@ def test_selected_shape_periodic_step_preserves_charge_gauss_and_total_impulse(o
 
 def test_quintic_rejects_unsupported_solver_and_walls_and_checks_restart_shape(tmp_path):
     particle = Species.electrons(4, 1)
-    for solver, domain in ((Solver(shape_order=5, algorithm='implicit'), Domain()),
-                           (Solver(shape_order=5), Domain(particle_bc='reflective')),
-                           (Solver(shape_order=5), Domain(field_bc='reflective'))):
+    Simulation(Domain(), (Species.electrons(8, 1),), Solver(shape_order=5, algorithm='implicit'))
+    for solver, domain in ((Solver(shape_order=5), Domain(particle_bc='reflective')),
+                           (Solver(shape_order=5), Domain(field_bc='reflective')),
+                           (Solver(shape_order=5, algorithm='implicit'), Domain(field_bc='reflective'))):
         with pytest.raises(ValueError, match='shape_order=5'):
             Simulation(domain, (particle,), solver)
     with pytest.raises(ValueError, match='shape_order'):

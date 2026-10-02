@@ -8,7 +8,7 @@ round-off.
 ## Particle shape
 
 `Solver(shape_order=2)` uses the quadratic B-spline $S_2$, supported on three cells.
-For periodic explicit runs, `shape_order=5` selects the centred quintic cell weight,
+For periodic runs, `shape_order=5` selects the centred quintic cell weight,
 the convolution of six unit-width box functions:
 
 ```{math}
@@ -21,13 +21,14 @@ The code evaluates local polynomials and gathers from three periodic ghost centr
 per wall. The same shape is used for charge, transverse current, moments and gathers;
 the continuity solve below applies to either shape. Wider weighting suppresses short
 grid wavelengths, but does not increase the order of the field difference or time step.
-Quintic wall closures and the implicit orbit work gather are not implemented, so those
-combinations are rejected. The default quadratic kernels keep their original arithmetic.
+Quintic wall closures are not implemented, so nonperiodic combinations are rejected.
+The {doc}`implicit` scheme uses the potential's discrete gradient for longitudinal work.
+The default quadratic kernels keep their original arithmetic.
 
 This is $W^5$ in [Shalaby et al. (2017), SHARP](https://arxiv.org/abs/1702.04732),
 Eq. (15) and Appendix B, Table 4: their raw particle shape $S^5$ has degree four,
-and integration across a cell gives this degree-five weight. Depositing at centres
-and gathering the face-averaged field implements their momentum-conserving Eq. (23).
+and integration across a cell gives this degree-five weight. The explicit scheme deposits
+at centres and gathers the face-averaged field, implementing their momentum-conserving Eq. (23).
 The solver retains its second-order Maxwell split and mean-current response; SHARP's
 Simpson force quadrature and higher-order mean-field update are separate methods.
 

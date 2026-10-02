@@ -579,7 +579,7 @@ class Solver:
         picard_iterations: Fixed-point iterations of the implicit scheme.
         substeps: Particle sub-steps per field step in the implicit scheme.
         shape_order: B-spline degree, 2 (quadratic) or 5 (quintic). Quintic weighting
-            requires an explicit scheme and periodic particle and field boundaries.
+            requires periodic particle and field boundaries, for either integrator.
     """
     algorithm: str = "explicit"
     model: str = "electromagnetic"

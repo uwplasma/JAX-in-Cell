@@ -23,7 +23,7 @@ solver = Solver(algorithm="explicit", model="electromagnetic", field_solver="amp
 | `filter_strides` | cell offsets of the filter stencil | `(1,)` |
 | `picard_iterations` | fixed-point iterations of the implicit scheme | `8` |
 | `substeps` | particle sub-steps per field step, implicit only | `2` |
-| `shape_order` | B-spline degree: `2` (quadratic, three cells) or `5` (quintic, six cells); quintic requires explicit PIC with periodic particle and field boundaries | `2` |
+| `shape_order` | B-spline degree: `2` (quadratic, three cells) or `5` (quintic, six cells); quintic requires periodic particle and field boundaries with either integrator | `2` |
 
 The selected shape is shared by charge and transverse-current deposition, particle
 moments and field gathering, including each coordinate of an external field grid.

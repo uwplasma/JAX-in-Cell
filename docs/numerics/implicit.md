@@ -1,7 +1,7 @@
 # Implicit scheme
 
-`Solver(algorithm="implicit")` selects a Crank-Nicolson scheme that conserves the discrete
-total energy and the discrete Gauss law to round-off: the energy-conserving scheme of Chen,
+`Solver(algorithm="implicit")` selects a Crank-Nicolson scheme that preserves the discrete
+Gauss law and, with a converged particle/field iteration, total energy to round-off: the scheme of Chen,
 Chacón and Barnes {cite}`chen2011,chen2014`, with the longitudinal current and force of the
 discrete gradient of Kormann and Sonnendrücker {cite}`kormann2021`. The fixed-point iteration
 is a `lax.scan` of a fixed length, so that the whole loop stays differentiable.
@@ -12,8 +12,8 @@ The explicit leapfrog is fast and its energy error is bounded, but it is not zer
 it grows with $\omega_{pe}\Delta t$. Two situations make that a problem: long runs
 where a slow energy drift competes with the physics being studied, and stiff problems
 where the explicit stability limits force a step far below the timescale of interest.
-The Crank-Nicolson scheme is unconditionally stable and conserves the discrete total
-energy exactly, at the price of solving a nonlinear system every step.
+The converged linear Crank-Nicolson update is unconditionally stable. The coupled nonlinear
+orbit and field solve still needs an iteration-convergence check every time its parameters change.
 
 ## The discrete equations
 
@@ -80,14 +80,25 @@ E_{x,p} = \frac{\Phi(x_p^{\nu+1}) - \Phi(x_p^\nu)}{\Delta\tau\,\bar v_{x,p}} + \
 ```
 
 the one-dimensional form of the line integral of Kormann and Sonnendrücker
-{cite}`kormann2021`: $\Phi$ is the integral of the $S_1$ interpolant of $E_x$, and its
-difference is their integral along the orbit, in closed form. The displacement in the
+{cite}`kormann2021`: $\Phi$ integrates the $S_1$ face interpolant for quadratic weights
+or $S_4$ for quintic weights, and its difference is the orbit integral in closed form. The displacement in the
 denominator is the unwrapped one, and $\Phi$ is read where the deposit puts the particle,
-mirrored or wrapped. When the displacement is below $\sqrt\epsilon$ of a cell, with
+mirrored or wrapped. `shape_order=5` selects the same quintic charge weights for the
+endpoint deposit and its transposed potential, with periodic particle and field boundaries.
+Its potential slope is the quartic face-field interpolant; `shape_order=2` retains the
+linear interpolant. Transverse gathering and its current use the selected spline too.
+This is an optional particle shape within the existing implicit algorithm, not the complete
+SHARP field/interpolation method. Continuity and the work identity retain their algebraic
+form; quintic smoothing does not imply exact continuous momentum or converged physical phase.
+The figures and measured comparisons below retain the default quadratic weighting.
+
+When the displacement is below $\sqrt\epsilon$ of a cell, with
 $\epsilon$ the machine epsilon, the quotient has lost half its digits and $E_{x,p}$ is the
-slope $\Phi'(x_p^{\nu+1/2})$ instead, which equals the quotient while both ends lie in
-one piece of the spline and otherwise differs from it by the square of the displacement
-in cells, the round-off. The code writes none of these operators out: $\mathcal T^{\mathsf T}$
+slope $\Phi'(x_p^{\nu+1/2})$ instead. For quadratic weights it equals the quotient while
+both ends lie in one spline piece; for quintic weights it differs by
+$O((\Delta x_p/\Delta x)^2)$ even within a piece. At this threshold that local truncation
+is on the machine-epsilon scale. Knot crossings, cancellation and finite Picard closure
+still need separate checks. The code writes none of these operators out: $\mathcal T^{\mathsf T}$
 and $\mathcal D^{\mathsf T}$ are `jax.linear_transpose` of `current_from_continuity` and of
 `deposit`, and the slope is `jax.jvp` of $\Phi$.
 
@@ -208,8 +219,8 @@ would not be differentiable. With a fixed count the whole scheme is, and
 | energy error | {{ energy_error_max_explicit }}, bounded | {{ energy_error_max_implicit_8 }} |
 | momentum error, periodic | {{ momentum_error_relative }} | {{ momentum_error_implicit }} |
 | Gauss law | round-off | round-off |
-| stability | $\omega_{pe}\Delta t \lesssim 2$, $c\Delta t \le \Delta x$ for light waves | unconditional |
-| grid resolution | $\Delta x \lesssim \lambda_D$ | can exceed $\lambda_D$ |
+| linear stability | $\omega_{pe}\Delta t \lesssim 2$, $c\Delta t \le \Delta x$ for light waves | converged midpoint update is unconditional |
+| physical grid resolution | requires independent refinement | requires independent refinement |
 | reverse-mode gradients | yes | yes |
 
 Start explicit. Move to implicit when the energy budget matters, when the step you
