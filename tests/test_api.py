@@ -1057,3 +1057,22 @@ def test_typed_random_key_archive_preserves_generator_and_restart(tmp_path, impl
         if hasattr(a, "dtype") and jax.dtypes.issubdtype(a.dtype, jax.dtypes.prng_key):
             a, b = jax.random.key_data(a), jax.random.key_data(b)
         np.testing.assert_array_equal(a, b)
+
+
+@pytest.mark.parametrize("steps", [-1, True, np.bool_(False), 1.5, None])
+def test_run_rejects_noninteger_or_negative_step_counts(steps):
+    with pytest.raises(ValueError, match="steps must be a nonnegative integer"):
+        small_simulation(n=4).run(steps)
+
+
+def test_openpmd_with_no_prescribed_fields_exports_only_internal_meshes(tmp_path):
+    io = pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+    simulation = small_simulation(n=4)
+    output = simulation.run(1, store_particles=False)
+    path = write_openpmd(output, tmp_path/"internal.json", simulation=simulation)
+    series = io.Series(str(path), io.Access.read_only)
+    iteration = series.iterations[0]
+    assert iteration.time == pytest.approx(float(output.t[0]), rel=1e-15, abs=0)
+    assert set(iteration.meshes) == {"E", "B", "J", "rho"}
+    series.close()
