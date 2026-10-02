@@ -598,6 +598,7 @@ def test_simulation_property_setters_reinitialize_state_and_hashes():
     assert sim.positions.shape == (5, 3)
 
 
+
 def test_simulation_input_parameters_setter_reclassifies_and_reinitializes():
     """Test Simulation.input_parameters setter.
 

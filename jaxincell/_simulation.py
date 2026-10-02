@@ -236,8 +236,9 @@ class Simulation:
                 positions_plus1_2, velocities, qs, ms, q_ms,
             )
             step_func = lambda carry, step_index: Boris_step(
-                carry, step_index, solver_parameters, runtime_external_field_parameters, dx, dt, grid, box_size,
-                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
+                carry, step_index, solver_parameters, runtime_external_field_parameters,
+                dx, dt, grid, box_size, particle_BC_left, particle_BC_right,
+                field_BC_left, field_BC_right, solver_parameters['field_solver']
             )
         else:
             initial_carry = (
@@ -561,7 +562,7 @@ class Simulation:
     @solver_parameters.setter
     def solver_parameters(self, new_solver_parameters):
         self.set_parameter_section("solver_parameters", new_solver_parameters)
-    
+
     @property
     def input_parameters(self):
         return deepcopy(self._input_parameters)

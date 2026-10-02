@@ -84,6 +84,7 @@ EXPECTED_SECTION_METADATA = {
         "attribute": "_solver_parameters",
         "hash_attribute": "solver_hash",
     },
+
 }
 
 
