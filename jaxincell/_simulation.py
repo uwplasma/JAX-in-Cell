@@ -277,17 +277,13 @@ class Simulation:
                     for buf, value in zip(buffers, step_data)
                 )
 
-            buffers = lax.cond(
-                should_save,
-                save_snapshot,
-                lambda buffers: buffers,
-                buffers,
-            )
+            if num_snapshots:
+                buffers = lax.cond(should_save, save_snapshot, lambda buffers: buffers, buffers)
             next_snapshot += should_save.astype(next_snapshot.dtype)
             # Returning None prevents scan from stacking a second output history.
             return (new_sim_carry, buffers, next_snapshot), None
 
-        (_, snapshot_buffers, _), _ = lax.scan(
+        (final_carry, snapshot_buffers, _), _ = lax.scan(
             scan_body, (initial_carry, snapshot_buffers, jnp.array(0, dtype=int)), jnp.arange(total_steps)
         )
         positions_over_time, velocities_over_time, electric_field_over_time, \
@@ -334,6 +330,13 @@ class Simulation:
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
             "time_array":  time_array,
+            "final_state": {
+                "time": total_steps * dt,
+                "electric_field": final_carry[0], "magnetic_field": final_carry[1],
+                "positions": final_carry[3 if solver_parameters["time_evolution_algorithm"] == 0 else 2],
+                "velocities": final_carry[-4], "charges": final_carry[-3],
+                "masses": final_carry[-2], "charge_to_mass_ratios": final_carry[-1],
+            },
             "grid": grid,
             "dt": dt,
             "plasma_frequency": plasma_frequency,
@@ -504,8 +507,7 @@ class Simulation:
         if snapshot_steps is None:
             snapshot_steps = tuple(range(self._domain_parameters["total_steps"]))
         else:
-            snapshot_steps = tuple(s for s in snapshot_steps if 0 <= s < self._domain_parameters["total_steps"])
-            assert len(snapshot_steps) > 0, "All snapshot steps are out of bounds. Please provide at least one valid snapshot step."
+            assert all(s < self._domain_parameters["total_steps"] for s in snapshot_steps), "Snapshot steps must be less than total_steps."
         self._snapshot_steps = snapshot_steps
 
     def initialize_particles(self):

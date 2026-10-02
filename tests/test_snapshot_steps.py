@@ -14,7 +14,7 @@ from tests.helpers import scalar
 from tests.test_simulation import small_simulation_parameters
 
 
-@pytest.mark.parametrize("snapshot_steps", [[0], [0, 5], [0, 5, 11], [11]])
+@pytest.mark.parametrize("snapshot_steps", [[0], [0, 5], [0, 5, 11], [11], []])
 @pytest.mark.parametrize("time_evolution_algorithm", [0, 1])
 def test_snapshot_steps_matches_full_history_final_state(snapshot_steps, time_evolution_algorithm):
     """Test solver_parameters["snapshot_steps"].
@@ -64,7 +64,7 @@ def test_snapshot_steps_matches_full_history_final_state(snapshot_steps, time_ev
     dt = scalar(full_output["dt"])
     np.testing.assert_allclose(
         np.asarray(snap_output["time_array"]),
-        np.asarray(snapshot_steps) * dt,
+        (np.asarray(snapshot_steps) + 1) * dt,
         rtol=1e-12,
     )
 
@@ -75,6 +75,35 @@ def test_snapshot_steps_matches_full_history_final_state(snapshot_steps, time_ev
         assert jnp.allclose(snap_output["velocities"][snap_index], full_output["velocities"][step])
         assert jnp.allclose(snap_output["current_density"][snap_index], full_output["current_density"][step])
         assert jnp.allclose(snap_output["charge_density"][snap_index], full_output["charge_density"][step])
+    for name, value in snap_output["final_state"].items():
+        np.testing.assert_allclose(value, full_output["final_state"][name], rtol=1e-12, atol=1e-12)
+    assert scalar(snap_output["final_state"]["time"]) == pytest.approx(total_steps * dt)
+
+
+@pytest.mark.parametrize("schedule", [[12], [0, 12], [-1]])
+def test_snapshot_steps_reject_out_of_bounds_indices(schedule):
+    parameters = small_simulation_parameters(total_steps=12, number_grid_points=4, number_pseudoparticles=2)
+    parameters["solver_parameters"]["snapshot_steps"] = schedule
+    with pytest.raises(AssertionError, match="Snapshot steps"):
+        Simulation(parameters)
+
+
+def test_snapshot_steps_are_reachable_from_toml(tmp_path):
+    path = tmp_path / "snapshots.toml"
+    path.write_text("""[domain_parameters]
+total_steps = 3
+number_grid_points = 4
+[solver_parameters]
+print_info = false
+snapshot_steps = [2, 0, 2]
+[species_parameters.electrons.electrons0]
+number_pseudoparticles = 2
+[species_parameters.ions.ions0]
+number_pseudoparticles = 2
+""")
+    out = Simulation(path).run()
+    np.testing.assert_allclose(out["time_array"], np.array([1, 3]) * scalar(out["dt"]), rtol=1e-12, atol=0)
+    assert out["positions"].shape == (2, 4, 3)
 
 
 def test_snapshot_steps_preserves_gradients():

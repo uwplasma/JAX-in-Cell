@@ -33,8 +33,8 @@ def test_clean_and_initialize_solver_parameters_defaults_and_tuple_coercion():
     "snapshot_steps, expected",
     [
         (None, None),
-        ([], None),
-        ((), None),
+        ([], ()),
+        ((), ()),
         ([3, 1, 3, 0], (0, 1, 3)),
         ((3, 1, 3, 0), (0, 1, 3)),
         (np.array([3, 1, 3, 0], dtype=np.int32), (0, 1, 3)),
@@ -46,7 +46,7 @@ def test_clean_and_initialize_solver_parameters_snapshot_steps(snapshot_steps, e
     """Test snapshot schedule normalization.
 
     Cases:
-    - None and empty sequences preserve the all-steps setting.
+    - None selects all steps; empty sequences select no snapshots.
     - lists, tuples, NumPy integers, and ranges become sorted unique Python integers.
     """
     parameters = clean_and_initialize_solver_parameters({"snapshot_steps": snapshot_steps})

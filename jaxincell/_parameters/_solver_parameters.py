@@ -1,3 +1,5 @@
+from numbers import Integral
+
 from ._utils import build_parameter_hash, overlay_parameter_defaults
 
 __all__ = [
@@ -39,9 +41,8 @@ def clean_and_initialize_solver_parameters(solver_parameters, input_parameters=N
 
     if solver_parameters["snapshot_steps"] is not None:
         snapshot_steps = tuple(solver_parameters["snapshot_steps"])
-        assert all(isinstance(s, int) and not isinstance(s, bool) and s >= 0 for s in snapshot_steps), "Snapshot steps must be a list of non-negative integers or None."
-        solver_parameters["snapshot_steps"] = tuple(sorted(set(snapshot_steps)))
-        assert len(solver_parameters["snapshot_steps"]) > 0, "Snapshot steps must contain at least one step if not None."
+        assert all(isinstance(s, Integral) and not isinstance(s, bool) and s >= 0 for s in snapshot_steps), "Snapshot steps must be a list of non-negative integers or None."
+        solver_parameters["snapshot_steps"] = tuple(sorted(set(map(int, snapshot_steps))))
 
     solver_parameters["tolerance_Picard_iterations_implicit_CN"] = float(solver_parameters["tolerance_Picard_iterations_implicit_CN"])
     if type(solver_parameters["filter_strides"]) != tuple:
