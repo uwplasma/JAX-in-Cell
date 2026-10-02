@@ -1040,7 +1040,7 @@ def test_every_input_file_is_one_the_loader_accepts():
         assert all(s.n >= 1 for s in sim.species), path.name
 
 
-@pytest.mark.parametrize("implementation", ["threefry2x32", "rbg"])
+@pytest.mark.parametrize("implementation", ["threefry2x32", "rbg", "unsafe_rbg"])
 def test_typed_random_key_archive_preserves_generator_and_restart(tmp_path, implementation):
     from jaxincell import save_state, load_state
     simulation = small_simulation(n=20)
@@ -1049,7 +1049,7 @@ def test_typed_random_key_archive_preserves_generator_and_restart(tmp_path, impl
     output = simulation.run(2, state=state)
     path = save_state(tmp_path/"typed", output.state, simulation)
     restored = load_state(path, simulation)
-    assert str(jax.random.key_impl(restored.key)) == implementation
+    assert str(jax.random.key_impl(restored.key)) == str(jax.random.key_impl(key))
     np.testing.assert_array_equal(jax.random.key_data(restored.key), jax.random.key_data(output.state.key))
     expected = simulation.run(2, state=output.state)
     continued = simulation.run(2, state=restored)

@@ -113,7 +113,8 @@ def save_state(path, state, simulation=None):
                     arrays[f"wall.{inner}"] = np.asarray(getattr(value, inner))
         elif name == "key" and dtypes.issubdtype(value.dtype, dtypes.prng_key):
             arrays[name] = np.asarray(random.key_data(value))
-            arrays["key_impl"] = np.asarray(str(random.key_impl(value)))
+            implementation = str(random.key_impl(value))
+            arrays["key_impl"] = np.asarray({"fry": "threefry2x32", "urbg": "unsafe_rbg"}.get(implementation, implementation))
         elif value is not None:
             arrays[name] = np.asarray(value)
     if simulation is not None:
