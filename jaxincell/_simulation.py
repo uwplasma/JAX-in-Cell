@@ -128,7 +128,7 @@ class Wall:
         return jnp.sum(jnp.asarray(charge_per_particle)[:, None] * self.collected, axis=0)
 
 
-@pytree_dataclass(static=())
+@pytree_dataclass(static=("x_phase",))
 class State:
     """Everything the time loop carries from one step to the next, and all that a
     restart needs. ``run(..., state=out.state)`` continues from it: the absolute time
@@ -139,9 +139,10 @@ class State:
     run, not of this one. A cumulative diagnostic divides by a difference of them, never by
     the length of an array.
 
-    ``x`` is the half-step position of the leapfrog and ``u`` the momentum per unit
-    mass of a relativistic run, or the velocity otherwise; the implicit scheme carries
-    integer-time positions instead. ``sigma`` is the charge on the collector at the time
+    ``x`` is the half-step position for periodic explicit runs and the integer-time
+    position for explicit wall and implicit runs. ``x_phase`` records that convention.
+    ``u`` is the momentum per unit mass of a relativistic run, or the velocity otherwise.
+    ``sigma`` is the charge on the collector at the time
     ``rho`` is for, collected and overlapping together, which is what makes the boundary
     current a difference rather than a guess. ``moments`` is the running sum of
     :meth:`Simulation.moments`, or ``None`` when ``run(moments=False)``.
@@ -159,6 +160,7 @@ class State:
     steps: object
     wall: object
     moments: object
+    x_phase: str = "legacy"
 
 
 @pytree_dataclass(static=("names", "counts", "relativistic", "field_bc"))
@@ -482,7 +484,7 @@ class Simulation:
                                                for s, block in zip(self.species, self.blocks)]), 0.0, 1.0)
                      for side in (0, 1))
 
-    def _thermalise(self, key, x, u, hits=None):
+    def _thermalise(self, key, u, hits):
         """Redraw the velocity of every particle that crossed a thermal wall from the
         half-Maxwellian flux of its species: the normal speed from the Rayleigh
         distribution :math:`\\sigma\\sqrt{-2\\ln U}`, pointing into the box, and the
@@ -495,12 +497,10 @@ class Simulation:
                                  for s in self.species])
         k_normal, k_tangential = random.split(key)
         uniform = random.uniform(k_normal, (u.shape[0],), minval=jnp.finfo(u.dtype).tiny)
-        left = x[:, 0] < -d.length / 2 if hits is None else hits[0][0] > 0
+        left = hits[0][0] > 0
         new = (sigma * random.normal(k_tangential, u.shape)).at[:, 0].set(
             jnp.where(left, 1.0, -1.0) * sigma[:, 0] * jnp.sqrt(-2 * jnp.log(uniform)))
-        hit = (left & (d.particle_bc[0] == 3)) | ((x[:, 0] > d.length / 2) & (d.particle_bc[1] == 3))
-        if hits is not None:
-            hit = ((hits[0][0] > 0) & (d.particle_bc[0] == 3)) | ((hits[0][1] > 0) & (d.particle_bc[1] == 3))
+        hit = (left & (d.particle_bc[0] == 3)) | ((hits[0][1] > 0) & (d.particle_bc[1] == 3))
         return jnp.where(hit[:, None], self._momentum(new), u)
 
     @staticmethod
@@ -932,22 +932,13 @@ class Simulation:
             x = x.at[:, 0].set(jnp.where(dead, -L / 2 - PARK * dx, x[:, 0]))
             qm = jnp.where(dead, 0.0, qm)
         wall = self._empty_wall()
-        if self.solver.algorithm == "explicit":
-            # The leapfrog carries the half-step position and reconstructs the
-            # integer-time one as wrap(x - dt v / 2). A particle that meets a wall in
-            # that first half step has to meet it the way every later step would, and
-            # the initial field has to be built from the density the first step will
-            # actually see; otherwise the discrete Gauss law starts out violated and
-            # stays that way for the whole run.
+        if self.solver.algorithm == "explicit" and d.particle_bc == (0, 0):
+            # Only the periodic leapfrog precomputes a future half position.
+            # A wall run starts at its supplied physical position, before any impact.
             x_free = x + 0.5 * dt * v
-            x, u_out, w, qm, hits = apply_particle_bc(
+            x, u, w, qm, _ = apply_particle_bc(
                 x_free, u, w, qm, box, d.particle_bc, d.restitution, self._reflection(v), dx,
                 self._weight_floor())
-            if 3 in d.particle_bc:                # the same wall law as every later step, key and all
-                key, k_wall = random.split(key)
-                u_out = self._thermalise(k_wall, x_free, u_out, hits)
-            wall = self._record(wall, hits, m, u, u_out)
-            u = u_out
             x_integer = wrap_positions(x - 0.5 * dt * self._velocity(u), w, box, d.particle_bc, dx)
         else:
             x_integer = x
@@ -957,7 +948,11 @@ class Simulation:
             E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall, self._overlap_charge(x_integer, w)[1])))
         B = jnp.zeros((d.cells, 3))
         return (State(E, B, x, u, w, qm, rho, self._surface_charge(wall, x_integer, w), key, jnp.zeros(()),
-                      jnp.zeros((), jnp.int32), wall, None), (m, q))
+                      jnp.zeros((), jnp.int32), wall, None, self._x_phase()), (m, q))
+
+    def _x_phase(self):
+        return ("integer" if self.solver.algorithm == "implicit" else
+                "half" if self.domain.particle_bc == (0, 0) else "wall")
 
     def _smooth(self, f):
         s = self.solver
@@ -1056,15 +1051,55 @@ class Simulation:
             ln_lambda = jnp.where(jnp.any(charge < 0), coulomb_logarithm(density, kT_ev), jnp.nan)
         return collide(key, x, v, w, m, qm * m, self.blocks, pairs, ln_lambda, dt, d.dx, d.length, d.cells)
 
+    def _wall_drift(self, key, x, u, w, qm, wall, fields, m, dt, time_fraction):
+        """One physical half drift, with the wall law and ledger evaluated at the impact.
+
+        The first drift carries momentum at its start, the second at its end. Transport
+        the returned momentum back to that time, so the full Boris kick still belongs
+        between the two drifts. At zero force the returned trajectory is exact, including
+        thermal and relativistic returns; a segment can resolve one impact per particle.
+        """
+        d = self.domain
+        box = (d.length, d.length_y, d.length_z)
+        drift = dt * self._velocity(u)
+        free = x + drift
+        args = (box, d.particle_bc, d.restitution)
+        _, _, _, _, hits = apply_particle_bc(free, u, w, qm, *args, self._reflection(self._velocity(u)),
+                                             d.dx, self._weight_floor(), displacement=drift[:, 0])
+        hit = jnp.any(hits[0] > 0, axis=0)
+        fraction = jnp.where(hits[0][0] > 0, hits[3][0], hits[3][1])
+        interval = jnp.where(hit, (fraction - time_fraction) * dt, 0.0)[:, None]
+        incoming = self._accelerate(u, fields, qm, interval)
+        mapped, returned, w, qm, hits = apply_particle_bc(
+            free, incoming, w, qm, *args, self._reflection(self._velocity(incoming)), d.dx,
+            self._weight_floor(), displacement=drift[:, 0])
+        returned = self._thermalise(key, returned, hits)
+        wall = self._record(wall, hits, m, incoming, returned)
+        u = self._accelerate(returned, fields, qm, -interval)
+        bounced = x + fraction[:, None] * drift + (1 - fraction[:, None]) * dt * self._velocity(u)
+        x = jnp.where((hit & (w > 0))[:, None], bounced, mapped)
+        x = x.at[:, 0].set(jnp.where((w > 0) & (jnp.abs(x[:, 0]) > d.length / 2), jnp.nan, x[:, 0]))
+        periods = jnp.asarray(box[1:])
+        x = x.at[:, 1:].set((x[:, 1:] + periods / 2) % periods - periods / 2)
+        return x, u, w, qm, wall
+
     def _explicit_step(self, st, extra):
         d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
         box = (L, d.length_y, d.length_z)
         m, q = extra
         key, k_collide, k_wall, k_source = self._split_step_key(st.key)
+        walls = d.particle_bc != (0, 0)
+        if walls:
+            k_first, k_wall = random.split(k_wall)
+            initial_fields = self._fields_at(st.x, st.E, st.B, st.rho)
+            x_half, u, w, qm, wall = self._wall_drift(k_first, st.x, st.u, st.w, st.qm, st.wall,
+                                                      initial_fields, m, dt / 2, 0.0)
+        else:
+            x_half, u, w, qm, wall = st.x, st.u, st.w, st.qm, st.wall
         # What the sources supplied over the interval ending at the position the leapfrog
         # carries. They enter first, so the deposit below already counts them and no charge
         # appears between the two halves of the step.
-        x_half, u, w, qm, wall = self._inject(k_source, st.x, st.u, st.w, st.qm, st.wall, st.E, st.B, st.rho,
+        x_half, u, w, qm, wall = self._inject(k_source, x_half, u, w, qm, wall, st.E, st.B, st.rho,
                                               st.steps)
         v = self._velocity(u)
         # First half step: sources from the motion x^n -> x^{n+1/2}. The density at x^n
@@ -1080,38 +1115,25 @@ class Simulation:
         # push with the fields at t^{n+1/2}
         fields = self._fields_at(x_half, E, B, rho_half)
         u = self._accelerate(u, fields, qm, dt)
-        # Collisions act at t^{n+1}, where the velocity lives, on the particles at x^{n+1}: the
-        # drift is split around them, x^{n+1/2} -> x^{n+1} at the kicked velocity and on at the
-        # scattered one (docs/numerics/collisions.md). A pair then keeps its kinetic plus
-        # potential energy exactly; scattered at x^{n+1/2}, the integer-time position moved with
-        # the new velocity and the energy jumped by (dt/2) q E . dv at every collision.
-        v_kicked = self._velocity(u)
-        x_integer = wrap_positions(x_half + 0.5 * dt * v_kicked, w, box, d.particle_bc, dx)
-        u = self._collide_momenta(k_collide, x_integer, u, w, qm, m, dt)
-        v = self._velocity(u)
-        displacement = 0.5 * dt * (v_kicked + v)
-        x_free = x_half + displacement
-        incident = qm                     # the wall zeroes it for what it collects; the impact had it
-        x_next_half, u_out, w, qm, hits = apply_particle_bc(x_free, u, w, qm, box, d.particle_bc, d.restitution,
-                                                            self._reflection(v), dx, self._weight_floor(),
-                                                            displacement=displacement[:, 0])
-        u_out = self._thermalise(k_wall, x_free, u_out, hits)
-        # The ledger records the state the particle arrived in, which is its state at the
-        # crossing and not at the end of the step it overshot to. The two differ by the part
-        # of the push that belongs after the impact, and the difference does not go away with
-        # the time step: the derivative of the recorded energy is off by a fixed fraction,
-        # 6 % in the control of test_gradients, because it is taken at a fixed step index
-        # rather than at the wall. Undoing that part is the dtau/dtheta term of an event.
-        u_impact = self._at_impact(u, hits, fields, incident, dt)
-        _, u_returned, _, _, _ = apply_particle_bc(x_free, u_impact, w, incident, box, d.particle_bc,
-                                                   d.restitution, self._reflection(v), dx, self._weight_floor())
-        if 3 in d.particle_bc:
-            thermal = ((hits[0][0] > 0) & (d.particle_bc[0] == 3)) | ((hits[0][1] > 0) & (d.particle_bc[1] == 3))
-            u_returned = jnp.where(thermal[:, None], u_out, u_returned)
-        wall = self._record(wall, hits, m, u_impact, u_returned)
-        u = u_out
-        v = self._velocity(u)
-        x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
+        if walls:
+            x_next, u, w, qm, wall = self._wall_drift(k_wall, x_half, u, w, qm, wall, fields, m,
+                                                      dt / 2, 1.0)
+            u = self._collide_momenta(k_collide, x_next, u, w, qm, m, dt)
+            v = self._velocity(u)
+            x_next_half = x_next
+        else:
+            # The periodic leapfrog retains its half-position carry and integer-time collisions.
+            v_kicked = self._velocity(u)
+            x_integer = wrap_positions(x_half + 0.5 * dt * v_kicked, w, box, d.particle_bc, dx)
+            u = self._collide_momenta(k_collide, x_integer, u, w, qm, m, dt)
+            v = self._velocity(u)
+            displacement = 0.5 * dt * (v_kicked + v)
+            x_free = x_half + displacement
+            x_next_half, u, w, qm, _ = apply_particle_bc(
+                x_free, u, w, qm, box, d.particle_bc, d.restitution, self._reflection(v), dx,
+                self._weight_floor(), displacement=displacement[:, 0])
+            v = self._velocity(u)
+            x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
         # Second half step, x^{n+1/2} -> x^{n+1}, starting from the charge density the
         # first half already ended on. Depositing it again here would use the weights
         # that apply_particle_bc has just reduced, so the density at x^{n+1/2} would jump
@@ -1125,7 +1147,7 @@ class Simulation:
                                     overlap=self._electrode_overlap(sigma_next, wall))
         totals = self._accumulate(st.moments, x_next, v, w)
         state = State(E, B, x_next_half, u, w, qm, rho_next, sigma_next, key, st.time + dt, st.steps + 1,
-                      wall, totals)
+                      wall, totals, st.x_phase)
         return state, (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
     def _check_picard(self, picard, state, initial, q):
@@ -1238,7 +1260,7 @@ class Simulation:
                 # would make an elastic wall appear to exchange energy.
                 _, u_returned, _, _, _ = apply_particle_bc(x_free, u_impact, ws, incident, box, d.particle_bc,
                                                            d.restitution, reflection, dx, self._weight_floor())
-                u_bounced = self._thermalise(k_sub, x_free, u_bounced, hits)
+                u_bounced = self._thermalise(k_sub, u_bounced, hits)
                 if 3 in d.particle_bc:
                     thermal_hit = ((hits[0][0] > 0) & (d.particle_bc[0] == 3)
                                    | (hits[0][1] > 0) & (d.particle_bc[1] == 3))
@@ -1283,7 +1305,7 @@ class Simulation:
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
         v = self._velocity(u)
         return (State(E_new, B_new, x, u, w, qm, rho_next, st.sigma, key, st.time + dt, st.steps + 1, wall,
-                      self._accumulate(st.moments, x, v, w)),
+                      self._accumulate(st.moments, x, v, w), st.x_phase),
                 (x, v, w, E_new, B_new, J, rho_next))
 
     # -- the run ---------------------------------------------------------------------------------
@@ -1403,6 +1425,12 @@ def _advance(sim, carry, extra, chunks, store_every, store_particles, snapshot_s
 def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose, snapshot_steps):
     """Drive :func:`_advance`, in one group or in several with a meter between them."""
     carry, extra = sim.initial_state(random.PRNGKey(seed)) if state is None else (state, sim.per_particle)
+    phase = sim._x_phase()
+    if carry.x_phase == "legacy" and phase != "wall":
+        carry = carry.replace(x_phase=phase)
+    if carry.x_phase != phase:
+        raise ValueError("state position convention does not match this simulation; old explicit wall states "
+                         "processed future impacts and cannot be continued with the physical-time wall scheme")
     if moments:
         carry = carry.replace(moments=jnp.zeros((len(sim.species), sim.MOMENT_LEVELS[moments],
                                                  sim.domain.cells))

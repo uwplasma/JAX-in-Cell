@@ -140,7 +140,13 @@ second = simulation.run(1000, seed=2, state=load_state("checkpoint.npz", simulat
   analysis tool reads — the fields and the particles at the stored steps — and is not
   enough to carry on from: no random key, no wall ledger, no source bookkeeping, no charge
   density at the step the loop is about to begin, and positions at integer times where the
-  explicit loop carries half-step ones.
+  periodic explicit loop carries half-step ones.
+
+Explicit wall states now carry integer-time positions, recorded by `State.x_phase`.
+Their archives use format 4 so an older half-position reader refuses them. Legacy
+explicit wall archives are also refused on continuation: their wall ledgers and
+thermal random streams may already include future events, which a position shift
+cannot undo. Periodic explicit and implicit archive conventions remain compatible.
 
 ## Ensembles
 

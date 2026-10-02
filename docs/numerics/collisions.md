@@ -135,7 +135,7 @@ so a single realization can finish above or below its initial-energy equilibrium
 
 ## Where in the step
 
-The explicit step carries the position at half-integer times and the velocity at integer
+The periodic explicit step carries the position at half-integer times and the velocity at integer
 times. One step is a kick centred at $t^{n+1/2}$ followed by two half drifts,
 
 ```{math}
@@ -159,6 +159,11 @@ x^{n+3/2} = x^{n+1} + \tfrac12\Delta t\, v^{n+1}.
 The particles are paired in the cells of $x^{n+1}$, and the energy $\sum_p w_p(\tfrac12 m_p v_p^2 + q_p\phi(x_p))$
 at $t^{n+1}$ is unchanged by the scattering, because the positions are. Between collisions the
 leapfrog keeps its own bounded, second-order energy error.
+
+An explicit wall run carries integer positions and uses drift--kick--drift through
+the physical interval $[t^n,t^{n+1}]$. Its collisions act after the second drift
+and the endpoint wall events, at $x^{n+1}$ with the weights still live there. No
+future half drift or wall event is processed before that output is stored.
 
 Scattering at $x^{n+1/2}$ right after the kick, as the code did before, moves the integer-time position $x^{n+1} = x^{n+3/2} - \tfrac12\Delta t\,v^{n+1}$ with
 the scattered velocity, and every collision changes the energy by

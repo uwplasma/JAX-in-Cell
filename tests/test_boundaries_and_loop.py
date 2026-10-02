@@ -172,16 +172,12 @@ def walled_simulation(**solver):
 
 def test_the_carried_density_is_the_density_at_the_integer_time_positions():
     """The explicit step no longer deposits the density at x^n: it carries the one the
-    previous step ended on. That is only right if the carried density is the deposit at
-    the reconstructed positions wrap(x^{n+1/2} - dt v/2), with the weights the walls have
-    left, which this checks after a run with a thermal wall, partial reflection and a
-    filter."""
+    previous step ended on, with physical integer-time wall positions and weights."""
     sim = walled_simulation()
     d = sim.domain
     out = sim.run(40, seed=1, store_every=4)
     state = out.state
-    x_n = wrap_positions(state.x - 0.5 * d.dt * state.u, state.w,
-                         (d.length, d.length_y, d.length_z), d.particle_bc, d.dx)
+    x_n = state.x
     expected = sim._smooth(deposit(x_n[:, 0], out.charge * state.w, d.grid[0], d.dx, d.cells, d.particle_bc))
     assert np.allclose(np.asarray(state.rho), np.asarray(expected),
                        rtol=1e-12, atol=1e-12 * float(jnp.abs(expected).max()))
@@ -428,9 +424,112 @@ def test_elastic_wall_records_both_energies_at_the_crossing(algorithm, side):
 def test_thermal_wall_exact_endpoint_redraws_and_records_the_same_returned_energy():
     domain = Domain(length=1., cells=8, dt_over_dx_c=8*c, particle_bc="thermal", field_bc="reflective")
     species = Species("neutral", 1, 0., 1., 1., vth=(.05, .02, .02),
-                      x=jnp.array([[.2, 0., 0.]]), v=jnp.array([[.2, 0., 0.]]))
+                      x=jnp.array([[.3, 0., 0.]]), v=jnp.array([[.2, 0., 0.]]))
     output = Simulation(domain, (species,), Solver(model="electrostatic")).run(1, seed=1)
     assert float(output.v[0, 0, 0]) < 0
     assert float(output.v[0, 0, 0]) != -.2
     assert float(output.wall.energy_out[0, 0, 1]) == pytest.approx(
         float(jnp.sum(output.v[0, 0]**2)/2), rel=1e-13)
+
+
+@pytest.mark.parametrize("side", [-1., 1.])
+@pytest.mark.parametrize("boundary,reflection", [("reflective", 1.), ("absorbing", 0.),
+                                                 ("absorbing", .4), ("thermal", 1.)])
+def test_explicit_wall_events_belong_to_the_output_time(side, boundary, reflection):
+    """Markers hit after, exactly at, and before t=1; no future event is consumed."""
+    domain = Domain(length=1., cells=8, time_step=1., particle_bc=boundary, field_bc="reflective",
+                    length_y=1., length_z=1.)
+    x = jnp.array([[side*s, 0., 0.] for s in (.25, .3, .35)])
+    velocity = jnp.tile(jnp.array([side*.2, .03, -.04]), (3, 1))
+    species = Species("neutral", 3, 0., 1., 3., vth=(.05, .02, .02), reflection=reflection, x=x, v=velocity)
+    sim = Simulation(domain, [species], Solver(model="electrostatic", filter_passes=0))
+    initial, _ = sim.initial_state(random.PRNGKey(1))
+    np.testing.assert_array_equal(initial.x, x)
+    np.testing.assert_array_equal(initial.u, velocity)
+    assert float(jnp.sum(initial.wall.arrived)) == 0
+    out = sim.run(1, seed=1).validate()
+    wall = 0 if side < 0 else 1
+    assert float(out.t[0]) == 1.
+    assert float(out.wall.arrived[0, 0, wall]) == 2.
+    assert float(out.wall.collected[0, 0, wall]) == pytest.approx(2*(1-reflection), abs=1e-16)
+    np.testing.assert_allclose(out.x[0, 0], [side*.45, .03, -.04], atol=1e-16)
+    np.testing.assert_array_equal(out.v[0, 0], velocity[0])
+    np.testing.assert_array_equal(out.state.x, out.x[-1])
+    np.testing.assert_array_equal(out.state.u, out.v[-1])
+    np.testing.assert_allclose(out.weight[0], [1., reflection, reflection], atol=1e-16)
+    if reflection:
+        # The endpoint particle has no return flight; the earlier one has 1/4 step.
+        np.testing.assert_allclose(out.x[0, 1], [side*.5, .03, -.04], atol=1e-16)
+        crossing = np.array([side*.5, .0225, -.03])
+        np.testing.assert_allclose(out.x[0, 2], crossing + .25*np.asarray(out.v[0, 2]), atol=1e-16)
+        assert side*float(out.v[0, 1, 0]) < 0
+        incoming = np.sum(np.asarray(velocity[1:])**2)/2
+        returned = reflection*np.sum(np.asarray(out.v[0, 1:])**2)/2
+        assert float(out.wall.energy_in[0, 0, wall]) == pytest.approx(incoming, rel=1e-14)
+        assert float(out.wall.energy_out[0, 0, wall]) == pytest.approx(returned, rel=1e-14)
+    else:
+        np.testing.assert_array_equal(out.v[0, 1:], np.zeros((2, 3)))
+        np.testing.assert_array_equal(out.state.qm[1:], np.zeros(2))
+
+
+def test_a_thermal_future_half_step_consumes_neither_a_draw_nor_a_wall_budget():
+    domain = Domain(length=1., cells=8, time_step=1., particle_bc="thermal", field_bc="reflective",
+                    length_y=1., length_z=1.)
+    species = Species("neutral", 1, 0., 1., 1., vth=(.05, .02, .02),
+                      x=jnp.array([[.2, 0., 0.]]), v=jnp.array([[.2, 0., 0.]]))
+    sim = Simulation(domain, [species], Solver(model="electrostatic"))
+    out = sim.run(2, seed=1).validate()
+    assert float(out.v[0, 0, 0]) == .2
+    assert float(out.wall.arrived[0, 0, 1]) == 0
+    assert float(out.wall.arrived[1, 0, 1]) == 1
+    assert float(out.v[1, 0, 0]) < 0
+    np.testing.assert_allclose(out.x[1, 0], [.5, 0., 0.] + .5*np.asarray(out.v[1, 0]), atol=1e-16)
+
+
+@pytest.mark.parametrize("side", [-1., 1.])
+@pytest.mark.parametrize("start", [.4, .45])
+def test_a_first_half_thermal_return_flies_for_the_physical_remaining_time(side, start):
+    domain = Domain(length=1., cells=8, time_step=1., particle_bc="thermal", field_bc="reflective",
+                    length_y=1., length_z=1.)
+    species = Species("neutral", 1, 0., 1., 1., vth=(.05, .02, .02),
+                      x=jnp.array([[side*start, 0., 0.]]), v=jnp.array([[side*.2, 0., 0.]]))
+    out = Simulation(domain, [species], Solver(model="electrostatic")).run(1, seed=1).validate()
+    remaining = 1-(.5-start)/.2
+    np.testing.assert_allclose(out.x[0, 0], [side*.5, 0., 0.] + remaining*np.asarray(out.v[0, 0]), atol=1e-16)
+    assert float(jnp.sum(out.wall.arrived)) == 1.
+
+
+@pytest.mark.parametrize("side", [-1., 1.])
+def test_relativistic_restitution_uses_the_returned_speed_for_the_remaining_flight(side):
+    """Scaling proper momentum by e does not scale velocity by e at high gamma."""
+    domain = Domain(length=1., cells=8, time_step=.25/c, particle_bc="reflective",
+                    field_bc="reflective", restitution=.5)
+    species = Species("neutral", 1, 0., 1., 1., x=jnp.array([[side*.4, 0., 0.]]),
+                      v=jnp.array([[side*.8*c, 0., 0.]]))
+    out = Simulation(domain, [species], Solver(model="electrostatic", relativistic=True)).run(1).validate()
+    gamma = 1/np.sqrt(1-.8**2)
+    u = -.5*side*gamma*.8*c
+    v = u/np.sqrt(1+(u/c)**2)
+    np.testing.assert_allclose(out.x[0, 0, 0], side*.5 + (.25/c-.1/(.8*c))*v, atol=1e-16)
+    assert float(out.v[0, 0, 0]) == pytest.approx(v, rel=1e-14)
+
+
+def test_explicit_wall_collisions_see_the_physical_endpoint_and_post_wall_weights(monkeypatch):
+    domain = Domain(length=1., cells=8, time_step=1., particle_bc="absorbing", field_bc="reflective",
+                    length_y=1., length_z=1.)
+    species = Species("neutral", 2, 0., 1., 2., x=jnp.array([[.25, 0., 0.], [.35, 0., 0.]]),
+                      v=jnp.array([[.2, 0., 0.], [.2, 0., 0.]]))
+    observed = []
+
+    def scatter(self, key, x, u, w, *rest):
+        observed.append((np.asarray(x), np.asarray(w)))
+        return u.at[0, 1].set(.1)
+
+    monkeypatch.setattr(Simulation, "_collide_momenta", scatter)
+    sim = Simulation(domain, [species], Solver(model="electrostatic"))
+    initial, extra = sim.initial_state(random.PRNGKey(0))
+    state, values = sim._explicit_step(initial, extra)
+    assert observed[0][0][0, 0] == pytest.approx(.45, abs=1e-16)
+    np.testing.assert_array_equal(observed[0][1], [1., 0.])
+    assert float(state.u[0, 1]) == .1
+    assert float(values[0][0, 1]) == 0.

@@ -99,15 +99,11 @@ $E_x$ is taken from the discrete Gauss law applied to the charge density
 ({doc}`field_solvers`), so the constraint holds from the first step. Static external
 fields, if given, are added at the gather and never evolve.
 
-The order matters at a wall. In the explicit scheme positions are first displaced by
-$+\tfrac12\Delta t\,\mathbf v$ to set up the leapfrog, and the density the initial
-field is built from is then deposited at
-$\mathrm{wrap}(x^{1/2} - \tfrac12\Delta t\,\mathbf v)$ — the integer-time position
-the *loop* will reconstruct, not the one the particles were placed at. For a periodic
-box the two are the same; at a reflecting or absorbing wall a particle whose half step
-crossed the wall comes back somewhere else, and building the field from the placed
-positions leaves the discrete Gauss law violated from the first step and violated for
-the rest of the run.
+Explicit periodic runs initialize the half-position carry and deposit the density
+at the reconstructed integer-time positions. Explicit wall and implicit runs
+initialize directly at the supplied integer-time positions, before applying any
+wall event. Their initial field uses that density, and their initial wall ledger is
+empty. A wall crossing in the first half drift belongs to the first physical step.
 
 In a relativistic run a sampled velocity with $v^2/c^2 > 1 - 10^{-5}$, which the tail of
 a hot Maxwellian or a drift given too close to $c$ can produce, is brought back to that

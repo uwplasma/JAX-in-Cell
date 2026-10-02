@@ -1338,6 +1338,26 @@ def test_a_particle_emitted_past_the_far_wall_is_collected_on_the_step_it_was_em
     assert np.asarray(charge_balance(out)).max() < 1e-12
 
 
+def test_reservoir_quadrature_and_wall_collection_share_the_physical_output_time():
+    """The documented midpoint entry window is preserved, but no future wall hit is recorded.
+
+    Entries on the first step are at (s-1/2)dt, including the prescribed startup
+    half-window before zero. Their transit time is 2.5: none reaches the collector
+    by t=2 and all four have reached it by t=3.
+    """
+    domain = Domain(length=1., cells=8, time_step=1., particle_bc="absorbing", field_bc="reflective")
+    source = Source(density=1., vth=0., drift=(.4, 0., 0.), emit=4)
+    species = Species("neutral", 20, 0., 1., 0., source=source)
+    out = Simulation(domain, [species], Solver(model="electrostatic", filter_passes=0)).run(3).validate()
+    s = (np.arange(4)+.5)/4
+    expected = np.sort(np.r_[-.5+.4*(1.5-s), -.5+.4*(2.5-s)])
+    live = np.asarray(out.weight[1]) > 0
+    np.testing.assert_allclose(np.sort(np.asarray(out.x[1, live, 0])), expected, atol=1e-16)
+    np.testing.assert_allclose(out.wall.injected[:, 0, 0], [.4, .8, 1.2], atol=3e-16)
+    np.testing.assert_allclose(out.wall.arrived[:, 0, 1], [0., 0., .4], atol=1e-16)
+    np.testing.assert_array_equal(np.asarray(out.wall.collected), np.asarray(out.wall.arrived))
+
+
 def test_a_sheath_fed_every_k_steps_is_differentiable_in_the_reservoir():
     """The weight :math:`\\Gamma k\\Delta t/N_{\\rm emit}` is a smooth function of the reservoir
     density, and an idle step passes the arrays through a ``cond`` rather than dividing by

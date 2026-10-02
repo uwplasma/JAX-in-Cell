@@ -196,7 +196,8 @@ def test_the_impact_energy_a_prescribed_field_gives_and_its_derivative():
 
 
 @pytest.mark.parametrize("side", [-1, 1])
-def test_implicit_impact_energy_and_event_derivatives_converge(side):
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_impact_energy_and_event_derivatives_converge(side, algorithm):
     """At either wall K = v0^2/2 + E/2, dK/dv0 = v0 and dK/dE = 1/2.
 
     Unit mass and charge make the per-particle comparisons order one. A tiny
@@ -204,7 +205,8 @@ def test_implicit_impact_energy_and_event_derivatives_converge(side):
     impact. The coarse/fine steps used to give dK/dv0 = 1.425/1.415625.
     """
     errors = []
-    for dt, tolerance in [(0.025, 1.5e-3), (0.00625, 6e-5)]:
+    for dt, tolerance in ([(0.025, 4e-3), (0.00625, 6e-4)] if algorithm == "explicit"
+                          else [(0.025, 1.5e-3), (0.00625, 6e-5)]):
         domain = Domain(length=1., cells=16, time_step=dt,
                         particle_bc="absorbing", field_bc="absorbing")
         weight, steps = 1e-30, round(.6 / dt)
@@ -213,7 +215,7 @@ def test_implicit_impact_energy_and_event_derivatives_converge(side):
             species = Species("test", 1, 1 / e_charge, 1., weight,
                               x=jnp.zeros((1, 3)), v=jnp.array([[side * speed, 0., 0.]]))
             external = jnp.zeros((16, 3)).at[:, 0].set(side * field)
-            return Simulation(domain, [species], Solver(algorithm="implicit", model="electrostatic",
+            return Simulation(domain, [species], Solver(algorithm=algorithm, model="electrostatic",
                                                         picard_iterations=2, substeps=2), external_E=external).run(
                 steps, store_every=steps, store_particles=False)
 

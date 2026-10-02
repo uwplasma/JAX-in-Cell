@@ -14,7 +14,7 @@ name that is present or absent rather than a class that no longer unpickles.
 It is also not openPMD. :func:`~jaxincell.write_openpmd` writes what an analysis tool reads --
 the fields and the particles at the steps that were stored -- and that is not enough to carry
 on from: it has no random key, no wall ledger, no source bookkeeping, no charge density at the
-step the loop is about to begin, and its positions are at integer times while the explicit
+step the loop is about to begin, and its positions are at integer times while the periodic explicit
 loop carries half-step ones. The two files answer different questions and both are worth
 having.
 """
@@ -29,6 +29,7 @@ __all__ = ["save_state", "load_state", "provenance"]
 FORMAT = 1      #: Version of the archive layout, written into every file and checked on reading.
 QUINTIC_FORMAT = 2  # an S2-only reader must refuse a state whose charge used S5
 INTEGRAL_FORMAT = 3  # a secant-only reader must refuse an integral-force restart
+WALL_FORMAT = 4  # a half-position reader must refuse an integer-position explicit wall restart
 
 
 def _fields(obj):
@@ -129,6 +130,7 @@ def save_state(path, state, simulation=None):
             arrays["format"] = np.asarray(INTEGRAL_FORMAT)
             arrays["shape_order"] = np.asarray(simulation.solver.shape_order)
             arrays["orbit_force"] = np.asarray("integral")
+    arrays["format"] = np.asarray(WALL_FORMAT if state.x_phase == "wall" else arrays["format"])
     np.savez(path, **arrays)
     return path
 
@@ -141,6 +143,21 @@ def _check_integral_format(version, stored):
                                                   for order in (2, 5))):
         raise ValueError("archive format 3 requires orbit_force='integral', "
                          "algorithm='implicit' and shape_order=2 or 5")
+
+
+def _state_field(name, stored, wall, path):
+    """Decode one state field; strings and typed keys are not ordinary array leaves."""
+    if name == "wall":
+        return wall
+    if name == "x_phase":
+        return str(stored.get(name, "legacy"))
+    if name == "key" and "key_impl" in stored:
+        return random.wrap_key_data(jnp.asarray(stored[name]), impl=str(stored["key_impl"]))
+    if name in stored:
+        return jnp.asarray(stored[name])
+    if name == "moments":
+        return None
+    raise ValueError(f"{path} has no {name!r}, which a state needs; it is not a state archive")
 
 
 def load_state(path, simulation=None):
@@ -160,13 +177,20 @@ def load_state(path, simulation=None):
     with np.load(str(path), allow_pickle=False) as data:
         stored = {key: data[key] for key in data.files}
     version = int(stored.pop("format", -1))
-    if version not in (FORMAT, QUINTIC_FORMAT, INTEGRAL_FORMAT):
+    if version not in (FORMAT, QUINTIC_FORMAT, INTEGRAL_FORMAT, WALL_FORMAT):
         raise ValueError(f"{path} is a format {version} archive; this jaxincell reads formats "
-                         f"{FORMAT}, {QUINTIC_FORMAT} and {INTEGRAL_FORMAT}; it was written by a different version")
+                         f"{FORMAT}, {QUINTIC_FORMAT}, {INTEGRAL_FORMAT} and {WALL_FORMAT}; "
+                         "it was written by a different version")
     if version == QUINTIC_FORMAT and not np.array_equal(stored.get("shape_order"), np.asarray(5)):
         raise ValueError("archive format 2 requires stored shape_order=5")
     _check_integral_format(version, stored)
+    phase = str(stored.get("x_phase", "legacy"))
+    if version == WALL_FORMAT and phase != "wall":
+        raise ValueError("archive format 4 requires the explicit wall position convention x_phase='wall'")
     if simulation is not None:
+        if phase != simulation._x_phase() and not (phase == "legacy" and simulation._x_phase() != "wall"):
+            raise ValueError("archive position convention does not match this simulation; old explicit wall "
+                             "states processed future impacts and cannot be continued")
         stored.setdefault("shape_order", np.asarray(2))  # archives predating shape selection used S2
         stored.setdefault("orbit_force", np.asarray("secant"))
         wanted = {"names": np.asarray([s.name for s in simulation.species]),
@@ -182,16 +206,4 @@ def load_state(path, simulation=None):
                                  "differently shaped run is not the run it came from")
     wall = Wall(*[jnp.asarray(stored[f"wall.{name}"]) if f"wall.{name}" in stored else None
                   for name in _fields(Wall)])
-    values = []
-    for name in _fields(State):
-        if name == "wall":
-            values.append(wall)
-        elif name == "key" and "key_impl" in stored:
-            values.append(random.wrap_key_data(jnp.asarray(stored[name]), impl=str(stored["key_impl"])))
-        elif name in stored:
-            values.append(jnp.asarray(stored[name]))
-        elif name == "moments":
-            values.append(None)
-        else:
-            raise ValueError(f"{path} has no {name!r}, which a state needs; it is not a state archive")
-    return State(*values)
+    return State(*[_state_field(name, stored, wall, path) for name in _fields(State)])

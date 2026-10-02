@@ -301,10 +301,9 @@ all three at every wall type, with and without filtering:
 
 * the density at $t^{n+1/2}$ has to be shared between the two half steps, or the
   charge an absorbing wall removes disappears between them uncounted;
-* the initial field has to be built from the density the loop starts from. The
-  leapfrog carries $x^{n+1/2}$ and reconstructs $x^n$ as
-  $\mathrm{wrap}(x^{n+1/2} - \tfrac12\Delta t\,\mathbf v)$, which at a reflecting
-  wall is not where the particles were placed;
+* the initial field uses the density the loop starts from. Explicit wall runs
+  carry the supplied $x^n$ directly and apply wall events during the physical
+  half drifts, before storing $x^{n+1}$;
 * the residual has to be measured with the same $E_{-1/2}$ the solver used: zero at a
   wall, the far end of the box only when the wall is periodic.
 

@@ -6,13 +6,28 @@ charge-conserving current of {doc}`deposition`.
 
 ## The state
 
-The loop carries the fields $\mathbf E^n$, $\mathbf B^n$, the half-step positions
+For periodic particles the loop carries the fields $\mathbf E^n$, $\mathbf B^n$, the half-step positions
 $x^{n+1/2}$, the velocities $\mathbf v^n$ ($\gamma\mathbf v^n$ in a relativistic run, see
 below), the pseudo-particle charges and charge-to-mass ratios (which change only when a
 particle is absorbed), the charge density $\rho^n$ at the integer-time positions, and the
 random key. Before the loop starts the initial positions are displaced by
 $\tfrac12\Delta t\,\mathbf v^0$ to create $x^{1/2}$, and $\mathbf E^0$ is taken from
 Gauss's law so that the constraint holds from the first step.
+
+With particle walls the state instead carries $x^n$, alongside $\mathbf v^n$.
+The first physical half drift reaches $x^{n+1/2}$ and applies any wall event there;
+after the full Boris kick the second half drift reaches $x^{n+1}$ and applies its
+events. Collisions then act at this physical endpoint. A wall hit after $t^{n+1}$
+is handled on the next step: initialization consumes neither a future impact nor
+a thermal redraw. A segment resolves at most one impact per particle; a return
+that crosses the opposite wall makes the result invalid and requires a shorter step.
+
+The wall ledger uses momenta transported to the impact time in the gathered field,
+and the returned momentum is transported back to its carried time. Ballistic return
+flights, including thermal and relativistic ones, use the returned velocity rather
+than mirroring a distance at an assumed speed. In varying fields the drift and event
+time remain discrete approximations; refine the timestep for impact observables and
+their derivatives. The periodic path below retains its half-position carry.
 
 ## One step
 

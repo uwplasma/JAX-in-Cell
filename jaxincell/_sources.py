@@ -194,8 +194,8 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length, field,
     was overwritten because the pool was full. Finding them costs one partial sort of the
     block, not a search per slot.
 
-    **The staggering.** The loop carries the position at half-integer times and the velocity
-    at integer ones. A particle emitted on this step enters the plane at
+    **The staggering.** Injection targets the position at the physical half-step and the
+    velocity at the step's start. A particle emitted on this step enters the plane at
     :math:`\\tau_k = t^n + (s_k - \\tfrac12)\\Delta t`, with
     :math:`s_k = (k + 1/2)/N_{\\rm emit}` a quiet quadrature of the interval
     :math:`(t^{n-1/2}, t^{n+1/2}]` that ends where the carried position stands. It is put in
@@ -221,7 +221,8 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length, field,
     step then acts on it, so an absorbing wall collects it on the step it was emitted and its
     ledger counts it, having held its whole cloud as surface charge in between.
 
-    It is emitted at the top of a step, so the deposit of that step already counts it and no
+    The first window includes entry before zero; it represents a maintained reservoir,
+    not one switched on at zero. It is emitted before the first half-step deposit, so it counts and no
     charge appears between the two halves of the step with no current to account for it.
 
     Returns:

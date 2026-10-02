@@ -297,7 +297,7 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     import numpy as np
 
     from jaxincell import load_state, save_state
-    from jaxincell._archive import INTEGRAL_FORMAT
+    from jaxincell._archive import WALL_FORMAT
 
     domain = Domain(length=1e-2, cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
     species = Species("electrons", 2000, -1.0, mass_electron, 0.0,
@@ -332,12 +332,45 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     # an archive of another format is refused rather than half read, and so is one that is not
     # a state at all
     stored = dict(np.load(path))
-    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(INTEGRAL_FORMAT + 1)})
-    with pytest.raises(ValueError, match=f"format {INTEGRAL_FORMAT + 1}"):
+    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(WALL_FORMAT + 1)})
+    with pytest.raises(ValueError, match=f"format {WALL_FORMAT + 1}"):
         load_state(tmp_path / "future.npz")
     np.savez(tmp_path / "partial.npz", **{k: v for k, v in stored.items() if k != "rho"})
     with pytest.raises(ValueError, match="not a state archive"):
         load_state(tmp_path / "partial.npz")
+
+
+@pytest.mark.parametrize("algorithm,boundary", [("explicit", "periodic"), ("implicit", "reflective"),
+                                                ("explicit", "thermal")])
+def test_restart_position_conventions_and_legacy_wall_rejection(tmp_path, algorithm, boundary):
+    from jaxincell import load_state, save_state
+    from jaxincell._archive import WALL_FORMAT
+    domain = Domain(length=1., cells=8, time_step=1., particle_bc=boundary,
+                    field_bc="periodic" if boundary == "periodic" else "reflective")
+    species = Species("neutral", 1, 0., 1., 1., vth=(.05, .02, .02),
+                      x=jnp.array([[.25, 0., 0.]]), v=jnp.array([[.2, 0., 0.]]))
+    sim = Simulation(domain, [species], Solver(algorithm=algorithm, model="electrostatic"))
+    first = sim.run(1)
+    whole = sim.run(3, snapshot_steps=(0, 2))
+    path = save_state(tmp_path / "state", first.state, sim)
+    restored = load_state(path, sim)
+    assert restored.x_phase == first.state.x_phase
+    continued = sim.run(2, state=restored, snapshot_steps=(1,))
+    for a, b in zip(jax.tree.leaves(whole.state), jax.tree.leaves(continued.state)):
+        np.testing.assert_array_equal(a, b)
+    with np.load(path) as data:
+        stored = dict(data)
+    assert int(stored["format"]) == (WALL_FORMAT if boundary == "thermal" else 1)
+    old = {k: v for k, v in stored.items() if k != "x_phase"}
+    np.savez(tmp_path / "legacy.npz", **{**old, "format": np.asarray(1)})
+    legacy = load_state(tmp_path / "legacy.npz")
+    if boundary == "thermal":
+        with pytest.raises(ValueError, match="future impacts"):
+            load_state(tmp_path / "legacy.npz", sim)
+        with pytest.raises(ValueError, match="future impacts"):
+            sim.run(1, state=legacy)
+    else:
+        sim.run(1, state=load_state(tmp_path / "legacy.npz", sim))
 
 
 def test_per_species_diagnostics_are_the_masked_sums():

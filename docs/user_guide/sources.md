@@ -126,8 +126,13 @@ function of the reservoir's density and temperature.
   the same plasma on average and have no derivative at all: a count is an integer, and the
   derivative of a step function is zero almost everywhere. Continuous weights are what make
   the reservoir an optimisable control.
-* Entry times are a quiet quadrature of the step, $s_k = (k+\tfrac12)/N_{\rm emit}$, and each
-  particle streams freely for the remaining $(1-s_k)\Delta t$ before its first push.
+* Entry times use the midpoint window: $\tau_j=t^n+(s_j-\tfrac12)\Delta t$,
+  with $s_j=(j+\tfrac12)/N_{\rm emit}$. The entry field is held at the plane for
+  the partial trajectory to $t^{n+1/2}$; the momentum is backdated to $t^n$
+  before the full Boris kick. The first window includes prescribed entry times
+  before zero. This startup quadrature is not an inflow switched on exactly at
+  $t=0$; refine $\Delta t$ when that transient matters. Wall collection in the
+  output still includes only events through its physical time $t^{n+1}$.
 * A particle's first deposit is therefore about one step's flight inside the plane, biasing
   the density there by of order $\langle v\rangle\Delta t/L$ — a per cent in the examples
   here, and smaller with a smaller time step.
