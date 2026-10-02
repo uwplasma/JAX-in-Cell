@@ -35,7 +35,7 @@ def _particle_boundary_map(x, vx, dx, grid, box, BC_left, BC_right,
     # This scalar choice lets XLA discard all impact logic for paired periodic walls.
     periodic = (BC_left == 0) & (BC_right == 0)
     position = jnp.where(periodic, wrapped, jnp.array([normal, wrapped[1], wrapped[2]]))
-    return position, jnp.where(periodic, 1., speed_factor), jnp.where(periodic, 1., fraction), (lost | parked) & ~periodic
+    return position, jnp.where(periodic, 1., speed_factor), jnp.where(periodic, 1., fraction), (lost | parked) & jnp.logical_not(periodic)
 
 def set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z,
                            BC_left, BC_right, mixed_BC_weight=1., COR_left=1., COR_right=1., max_vx=1.):
