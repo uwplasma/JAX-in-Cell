@@ -29,12 +29,11 @@ Reflective (`1`)
   the opposite wall after reflecting.
 
 Absorbing (`2`)
-: The particle is removed from the dynamics: its charge and charge-to-mass ratio are set
+: The particle is removed from the dynamics: its charge, mass and charge-to-mass ratio are set
   to zero, its velocity to zero, and it is parked outside the grid ($1.5\,\Delta x$
   beyond the left edge or $3\,\Delta x$ beyond the right edge). It stays in the arrays,
   so the particle count is fixed, but it no longer contributes to $\rho$, $\mathbf J$ or
-  the kinetic energy. The mass entry is kept, which is why the kinetic energy of absorbed
-  particles is zero rather than undefined.
+  the kinetic energy.
 
 The conditions are applied after every push, and also to the half-step positions used
 by the current deposit, so a particle cannot deposit charge outside the box.
@@ -45,8 +44,8 @@ Periodic (`0`)
 : Ghost cells copy the values from the opposite end of the grid.
 
 Reflective (`1`)
-: Ghost cells copy the adjacent boundary value, which makes the normal derivative of
-  each field component vanish at the wall.
+: Ghost cells copy the adjacent boundary value in the implemented stencil.
+  This convention does not establish a general PEC or PMC wall model.
 
 Absorbing (`2`)
 : The ghost values are chosen so that the transverse fields at the wall satisfy the
@@ -61,8 +60,8 @@ The ghost-cell formulas are written out in {doc}`../numerics/boundaries`.
 
 * Periodic particles with periodic fields is the fully consistent choice for
   homogeneous plasmas and the one used by all the linear-theory checks.
-* Reflective particles with reflective fields represents a conducting wall for the
-  particles with a zero-gradient condition for the fields. It is what the README
+* Reflective particles with reflective fields combines elastic particle reflection
+  with the implemented field-ghost convention. It is what the README
   animation of the bump-on-tail instability with walls uses.
 * Absorbing particles with absorbing fields lets a plasma leave the box.
 
@@ -88,6 +87,13 @@ The reflected endpoint is `wall - COR*(endpoint-wall)`, with normal velocity
 `-COR*v_x`. Both half drifts resolve impacts at their physical time; the output
 reports the end of the full step. Resolve at most one wall impact per half drift.
 An unresolved second crossing produces a nonfinite position: reduce the time step.
+Position-only and full-state helpers share this mapping. Position-only calls use
+unit restitution and return: they have no velocity or mass to determine an exact
+outgoing impact, a returned fraction, or collection history. Use the full-state
+helper for those laws; it preserves already parked zero-charge, zero-mass markers
+and still moves massive neutral tracers. Charges alone do not identify inactive
+markers in the generic position-only API. Derivatives describe a fixed impact
+branch; the wall-contact and collection decisions are nonsmooth.
 
 Fractional walls require Newtonian Boris and `field_solver=2` (Cartesian Gauss).
 The longitudinal field is reconstructed after collection; this is an imposed wall
