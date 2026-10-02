@@ -2,22 +2,24 @@
 import os
 import time
 from jax import block_until_ready
-from jaxincell import plot, simulation, load_parameters, diagnostics
+from jaxincell import plot, Simulation, load_parameters, diagnostics
 
 # Read from input.toml (assuming it's in the same directory as this script)
 input_file = 'input.toml'
 current_directory = os.path.dirname(os.path.abspath(__file__))
 input_toml_path = os.path.join(current_directory, input_file)
 
-input_parameters, solver_parameters = load_parameters(input_toml_path)
+parameters = load_parameters(input_toml_path)
 
 n_simulations = 1 # >1 to check that first simulation takes longer due to JIT compilation
 
 # Run the simulation
 for i in range(n_simulations):
-    if i>0: input_parameters["print_info"] = False
+    if i > 0:
+        parameters.setdefault("solver_parameters", {})["print_info"] = False
+    sim = Simulation(parameters)
     start = time.time()
-    output = block_until_ready(simulation(input_parameters, **solver_parameters))
+    output = block_until_ready(sim.run())
     print(f"Run #{i+1}: Wall clock time: {time.time()-start}s")
 
 # Post-process: segregate ions/electrons, compute energies, compute FFT

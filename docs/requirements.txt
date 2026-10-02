@@ -1,6 +1,8 @@
-jax
-jax_tqdm
-matplotlib
-sphinx
-sphinx-autoapi
-piccolo_theme
+# Documentation build dependencies (see .readthedocs.yaml). The package itself
+# is installed from the repository root, which pulls in jax, jax_tqdm and matplotlib.
+sphinx>=8.1
+pydata-sphinx-theme>=0.16
+myst-parser>=4.0
+sphinx-design>=0.6
+sphinx-copybutton>=0.5
+sphinxcontrib-bibtex>=2.6
