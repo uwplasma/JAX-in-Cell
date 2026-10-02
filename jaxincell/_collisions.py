@@ -3,8 +3,8 @@
 Inside every cell the particles are paired at random and the relative velocity of
 each pair is rotated through an angle whose variance carries the collision frequency,
 which conserves the pair's momentum and energy. The pairing within a species and
-between two, the Nanbu-Yonemura acceptance for unequal weights, the pair density of
-Perez et al. and the variance are derived on the Collisions page of the numerical
+between two, the unequal-weight acceptance, the pair-local density correction of
+Higginson et al. and the variance are derived on the Collisions page of the numerical
 methods."""
 import jax.numpy as jnp
 from jax import lax, random
@@ -79,6 +79,7 @@ def _scatter(key, v, i, j, active, density, fraction, weight, mass, charge, coul
     u = v[i] - v[j]
     u_mag = jnp.sqrt(jnp.maximum(jnp.sum(u ** 2, axis=1), 1e-20))
     variance = (q_i / epsilon_0 * (q_j / m_r)) ** 2 * fraction * density * coulomb_log * dt / (8 * jnp.pi * u_mag ** 3)
+    active = active & (variance > 0)
     # Past 1e30 the angle is within 1e-15 of pi anyway; the cap keeps single precision finite. The
     # floor keeps the derivative of the square root finite where the variance vanishes, as it does
     # in the slots that hold no collision.
@@ -110,20 +111,13 @@ def _within(key, v, start, n, cell, n_cells, dx, *args):
     pairs_fraction = jnp.where(triplet[pair_cell] & (rank == half[pair_cell] - 1), 0.5, 1.0)
     last = jnp.clip(first + count - 1, 0, n - 1)
     t_1, t_2, t_3 = s[jnp.clip(last - 2, 0, n - 1)], s[jnp.clip(last - 1, 0, n - 1)], s[last]
-    # densities of the cell: n_a, and n_aa = 2 sum over its collisions of fraction * min(w_i, w_j)
-    w_pairs = jnp.where(pairs_active, pairs_fraction * jnp.minimum(weight[pairs_i], weight[pairs_j]), 0.0)
-    w_1, w_2, w_3 = weight[t_1], weight[t_2], weight[t_3]
-    w_triplets = jnp.where(triplet, 0.5 * (jnp.minimum(w_2, w_3) + jnp.minimum(w_3, w_1)), 0.0)
-    cells = jnp.concatenate([sorted_cell, pair_cell, jnp.arange(n_cells + 1)])
-    columns = jnp.zeros((n_cells + 1, 2)).at[cells].add(jnp.stack([
-        jnp.concatenate([weight[s], jnp.zeros(n // 2 + n_cells + 1)]),
-        2 * jnp.concatenate([jnp.zeros(n), w_pairs, w_triplets])], axis=1)) / dx
-    has_pairs = columns[:, 1] > 0
-    density = columns[:, 0] * (columns[:, 0] / jnp.where(has_pairs, columns[:, 1], 1.0))
-    v = _scatter(k_pairs, v, pairs_i, pairs_j, pairs_active, density[pair_cell], pairs_fraction, *args)
+    # A random partner samples one of count-1 possible partners, independently of its weight.
+    density = jnp.maximum(count - 1, 0) / dx
+    v = _scatter(k_pairs, v, pairs_i, pairs_j, pairs_active,
+                 density[pair_cell] * jnp.maximum(weight[pairs_i], weight[pairs_j]), pairs_fraction, *args)
     if n > 2:                   # the triplet's second and third collisions see the velocities left by the first
-        v = _scatter(k_second, v, t_2, t_3, triplet, density, 0.5, *args)
-        v = _scatter(k_third, v, t_3, t_1, triplet, density, 0.5, *args)
+        v = _scatter(k_second, v, t_2, t_3, triplet, density * jnp.maximum(weight[t_2], weight[t_3]), 0.5, *args)
+        v = _scatter(k_third, v, t_3, t_1, triplet, density * jnp.maximum(weight[t_3], weight[t_1]), 0.5, *args)
     return v
 
 
@@ -134,24 +128,17 @@ def _between(key, v, block_a, block_b, cell_a, cell_b, n_cells, dx, *args):
     (start_a, n_a), (start_b, n_b) = block_a, block_b
     weight = args[0]
     k_a, k_b, k_scatter = random.split(key, 3)
-    order_a, sorted_a, first_a, _ = _shuffle_by_cell(k_a, cell_a, n_cells)
+    order_a, sorted_a, first_a, count_a = _shuffle_by_cell(k_a, cell_a, n_cells)
     order_b, sorted_b, first_b, count_b = _shuffle_by_cell(k_b, cell_b, n_cells)
     ia, ib = start_a + order_a, start_b + order_b
     rank_a = jnp.arange(n_a) - first_a[sorted_a]
     # Match each rank once. Random ordering samples the longer list without replacement;
-    # the pair density below accounts for the particles left unmatched in either species.
+    # the pair density accounts for the particles left unmatched in either species.
     on_b = count_b[sorted_a]
     i, j = ia, ib[jnp.minimum(first_b[sorted_a] + rank_a, n_b - 1)]
     active = rank_a < on_b
-    cells = jnp.concatenate([sorted_a, sorted_b])
-    # densities of the cell: n_a, n_b and n_ab = sum over its pairs of min(w_i, w_j)
-    zeros_a, zeros_b = jnp.zeros(n_a), jnp.zeros(n_b)
-    columns = jnp.zeros((n_cells + 1, 3)).at[cells].add(jnp.stack([
-        jnp.concatenate([weight[ia], zeros_b]), jnp.concatenate([zeros_a, weight[ib]]),
-        jnp.concatenate([jnp.where(active, jnp.minimum(weight[i], weight[j]), 0.0), zeros_b])], axis=1)) / dx
-    has_pairs = columns[:, 2] > 0
-    density = columns[:, 0] * (columns[:, 1] / jnp.where(has_pairs, columns[:, 2], 1.0))
-    return _scatter(k_scatter, v, i, j, active, density[sorted_a], 1.0, *args)
+    density = jnp.maximum(count_a, count_b)[sorted_a] * jnp.maximum(weight[i], weight[j]) / dx
+    return _scatter(k_scatter, v, i, j, active, density, 1.0, *args)
 
 
 def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx, length, n_cells):

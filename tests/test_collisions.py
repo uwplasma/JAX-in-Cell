@@ -200,6 +200,77 @@ def test_each_species_scatters_off_the_density_of_the_other(n_a, w_a, n_b, w_b):
         assert abs(kick[block].mean() / expected - 1) < 0.08
 
 
+@pytest.mark.parametrize("within", [True, False])
+@pytest.mark.parametrize("dt_factor", [1.0, 0.25])
+def test_velocity_correlated_weights_reproduce_each_populations_fast_beam_rate(within, dt_factor):
+    """Higginson et al. (2020), sections 2.2 and 3: global weight normalization
+    fails when weights and velocities differ within a group, even as dt -> 0.
+    Both stopping and diffusion must see physical partner density, not macro weight."""
+    na, nb = (1024, 19 * 1024) if within else (4096, 8192)
+    n, u, density = na + nb, 1e6, 1e20
+    v = jnp.zeros((n, 3)).at[:na, 0].set(u)
+    w = np.r_[np.full(na, 9.0 if within else 1.0), np.ones(nb)]
+    if not within:
+        w[na + nb // 2:] = 9.0
+    w *= density / w[na:].sum()
+    nu = e_charge ** 4 * density * 10 / (4 * np.pi * epsilon_0 ** 2 * mass_electron ** 2 * u ** 3)
+    dt = dt_factor * 1e-5 / nu
+    blocks, pairs = (((0, n),), ((0, 0),)) if within else (((0, na), (na, nb)), ((0, 1),))
+    new = np.asarray(jax.jit(jax.vmap(lambda key: collide(
+        key, jnp.zeros_like(v), v, jnp.asarray(w), jnp.full(n, mass_electron), jnp.full(n, -e_charge),
+        blocks, pairs, 10.0, dt, 1.0, 1.0, 1)))(random.split(random.PRNGKey(17), 64)))
+
+    def correct(ratio):
+        # Independent keys: six standard errors plus a small finite-step allowance.
+        assert abs(ratio.mean() - 1) < 6 * ratio.std(ddof=1) / np.sqrt(len(ratio)) + 0.002
+
+    correct((u - new[:, :na, 0].mean(axis=1)) / (2 * nu * u * dt))
+    correct((new[:, :na, 1:] ** 2).sum(axis=2).mean(axis=1) / (2 * nu * u ** 2 * dt))
+    if not within:
+        expected = 2 * nu * w[:na].sum() / density * u ** 2 * dt
+        for part in (slice(na, na + nb // 2), slice(na + nb // 2, n)):
+            correct((new[:, part] ** 2).sum(axis=2).mean(axis=1) / expected)
+
+
+@pytest.mark.parametrize("mass_ratio", [1.0, 1836.15])
+def test_unequal_weights_conserve_energy_and_momentum_in_expectation(mass_ratio):
+    v = jnp.array([[1e6, 0.0, 0.0], [0.0, 4e5, 0.0]])
+    w, m = jnp.array([1e18, 9e18]), jnp.array([mass_electron, mass_ratio * mass_electron])
+    new = np.asarray(jax.jit(jax.vmap(lambda key: collide(
+        key, jnp.zeros_like(v), v, w, m, jnp.array([-e_charge, e_charge]),
+        ((0, 1), (1, 1)), ((0, 1),), 10.0, 1e-9, 1.0, 1.0, 1)))(random.split(random.PRNGKey(18), 8192)))
+    wm = np.asarray(w * m)
+    momentum_change = np.sum(wm[None, :, None] * (new - np.asarray(v)[None]), axis=1)
+    energy_change = np.sum(wm[None, :] * np.sum(new ** 2 - np.asarray(v)[None] ** 2, axis=2), axis=1)
+    for change in (momentum_change, energy_change):
+        assert np.all(np.abs(change.mean(axis=0)) < 6 * change.std(axis=0, ddof=1) / np.sqrt(len(change)) + 1e-20)
+
+
+@pytest.mark.parametrize("dt, logarithm, charge", [(0.0, 10.0, -e_charge), (1e-9, 0.0, -e_charge), (1e-9, 10.0, 0.0)])
+def test_zero_scattering_is_exactly_inactive(dt, logarithm, charge):
+    v = jnp.array([[1e6, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    new = collide(random.PRNGKey(19), jnp.zeros_like(v), v, jnp.ones(2), jnp.full(2, mass_electron),
+                  jnp.full(2, charge), ((0, 2),), ((0, 0),), logarithm, dt, 1.0, 1.0, 1)
+    assert np.array_equal(new, v)
+
+
+def test_realized_arbitrary_weight_velocity_gradient_matches_finite_difference():
+    rng = np.random.default_rng(20)
+    v, direction = jnp.asarray(rng.normal(size=(13, 3))), jnp.asarray(rng.normal(size=(13, 3)))
+    w = jnp.asarray(np.resize([1e18, 3e18, 9e18], 13))
+    m = jnp.asarray(np.r_[np.full(8, mass_electron), np.full(5, 5 * mass_electron)])
+
+    def energy(v):
+        new = collide(random.PRNGKey(20), jnp.zeros_like(v), 1e6 * v, w, m, jnp.full(13, -e_charge),
+                      ((0, 8), (8, 5)), ((0, 0), (0, 1), (1, 1)), 10.0, 1e-11, 1.0, 1.0, 1)
+        return jnp.sum((w / 1e18)[:, None] * (new / 1e6) ** 2)
+
+    derivative = jnp.sum(jax.grad(energy)(v) * direction)
+    h = 1e-5
+    finite = (energy(v + h * direction) - energy(v - h * direction)) / (2 * h)
+    assert np.isfinite(derivative) and np.isclose(derivative, finite, rtol=1e-6, atol=1e-7)
+
+
 def test_coulomb_logarithm_is_floored_and_survives_zero_temperature():
     """The formulary goes negative in cold, dense plasma (-0.03 at 1e20 m^-3 and 10 meV)
     and divides by zero at T = 0. Both give the floor of 2, with finite gradients."""

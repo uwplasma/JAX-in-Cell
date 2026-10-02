@@ -100,30 +100,38 @@ Pseudo-particles of different species, or particles a wall has partly collected,
 carry different weights $w$. Following Nanbu and Yonemura {cite}`nanbu1998`, the
 change is applied to each partner with probability $w_{\rm other}/\max(w_a, w_b)$,
 which conserves momentum and energy on average instead of per pair. The density in
-{eq}`ta-variance` is then
+{eq}`ta-variance` must be evaluated for each pair. The pair-local correction of
+Higginson, Holod and Link {cite}`higginson2020` gives
 
 ```{math}
 :label: pair-density
-n = \frac{n_a\, n_b}{n_{ab}}, \qquad
-n_{ab} = \frac{c}{\Delta x}\sum_{\rm pairs\ in\ cell} f\,\min(w_i, w_j),
+n_{ij} = \frac{N_{\rm partners}\,\max(w_i,w_j)}{\Delta x}, \qquad
+N_{\rm partners} = \begin{cases}
+\max(N_a,N_b), & a \ne b,\\
+N_a-1, & a=b.
+\end{cases}
 ```
 
-the form of Pérez et al. {cite}`perez2012`, with $f$ the fraction of the variance a
-collision carries (½ in a triplet, 1 otherwise), $c = 1$ between two species and
-$c = 2$ within one, where $n_a = n_b$ is the density of the species.
+For two species, any particular pair is selected with probability
+$1/\max(N_a,N_b)$. Multiplying this by $n_{ij}$ and the acceptance probability
+$w_j/\max(w_i,w_j)$ gives precisely the physical density $w_j/\Delta x$ seen
+by particle $i$. This holds even when weights and velocities are correlated.
+A density based on cell averages or a sum of $\min(w_i,w_j)$ over the sampled
+pairs only gives the right individual rates for constant weights within each
+species; it can bias scattering and equilibration for arbitrary weights.
 
-The rule follows from asking that every particle receive, on average, one
-collision's worth of scattering off the whole density of the other species. With
-weights $w_a$, $w_b$ and counts $N_a \ge N_b$ in a cell of length $\Delta x$: a
-particle of $a$ is selected with probability $N_b/N_a$ and accepts with probability
-$w_b/w_{\max}$, so it needs $(N_b/N_a)n\,w_b/w_{\max} = n_b$; a particle of $b$
-is always selected and needs $n\,w_a/w_{\max} = n_a$.
-Both give $n = N_a w_{\max}/\Delta x$, which is {eq}`pair-density` with $N_b$ pairs.
+Within one species, an even-cell matching selects each pair with probability
+$1/(N_a-1)$. For an odd cell the ordinary pairs contribute
+$(N_a-3)/[N_a(N_a-1)]$, and the three half-strength triplet edges contribute
+$3/[N_a(N_a-1)]$. Their sum is again $1/(N_a-1)$, so the same pair-local argument
+applies without colliding a particle with itself. A lone particle does not collide.
 
-For equal weights this is $\max(n_a, n_b)$ between species and $n_a$ within one.
-The larger scattering variance compensates for sampling fewer pairs; keep its
-collisional time step small and check [convergence](#time-step). Dropping unmatched
-particles without changing the density would scatter both species too slowly.
+For constant weights this is $\max(N_a,N_b)\max(w_a,w_b)/\Delta x$ between
+species and $(N_a-1)w_a/\Delta x$ within one. The finite-count subtraction
+excludes the particle's own density. The larger pair variance compensates for
+sampling fewer partners; keep its collisional time step small and check
+[convergence](#time-step). With unequal weights conservation remains statistical,
+so a single realization can finish above or below its initial-energy equilibrium.
 
 ## Where in the step
 
@@ -235,8 +243,10 @@ at 50 000 cells and 100 000 particles; within a species every live particle take
 part in exactly one collision or two half collisions, and one step conserves momentum
 and energy to round-off, at 2, 3, 4, 10 and 100 particles per cell; with unequal cell
 counts and equal weights, each cell conserves energy and momentum; with unequal
-numbers and weights each species scatters off the density of the other to within
-the statistical error; gradients stay finite for identical velocities; and the
+numbers and velocity-correlated weights each population scatters at the independent
+fast-beam rates to within the statistical error; unequal-weight momentum and energy
+are conserved in expectation for equal and proton/electron masses; zero time step,
+charge or Coulomb logarithm leaves velocities exactly unchanged; gradients stay finite for identical velocities; and the
 oscillator of [where in the step](#where-in-the-step) keeps its collisionless energy error.
 
 ## Time step
