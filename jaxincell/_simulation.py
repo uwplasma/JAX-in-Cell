@@ -222,6 +222,9 @@ class Simulation:
         # Leapfrog integration: positions at half-step before the start
         positions_plus1_2 = positions + dt/2*velocities
         qs, ms, q_ms = charges, masses, charge_to_mass_ratios
+        if particle_BC_left == 0 and particle_BC_right == 0:
+            positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
+                positions_plus1_2, velocities, qs, ms, q_ms, dx, grid, *box_size, 0, 0)
 
         positions_minus1_2 = set_BC_positions(
             positions - (dt / 2) * velocities,
