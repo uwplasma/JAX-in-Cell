@@ -150,6 +150,38 @@ def test_snapshot_steps_preserves_gradients():
     np.testing.assert_allclose(snapshot_gradient, full_gradient, rtol=1e-10, atol=0)
 
 
+@pytest.mark.parametrize("feature", ["collisions", "tensor", "mixed"])
+@pytest.mark.parametrize("schedule", [[0], []])
+def test_sparse_histories_preserve_new_features_and_final_state(feature, schedule):
+    parameters = small_simulation_parameters(total_steps=3, number_grid_points=6, number_pseudoparticles=4)
+    if feature == "collisions":
+        parameters["solver_parameters"].update(collisions=True, coulomb_logarithm=10.)
+    elif feature == "tensor":
+        parameters["domain_parameters"].update(number_grid_points_y=2, number_grid_points_z=3)
+        parameters["external_field_parameters"] = {
+            "external_magnetic_field": {"B": jnp.zeros((6, 2, 3, 3)).at[..., 2].set(.001)}}
+    else:
+        initial = Simulation(parameters)
+        length, dt = float(initial.box_size[0]), float(initial.dt)
+        speed = .02*299792458.
+        for population in parameters["species_parameters"].values():
+            for species in population.values():
+                species.update(initial_positions=jnp.zeros((4, 3)).at[:, 0].set(length/2-dt*speed/4),
+                               initial_velocities=jnp.zeros((4, 3)).at[:, 0].set(speed))
+        parameters["domain_parameters"].update(particle_BC_left=3, particle_BC_right=3,
+                                                 field_BC_left=1, field_BC_right=1,
+                                                 mixed_BC_weight=.3, COR_left=.5, COR_right=.5)
+        parameters["solver_parameters"]["field_solver"] = 2
+    full = Simulation(deepcopy(parameters)).run()
+    parameters["solver_parameters"]["snapshot_steps"] = schedule
+    sparse = Simulation(parameters).run()
+    for key in ("positions", "velocities", "electric_field", "magnetic_field", "mus",
+                *(("masses_over_time", "charges_over_time") if feature == "mixed" else ())):
+        np.testing.assert_array_equal(sparse[key], np.asarray(full[key])[schedule])
+    for key in full["final_state"]:
+        np.testing.assert_array_equal(sparse["final_state"][key], full["final_state"][key])
+
+
 def _peak_gpu_bytes_in_subprocess(snapshot_steps, total_steps, number_grid_points, number_pseudoparticles, seed):
     """Run a small simulation in an isolated subprocess and return the peak
     GPU memory (bytes) JAX reported for it.

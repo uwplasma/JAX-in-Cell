@@ -546,10 +546,6 @@ class Simulation:
                 self._solver_parameters["field_solver"] != 2):
             raise ValueError("mixed walls require field_solver=2 to account for collected charge")
         self.initialize_fields()
-        if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
-            bool(jnp.any(field != 0)) for field in (self.external_electric_field, self.external_magnetic_field)
-        ):
-            raise ValueError("Implicit CN does not apply prescribed grid fields; use the explicit solver.")
         self.build_hash_values()
 
     def clean_runtime_input_parameters(self, input_parameters=None):
@@ -622,7 +618,7 @@ class Simulation:
         if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
                 bool(np.any(np.asarray(field_state[name])))
                 for name in ("external_electric_field", "external_magnetic_field")):
-            raise ValueError("The implicit CN path does not support prescribed external fields; use Boris.")
+            raise ValueError("Implicit CN does not apply prescribed grid fields; use the explicit solver.")
         self.external_magnetic_field = field_state["external_magnetic_field"]
         self.external_electric_field = field_state["external_electric_field"]
         self.padded_external_magnetic_field = field_state["padded_external_magnetic_field"]

@@ -486,3 +486,32 @@ def test_relativistic_kinetic_energy_has_a_stable_low_speed_limit():
     output["solver_parameters"] = {"relativistic": True}
     diagnostics(output)
     np.testing.assert_allclose(output["kinetic_energy"], 4.5 * (1e-8 * speed_of_light) ** 2, rtol=1e-12)
+
+
+def test_diagnostics_partial_wall_weights_use_stored_mass_histories():
+    v = jnp.array([[[1., 0., 0.], [3., 0., 0.]], [[1., 0., 0.], [3., 0., 0.]]])
+    output = _minimal_diagnostic_output(electric_field=jnp.zeros((2, 4, 3)), velocities=v,
+                                        masses=jnp.array([[4.], [8.]]), charges=-jnp.ones((2, 1)))
+    output.update(weights=jnp.array([[2.], [4.]]), species_integer_index=jnp.zeros(2, dtype=int),
+                  mass_integer_lookup=jnp.array([2.]), charge_integer_lookup=jnp.array([-1.]),
+                  masses_over_time=jnp.array([[[4.], [8.]], [[4.], [2.]]]))
+    raw = np.asarray(output["masses_over_time"]).copy()
+    for _ in range(2):
+        diagnostics(output)
+        np.testing.assert_array_equal(output["masses_over_time"], raw)
+        np.testing.assert_allclose(output["kinetic_energy"], [38., 11.], atol=0)
+        np.testing.assert_allclose(output["total_momentum"][:, 0], [28., 10.], atol=0)
+        np.testing.assert_allclose(output["species"][0]["temperature_components"][:, 0] * boltzmann_constant,
+                                   [16/9, 16/9], rtol=1e-14, atol=0)
+
+
+@pytest.mark.parametrize("transverse_shape", [(2,), (2, 3)])
+def test_diagnostics_tensor_external_energy_averages_transverse_coordinates(transverse_shape):
+    shape = (4, *transverse_shape, 3)
+    field = jnp.arange(np.prod(shape), dtype=float).reshape(shape)
+    output = _minimal_diagnostic_output(electric_field=jnp.zeros((2, 4, 3)), external_magnetic_field=field)
+    output["dimensions"] = ("x", "y", "z")[:len(transverse_shape)+1]
+    diagnostics(output)
+    density = np.mean(np.sum(np.asarray(field)**2, axis=-1), axis=tuple(range(1, field.ndim-1))) / (2*mu_0)
+    np.testing.assert_allclose(output["external_magnetic_field_energy_density"], density, rtol=1e-14, atol=0)
+    np.testing.assert_allclose(output["total_energy"], np.sum(density)*output["dx"], rtol=1e-14, atol=0)

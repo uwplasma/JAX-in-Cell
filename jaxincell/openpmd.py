@@ -312,15 +312,16 @@ def _write_meshes(iteration, output, iteration_index, io, keep=None):
         mesh = iteration.meshes[name]
         mesh.geometry = io.Geometry.cartesian
         mesh.data_order = io.Data_Order.C if hasattr(io, "Data_Order") else "C"
-        tensor = data.ndim > 2
-        lengths = tuple(map(float, output["box_size"])) if tensor else (float(output["length"]),)
+        rank = data.ndim - (record_type == "vector")
+        dimensions = output.get("dimensions", tuple("xyz"[:rank])) if rank > 1 else ("x",)
+        lengths = tuple(float(output["box_size"]["xyz".index(dim)]) for dim in dimensions) if rank > 1 else (float(output["length"]),)
         spacing = [length / cells for length, cells in zip(lengths, data.shape)]
-        mesh.axis_labels = list("xyz"[:len(lengths)])
+        mesh.axis_labels = list(dimensions)
         mesh.grid_spacing = spacing
         mixed = name == "J" and output.get("solver_parameters", {}).get("time_evolution_algorithm", 0) == 0
-        faces = not tensor and (name in ("E", "external_E") or (name == "J" and not mixed))
-        mesh.grid_global_offset = [-length / 2 + (spacing[0] / 2 if mixed else spacing[0] if faces else 0)
-                                   for length in lengths]
+        faces = name in ("E", "external_E") or (name == "J" and not mixed)
+        mesh.grid_global_offset = [-length / 2 + (spacing[0] / 2 if mixed else spacing[0] if faces else 0) * (axis == 0)
+                                   for axis, length in enumerate(lengths)]
         try:
             mesh.grid_unit_SI = 1.0
         except Exception:
@@ -334,7 +335,8 @@ def _write_meshes(iteration, output, iteration_index, io, keep=None):
         if record_type == "vector":
             for component_index, component_name in enumerate(("x", "y", "z")):
                 mesh[component_name].position = [0.5 if mixed and component_index == 0 else
-                                                 0.0 if mixed or faces else 0.5] * len(lengths)
+                                                 0.0 if axis == 0 and (mixed or faces) else 0.5
+                                                 for axis in range(len(lengths))]
                 _store(mesh[component_name], data[..., component_index], io, keep)
         else:
             scalar_component = getattr(io, "Mesh_Record_Component", None)
