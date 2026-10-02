@@ -64,7 +64,7 @@ def test_clean_and_initialize_domain_parameters_rejects_invalid_values():
         input_parameters = {bc_key: -1}
         with pytest.raises(AssertionError, match="Invalid .* boundary condition .* Must be 0 \\(periodic\\), 1 \\(reflecting\\), or 2 \\(absorbing\\)."):
             clean_and_initialize_domain_parameters({}, input_parameters)
-        input_parameters = {bc_key: 3}
+        input_parameters = {bc_key: 5}
         with pytest.raises(AssertionError, match="Invalid .* boundary condition .* Must be 0 \\(periodic\\), 1 \\(reflecting\\), or 2 \\(absorbing\\)."):
             clean_and_initialize_domain_parameters({}, input_parameters)
         input_parameters = {bc_key: 1.5}
