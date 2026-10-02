@@ -623,3 +623,26 @@ def test_exact_wall_impact_is_applied_once(side):
                                            jnp.array([.2*side, 0., 0.]), 2., .5, 4., *args)
     _, _, again_q, _, again_m = set_BC_single_particle(x, v, q, qm, m, *args)
     assert (again_q, again_m) == (1., 2.)
+
+
+@pytest.mark.parametrize("vx", [-4.3, -2.6, -1.6, -.6, .6, 1.6, 2.6, 4.3, -2.5, 2.5])
+def test_elastic_walls_match_independent_free_flight_impacts(vx):
+    position, velocity, remaining = 0., vx, 1.
+    while remaining > 0:
+        wall = .5 if velocity > 0 else -.5
+        travel_time = (wall-position)/velocity
+        if travel_time > remaining:
+            position += velocity*remaining
+            break
+        position, velocity, remaining = wall, -velocity, remaining-travel_time
+    grid = jnp.linspace(-.45, .45, 10)
+    original = jnp.array([vx, .2, -.3])
+    mapped, reflected, charge, ratio, mass = set_BC_single_particle(
+        jnp.array([vx, 0., 0.]), original, 1., 2., .5, .1, grid, 1., 1., 1., 1, 1)
+    positions_only = set_BC_single_particle_positions(jnp.array([vx, 0., 0.]), .1, grid, 1., 1., 1., 1, 1)
+    assert float(mapped[0]) == pytest.approx(position, abs=2e-15)
+    assert float(positions_only[0]) == pytest.approx(position, abs=2e-15)
+    assert float(reflected[0]) == velocity
+    assert jnp.array_equal(reflected[1:], original[1:])
+    assert jnp.sum(reflected**2) == jnp.sum(original**2)
+    assert (charge, ratio, mass) == (1., 2., .5)
