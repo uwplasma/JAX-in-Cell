@@ -8,7 +8,6 @@ def test_package_exports_core_public_functions():
     Cases:
     - Simulation and load_parameters are exported.
     - diagnostics and plot are exported.
-    - write_openpmd is exported without importing the optional openpmd_api backend.
     - field, particle, source, filter, and boundary-condition helpers expected by examples remain importable.
     """
     import jaxincell
@@ -18,7 +17,6 @@ def test_package_exports_core_public_functions():
         "load_parameters",
         "diagnostics",
         "plot",
-        "write_openpmd",
         "E_from_Gauss_1D_Cartesian",
         "boris_step",
         "current_density",
@@ -46,7 +44,7 @@ def test_package_import_does_not_mask_module_exports():
     exec("from jaxincell import *", wildcard_namespace)
 
     assert jaxincell_again is jaxincell
-    for export_name in ("Simulation", "load_parameters", "diagnostics", "plot", "write_openpmd"):
+    for export_name in ("Simulation", "load_parameters", "diagnostics", "plot"):
         assert wildcard_namespace[export_name] is getattr(jaxincell, export_name)
 
 

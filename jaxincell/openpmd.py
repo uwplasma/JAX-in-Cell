@@ -3,7 +3,6 @@ import re
 from pathlib import Path
 
 import numpy as np
-io = None  # optional backend, resolved only by the writer; also permits test backends
 
 from ._constants import speed_of_light
 from ._parameters._species_definitions import SPECIES_TYPES
@@ -44,6 +43,37 @@ MESH_RECORDS = (
 )
 
 
+DEFAULT_OPENPMD_EXPORT_PARAMETERS = {
+        "openpmd_filename": "jaxincell_openpmd.json",  # Destination file or series name for openPMD output
+        "openpmd_meshes_path": "meshes/",      # openPMD meshesPath attribute
+        "openpmd_particles_path": "particles/", # openPMD particlesPath attribute
+        "openpmd_iteration_encoding": "groupBased", # openPMD iteration encoding
+        "openpmd_overwrite": False,            # Overwrite an existing openPMD destination
+        "openpmd_iteration_stride": 1,         # Write every Nth output iteration to openPMD
+        "openpmd_separate_particles_and_meshes": False, # Write particles and meshes to separate openPMD series
+        "openpmd_write_pmd_sidecar": True,     # Write a .pmd sidecar listing generated openPMD series files
+    }
+
+
+def clean_and_initialize_export_parameters(export_parameters, input_parameters=None):
+    unknown = (set(export_parameters) | set(input_parameters or {})) - DEFAULT_OPENPMD_EXPORT_PARAMETERS.keys()
+    if unknown:
+        raise ValueError(f"Unknown openPMD options: {sorted(unknown)}")
+    export_parameters = {**DEFAULT_OPENPMD_EXPORT_PARAMETERS, **export_parameters, **(input_parameters or {})}
+
+    assert type(export_parameters["openpmd_filename"]) == str and export_parameters["openpmd_filename"], "openpmd_filename must be a non-empty string."
+    assert type(export_parameters["openpmd_meshes_path"]) == str and export_parameters["openpmd_meshes_path"], "openpmd_meshes_path must be a non-empty string."
+    assert type(export_parameters["openpmd_particles_path"]) == str and export_parameters["openpmd_particles_path"], "openpmd_particles_path must be a non-empty string."
+    assert export_parameters["openpmd_iteration_encoding"] in ["groupBased", "fileBased"], "openpmd_iteration_encoding must be 'groupBased' or 'fileBased'."
+    assert type(export_parameters["openpmd_overwrite"]) == bool, "openpmd_overwrite must be a boolean."
+    assert type(export_parameters["openpmd_iteration_stride"]) == int and export_parameters["openpmd_iteration_stride"] > 0, "openpmd_iteration_stride must be a positive integer."
+    assert type(export_parameters["openpmd_separate_particles_and_meshes"]) == bool, "openpmd_separate_particles_and_meshes must be a boolean."
+    assert type(export_parameters["openpmd_write_pmd_sidecar"]) == bool, "openpmd_write_pmd_sidecar must be a boolean."
+
+    return export_parameters
+
+
+
 def _set_attr(target, name, value):
     setter = getattr(target, "set_attribute", None)
     if setter is not None:
@@ -53,8 +83,6 @@ def _set_attr(target, name, value):
 
 
 def _require_openpmd_api():
-    if io is not None:
-        return io
     try:
         import openpmd_api
     except ImportError as exc:
@@ -73,7 +101,7 @@ def openpmd_output_paths(
     filename = os.fspath(filename)
     root, extension = os.path.splitext(filename)
     if not extension:
-        extension = ".h5"
+        extension = ".json"
     if extension.lower() not in SUPPORTED_OPENPMD_EXTENSIONS:
         supported = ", ".join(SUPPORTED_OPENPMD_EXTENSIONS)
         raise ValueError(
@@ -366,6 +394,11 @@ def _write_particles(iteration, output, iteration_index, io, keep=None):
             out=np.zeros_like(macro_masses),
             where=weights != 0,
         )
+        # Main stores initial weights; a collected slot is parked outside its absorbing wall.
+        bc = output.get("domain_parameters", output)
+        collected = ((positions[:, 0] < -output["length"] / 2) & (bc.get("particle_BC_left", 0) == 2)
+                     | (positions[:, 0] > output["length"] / 2) & (bc.get("particle_BC_right", 0) == 2))
+        weights = np.where(collected, 0.0, weights)
         speed_squared = np.sum(velocities**2, axis=1)
         gamma = 1.0 / np.sqrt(
             np.clip(1.0 - speed_squared / float(speed_of_light**2), 1e-15, None)
@@ -440,12 +473,15 @@ def _write_iterations(series, output, io, iteration_stride, write_meshes, write_
     series.close()
 
 
-def write_openpmd(output, export_parameters=None):
-    """Export a completed output dictionary; imports the optional backend only when called."""
-    from ._parameters._export_parameters import clean_and_initialize_export_parameters
+def write_openpmd(output, export_parameters=None, **overrides):
+    """Export completed output, with options in a dictionary or keyword arguments.
+
+    The optional backend is imported only when called. The default is JSON; filenames,
+    iteration thinning, file/group layouts, separate series and sidecars are writer options.
+    """
     io = _require_openpmd_api()
     export_parameters = clean_and_initialize_export_parameters(
-        output.get("export_parameters", {}) if export_parameters is None else export_parameters)
+        output.get("export_parameters", {}) if export_parameters is None else export_parameters, overrides)
     if not _stored_steps(output):
         raise ValueError("openPMD export requires at least one stored step")
     iteration_encoding = export_parameters["openpmd_iteration_encoding"]

@@ -7,4 +7,3 @@ from ._plot import *
 from ._simulation import *
 from ._sources import *
 from ._filters import *
-from ._openpmd import *

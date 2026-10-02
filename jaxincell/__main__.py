@@ -18,9 +18,6 @@ def main(cl_args=sys.argv[1:]):
         parameters = load_parameters(cl_args[0])
         sim = Simulation(parameters)
     output = sim.run()
-    if output.get("export_parameters", {}).get("openpmd_output", False):
-        from ._openpmd import write_openpmd
-        output["openpmd_files"] = write_openpmd(output)
     diagnostics(output)
     plot(output)
 

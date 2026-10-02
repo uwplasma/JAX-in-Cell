@@ -61,16 +61,17 @@ Normal imports and simulations do not require openPMD. Install `jaxincell[openpm
 export a completed output, separately from its differentiable evolution:
 
 ```python
-from jaxincell import write_openpmd
+from jaxincell.openpmd import write_openpmd
 
-paths = write_openpmd(output, {"openpmd_filename": "run.json"})
+paths = write_openpmd(output, openpmd_filename="run.json")
 ```
 
 The JSON backend is useful for small serial output; HDF5 and ADIOS2 depend on the backends
 in the user's optional `openpmd-api` installation. Existing filenames receive a numbered
 suffix unless `openpmd_overwrite=True`. File-based templates, separate particle/mesh series,
-sidecars and iteration thinning remain supported. `openpmd_output=True` enables export in
-the command-line application; `Simulation.run()` always returns data without writing files.
+sidecars and iteration thinning remain supported. Export settings belong to the writer;
+`Simulation.run()` always returns data without writing files. The runnable example is
+`examples/openpmd_export.py`.
 Mesh coordinates include their actual staggering, and momentum follows the selected pusher.
 
 ## What `diagnostics` adds

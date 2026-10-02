@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from jaxincell import Simulation, speed_of_light
-from jaxincell._openpmd import (
+from jaxincell.openpmd import (
     _open_series,
     _set_record_metadata,
     _store,
@@ -16,7 +16,7 @@ from jaxincell._openpmd import (
     openpmd_output_paths,
     write_openpmd,
 )
-from jaxincell._parameters._export_parameters import clean_and_initialize_export_parameters
+from jaxincell.openpmd import clean_and_initialize_export_parameters
 from jaxincell._parameters._solver_parameters import clean_and_initialize_solver_parameters
 from tests.helpers import base_simulation_parameters
 
@@ -202,7 +202,7 @@ def fake_openpmd_module():
 
 def test_openpmd_version_import_fallback(monkeypatch):
     """Test the fallback used if jaxincell.version cannot be imported."""
-    import jaxincell._openpmd as openpmd_module
+    import jaxincell.openpmd as openpmd_module
 
     real_import = builtins.__import__
 
@@ -268,10 +268,10 @@ def tiny_openpmd_output(tmp_path, **export_overrides):
 
 @pytest.mark.parametrize("extension", OPENPMD_EXTENSIONS)
 def test_openpmd_output_paths_iterate_without_overwrite(tmp_path, extension):
-    """Test jaxincell._openpmd.openpmd_output_paths.
+    """Test jaxincell.openpmd.openpmd_output_paths.
 
     Cases:
-    - missing extensions default to .h5.
+    - missing extensions default to .json.
     - supported extensions are preserved.
     - an occupied combined destination receives an integer suffix.
     - separate mesh/particle destinations share one suffix.
@@ -289,7 +289,7 @@ def test_openpmd_output_paths_iterate_without_overwrite(tmp_path, extension):
         str(no_extension),
         write_pmd_sidecar=False,
     )
-    assert default_paths["data"]["combined"] == str(tmp_path / "no_extension.h5")
+    assert default_paths["data"]["combined"] == str(tmp_path / "no_extension.json")
 
     occupied = tmp_path / f"occupied{extension}"
     occupied.write_text("old data")
@@ -399,7 +399,7 @@ def test_openpmd_output_paths_edge_cases(monkeypatch, tmp_path):
         def sub(self, replacement, text):
             return "series"
 
-    monkeypatch.setattr("jaxincell._openpmd.ITERATION_TOKEN_PATTERN", OneShotPattern())
+    monkeypatch.setattr("jaxincell.openpmd.ITERATION_TOKEN_PATTERN", OneShotPattern())
     paths = openpmd_output_paths(
         "ignored.h5",
         iteration_encoding="fileBased",
@@ -531,14 +531,14 @@ def test_write_meshes_skips_missing_records_and_uses_unit_fallbacks():
 
 @pytest.mark.parametrize("extension", OPENPMD_EXTENSIONS)
 def test_write_openpmd_combined_series(monkeypatch, tmp_path, extension):
-    """Test jaxincell._openpmd.write_openpmd with a fake openpmd_api module.
+    """Test jaxincell.openpmd.write_openpmd with a fake openpmd_api module.
 
     Cases:
     - one combined series contains both mesh and particle records.
     - openpmd_iteration_stride selects only every Nth iteration.
     - root path attributes and sidecar output are written.
     """
-    monkeypatch.setattr("jaxincell._openpmd.io", fake_openpmd_module())
+    monkeypatch.setattr("jaxincell.openpmd._require_openpmd_api", fake_openpmd_module)
     output = tiny_openpmd_output(
         tmp_path,
         openpmd_filename=str(tmp_path / f"jaxincell_output{extension}"),
@@ -570,14 +570,14 @@ def test_write_openpmd_combined_series(monkeypatch, tmp_path, extension):
 
 @pytest.mark.parametrize("extension", OPENPMD_EXTENSIONS)
 def test_write_openpmd_separate_series(monkeypatch, tmp_path, extension):
-    """Test jaxincell._openpmd.write_openpmd separate particle and mesh output.
+    """Test jaxincell.openpmd.write_openpmd separate particle and mesh output.
 
     Cases:
     - supported filename extensions are preserved.
     - mesh and particle records are written to separate series objects.
     - each generated series gets its own sidecar.
     """
-    monkeypatch.setattr("jaxincell._openpmd.io", fake_openpmd_module())
+    monkeypatch.setattr("jaxincell.openpmd._require_openpmd_api", fake_openpmd_module)
     output = tiny_openpmd_output(
         tmp_path,
         openpmd_filename=str(tmp_path / f"split{extension}"),
@@ -602,14 +602,14 @@ def test_write_openpmd_separate_series(monkeypatch, tmp_path, extension):
 
 @pytest.mark.parametrize("extension", OPENPMD_EXTENSIONS)
 def test_write_openpmd_file_based_series(monkeypatch, tmp_path, extension):
-    """Test jaxincell._openpmd.write_openpmd fileBased output.
+    """Test jaxincell.openpmd.write_openpmd fileBased output.
 
     Cases:
     - supported filename extensions are accepted.
     - fileBased output opens a templated series name.
     - sidecars list the templated data file basename.
     """
-    monkeypatch.setattr("jaxincell._openpmd.io", fake_openpmd_module())
+    monkeypatch.setattr("jaxincell.openpmd._require_openpmd_api", fake_openpmd_module)
     output = tiny_openpmd_output(
         tmp_path,
         openpmd_filename=str(tmp_path / f"filebased{extension}"),
@@ -631,7 +631,7 @@ def test_write_openpmd_file_based_series(monkeypatch, tmp_path, extension):
 
 def test_write_openpmd_computed_time_and_particle_edge_cases(monkeypatch, tmp_path):
     """Test writer branches for computed time and particle naming edge cases."""
-    monkeypatch.setattr("jaxincell._openpmd.io", fake_openpmd_module())
+    monkeypatch.setattr("jaxincell.openpmd._require_openpmd_api", fake_openpmd_module)
     output = tiny_openpmd_output(
         tmp_path,
         openpmd_filename=str(tmp_path / "particle_edges.h5"),
@@ -664,36 +664,10 @@ def test_write_openpmd_computed_time_and_particle_edge_cases(monkeypatch, tmp_pa
     )
 
 
-def test_simulation_run_leaves_export_to_postprocessing(monkeypatch, tmp_path):
-    """Export configuration does not add filesystem side effects to simulation or gradients."""
-    called = []
-
-    def fake_writer(output):
-        called.append(output)
-        return {"data": {"combined": output["export_parameters"]["openpmd_filename"]}, "sidecar": {}}
-
-    parameters = base_simulation_parameters()
-    monkeypatch.setattr("jaxincell.write_openpmd", fake_writer)
-    default_output = Simulation(parameters).run()
-
-    assert called == []
-    assert "openpmd_files" not in default_output
-
-    parameters = base_simulation_parameters()
-    parameters["export_parameters"] = {
-        **parameters.get("export_parameters", {}),
-        "openpmd_output": True,
-        "openpmd_filename": str(tmp_path / "auto.h5"),
-    }
-    output = Simulation(parameters).run()
-
-    assert called == [] and "openpmd_files" not in output
-    assert not (tmp_path / "auto.h5").exists()
-
-
 def test_core_imports_and_optional_export_reports_missing_backend(monkeypatch, tmp_path):
     result = subprocess.run([sys.executable, "-c", "import sys; sys.modules['openpmd_api'] = None; "
-                             "import jaxincell; assert callable(jaxincell.write_openpmd)"],
+                             "import jaxincell; assert 'jaxincell.openpmd' not in sys.modules; "
+                             "from jaxincell.openpmd import write_openpmd; assert callable(write_openpmd)"],
                             check=True, capture_output=True, text=True)
     assert result.returncode == 0
     monkeypatch.setitem(sys.modules, "openpmd_api", None)
@@ -762,21 +736,6 @@ def test_real_openpmd_file_based_separate_series_and_tensor_coordinates(tmp_path
         assert open(paths["sidecar"][name]).read().strip() == path.rsplit("/", 1)[-1]
 
 
-def test_command_line_exports_after_the_simulation_only_when_requested(monkeypatch, tmp_path):
-    from jaxincell.__main__ import main
-    output = tiny_openpmd_output(tmp_path)
-    monkeypatch.setattr("jaxincell.__main__.Simulation", lambda: SimpleNamespace(run=lambda: output))
-    monkeypatch.setattr("jaxincell.__main__.diagnostics", lambda out: None)
-    monkeypatch.setattr("jaxincell.__main__.plot", lambda out: None)
-    seen = []
-    monkeypatch.setattr("jaxincell._openpmd.write_openpmd", lambda out: seen.append(out) or {"written": True})
-    main([])
-    assert seen == []
-    output["export_parameters"]["openpmd_output"] = True
-    main([])
-    assert seen == [output] and output["openpmd_files"] == {"written": True}
-
-
 @pytest.mark.parametrize("backend, extension", [("json", ".json"), ("hdf5", ".h5"), ("adios2", ".bp")])
 def test_real_openpmd_installed_backends_round_trip_mesh_values_and_units(tmp_path, backend, extension):
     io = pytest.importorskip("openpmd_api")
@@ -792,4 +751,23 @@ def test_real_openpmd_installed_backends_round_trip_mesh_values_and_units(tmp_pa
     np.testing.assert_array_equal(data, output["electric_field"][2, :, 1])
     assert mesh["y"].unit_SI == 1.0 and mesh.grid_unit_SI == 1.0
     np.testing.assert_array_equal(mesh.unit_dimension, [1, 1, -3, -1, 0, 0, 0])
+    series.close()
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+def test_real_openpmd_collected_slots_have_zero_weight_and_physical_charge_mass(tmp_path, side):
+    io = pytest.importorskip("openpmd_api")
+    output = tiny_openpmd_output(tmp_path)
+    output["positions"][:] = 0
+    output["positions"][:, 0, 0] = side * .75
+    output["domain_parameters"] = {"particle_BC_left": 2, "particle_BC_right": 2}
+    paths = write_openpmd(output, openpmd_filename=str(tmp_path / "collected.json"))
+    series = io.Series(paths["data"]["combined"], io.Access.read_only)
+    particles = series.iterations[2].particles["electron_beam"]
+    records = {name: particles[name][io.Record_Component.SCALAR].load_chunk()
+               for name in ("weighting", "charge", "mass")}
+    series.flush()
+    np.testing.assert_array_equal(records["weighting"], [0, 2])
+    np.testing.assert_array_equal(records["charge"], [-1, -1])
+    np.testing.assert_array_equal(records["mass"], [3, 3])
     series.close()
