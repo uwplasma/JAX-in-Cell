@@ -15,15 +15,9 @@ __all__ = ['Boris_step', 'CN_step', 'calculate_mu']
 
 
 def calculate_mu(velocities, magnetic_field, masses):
-    magnetic_field_strength = jnp.sqrt(
-        jnp.sum(magnetic_field ** 2, axis=-1, keepdims=True)
-    )
-    active_field = magnetic_field_strength > 0.0
-    safe_magnetic_field_strength = jnp.where(
-        active_field,
-        magnetic_field_strength,
-        1.0,
-    )
+    strength2 = jnp.sum(magnetic_field**2, axis=-1, keepdims=True)
+    active_field = strength2 > 0.
+    safe_magnetic_field_strength = jnp.sqrt(jnp.where(active_field, strength2, 1.))
     b_hat = magnetic_field / safe_magnetic_field_strength
     v_parallel = jnp.sum(velocities * b_hat, axis=-1, keepdims=True) * b_hat
     v_perpendicular = velocities - v_parallel
@@ -373,7 +367,8 @@ def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
                                               filter_passes=0, filter_alpha=0.5, filter_strides=(1, 2, 4),
                                               field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
-    mus = jnp.zeros_like(ms)
+    B_at_particles = vmap(lambda x: fields_to_particles_periodic_CN(x, B_field, dx, grid[0]))(positions_plus1)
+    mus = calculate_mu(velocities_plus1, B_at_particles, ms)
     step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density, mus)
     
     return carry, step_data

@@ -1,16 +1,10 @@
-"""
-    Someone needs to look through these tests and make sure they cover the
-    intended cases, and that the expected results are correct.
-
-    They were written using Codex and seem reasonable to me,
-    but I haven't gone through the functions being tested myself to verify
-    the intended behavior.
-"""
+"""Regression and independent controls of particle and field updates."""
 
 # tests/test_algorithms.py
 
 from functools import partial
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -817,3 +811,29 @@ def test_fractional_wall_trajectory_at_integer_output_time(phase, side):
     assert float(data[0][0, 0]) == pytest.approx(side*(.5-.5*.2*(1-phase)))
     assert float(data[1][0, 0]) == pytest.approx(-.5*.2*side)
     assert float(new[7][0, 0]) == pytest.approx(4*.3)
+
+
+def test_cn_magnetic_moment_uses_final_internal_field():
+    grid = jnp.linspace(-.4375, .4375, 8)
+    positions = jnp.array([[-.2, 0., 0.], [.1, 0., 0.]])
+    velocities = jnp.array([[1., 2., 3.], [-2., 1., 4.]])
+    masses = jnp.array([[2.], [3.]])
+    charges = jnp.full((2, 1), 1e-40)
+    magnetic = jnp.tile(jnp.array([.1, .2, .3]), (8, 1))
+    carry = (jnp.zeros_like(magnetic), magnetic, positions, velocities, charges, masses, charges/masses)
+    solver = clean_and_initialize_solver_parameters({"filter_passes": 0})
+    _, data = CN_step(carry, 0, solver, .125, .01, grid, (1., 1., 1.), 0, 0, 0, 0, 1)
+    unit = np.array([.1, .2, .3])/np.linalg.norm([.1, .2, .3])
+    perpendicular2 = np.sum(np.asarray(velocities)**2, axis=1)-(np.asarray(velocities)@unit)**2
+    expected = np.asarray(masses)[:, 0]*perpendicular2/(2*np.linalg.norm([.1, .2, .3]))
+    np.testing.assert_allclose(np.asarray(data[6])[:, 0], expected, rtol=1e-13, atol=1e-13)
+
+
+def test_zero_field_magnetic_moment_is_finite_and_zero():
+    value = algorithms.calculate_mu(jnp.array([[1., 2., 3.]]), jnp.zeros((1, 3)), jnp.ones((1, 1)))
+    np.testing.assert_array_equal(value, [[0.]])
+
+
+def test_zero_field_magnetic_moment_does_not_contaminate_gradients():
+    function = lambda magnetic: algorithms.calculate_mu(jnp.array([[1., 2., 3.]]), magnetic, jnp.ones((1, 1))).sum()
+    np.testing.assert_array_equal(jax.grad(function)(jnp.zeros((1, 3))), np.zeros((1, 3)))

@@ -117,3 +117,9 @@ def test_grid_requires_two_integer_cells(grid_points):
 def test_time_step_ratio_must_be_finite_and_positive(ratio):
     with pytest.raises(AssertionError, match="Time step ratio must be finite and positive"):
         clean_and_initialize_domain_parameters({"timestep_over_spatialstep_times_c": ratio})
+
+
+def test_optional_transverse_cells_none_selects_one_dimensional_geometry():
+    parameters = clean_and_initialize_domain_parameters({"number_grid_points_y": None,
+                                                         "number_grid_points_z": None})
+    assert parameters["number_grid_points_y"] == parameters["number_grid_points_z"] == 0
