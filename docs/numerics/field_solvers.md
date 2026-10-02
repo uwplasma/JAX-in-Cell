@@ -89,16 +89,22 @@ typical of these runs, so Gauss's law would not be satisfied by the field it ret
 Both curls need one value beyond the grid. `_left_ghost_E` and `_right_ghost_B` supply
 it according to the wall type ({doc}`boundaries`): the opposite end for a periodic
 wall, a copy of the boundary value for a reflective wall, and for an absorbing wall the
-first-order Mur condition, which sets the ghost so that an outgoing plane wave leaves
-without reflection:
+first-order radiating closure, which approximates the outgoing plane-wave relation:
 
 ```{math}
 E_{y,-1/2} = -2cB_{z,0} - E_{y,0}, \qquad E_{z,-1/2} = 2cB_{y,0} - E_{z,0},
 ```
 
-and the mirror image on the right. First order means a wave arriving at normal
-incidence is absorbed to the accuracy of the discretisation; in one dimension there is
-no other angle of incidence, so this is as good as an open boundary gets here.
+and the mirror image on the right. Absorption has spatial and temporal discretisation
+error; it is not reflection-free for every resolved wavelength.
+
+These are the existing one-sided wall stencils. A reflective left wall fixes the
+first stored transverse $B$, while a reflective right wall fixes the last stored
+transverse $E$. They do not impose identical electromagnetic wall conditions.
+Only compatible zero values remove their boundary work. The periodic vacuum field
+energy is conserved by the implicit solve; at walls the energy identity includes
+the ghost-boundary work. The implicit solver inverts these same discrete equations,
+including the midpoint dependence of the radiating ghost, without curl iteration.
 
 ## Choosing
 

@@ -28,14 +28,17 @@ print(float(simulation.plasma_frequency() * simulation.domain.dt))
 The Yee update of the transverse fields is stable only for
 
 ```{math}
-\frac{c\,\Delta t}{\Delta x} \le 1,
+\frac{c\,\Delta t}{\Delta x} < 1,
 ```
 
-the Courant condition, which is `dt_over_dx_c` directly. At exactly one the scheme is
-*exact* for a plane wave in vacuum — the "magic time step", at which the numerical
-dispersion relation reduces to $\omega = ck$ — and a pulse is translated by a whole
-cell per step with no error at all. Below one the scheme is stable but dispersive;
-above one it blows up.
+the Courant condition for bounded evolution of arbitrary fields, which is
+`dt_over_dx_c` directly. At exactly one, resolved interior Fourier modes have
+$\omega=ck$, but their numerical field impedance still matters: arbitrary stored
+$E$ and $B$ profiles do not translate exactly. The Nyquist mode is defective and
+can grow even at one. Below one the scheme is stable but dispersive; above one
+it is unstable. The implicit field solve has no periodic vacuum Courant limit,
+but still needs time-step refinement for phase accuracy and particle iteration
+checks in a plasma ({doc}`implicit`).
 
 :::{warning}
 Purely electrostatic problems never excite the transverse fields, so they are often

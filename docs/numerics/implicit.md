@@ -1,7 +1,8 @@
 # Implicit scheme
 
-`Solver(algorithm="implicit")` selects a Crank-Nicolson scheme that preserves the discrete
-Gauss law and, with a converged particle/field iteration, total energy to round-off: the scheme of Chen,
+`Solver(algorithm="implicit")` selects a Crank-Nicolson scheme that keeps the discrete
+Gauss law to round-off and, when the particle-field iteration converges in a periodic box,
+the total energy: the energy-conserving scheme of Chen,
 Chacón and Barnes {cite}`chen2011,chen2014`, with the longitudinal current and force of the
 discrete gradient of Kormann and Sonnendrücker {cite}`kormann2021`. The fixed-point iteration
 is a `lax.scan` of a fixed length, so that the whole loop stays differentiable.
@@ -12,8 +13,9 @@ The explicit leapfrog is fast and its energy error is bounded, but it is not zer
 it grows with $\omega_{pe}\Delta t$. Two situations make that a problem: long runs
 where a slow energy drift competes with the physics being studied, and stiff problems
 where the explicit stability limits force a step far below the timescale of interest.
-The converged linear Crank-Nicolson update is unconditionally stable. The coupled nonlinear
-orbit and field solve still needs an iteration-convergence check every time its parameters change.
+The linear periodic vacuum update is stable at any time step. A plasma still requires
+a converged nonlinear solve, and a large step can lose phase and orbit accuracy even
+when its energy is conserved.
 
 ## The discrete equations
 
@@ -37,7 +39,7 @@ $x_p^{\nu+1} = x_p^\nu + \Delta\tau\,\bar v_{x,p}$ and is pushed by the Boris st
 
 with $\mathbf u = \gamma\mathbf v$ and $\gamma = 1$ in a Newtonian run, where $\bar{\mathbf v}$ is the
 mean of the two velocities. The Boris step changes $|\mathbf u|^2$ by exactly
-$2(q/m)\Delta\tau\,\mathbf E_p\cdot(\mathbf u^\nu + \mathbf u^{\nu+1})$, so the kinetic energy,
+$(q/m)\Delta\tau\,\mathbf E_p\cdot(\mathbf u^\nu + \mathbf u^{\nu+1})$, so the kinetic energy,
 $\tfrac12 m|\mathbf v|^2$ or $(\gamma - 1)mc^2$, changes by $q\,\mathbf E_p\cdot\bar{\mathbf v}\,\Delta\tau$
 to round-off, and the magnetic field does no work. What remains is to choose $\mathbf E_p$
 and $\mathbf J$ so that this work is what the current takes from the field, which is where
@@ -147,8 +149,9 @@ over the grid,
 \frac{W_F^{n+1} - W_F^n}{\Delta t} = -\Delta x\sum_i \mathbf E_i^{n+1/2}\cdot\mathbf J_i^{n+1/2},
 ```
 
-the curl terms cancelling because the staggered difference operators are exact adjoints of
-one another. The particles gain $\sum_p q_p w_p\mathbf E_p\cdot\bar{\mathbf v}_p\Delta\tau$ per
+in a periodic box, where the staggered differences are exact adjoints. Nonperiodic
+ghosts also contribute boundary work; their stored field energy need not be constant
+({doc}`field_solvers`). The particles gain $\sum_p q_p w_p\mathbf E_p\cdot\bar{\mathbf v}_p\Delta\tau$ per
 sub-step, from {eq}`implicit-push`: transversely that is the transpose of the gather, and
 longitudinally {eq}`discrete-gradient`, so the two cancel, once the orbit the force was
 computed on is the orbit the particles move on — which is what the Picard iteration
@@ -188,14 +191,27 @@ $|\langle E_x\rangle|/\max|E_x| \le 6\times10^{-17}$ at every step.
 
 ## Solving the system
 
-The equations are nonlinear because the orbit depends on the field and the field on
-the orbit. The code uses Picard iteration: starting from $\mathbf E^{n+1} = \mathbf E^n$ and
-from every particle streaming freely at its present velocity,
+For a prescribed current the Maxwell equations are linear. Eliminating midpoint
+$\mathbf B$ gives a transverse Helmholtz system. In a periodic box,
 
-1. form $\mathbf E^{n+1/2}$ and, from Faraday, $\mathbf B^{n+1/2}$;
+```{math}
+\left(I+\frac{c^2\Delta t^2}{4}\,\operatorname{curl}_B\operatorname{curl}_E\right)\mathbf E^{n+1/2}
+=\mathbf E^n+\frac{\Delta t}{2}\left(c^2\operatorname{curl}_B\mathbf B^n-\mathbf J/\epsilon_0\right).
+```
+
+Its Fourier denominator is $1+C^2\sin^2(k\Delta x/2)$, with $C=c\Delta t/\Delta x$;
+the code inverts it directly using the discrete curl symbol, not the continuum $ik$
+{cite}`kormann2021`. Reflective, absorbing and mixed walls give a tridiagonal system.
+The radiating ghost depends on midpoint $\mathbf B$, which is solved together with
+$\mathbf E$. Thus vacuum propagation requires no particle iteration to converge.
+
+The particle-field coupling remains nonlinear. Starting from the old fields and
+every particle streaming freely at its present velocity, each Picard iteration:
+
+1. forms midpoint fields from the previous iterate;
 2. sub-step the particles in those fields, with $\mathbf E_p$ from the orbit of the previous
    iteration, accumulating the current of the new orbit;
-3. update $\mathbf E^{n+1}$ from Ampere;
+3. solves the linear Maxwell system for that current;
 
 repeated `picard_iterations` times. The state the step returns is the last iteration's
 particles, field and density, so that the Gauss law holds exactly. The particles are
@@ -216,8 +232,8 @@ balance needs; `model="electrostatic"` does not, as above.
 
 ## Convergence
 
-The Gauss law holds at every iteration count. The energy error falls geometrically with
-the count until it reaches round-off:
+The Gauss law holds at every iteration count. For the verification run, the energy
+error falls geometrically with the count until it reaches round-off:
 
 | Picard iterations | 1 | 2 | 4 | 8 |
 |---|---|---|---|---|
@@ -233,22 +249,31 @@ apart; at eight the error is at the round-off of double precision.
 box and between absorbing walls ({doc}`../examples/conservation`).
 ```
 
-The default is eight, which reaches round-off for the problems in {doc}`verification`
-while costing about {{ scaling_implicit_over_explicit }} times an explicit step.
+The default is eight; it is not a convergence guarantee. Check fields, particle
+observables and gradients against a larger iteration count and a smaller time step.
+Stiff particle coupling can make Picard diverge, in which case more iterations do
+not repair the step. Substeps resolve particle orbits but do not certify convergence
+of the field-particle solve.
+
+Periodic vacuum modes have unit amplification modulus and phase advance
+$2\arctan[C\sin(k\Delta x/2)]$, independently of `picard_iterations`. This is the
+Crank-Nicolson solution of the discrete Maxwell equations, not exact continuum
+propagation. Time-step refinement recovers the semi-discrete wave at second order.
 A fixed iteration count, rather than a tolerance and a `while` loop, is a deliberate
 choice: `lax.while_loop` has no reverse-mode derivative, so a tolerance-based solver
-would not be differentiable. With a fixed count the whole scheme is, and
-`jax.grad` runs through it; see {doc}`../user_guide/differentiation`.
+would not have that derivative directly. With a fixed count, `jax.grad` differentiates
+the executed finite solve; it represents the converged scheme only after iteration
+and time-step checks. See {doc}`../user_guide/differentiation`.
 
 ## When to use which
 
 | | explicit | implicit |
 |---|---|---|
-| cost per step | 1 | about {{ scaling_implicit_over_explicit }} |
+| cost per step | 1 | depends on grid, substeps and iteration count |
 | energy error | {{ energy_error_max_explicit }}, bounded | {{ energy_error_max_implicit_8 }} |
 | momentum error, periodic | {{ momentum_error_relative }} | {{ momentum_error_implicit }} |
 | Gauss law | round-off | round-off |
-| linear stability | $\omega_{pe}\Delta t \lesssim 2$, $c\Delta t \le \Delta x$ for light waves | converged midpoint update is unconditional |
+| stability | $\omega_{pe}\Delta t \lesssim 2$, $c\Delta t < \Delta x$ for general light waves | periodic vacuum: any step; plasma: converged solve required |
 | physical grid resolution | requires independent refinement | requires independent refinement |
 | reverse-mode gradients | yes | yes |
 

@@ -211,6 +211,38 @@ def test_implicit_scheme_conserves_energy_and_charge_to_round_off(drift, relativ
     assert float(np.asarray(d["gauss_residual"]).max()) < 1e-10
 
 
+@pytest.mark.parametrize("iterations", [1, 8, 32])
+def test_implicit_vacuum_is_stable_independently_of_particle_iterations(iterations):
+    """A Nyquist standing wave follows the exact discrete CN phase even above CFL.
+    The old curl Picard iteration diverged; increasing its count made it worse."""
+    n, steps, courant = 16, 12, 4.5
+    domain = Domain(length=1., cells=n, dt_over_dx_c=courant)
+    neutral = Species("neutral", 1, charge=0., mass=1., density=1., vth=(0., 0., 0.))
+    sim = Simulation(domain, [neutral], Solver(algorithm="implicit", picard_iterations=iterations))
+    initial = sim.initial_state(random.key(0))[0]
+    profile = (-1.) ** jnp.arange(n)
+    E = jnp.zeros((n, 3)).at[:, 1].set(profile)
+    initial = initial.replace(E=E)
+    out = sim.run(steps, state=initial)
+    angle = 2 * np.arctan(courant)
+    phase = np.arange(1, steps + 1) * angle
+    assert np.allclose(out.E[:, :, 1], np.cos(phase)[:, None] * np.asarray(profile), rtol=0, atol=2e-13)
+    assert np.allclose(c * out.B[:, :, 2], -np.sin(phase)[:, None] * np.asarray(profile), rtol=0, atol=2e-13)
+    energy = np.sum(np.asarray(out.E) ** 2 + (c * np.asarray(out.B)) ** 2, axis=(1, 2))
+    assert np.max(np.abs(energy / n - 1)) < 2e-13
+    assert not np.any(np.asarray(out.J))
+    if iterations == 1:
+        def amplitude(parameters):
+            C, scale = parameters
+            simulation = sim.replace(domain=domain.replace(dt_over_dx_c=C))
+            result = simulation.run(steps, state=initial.replace(E=scale * E))
+            return jnp.mean(result.E[-1, :, 1] * profile)
+        expected = np.array([-2 * steps * np.sin(steps * angle) / (1 + courant ** 2), np.cos(steps * angle)])
+        parameters = jnp.array([courant, 1.])
+        assert np.allclose(jax.grad(amplitude)(parameters), expected, rtol=0, atol=3e-13)
+        assert np.allclose(jax.jacfwd(amplitude)(parameters), expected, rtol=0, atol=3e-13)
+
+
 @pytest.mark.parametrize("boundary", ["periodic", "reflective"])
 def test_implicit_electrostatic_scheme_conserves_energy_and_charge_without_a_projection(boundary):
     """model='electrostatic' keeps the implicit update of E_x, Ampere's law with the continuity

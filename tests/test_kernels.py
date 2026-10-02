@@ -12,6 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from scipy.interpolate import BSpline
+from jax import lax
 
 from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mu_0,
                        elementary_charge, load_state, mass_electron, quiet_start, save_state)
@@ -19,6 +20,7 @@ from jaxincell import speed_of_light as c
 from jaxincell._core import (E_x_from_rho, apply_particle_bc, boris, boris_relativistic,
                              current_from_continuity, deposit, gather, gather_xyz, half_step_fields,
                              orbit_field_average, s2_weights, shape_weights, smooth, with_ghosts, wrap_positions)
+from jaxincell._simulation import _implicit_fields
 
 L, G = 1.0, 32
 dx = L / G
@@ -798,33 +800,177 @@ def field_energy(E, B, h):
     return float(0.5 * epsilon_0 * jnp.sum(E ** 2) * h + 0.5 / mu_0 * jnp.sum(B ** 2) * h)
 
 
+def maxwell_matrix(n, bc):
+    """Independent dimensionless generator for (E_y, c B_z), including wall ghosts."""
+    def derivative(y):
+        e, b = y[:n], y[n:]
+        left = e[-1] if bc[0] == 0 else e[0] if bc[0] == 1 else -2 * b[0] - e[0]
+        right = b[0] if bc[1] == 0 else b[-1] if bc[1] == 1 else 2 * e[-1] - b[-1]
+        return np.r_[-np.diff(np.r_[b, right]), -np.diff(np.r_[left, e])]
+    return np.column_stack([derivative(y) for y in np.eye(2 * n)])
+
+
+@pytest.mark.parametrize("n, mode, courant", [
+    (4, 0, 4.5), (4, 2, 1.), (9, 4, 1.1), (9, 1, 20.), (32, 16, 4.5), (32, 3, .5)])
+def test_implicit_maxwell_matches_the_discrete_fourier_CN_solution(n, mode, courant):
+    """The two-by-two Cayley transform uses the staggered difference symbol, not ik.
+    It tests both polarizations, zero/odd/Nyquist modes and prescribed current."""
+    theta = 2 * np.pi * mode / n
+    phase = np.exp(1j * theta * np.arange(n))
+    E = np.zeros((n, 3))
+    B = np.zeros_like(E)
+    forcing = np.zeros_like(E)
+    dt, h = courant / (n * c), 1 / n
+    operator = np.array([[0, -(np.exp(1j * theta) - 1)], [-(1 - np.exp(-1j * theta)), 0]])
+    expected_E, expected_B = E.copy(), B.copy()
+    for ei, bi, sign in [(1, 2, 1), (2, 1, -1)]:
+        amplitudes = np.array([.7 + .2j * ei, -.3 + .1j * bi])
+        current = .2 - .15j * ei
+        E[:, ei] = np.real(amplitudes[0] * phase)
+        B[:, bi] = sign * np.real(amplitudes[1] * phase) / c
+        forcing[:, ei] = np.real(current * phase)
+        evolved = np.linalg.solve(np.eye(2) - courant * operator / 2,
+                                  (np.eye(2) + courant * operator / 2) @ amplitudes - [current, 0])
+        expected_E[:, ei] = np.real(evolved[0] * phase)
+        expected_B[:, bi] = sign * np.real(evolved[1] * phase) / c
+    E[:, 0], B[:, 0], forcing[:, 0] = .4, .3 / c, .1
+    expected_E[:, 0], expected_B[:, 0] = .3, .3 / c
+    actual_E, actual_B = _implicit_fields(jnp.asarray(E), jnp.asarray(B),
+                                          jnp.asarray(forcing) * epsilon_0 / dt, dt, h, (0, 0))
+    assert np.allclose(actual_E, expected_E, rtol=0, atol=2e-14)
+    assert np.allclose(c * actual_B, c * expected_B, rtol=0, atol=2e-14)
+
+
+@pytest.mark.parametrize("bc", [(1, 1), (2, 2), (1, 2), (2, 1)])
+@pytest.mark.parametrize("n", [4, 9])
+@pytest.mark.parametrize("courant", [.5, 4.5, 20.])
+def test_implicit_maxwell_wall_equations_and_boundary_work(bc, n, courant):
+    """Dense CN is independent of the tridiagonal elimination. Wall work is retained,
+    rather than assuming that every nonperiodic ghost conserves the stored energy."""
+    rng = np.random.default_rng(23)
+    E, scaled_B, forcing = rng.normal(size=(3, n, 3))
+    A = maxwell_matrix(n, bc)
+    dt, h = courant / (n * c), 1 / n
+    actual_E, actual_B = _implicit_fields(jnp.asarray(E), jnp.asarray(scaled_B / c),
+                                          jnp.asarray(forcing) * epsilon_0 / dt, dt, h, bc)
+    actual_E, actual_B = np.asarray(actual_E), c * np.asarray(actual_B)
+    assert np.allclose(actual_E[:, 0], E[:, 0] - forcing[:, 0], rtol=0, atol=1e-14)
+    assert np.array_equal(actual_B[:, 0], scaled_B[:, 0])
+    for ei, bi, sign in [(1, 2, 1), (2, 1, -1)]:
+        y = np.r_[E[:, ei], sign * scaled_B[:, bi]]
+        new = np.r_[actual_E[:, ei], sign * actual_B[:, bi]]
+        source = np.r_[forcing[:, ei], np.zeros(n)]
+        expected = np.linalg.solve(np.eye(2 * n) - courant * A / 2,
+                                   (np.eye(2 * n) + courant * A / 2) @ y - source)
+        assert np.allclose(new, expected, rtol=0, atol=3e-14)
+        midpoint = .5 * (y + new)
+        assert np.max(np.abs(new - y - courant * A @ midpoint + source)) < 8e-14
+        energy_change = .5 * (np.dot(new, new) - np.dot(y, y))
+        work = np.dot(midpoint, courant * A @ midpoint - source)
+        assert energy_change == pytest.approx(work, abs=1e-12, rel=0)
+
+
+@pytest.mark.parametrize("bc", [(0, 0), (1, 1), (2, 2), (1, 2), (2, 1)])
+def test_implicit_maxwell_time_step_gradient(bc):
+    """Differentiate the independently assembled CN equation analytically, with a
+    fixed current rate; both JVP and VJP must agree, including the radiating rows."""
+    n, h = 9, 1 / 9
+    rng = np.random.default_rng(81)
+    y, rate, weights = rng.normal(size=(3, 2 * n))
+    rate[n:] = 0
+    A, courant = maxwell_matrix(n, bc), 1.1
+    new = np.linalg.solve(np.eye(2 * n) - courant * A / 2,
+                          (np.eye(2 * n) + courant * A / 2) @ y - courant * rate)
+    derivative = np.linalg.solve(np.eye(2 * n) - courant * A / 2, .5 * A @ (new + y) - rate)
+    E = jnp.zeros((n, 3)).at[:, 1].set(y[:n])
+    B = jnp.zeros_like(E).at[:, 2].set(y[n:] / c)
+    J = jnp.zeros_like(E).at[:, 1].set(epsilon_0 * c / h * rate[:n])
+
+    def objective(C):
+        e, b = _implicit_fields(E, B, J, C * h / c, h, bc)
+        return jnp.dot(jnp.asarray(weights), jnp.concatenate([e[:, 1], c * b[:, 2]]))
+
+    expected = np.dot(weights, derivative)
+    assert float(jax.grad(objective)(courant)) == pytest.approx(expected, abs=3e-13, rel=0)
+    assert float(jax.jacfwd(objective)(courant)) == pytest.approx(expected, abs=3e-13, rel=0)
+    finite_difference = (float(objective(courant + 1e-5)) - float(objective(courant - 1e-5))) / 2e-5
+    assert finite_difference == pytest.approx(expected, abs=5e-9, rel=0)
+
+
+def test_implicit_vacuum_time_and_gradient_refinement():
+    """At a fixed grid compare with the exact semi-discrete wave, separating time
+    error from spatial dispersion. Both the field and its time derivative converge at order two."""
+    n, mode, total = 32, 3, 16.
+    theta, h = 2 * np.pi * mode / n, 1 / n
+    profile = jnp.cos(theta * jnp.arange(n))
+    magnetic = jnp.sin(theta * (jnp.arange(n) - .5))
+    E = jnp.zeros((n, 3)).at[:, 1].set(profile)
+    B = jnp.zeros_like(E)
+    frequency = 2 * np.sin(theta / 2)
+    expected = np.array([np.cos(frequency * total), np.sin(frequency * total)])
+    expected_derivative = frequency * np.array([-np.sin(frequency * total), np.cos(frequency * total)])
+    errors, derivative_errors = [], []
+    for steps in [20, 40, 80, 160]:
+        def amplitudes(t):
+            def step(_, fields):
+                return _implicit_fields(*fields, jnp.zeros_like(E), (t / steps) * h / c, h, (0, 0))
+            e, b = lax.fori_loop(0, steps, step, (E, B))
+            return jnp.array([jnp.dot(e[:, 1], profile) / jnp.dot(profile, profile),
+                              c * jnp.dot(b[:, 2], magnetic) / jnp.dot(magnetic, magnetic)])
+        value = np.asarray(jax.jit(amplitudes)(total))
+        derivative = np.asarray(jax.jit(jax.jacfwd(amplitudes))(total))
+        reverse = np.asarray(jax.jit(jax.jacrev(amplitudes))(total))
+        assert np.allclose(derivative, reverse, rtol=0, atol=1e-13)
+        assert np.dot(value, value) == pytest.approx(1, abs=2e-13, rel=0)
+        errors.append(np.linalg.norm(value - expected))
+        derivative_errors.append(np.linalg.norm(derivative - expected_derivative))
+    assert np.all((np.asarray(errors[:-1]) / errors[1:] > 3.8)
+                  & (np.asarray(errors[:-1]) / errors[1:] < 4.2))
+    assert np.all((np.asarray(derivative_errors[:-1]) / derivative_errors[1:] > 3.8)
+                  & (np.asarray(derivative_errors[:-1]) / derivative_errors[1:] < 4.2))
+
+
+@pytest.mark.parametrize("bc", [(0, 0), (2, 2)])
+def test_implicit_maxwell_keeps_single_precision(bc):
+    n, h, courant = 9, 1 / 9, .75
+    E = jnp.zeros((n, 3), dtype=jnp.float32).at[:, 1].set(jnp.cos(2 * jnp.pi * jnp.arange(n) / n))
+    B = jnp.zeros_like(E)
+    e, b = _implicit_fields(E, B, jnp.zeros_like(E), courant * h / c, h, bc)
+    assert e.dtype == b.dtype == jnp.float32
+    y = np.r_[np.asarray(E[:, 1]), np.zeros(n)]
+    A = maxwell_matrix(n, bc)
+    expected = np.linalg.solve(np.eye(2 * n) - courant * A / 2, (np.eye(2 * n) + courant * A / 2) @ y)
+    assert np.allclose(np.r_[np.asarray(e[:, 1]), c * np.asarray(b[:, 2])], expected, rtol=0, atol=5e-7)
+
+
 @pytest.mark.parametrize("courant", [0.5, 1.0])
 def test_vacuum_light_wave(courant):
-    """A Gaussian pulse propagates at c on the Yee grid. At Courant number one
-    the scheme is exact (the magic time step) and reproduces the initial profile
-    shifted by a whole number of cells, to the round-off of 64 steps on a profile
-    of unit height; below it the pulse is no longer an eigenmode of the discrete
-    operator, so the energy wanders by a part in 1e4 and the test tracks the peak
-    instead."""
+    """At C=1 a right-moving discrete eigenstate translates exactly: its E face
+    is the average of neighboring cB centres, rather than a co-located copy.
+    Seventeen steps avoid the half-box recurrence that hides an impedance error.
+    Below C=1 the physical Gaussian is dispersive and the test tracks its peak."""
     n = 128
     h = 1.0 / n
     dt = courant * h / c
     xs = jnp.arange(n) * h
     profile = jnp.exp(-((xs + h / 2 - 0.5) / 0.05) ** 2)
-    E = jnp.zeros((n, 3)).at[:, 1].set(profile)
+    electric = (.5 * (profile + jnp.roll(profile, -1)) if courant == 1.0 else
+                jnp.exp(-((xs + h - 0.5) / 0.05) ** 2))
+    E = jnp.zeros((n, 3)).at[:, 1].set(electric)
     B = jnp.zeros((n, 3)).at[:, 2].set(profile / c)
     e0 = field_energy(E, B, h)
-    steps = 64
+    steps = 17
     for _ in range(steps):
         E, B = half_step_fields(E, B, jnp.zeros((n, 3)), dt / 2, h, (0, 0), True)
         E, B = half_step_fields(E, B, jnp.zeros((n, 3)), dt / 2, h, (0, 0), False)
     assert abs(field_energy(E, B, h) / e0 - 1) < (1e-12 if courant == 1.0 else 1e-3)
     shift = int(round(courant * steps))
     if courant == 1.0:
-        assert np.allclose(np.asarray(E[:, 1]), np.roll(np.asarray(profile), shift), rtol=0, atol=1e-13)
+        assert np.allclose(np.asarray(E[:, 1]), np.roll(np.asarray(electric), shift), rtol=0, atol=1e-13)
+        assert np.allclose(c * np.asarray(B[:, 2]), np.roll(np.asarray(profile), shift), rtol=0, atol=1e-13)
     else:
         peak = float(xs[jnp.argmax(E[:, 1])])
-        assert abs(peak + h / 2 - (0.5 + c * steps * dt)) < 2 * h
+        assert abs(peak + h - (0.5 + c * steps * dt)) < 2 * h
 
 
 def test_particle_boundaries():

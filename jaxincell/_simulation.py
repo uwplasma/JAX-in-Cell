@@ -36,6 +36,36 @@ _BETA2_MAX = 1 - 1e-5     # largest v^2/c^2 of a velocity entering a relativisti
 __all__ = ["Simulation", "Output", "State", "Wall", "load_toml", "quiet_start", "RUN_KEYS"]
 
 
+def _implicit_fields(E, B, J, dt, dx, bc):
+    """Solve the linear midpoint Maxwell equations for a prescribed current.
+
+    Eliminating B gives a transverse Helmholtz equation: a Fourier diagonal in
+    a periodic box, or a tridiagonal system with the existing wall ghosts.
+    The radiating left ghost depends on midpoint B, so its first row is implicit too.
+    """
+    courant = c * dt / dx
+    a2 = (courant / 2) ** 2
+    B_rhs = B.at[0, 1:].divide(1 + courant) if bc[0] in (2, 4) else B
+    rhs = E + (dt / 2) * (c ** 2 * curl_B(B_rhs, jnp.zeros_like(E), dx, bc) - J / epsilon_0)
+    if bc[0] == 0:
+        symbol = 1 + courant ** 2 * jnp.sin(jnp.pi * jnp.fft.rfftfreq(E.shape[0]).astype(rhs.dtype)) ** 2
+        E_half = jnp.fft.irfft(jnp.fft.rfft(rhs[:, 1:], axis=0) / symbol[:, None],
+                               n=E.shape[0], axis=0)
+    else:
+        diagonal = jnp.full(E.shape[0], 1 + 2 * a2, dtype=rhs.dtype)
+        diagonal = diagonal.at[0].set(1 + a2 + (2 * a2 / (1 + courant) if bc[0] in (2, 4) else 0))
+        diagonal = diagonal.at[-1].set(1 if bc[1] == 1 else 1 + courant + 2 * a2)
+        lower = jnp.full(E.shape[0], -a2, dtype=rhs.dtype).at[0].set(0).at[-1].set(0 if bc[1] == 1 else -2 * a2)
+        upper = jnp.full(E.shape[0], -a2, dtype=rhs.dtype).at[-1].set(0)
+        E_half = lax.linalg.tridiagonal_solve(lower, diagonal, upper, rhs[:, 1:])
+    E_new = E.at[:, 0].add(-dt * J[:, 0] / epsilon_0).at[:, 1:].set(2 * E_half - E[:, 1:])
+    E_mean = 0.5 * (E + E_new)
+    B_half = B - (dt / 2) * curl_E(E_mean, jnp.zeros_like(B), dx, bc)
+    if bc[0] in (2, 4):
+        B_half = B_half.at[0, 1:].divide(1 + courant)
+    return E_new, B.at[:, 1:].set(2 * B_half[:, 1:] - B[:, 1:])
+
+
 @pytree_dataclass(static=())
 class Wall:
     """What the two walls have exchanged with each species since the run began.
@@ -1089,7 +1119,7 @@ class Simulation:
         return state, (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
     def _implicit_step(self, st, extra):
-        """Crank-Nicolson step solved by a fixed number of Picard iterations (docs/numerics/implicit.md).
+        """Crank-Nicolson with a direct Maxwell solve and fixed particle Picard scan (docs/numerics/implicit.md).
 
         Each sub-step moves a particle on a straight line at :meth:`_mean_velocity`. Its current is the
         continuity current of the deposits at the two ends, which keeps the discrete Gauss law, and E_x at
@@ -1174,29 +1204,28 @@ class Simulation:
             state, orbits = lax.scan(one, init, (orbits, keys))
             return state[:6], state[-1], orbits
 
-        def advance(E_half, B_half, J):
+        def advance(J):
             """E after the step. An electrostatic run keeps Ampere's law for E_x alone, with the mean
             current of a periodic box left out so that <E_x> stays zero, and evolves neither the
             transverse E nor B (docs/numerics/implicit.md)."""
             if self.solver.electrostatic:
                 J_x = J[:, 0] - (jnp.mean(J[:, 0]) if bc[0] == 0 else 0.0)
-                return E.at[:, 0].add(-dt * J_x / epsilon_0)
-            return E + dt * (c ** 2 * curl_B(B_half, E_half, dx, bc) - J / epsilon_0)
+                return E.at[:, 0].add(-dt * J_x / epsilon_0), B
+            return _implicit_fields(E, B, J, dt, dx, bc)
 
         def picard(state, _):
-            E_new, orbits, _ = state
+            E_new, B_new, orbits, _ = state
             E_half = 0.5 * (E + E_new)
-            B_half = B if self.solver.electrostatic else B - 0.5 * dt * curl_E(E_half, B, dx, bc)
+            B_half = 0.5 * (B + B_new)
             particles, J, orbits = substeps(E_half, B_half, orbits)
-            return (advance(E_half, B_half, J), orbits, (particles, J)), None
+            return (*advance(J), orbits, (particles, J)), None
 
         v = self._velocity(u)      # the first guess: every particle streams freely at its present velocity
         free = jax.vmap(lambda s: wrap_positions(x + s * dtau * v, w, box, d.particle_bc, dx))
         orbits = (free(jnp.arange(1.0, n_sub + 1)), jnp.broadcast_to(v, (n_sub,) + v.shape))
-        state, _ = lax.scan(picard, (E, orbits, ((x, u, w, qm, rho, st.wall), jnp.zeros_like(E))), None,
+        state, _ = lax.scan(picard, (E, B, orbits, ((x, u, w, qm, rho, st.wall), jnp.zeros_like(E))), None,
                             length=self.solver.picard_iterations)
-        E_new, _, ((x, u, w, qm, rho_next, wall), J) = state
-        B_new = B if self.solver.electrostatic else B - dt * curl_E(0.5 * (E + E_new), B, dx, bc)
+        E_new, B_new, _, ((x, u, w, qm, rho_next, wall), J) = state
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
         v = self._velocity(u)
         return (State(E_new, B_new, x, u, w, qm, rho_next, st.sigma, key, st.time + dt, st.steps + 1, wall,

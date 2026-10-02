@@ -65,9 +65,9 @@ extrapolation, and the part of the cloud outside the box is folded back onto the
 boundary cell. Charge is conserved exactly.
 
 **Absorbing.** The part of the cloud outside the box is dropped, so charge leaves the
-system, which is what an open boundary means. The field ghosts use the first-order Mur
-radiating condition of {doc}`field_solvers`, so an outgoing electromagnetic wave leaves
-without reflection.
+system, which is what an open boundary means. The field ghosts use the first-order
+radiating closure of {doc}`field_solvers`; its reflection error depends on wavelength
+and time step.
 
 ## What a particle feels next to a wall
 
