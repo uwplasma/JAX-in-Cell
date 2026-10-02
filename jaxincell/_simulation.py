@@ -11,7 +11,6 @@ from ._parameters._sections import (
     PARAMETER_SECTIONS,
 )
 from ._parameters._species_parameters import resolve_species_references
-from ._openpmd import write_openpmd
 from ._routing import (
     build_runtime_flat_parameter_routes,
     build_runtime_parameter_sections,
@@ -122,10 +121,7 @@ class Simulation:
             solver_hash=self.solver_hash,
             export_hash=self.export_hash,
         )
-        output = self.assemble_output(simulation_output, input_parameters)
-        if output["export_parameters"]["openpmd_output"]:
-            output["openpmd_files"] = write_openpmd(output)
-        return output
+        return self.assemble_output(simulation_output, input_parameters)
      
     # See simulation(...) for details on the purpose of input_parameters.
     def run(self, input_parameters=None):
@@ -308,7 +304,7 @@ class Simulation:
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
-            "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
+            "time_array":  jnp.arange(1, total_steps + 1) * dt,
             "grid": grid,
             "dt": dt,
             "plasma_frequency": plasma_frequency,

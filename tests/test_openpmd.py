@@ -1,11 +1,13 @@
 import builtins
 import importlib
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from jaxincell import Simulation
+from jaxincell import Simulation, speed_of_light
 from jaxincell._openpmd import (
     _open_series,
     _set_record_metadata,
@@ -247,7 +249,7 @@ def tiny_openpmd_output(tmp_path, **export_overrides):
         "external_electric_field": np.full((number_grid_points, 3), 5.0),
         "external_magnetic_field": np.full((number_grid_points, 3), 6.0),
         "total_steps": total_steps,
-        "time_array": np.array([0.0, 0.1, 0.2]),
+        "time_array": np.array([0.1, 0.2, 0.3]),
         "dt": 0.1,
         "dx": 0.25,
         "length": 1.0,
@@ -651,7 +653,7 @@ def test_write_openpmd_computed_time_and_particle_edge_cases(monkeypatch, tmp_pa
     write_openpmd(output)
 
     series = FakeSeries.created[0]
-    assert series.iterations.entries[2].time == pytest.approx(0.2)
+    assert series.iterations.entries[2].time == pytest.approx(0.3)
     iteration = series.iterations.entries[0]
     assert "external_E" not in iteration.meshes.entries
     assert "external_B" not in iteration.meshes.entries
@@ -662,14 +664,8 @@ def test_write_openpmd_computed_time_and_particle_edge_cases(monkeypatch, tmp_pa
     )
 
 
-def test_simulation_run_writes_openpmd_when_enabled(monkeypatch, tmp_path):
-    """Test automatic Simulation.run openPMD writing.
-
-    Cases:
-    - the default openpmd_output=False path does not call the writer.
-    - enabling openpmd_output=True writes after output assembly.
-    - the writer return value is added as output metadata.
-    """
+def test_simulation_run_leaves_export_to_postprocessing(monkeypatch, tmp_path):
+    """Export configuration does not add filesystem side effects to simulation or gradients."""
     called = []
 
     def fake_writer(output):
@@ -677,7 +673,7 @@ def test_simulation_run_writes_openpmd_when_enabled(monkeypatch, tmp_path):
         return {"data": {"combined": output["export_parameters"]["openpmd_filename"]}, "sidecar": {}}
 
     parameters = base_simulation_parameters()
-    monkeypatch.setattr("jaxincell._simulation.write_openpmd", fake_writer)
+    monkeypatch.setattr("jaxincell.write_openpmd", fake_writer)
     default_output = Simulation(parameters).run()
 
     assert called == []
@@ -691,5 +687,109 @@ def test_simulation_run_writes_openpmd_when_enabled(monkeypatch, tmp_path):
     }
     output = Simulation(parameters).run()
 
-    assert called
-    assert output["openpmd_files"]["data"]["combined"] == str(tmp_path / "auto.h5")
+    assert called == [] and "openpmd_files" not in output
+    assert not (tmp_path / "auto.h5").exists()
+
+
+def test_core_imports_and_optional_export_reports_missing_backend(monkeypatch, tmp_path):
+    result = subprocess.run([sys.executable, "-c", "import sys; sys.modules['openpmd_api'] = None; "
+                             "import jaxincell; assert callable(jaxincell.write_openpmd)"],
+                            check=True, capture_output=True, text=True)
+    assert result.returncode == 0
+    monkeypatch.setitem(sys.modules, "openpmd_api", None)
+    with pytest.raises(ImportError, match="pip install jaxincell"):
+        write_openpmd(tiny_openpmd_output(tmp_path))
+
+
+@pytest.mark.parametrize("algorithm, relativistic", [(0, False), (0, True), (1, False)])
+def test_real_openpmd_round_trip_matches_coordinates_momentum_and_safe_paths(tmp_path, algorithm, relativistic):
+    io = pytest.importorskip("openpmd_api")
+    output = tiny_openpmd_output(tmp_path, openpmd_filename=str(tmp_path / "real.json"))
+    output["solver_parameters"].update(time_evolution_algorithm=algorithm, relativistic=relativistic)
+    output["velocities"][:] = [0.6 * float(speed_of_light), 0.0, 0.0]
+    paths = write_openpmd(output)
+    original = (tmp_path / "real.json").read_bytes()
+    second = write_openpmd(output)
+    assert paths["data"]["combined"] != second["data"]["combined"]
+    assert (tmp_path / "real.json").read_bytes() == original
+    series = io.Series(paths["data"]["combined"], io.Access.read_only)
+    assert list(series.iterations) == [0, 1, 2]
+    it = series.iterations[2]
+    assert it.time == pytest.approx(.3)
+    centres = -.5 + (np.arange(4) + .5) * .25
+    for name in ("E", "B", "J", "rho", "external_E", "external_B"):
+        mesh = it.meshes[name]
+        for label in ("x", "y", "z") if name != "rho" else (io.Record_Component.SCALAR,):
+            component = mesh[label]
+            where = mesh.grid_global_offset[0] + (np.arange(4) + component.position[0]) * mesh.grid_spacing[0]
+            faces = name in ("E", "external_E") or (name == "J" and (label == "x" or algorithm == 1))
+            np.testing.assert_allclose(where, centres + (.125 if faces else 0), atol=0)
+    momentum = it.particles["electron_beam"]["momentum"]["x"].load_chunk()
+    assert it.particles["electron_beam"].get_attribute("particleShape") == 2.0
+    charge = it.particles["electron_beam"]["charge"][io.Record_Component.SCALAR].load_chunk()
+    series.flush()
+    np.testing.assert_allclose(momentum, 3 * output["velocities"][2, :2, 0] * (1.25 if relativistic else 1),
+                               rtol=1e-14, atol=0)
+    np.testing.assert_allclose(charge, -1, atol=0)
+    series.close()
+
+
+def test_real_openpmd_file_based_separate_series_and_tensor_coordinates(tmp_path):
+    io = pytest.importorskip("openpmd_api")
+    output = tiny_openpmd_output(tmp_path, openpmd_filename=str(tmp_path / "separate.json"),
+                                openpmd_iteration_encoding="fileBased", openpmd_separate_particles_and_meshes=True,
+                                openpmd_iteration_stride=2)
+    field = np.arange(4 * 2 * 3 * 3, dtype=float).reshape(4, 2, 3, 3)
+    output["external_magnetic_field"] = field
+    output["box_size"] = (1.0, .2, .3)
+    paths = write_openpmd(output)
+    for name, path in paths["data"].items():
+        series = io.Series(path, io.Access.read_only)
+        assert list(series.iterations) == [0, 2]
+        it = series.iterations[2]
+        assert bool(len(it.meshes)) == (name == "meshes")
+        assert bool(len(it.particles)) == (name == "particles")
+        if name == "meshes":
+            mesh = it.meshes["external_B"]
+            assert mesh.axis_labels == ["x", "y", "z"]
+            np.testing.assert_allclose(mesh.grid_spacing, [.25, .1, .1], rtol=1e-14, atol=0)
+            np.testing.assert_allclose(mesh.grid_global_offset, [-.5, -.1, -.15], rtol=1e-14, atol=0)
+            np.testing.assert_allclose(mesh["z"].position, [.5, .5, .5], atol=0)
+            values = mesh["z"].load_chunk()
+            series.flush()
+            np.testing.assert_array_equal(values, field[..., 2])
+        series.close()
+        assert open(paths["sidecar"][name]).read().strip() == path.rsplit("/", 1)[-1]
+
+
+def test_command_line_exports_after_the_simulation_only_when_requested(monkeypatch, tmp_path):
+    from jaxincell.__main__ import main
+    output = tiny_openpmd_output(tmp_path)
+    monkeypatch.setattr("jaxincell.__main__.Simulation", lambda: SimpleNamespace(run=lambda: output))
+    monkeypatch.setattr("jaxincell.__main__.diagnostics", lambda out: None)
+    monkeypatch.setattr("jaxincell.__main__.plot", lambda out: None)
+    seen = []
+    monkeypatch.setattr("jaxincell._openpmd.write_openpmd", lambda out: seen.append(out) or {"written": True})
+    main([])
+    assert seen == []
+    output["export_parameters"]["openpmd_output"] = True
+    main([])
+    assert seen == [output] and output["openpmd_files"] == {"written": True}
+
+
+@pytest.mark.parametrize("backend, extension", [("json", ".json"), ("hdf5", ".h5"), ("adios2", ".bp")])
+def test_real_openpmd_installed_backends_round_trip_mesh_values_and_units(tmp_path, backend, extension):
+    io = pytest.importorskip("openpmd_api")
+    if not io.variants.get(backend):
+        pytest.skip(f"openpmd-api was built without {backend}")
+    output = tiny_openpmd_output(tmp_path, openpmd_filename=str(tmp_path / f"backend{extension}"))
+    output["electric_field"] = np.arange(36, dtype=float).reshape(3, 4, 3)
+    paths = write_openpmd(output)
+    series = io.Series(paths["data"]["combined"], io.Access.read_only)
+    mesh = series.iterations[2].meshes["E"]
+    data = mesh["y"].load_chunk()
+    series.flush()
+    np.testing.assert_array_equal(data, output["electric_field"][2, :, 1])
+    assert mesh["y"].unit_SI == 1.0 and mesh.grid_unit_SI == 1.0
+    np.testing.assert_array_equal(mesh.unit_dimension, [1, 1, -3, -1, 0, 0, 0])
+    series.close()

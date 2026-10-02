@@ -15,12 +15,12 @@ of all populations and `G` for `number_grid_points`.
 | `magnetic_field` | `(S, G, 3)` | T | cell centres $x_i$ |
 | `current_density` | `(S, G, 3)` | A/m² | $J_x$ at cell faces, $J_y$, $J_z$ at cell centres |
 | `charge_density` | `(S, G)` | C/m³ | cell centres |
-| `time_array` | `(S,)` | s | `linspace(0, S dt, S)` |
+| `time_array` | `(S,)` | s | `arange(1, S + 1) * dt` |
 
 Entry `n` of each history is the state after step `n + 1`; the initial state is
 available as `initial_positions`, `initial_velocities` and `fields`
-(a tuple `(E, B)` of the initial fields). Note that `time_array` starts at zero, so it
-is offset from the stored states by one step. The velocities of the explicit scheme are
+(a tuple `(E, B)` of the initial fields). The first stored timestamp is `dt`.
+The velocities of the explicit scheme are
 defined at integer times and the stored positions are the integer-time positions
 reconstructed from the half-step ones, so the two are synchronous. The particle axis is
 ordered by population in input order; `species_integer_index` tells which population
@@ -54,6 +54,24 @@ Every key of every parameter section is also copied to the top level (for exampl
 `output["filter_passes"]`), and the sections themselves are available under
 `domain_parameters`, `species_parameters`, `solver_parameters`,
 `external_field_parameters`, `source_parameters` and `parameter_sections`.
+
+## Optional openPMD export
+
+Normal imports and simulations do not require openPMD. Install `jaxincell[openpmd]` to
+export a completed output, separately from its differentiable evolution:
+
+```python
+from jaxincell import write_openpmd
+
+paths = write_openpmd(output, {"openpmd_filename": "run.json"})
+```
+
+The JSON backend is useful for small serial output; HDF5 and ADIOS2 depend on the backends
+in the user's optional `openpmd-api` installation. Existing filenames receive a numbered
+suffix unless `openpmd_overwrite=True`. File-based templates, separate particle/mesh series,
+sidecars and iteration thinning remain supported. `openpmd_output=True` enables export in
+the command-line application; `Simulation.run()` always returns data without writing files.
+Mesh coordinates include their actual staggering, and momentum follows the selected pusher.
 
 ## What `diagnostics` adds
 

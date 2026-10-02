@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 import numpy as np
-import openpmd_api as io
+io = None  # optional backend, resolved only by the writer; also permits test backends
 
 from ._constants import speed_of_light
 from ._parameters._species_definitions import SPECIES_TYPES
@@ -50,6 +50,16 @@ def _set_attr(target, name, value):
         setter(name, value)
     else:
         setattr(target, name, value)
+
+
+def _require_openpmd_api():
+    if io is not None:
+        return io
+    try:
+        import openpmd_api
+    except ImportError as exc:
+        raise ImportError("openPMD export is optional: pip install jaxincell[openpmd]") from exc
+    return openpmd_api
 
 
 def openpmd_output_paths(
@@ -248,19 +258,21 @@ def _set_record_metadata(
         _set_attr(record, "weightingPower", float(weighting_power))
 
 
-def _store(record_component, data, io):
+def _store(record_component, data, io, keep=None):
     array = np.asarray(data, dtype=np.float64)
     if not array.flags.c_contiguous or not array.flags.writeable:
         array = np.array(array, dtype=np.float64, copy=True, order="C")
     record_component.reset_dataset(io.Dataset(array.dtype, array.shape))
     record_component.store_chunk(array, [0] * array.ndim, array.shape)
+    if keep is not None:
+        keep.append(array)
     try:
         record_component.unit_SI = 1.0
     except Exception:
         _set_attr(record_component, "unitSI", 1.0)
 
 
-def _write_meshes(iteration, output, iteration_index, io):
+def _write_meshes(iteration, output, iteration_index, io, keep=None):
     for name, output_key, record_type, dimension_name, time_dependent in MESH_RECORDS:
         if output_key not in output:
             continue
@@ -272,9 +284,15 @@ def _write_meshes(iteration, output, iteration_index, io):
         mesh = iteration.meshes[name]
         mesh.geometry = io.Geometry.cartesian
         mesh.data_order = io.Data_Order.C if hasattr(io, "Data_Order") else "C"
-        mesh.axis_labels = ["x"]
-        mesh.grid_spacing = [float(np.asarray(output["dx"]))]
-        mesh.grid_global_offset = [-0.5 * float(np.asarray(output["length"]))]
+        tensor = data.ndim > 2
+        lengths = tuple(map(float, output["box_size"])) if tensor else (float(output["length"]),)
+        spacing = [length / cells for length, cells in zip(lengths, data.shape)]
+        mesh.axis_labels = list("xyz"[:len(lengths)])
+        mesh.grid_spacing = spacing
+        mixed = name == "J" and output.get("solver_parameters", {}).get("time_evolution_algorithm", 0) == 0
+        faces = not tensor and (name in ("E", "external_E") or (name == "J" and not mixed))
+        mesh.grid_global_offset = [-length / 2 + (spacing[0] / 2 if mixed else spacing[0] if faces else 0)
+                                   for length in lengths]
         try:
             mesh.grid_unit_SI = 1.0
         except Exception:
@@ -287,14 +305,17 @@ def _write_meshes(iteration, output, iteration_index, io):
 
         if record_type == "vector":
             for component_index, component_name in enumerate(("x", "y", "z")):
-                _store(mesh[component_name], data[:, component_index], io)
+                mesh[component_name].position = [0.5 if mixed and component_index == 0 else
+                                                 0.0 if mixed or faces else 0.5] * len(lengths)
+                _store(mesh[component_name], data[..., component_index], io, keep)
         else:
             scalar_component = getattr(io, "Mesh_Record_Component", None)
             scalar_key = "SCALAR" if scalar_component is None else scalar_component.SCALAR
-            _store(mesh[scalar_key], data, io)
+            mesh[scalar_key].position = [0.5] * len(lengths)
+            _store(mesh[scalar_key], data, io, keep)
 
 
-def _write_particles(iteration, output, iteration_index, io):
+def _write_particles(iteration, output, iteration_index, io, keep=None):
     species_names = []
     seen_names = {}
     for species_type in SPECIES_TYPES:
@@ -348,12 +369,12 @@ def _write_particles(iteration, output, iteration_index, io):
         speed_squared = np.sum(velocities**2, axis=1)
         gamma = 1.0 / np.sqrt(
             np.clip(1.0 - speed_squared / float(speed_of_light**2), 1e-15, None)
-        )
+        ) if output["solver_parameters"]["relativistic"] and particle_push == "Boris" else np.ones_like(speed_squared)
         momentum = velocities * masses[:, None] * gamma[:, None]
 
         species_group = iteration.particles[species_name]
         for attribute_name, attribute_value in (
-            ("particleShape", 1.0),
+            ("particleShape", 2.0),
             ("currentDeposition", "other"),
             ("particlePush", particle_push),
             ("particleInterpolation", "other"),
@@ -375,7 +396,7 @@ def _write_particles(iteration, output, iteration_index, io):
                 weighting_power=weighting_power,
             )
             for component_index, component_name in enumerate(("x", "y", "z")):
-                _store(record[component_name], values[:, component_index], io)
+                _store(record[component_name], values[:, component_index], io, keep)
 
         for record_name, values, dimension_name, macro_weighted, weighting_power in (
             ("weighting", weights, "dimensionless", 1, 1.0),
@@ -390,35 +411,46 @@ def _write_particles(iteration, output, iteration_index, io):
                 macro_weighted=macro_weighted,
                 weighting_power=weighting_power,
             )
-            _store(record, values, io)
+            _store(record, values, io, keep)
+
+
+def _stored_steps(output):
+    return len(output["time_array"] if "time_array" in output else output["electric_field"])
 
 
 def _write_iterations(series, output, io, iteration_stride, write_meshes, write_particles):
-    total_steps = int(output["total_steps"])
+    total_steps = _stored_steps(output)
     for iteration_index in range(0, total_steps, iteration_stride):
+        keep = []  # backend reads buffers at flush, after the mesh/particle helpers return
         iteration = series.iterations[int(iteration_index)]
         if "time_array" in output:
             iteration.time = float(np.asarray(output["time_array"])[iteration_index])
         else:
-            iteration.time = iteration_index * float(np.asarray(output["dt"]))
+            iteration.time = (iteration_index + 1) * float(np.asarray(output["dt"]))
         iteration.dt = float(np.asarray(output["dt"]))
         iteration.time_unit_SI = 1.0
 
         if write_meshes:
-            _write_meshes(iteration, output, iteration_index, io)
+            _write_meshes(iteration, output, iteration_index, io, keep)
         if write_particles:
-            _write_particles(iteration, output, iteration_index, io)
+            _write_particles(iteration, output, iteration_index, io, keep)
+        series.flush()
 
     series.flush()
     series.close()
 
 
 def write_openpmd(output, export_parameters=None):
-    if export_parameters is None:
-        export_parameters = output["export_parameters"]
+    """Export a completed output dictionary; imports the optional backend only when called."""
+    from ._parameters._export_parameters import clean_and_initialize_export_parameters
+    io = _require_openpmd_api()
+    export_parameters = clean_and_initialize_export_parameters(
+        output.get("export_parameters", {}) if export_parameters is None else export_parameters)
+    if not _stored_steps(output):
+        raise ValueError("openPMD export requires at least one stored step")
     iteration_encoding = export_parameters["openpmd_iteration_encoding"]
     iteration_stride = export_parameters["openpmd_iteration_stride"]
-    iteration_indices = range(0, int(output["total_steps"]), iteration_stride)
+    iteration_indices = range(0, _stored_steps(output), iteration_stride)
 
     paths = openpmd_output_paths(
         export_parameters["openpmd_filename"],
