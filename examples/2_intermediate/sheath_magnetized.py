@@ -227,7 +227,7 @@ for angle in angles:
     axes[0].plot(distance, r["phi"], label=rf"$\alpha = {angle:.0f}^\circ$")
     axes[1].plot(distance, r["flow"] / sound_speed, label=rf"$\alpha = {angle:.0f}^\circ$")
 axes[0].set(xlabel=r"distance from the collector ($\lambda_D$)", ylabel=r"$e\phi/T_e$",
-            title="the potential, at three field angles", xlim=(distance.max(), 0))
+            title="the potential, by field angle", xlim=(distance.max(), 0))
 axes[0].legend(frameon=False)
 axes[1].axhline(1.0, ls="--", color="k", lw=2)
 axes[1].set(xlabel=r"distance from the collector ($\lambda_D$)", ylabel=r"$v_{i,x}/c_s$",
