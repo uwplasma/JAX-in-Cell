@@ -252,7 +252,8 @@ class Output:
         and rejects the trial itself; :meth:`validate` is the host-side shortcut."""
         leaves = jax.tree.leaves(self.state.replace(key=random.key_data(self.state.key)))
         if not all(np.all(np.isfinite(np.asarray(a))) for a in leaves):
-            return ("non-finite final state: check finite source parameters; resolve at most one wall crossing per segment "
+            return ("non-finite final state: check finite source parameters; resolve at most one wall crossing "
+                    "per particle segment "
                     "and converge the implicit iteration (including picard_tolerance); reduce dt or increase "
                     "substeps or picard_iterations.",)
         spilt = float(jnp.max(jnp.asarray(self.state.wall.overflow)))

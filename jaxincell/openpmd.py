@@ -19,10 +19,8 @@ Layout:
     instead: ``grid_global_offset = [-length/2 + dx]`` with ``position=[0.0]``. Both records then
     read back at the coordinates the code puts them at, by the formula above and nothing else.
 
-    (This was the wrong way round: centres at ``0.0`` and faces at ``0.5``, which put every
-    quantity half a cell from where it belongs and the two of them a whole cell apart. Note that
-    WarpX's default openPMD output writes ``0.5`` on every component because it cell-centres
-    before writing, so it is not a reference for staggering; PIConGPU is.)
+    ``J`` is the average over the preceding step and has ``timeOffset=-out.dt/2``
+    in seconds. Other meshes and stored particles are at the iteration time.
 
     Particles: one species per ``out.names`` with the vector records
     ``position`` and ``momentum`` and the scalar ``weighting`` per particle, and ``positionOffset``
@@ -86,6 +84,7 @@ def _write_meshes(io, it, out, s, keep, external):
         mesh.grid_spacing = spacing
         mesh.grid_global_offset = [-0.5 * length + (spacing[0] if faces else 0.0) for length in lengths]
         _describe(io, mesh, name.removeprefix("external_"))
+        mesh.set_attribute("timeOffset", -0.5 * float(out.dt) if name == "J" else 0.0)
         components = zip("xyz", np.moveaxis(data, -1, 0)) if data.ndim > 1 else [(io.Record_Component.SCALAR, data)]
         for label, column in components:
             mesh[label].position = [0.0 if faces else 0.5] * len(lengths)

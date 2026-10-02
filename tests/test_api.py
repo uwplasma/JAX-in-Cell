@@ -507,6 +507,7 @@ def test_openpmd_export_round_trips():
         for name, want in (("B", np.asarray(out.grid)), ("rho", np.asarray(out.grid)),
                            ("E", np.asarray(out.faces)), ("J", np.asarray(out.faces))):
             mesh = iteration.meshes[name]
+            assert mesh.time_offset == (-0.5 * float(out.dt) if name == "J" else 0.0)
             component = mesh["x"] if name in ("E", "B", "J") else mesh[io.Record_Component.SCALAR]
             offset, spacing = mesh.grid_global_offset[0], mesh.grid_spacing[0]
             where = (offset + (np.arange(cells) + component.position[0]) * spacing) * mesh.grid_unit_SI

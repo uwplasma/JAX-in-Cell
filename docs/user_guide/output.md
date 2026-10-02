@@ -9,7 +9,7 @@ and a pytree. Histories have the stored step as their first axis.
 |---|---|---|
 | `t` | `(S,)` | time of each stored state, s |
 | `x`, `v` | `(S, N, 3)` | particle positions and velocities, or `None` |
-| `E`, `B`, `J` | `(S, cells, 3)` | fields and current density |
+| `E`, `B`, `J` | `(S, cells, 3)` | endpoint fields; `J` averages the preceding step |
 | `rho` | `(S, cells)` | charge density at the cell centres |
 | `grid` | `(cells,)` | cell centres |
 | `dx`, `dt`, `length` | scalars | grid spacing, time step, box length |
@@ -89,7 +89,8 @@ write_openpmd(output, "particles.json", meshes=False)
 ```
 
 * One iteration per stored step.
-* Meshes for `E`, `B`, `J` and `rho`, with the right staggering recorded in the file.
+* Meshes for `E`, `B`, `J` and `rho`, with their spatial staggering recorded. The
+  step-averaged `J` has `timeOffset=-dt/2` in seconds; endpoint records have zero offset.
 * One particle species per `Output.names`, carrying position, momentum and weighting per
   particle, and charge, mass and a zero `positionOffset` as constant records.
 * The momentum is the one the pusher advances: $\gamma m\mathbf v$ for a relativistic run,
