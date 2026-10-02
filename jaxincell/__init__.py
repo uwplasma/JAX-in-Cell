@@ -79,20 +79,22 @@ def main(argv=None):
     for name in ("steps", "seed"):
         if getattr(args, name) is not None:
             settings[name] = getattr(args, name)
-    out = sim.run(**settings)
-    d = diagnostics(out)
-    summary = {"steps": int(out.t.shape[0]), "final_time": float(out.t[-1]),
-               "gauss_residual": float(d["gauss_residual"][-1])}
+    out = sim.run(**settings).validate()
+    history = bool(out.t.shape[0])
+    d = diagnostics(out) if history else {}
+    final = out.replace(E=out.state.E[None], rho=out.state.rho[None], sigma=out.state.sigma[None],
+                        weight=out.state.w[None])
+    summary = {"steps": int(out.state.steps), "final_time": float(out.state.time),
+               "gauss_residual": float(gauss_residual(final)[-1])}
     line = (f"steps {summary['steps']}  final time {summary['final_time']:.3e} s  "
             f"gauss residual {summary['gauss_residual']:.2e}")
     if "total" in d:          # the energy balance needs the velocities, so a run that kept no
-        total = d["total"]    # particle history has the field energies and not the total
-        summary["energy_drift"] = float(abs(total[-1] / total[0] - 1))
+        summary["energy_drift"] = float(d["energy_error"][-1])
         line += f"  energy drift {summary['energy_drift']:.2e}"
     print(line)
     if args.save is not None:
         _write(args.save, args.input, settings, summary, out)
-    if args.movie is not None or (args.plot if args.plot is not None else run.get("plot", True)):
+    if history and (args.movie is not None or (args.plot if args.plot is not None else run.get("plot", True))):
         from ._plot import plot
         plot(out, save=args.movie, show=args.plot if args.plot is not None else run.get("plot", True))
     return 0

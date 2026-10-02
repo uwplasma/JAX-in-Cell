@@ -189,6 +189,23 @@ def test_irregular_snapshots_reject_competing_cadence_and_preserve_source_failur
         failed.validate()
 
 
+@pytest.mark.parametrize("schedule", [[], [0, 2]])
+def test_cli_snapshot_summary_uses_completed_state_and_skips_empty_history(tmp_path, schedule):
+    import json
+    path = tmp_path / "sparse.toml"
+    input_file(path, n=8, steps=6, plot=True)
+    path.write_text(path.read_text() + f"snapshot_steps = {schedule}\n")
+    folder = tmp_path / "saved"
+    sim, _ = load_toml(path)
+    with mock.patch("jaxincell.diagnostics", wraps=diagnostics) as read, mock.patch("jaxincell._plot.plot") as plot:
+        assert main([str(path), "--save", str(folder), "--plot"]) == 0
+    assert read.call_count == plot.call_count == bool(schedule)
+    result = json.loads((folder / "run.json").read_text())["results"]
+    assert result["steps"] == 6
+    assert result["final_time"] == pytest.approx(6 * float(sim.domain.dt), rel=1e-14, abs=0)
+    assert np.isfinite(result["gauss_residual"])
+
+
 def test_a_progress_meter_reports_without_changing_the_run(capsys):
     """A long run has to say how far it has got, and saying so must not change it.
 
