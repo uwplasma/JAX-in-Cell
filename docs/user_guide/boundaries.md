@@ -69,3 +69,25 @@ Mixed choices run but are rarely physical. Two limitations to keep in mind:
   with periodic boundaries.
 * With `field_solver = 1` the FFT solution of Gauss's law assumes periodicity in $x$
   even when the walls are reflective or absorbing.
+
+## Fractional return and restitution
+
+Particle code `3` returns `mixed_BC_weight` of each impacting marker; code `4`
+returns `clip(1 - abs(v_x)/mixed_BC_velocity_scale, 0, 1)`. The velocity scale is a
+positive prescribed wall property, independent of other particles. The returned
+fraction multiplies charge and mass equally, preserving charge-to-mass ratio;
+fully collected markers have zero charge, mass and velocity.
+
+`COR_left` and `COR_right` are normal restitution coefficients in `[0, 1]`.
+The reflected endpoint is `wall - COR*(endpoint-wall)`, with normal velocity
+`-COR*v_x`. Both half drifts resolve impacts at their physical time; the output
+reports the end of the full step. Resolve at most one wall impact per half drift.
+An unresolved second crossing produces a nonfinite position: reduce the time step.
+
+Fractional walls require Newtonian Boris and `field_solver=2` (Cartesian Gauss).
+The longitudinal field is reconstructed after collection; this is an imposed wall
+model, without a self-consistent wall circuit or a closed electromagnetic energy
+ledger. `masses_over_time` and `charges_over_time` retain returned marker weights
+for kinetic energy and momentum diagnostics. Periodic runs retain their usual
+output and memory cost. See `examples/mixed_bc.py` and
+`examples/bc_parameter_comparison.py` for near-ballistic controls.

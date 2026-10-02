@@ -220,10 +220,8 @@ class Simulation:
         velocities = particle_state["velocities"]
 
         # Leapfrog integration: positions at half-step before the start
-        positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
-            positions + (dt / 2) * velocities, velocities,
-            charges, masses, charge_to_mass_ratios,
-            dx, grid, *box_size, particle_BC_left, particle_BC_right)
+        positions_plus1_2 = positions + dt/2*velocities
+        qs, ms, q_ms = charges, masses, charge_to_mass_ratios
 
         positions_minus1_2 = set_BC_positions(
             positions - (dt / 2) * velocities,
@@ -237,7 +235,9 @@ class Simulation:
             )
             step_func = lambda carry, step_index: Boris_step(
                 carry, step_index, solver_parameters, runtime_external_field_parameters, dx, dt, grid, box_size,
-                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
+                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver'],
+                **{key: domain_parameters[key] for key in
+                   ("mixed_BC_weight", "COR_left", "COR_right", "mixed_BC_velocity_scale")}
             )
         else:
             initial_carry = (
@@ -250,9 +250,12 @@ class Simulation:
                 solver_parameters["number_of_particle_substeps_implicit_CN"]
             )
 
+        mixed_walls = particle_BC_left >= 3 or particle_BC_right >= 3
+
         @scan_tqdm(total_steps)
         def simulation_step(carry, step_index):
-            return step_func(carry, step_index)
+            carry, data = step_func(carry, step_index)
+            return carry, (data, carry[7], carry[6]) if mixed_walls else data
 
 
         # Run simulation
@@ -260,7 +263,7 @@ class Simulation:
 
         # Unpack results
         positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results[0] if mixed_walls else results
 
         # **Output results**
         from ._constants import epsilon_0, mass_electron
@@ -302,7 +305,7 @@ class Simulation:
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
-            "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
+            "time_array":  (jnp.arange(total_steps) + 1) * dt,
             "grid": grid,
             "dt": dt,
             "plasma_frequency": plasma_frequency,
@@ -317,6 +320,8 @@ class Simulation:
             "external_magnetic_field": field_state["external_magnetic_field"],
         }
 
+        if mixed_walls:
+            temporary_output.update(masses_over_time=results[1], charges_over_time=results[2])
         return temporary_output
 
     def assemble_output(self, simulation_output, input_parameters):
@@ -438,6 +443,13 @@ class Simulation:
         self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
         self.build_domain()
         self.initialize_particles()
+        if (self._solver_parameters["time_evolution_algorithm"] == 1 or self._solver_parameters["relativistic"]) and (
+                any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right"))
+                or any(self._domain_parameters[f"COR_{side}"] != 1 for side in ("left", "right"))):
+            raise ValueError("mixed or inelastic walls currently require nonrelativistic Boris")
+        if any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right")) and (
+                self._solver_parameters["field_solver"] != 2):
+            raise ValueError("mixed walls require field_solver=2 to account for collected charge")
         self.initialize_fields()
         self.build_hash_values()
 

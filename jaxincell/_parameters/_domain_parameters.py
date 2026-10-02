@@ -21,7 +21,11 @@ DEFAULT_DOMAIN_PARAMETERS = {
         "particle_BC_left": 0,                   # Left boundary condition for particles
         "particle_BC_right": 0,                   # Right boundary condition for particles
         "field_BC_left": 0,                     # Left boundary condition for fields
-        "field_BC_right": 0,                    # Right boundary condition for fields
+        "field_BC_right": 0,
+        "mixed_BC_weight": 1.0,
+        "mixed_BC_velocity_scale": 299792458.0,
+        "COR_left": 1.0,
+        "COR_right": 1.0,                    # Right boundary condition for fields
     }
 
 DIFFERENTIABLE_DOMAIN_PARAMETERS = [
@@ -29,6 +33,10 @@ DIFFERENTIABLE_DOMAIN_PARAMETERS = [
     "length",
     "length_y",
     "length_z",
+    "mixed_BC_weight",
+    "mixed_BC_velocity_scale",
+    "COR_left",
+    "COR_right",
 ]
 
 ALL_DOMAIN_PARAMETERS = list(DEFAULT_DOMAIN_PARAMETERS.keys())
@@ -50,10 +58,19 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters=N
     assert domain_parameters["length"] > 0, "Length of the simulation box must be positive."
     assert domain_parameters["length_y"] >= 0, "Length of the simulation box in y must be positive."
     assert domain_parameters["length_z"] >= 0, "Length of the simulation box in z must be positive."
-    assert domain_parameters["particle_BC_left"] in [0, 1, 2], "Invalid particle boundary condition for left boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
-    assert domain_parameters["particle_BC_right"] in [0, 1, 2], "Invalid particle boundary condition for right boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
+    assert domain_parameters["particle_BC_left"] in [0, 1, 2, 3, 4], "Invalid particle boundary condition for left boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
+    assert domain_parameters["particle_BC_right"] in [0, 1, 2, 3, 4], "Invalid particle boundary condition for right boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
     assert domain_parameters["field_BC_left"] in [0, 1, 2], "Invalid field boundary condition for left boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
     assert domain_parameters["field_BC_right"] in [0, 1, 2], "Invalid field boundary condition for right boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
+
+    for key in ("mixed_BC_weight", "COR_left", "COR_right"):
+        if not 0 <= domain_parameters[key] <= 1:
+            raise ValueError(f"{key} must lie in [0, 1]")
+    if not domain_parameters["mixed_BC_velocity_scale"] > 0:
+        raise ValueError("mixed_BC_velocity_scale must be positive")
+    for kind in ("particle", "field"):
+        if (domain_parameters[f"{kind}_BC_left"] == 0) != (domain_parameters[f"{kind}_BC_right"] == 0):
+            raise ValueError(f"periodic {kind} boundaries must be paired")
 
     return domain_parameters
 
