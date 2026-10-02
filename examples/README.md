@@ -30,6 +30,7 @@ They are ordered by how much of the code they use, not by how interesting they a
 | `output_and_restart.py` | save, restart and openPMD round trip | the uninterrupted run, bit for bit | ~20 s |
 | `compare_models.py` | one two-stream problem with seven solver settings | the kinetic growth rate; energy conservation | ~2 min on a GPU; `--quick` ~2 min |
 | `collisions.py` | Coulomb slowing-down and perpendicular diffusion | the NRL formulary rates | ~20 s |
+| `relativistic_two_stream.py` | relativistic counter-streaming beams | the cold and warm dispersion relations | default control |
 | `wall_reflection.py` | a velocity-dependent wall, through its flux average | `u^2/(u^2+sigma^2)`, in closed form | ~20 s |
 | `sheath_magnetized.py` | the sheath in a field oblique to the wall | its own limits, and the impact distributions | ~1 h |
 | `sheath_reflection.py` | a wall that returns part of the electron flux | Hobbs and Wesson (1967) | ~4 min |
@@ -39,6 +40,8 @@ They are ordered by how much of the code they use, not by how interesting they a
 
 | script | what it shows | compared with | runs in |
 |---|---|---|---|
+| `electron_field.py` | driven electron waves with uniform, frozen and mobile backgrounds | the accelerated-frame control and kinetic dielectric | `--quick` smoke preset |
+| `invariants.py` | periodic quintic shapes and orbit integration | conservation and refinement controls | `--quick` smoke preset |
 | `conservation.py` | the implicit scheme conserves energy and charge at once | round-off | ~1 min |
 | `optimize_two_stream.py` | gradient ascent on a growth rate, through the whole run | `sqrt(3/8)`, the cold-beam optimum | ~2 min |
 | `sheath_optimization.py` | a wall's reflectivity recovered from the sheath it holds | the value the target was made at | ~11 min |

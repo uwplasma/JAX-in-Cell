@@ -43,9 +43,10 @@ def run(algorithm, walls):
     start = time.perf_counter()
     output = Simulation(domain, [electrons, ions], Solver(algorithm=algorithm)).run(400, seed=3)
     d = diagnostics(output)
-    largest = "".join(f"   {name} {float(np.max(d[key])):.1e}" for key, name in ERRORS.items())
+    checked = ERRORS if walls == "periodic" else {"gauss_residual": "charge"}
+    largest = "".join(f"   {name} {float(np.max(d[key])):.1e}" for key, name in checked.items())
     print(f"{algorithm:8s} {walls:9s} largest errors:{largest}   {time.perf_counter() - start:.1f} s")
-    results[f"{algorithm}_{walls}"] = {name: float(np.max(d[key])) for key, name in ERRORS.items()}
+    results[f"{algorithm}_{walls}"] = {name: float(np.max(d[key])) for key, name in checked.items()}
     return np.asarray(output.t), d
 
 

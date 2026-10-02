@@ -373,6 +373,7 @@ def test_maxwellian_temperature_difference_has_coupled_relaxation_rate(gamma_dt)
         new = collide(collision, jnp.zeros_like(v), v, jnp.full(2 * n, density / n),
                       jnp.full(2 * n, mass_electron), jnp.full(2 * n, -e_charge),
                       ((0, n), (n, n)), ((0, 1),), logarithm, dt, 1.0, 1.0, 1)
+
         def difference(v):
             t = mass_electron / kb * jnp.var(v.reshape(2, n, 3), axis=1).mean(axis=1)
             return t[0] - t[1]
