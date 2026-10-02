@@ -4,6 +4,10 @@ from ._constants import speed_of_light
 
 __all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
 
+def _reflect_position(x, length):
+    phase = (x + length / 2) % (2 * length)
+    return length / 2 - jnp.abs(phase - length)
+
 def set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z,
                            BC_left, BC_right, mixed_BC_weight=1., COR_left=1., COR_right=1., max_vx=1.):
     """One resolved wall impact; q and m carry the same returned fraction.
@@ -27,10 +31,15 @@ def set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y
                        face-restitution*(x_n[0]-face))
     normal = jnp.where(hit | (code == 0), normal, x_n[0])
     normal = jnp.where(lost, jnp.where(left, grid[0]-1.5*dx, grid[-1]+3*dx), normal)
+    elastic_walls = (BC_left == 1) & (BC_right == 1) & (COR_left == 1) & (COR_right == 1)
+    normal = jnp.where(elastic_walls & hit, _reflect_position(x_n[0], box_size_x), normal)
     normal = jnp.where(~lost & (jnp.abs(normal) > box_size_x/2), jnp.nan, normal)
     position = jnp.array([normal, (x_n[1]+box_size_y/2) % box_size_y-box_size_y/2,
                          (x_n[2]+box_size_z/2) % box_size_z-box_size_z/2])
     velocity = v_n.at[0].set(jnp.where(hit & (code != 0), -restitution*v_n[0], v_n[0]))
+    reflections = jnp.floor((jnp.abs(x_n[0])-box_size_x/2)/box_size_x)+1
+    velocity = velocity.at[0].set(jnp.where(elastic_walls & hit,
+                    v_n[0]*jnp.where(reflections % 2 == 0, 1., -1.), velocity[0]))
     return position, jnp.where(lost, 0., velocity), q, jnp.where(lost, 0., q_m), m
 
 
@@ -75,6 +84,7 @@ def set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_
         x_n[0]
     )
 
+    x_n0 = jnp.where((BC_left == 1) & (BC_right == 1), _reflect_position(x_n[0], box_size_x), x_n0)
     return jnp.array([jnp.where((BC_left == 0) & (BC_right == 0),
                                      (x_n[0]+box_size_x/2) % box_size_x-box_size_x/2, x_n0), x_n1, x_n2])
 
