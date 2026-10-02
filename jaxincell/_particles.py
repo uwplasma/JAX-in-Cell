@@ -198,6 +198,8 @@ def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_s, m_s, E_fields_at_x, B_f
     """
 
     def single_particle_step(x, v, q, m, E, B):
+        active = m > 0
+        m = jnp.where(active, m, 1.)
         # Compute initial momentum
         gamma_n = 1/jnp.sqrt(1.0 - jnp.sum((v / c) ** 2))
 
@@ -221,7 +223,7 @@ def boris_step_relativistic(dt, xs_nplushalf, vs_n, q_s, m_s, E_fields_at_x, B_f
         # Update position using new velocity
         x_nplus3_2 = x + dt * v_nplus1
 
-        return x_nplus3_2, v_nplus1
+        return jnp.where(active, x_nplus3_2, x), jnp.where(active, v_nplus1, 0.)
 
     # Vectorize over particles
     xs_nplus3_2, vs_nplus1 = vmap(single_particle_step)(
