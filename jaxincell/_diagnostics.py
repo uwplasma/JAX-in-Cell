@@ -152,8 +152,8 @@ def diagnostics(output):
     output.update({'total_energy': total_energy})
 
     # Total momentum sum(m v) and its change relative to sum(m |v|) at t = 0
-    total_momentum = (jnp.sum(mass_electrons_array[:, None] * output['velocity_electrons'], axis=-2) +
-                      jnp.sum(mass_ions_array[:, None]      * output['velocity_ions'],      axis=-2))
+    total_momentum = (jnp.sum((mass_electrons_t if "masses_over_time" in output else mass_electrons_array)[..., None] * output['velocity_electrons'], axis=-2) +
+                      jnp.sum((mass_ions_t if "masses_over_time" in output else mass_ions_array)[..., None] * output['velocity_ions'],      axis=-2))
     momentum_scale = (jnp.sum(mass_electrons_array * jnp.linalg.norm(output['velocity_electrons'][0], axis=-1)) +
                       jnp.sum(mass_ions_array      * jnp.linalg.norm(output['velocity_ions'][0],      axis=-1)))
     output.update({

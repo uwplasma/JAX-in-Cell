@@ -220,12 +220,8 @@ class Simulation:
         velocities = particle_state["velocities"]
 
         # Leapfrog integration: positions at half-step before the start
-        positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
-            positions + (dt / 2) * velocities, velocities,
-            charges, masses, charge_to_mass_ratios,
-            dx, grid, *box_size, particle_BC_left, particle_BC_right,
-            **{key: domain_parameters[key] for key in
-               ("mixed_BC_weight", "COR_left", "COR_right", "mixed_BC_velocity_scale")})
+        positions_plus1_2 = positions + dt/2*velocities
+        qs, ms, q_ms = charges, masses, charge_to_mass_ratios
 
         positions_minus1_2 = set_BC_positions(
             positions - (dt / 2) * velocities,
@@ -309,7 +305,7 @@ class Simulation:
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
-            "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
+            "time_array":  (jnp.arange(total_steps) + 1) * dt,
             "grid": grid,
             "dt": dt,
             "plasma_frequency": plasma_frequency,

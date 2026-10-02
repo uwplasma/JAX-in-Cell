@@ -69,11 +69,11 @@ def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, 
 
     # Apply boundary conditions
     charge_left = jnp.select(
-        [particle_BC_left == 0, particle_BC_left == 1, particle_BC_left == 2],
+        [particle_BC_left == 0, (particle_BC_left == 1) | (particle_BC_left == 3) | (particle_BC_left == 4), particle_BC_left == 2],
         [extra_charge_right, extra_charge_left, 0]
     )
     charge_right = jnp.select(
-        [particle_BC_right == 0, particle_BC_right == 1, particle_BC_right == 2],
+        [particle_BC_right == 0, (particle_BC_right == 1) | (particle_BC_right == 3) | (particle_BC_right == 4), particle_BC_right == 2],
         [extra_charge_left, extra_charge_right, 0]
     )
 

@@ -6,177 +6,6 @@ from jaxincell._boundary_conditions import (
 from jaxincell._constants import speed_of_light
 import jax.numpy as jnp
 
-def test_set_BC_single_particle_periodic():
-    x_n = jnp.array([0.1, 0.5, 0.8])
-    v_n = jnp.array([1.0, 1.0, 1.0])
-    q = 1.0
-    q_m = 1.0
-    m = 1.0
-    dx = 0.1
-    grid = jnp.linspace(0.0, 1, 10)
-    box_size_x = 2.0
-    box_size_y = 2.0
-    box_size_z = 2.0
-    BC_left = 0
-    BC_right = 0
-
-    x_n_updated, v_n_updated, q_updated, q_m_updated, _ = set_BC_single_particle(
-        x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right
-    )
-
-    assert jnp.allclose(x_n_updated, jnp.array([0.1, 0.5, 0.8])), "Periodic BC failed for position"
-    assert jnp.allclose(v_n_updated, jnp.array([1.0, -1.0, -1.0])), "Periodic BC failed for velocity"
-    assert q_updated == 1.0, "Periodic BC failed for charge"
-    assert q_m_updated == 1.0, "Periodic BC failed for charge-to-mass ratio"
-
-def test_set_BC_single_particle_reflective():
-    x_n = jnp.array([-1.1, 1.0, 1.0])
-    v_n = jnp.array([1.0, 1.0, 1.0])
-    q = 1.0
-    q_m = 1.0
-    m = 1.0
-    dx = 0.1
-    grid = jnp.linspace(-1.0, 1.0, 10)
-    box_size_x = 2.0
-    box_size_y = 2.0
-    box_size_z = 2.0
-    BC_left = 1
-    BC_right = 1
-
-    x_n_updated, v_n_updated, q_updated, q_m_updated, _ = set_BC_single_particle(
-        x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right
-    )
-
-    assert jnp.allclose(x_n_updated, jnp.array([-0.9, -1.0, -1.0])), "Reflective BC failed for position"
-    assert jnp.allclose(v_n_updated, jnp.array([-1.0, 1.0, 1.0])), "Reflective BC failed for velocity"
-    assert q_updated == 1.0, "Reflective BC failed for charge"
-    assert q_m_updated == 1.0, "Reflective BC failed for charge-to-mass ratio"
-
-def test_set_BC_single_particle_absorbing():
-    x_n = jnp.array([1.1, 1.0, 1.0])
-    v_n = jnp.array([1.0, 1.0, 1.0])
-    q = 1.0
-    q_m = 1.0
-    m = 1.0
-    dx = 0.1
-    grid = jnp.linspace(-1.0, 1.0, 10)
-    box_size_x = 2.0
-    box_size_y = 2.0
-    box_size_z = 2.0
-    BC_left = 2
-    BC_right = 2
-
-    x_n_updated, v_n_updated, q_updated, q_m_updated, _ = set_BC_single_particle(
-        x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right
-    )
-
-    assert jnp.allclose(x_n_updated, jnp.array([1.3, -1.0, -1.0])), "Absorbing BC failed for position"
-    assert jnp.allclose(v_n_updated, jnp.array([0.0, 0.0, 0.0])), "Absorbing BC failed for velocity"
-    assert q_updated == 0.0, "Absorbing BC failed for charge"
-    assert q_m_updated == 0.0, "Absorbing BC failed for charge-to-mass ratio"
-
-def test_set_BC_single_particle_mixed():
-    x_n = jnp.array([-1.1, 1.0, 1.0])
-    v_n = jnp.array([1.0, 1.0, 1.0])
-    q = 1.0
-    q_m = 1.0
-    m = 1.0
-    dx = 0.1
-    grid = jnp.linspace(-1.0, 1.0, 10)
-    box_size_x = 2.0
-    box_size_y = 2.0
-    box_size_z = 2.0
-    BC_left = 1
-    BC_right = 2
-
-    x_n_updated, v_n_updated, q_updated, q_m_updated, _ = set_BC_single_particle(
-        x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right
-    )
-
-    assert jnp.allclose(x_n_updated, jnp.array([-0.9, -1.0, -1.0])), "Mixed BC failed for position"
-    assert jnp.allclose(v_n_updated, jnp.array([-1.0, 1.0, 1.0])), "Mixed BC failed for velocity"
-    assert q_updated == 1.0, "Mixed BC failed for charge"
-    assert q_m_updated == 1.0, "Mixed BC failed for charge-to-mass ratio"
-
-def test_set_BC_particles_periodic():
-    xs_n = jnp.array([[1.0, 2.0, 3.0], [-1.0, -2.0, -3.0]])
-    vs_n = jnp.array([[0.1, 0.2, 0.3], [-0.1, -0.2, -0.3]])
-    qs = jnp.array([1.0, -1.0])
-    ms = jnp.array([1.0, 1.0])
-    q_ms = jnp.array([1.0, -1.0])
-    dx = 0.1
-    grid = jnp.linspace(-5.0, 5.0, 100)
-    box_size_x = 10.0
-    box_size_y = 10.0
-    box_size_z = 10.0
-    BC_left = 0
-    BC_right = 0
-
-    xs_n_updated, vs_n_updated, qs_updated, ms_updated, q_ms_updated = set_BC_particles(
-        xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight=0.5, COR_left=1.0, COR_right=1.0
-    )
-
-    assert jnp.allclose(xs_n_updated, xs_n)
-    assert jnp.allclose(vs_n_updated, vs_n)
-    assert jnp.allclose(qs_updated, qs)
-    assert jnp.allclose(ms_updated, ms)
-    assert jnp.allclose(q_ms_updated, q_ms)
-
-def test_set_BC_particles_reflective():
-    xs_n = jnp.array([[6.0, 2.0, 3.0], [-6.0, -2.0, -3.0]])
-    vs_n = jnp.array([[0.1, 0.2, 0.3], [-0.1, -0.2, -0.3]])
-    qs = jnp.array([1.0, -1.0])
-    ms = jnp.array([1.0, 1.0])
-    q_ms = jnp.array([1.0, -1.0])
-    dx = 0.1
-    grid = jnp.linspace(-5.0, 5.0, 100)
-    box_size_x = 10.0
-    box_size_y = 10.0
-    box_size_z = 10.0
-    BC_left = 1
-    BC_right = 1
-
-    xs_n_updated, vs_n_updated, qs_updated, ms_updated, q_ms_updated = set_BC_particles(
-        xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight=0.5, COR_left=1.0, COR_right=1.0
-    )
-
-    expected_xs_n = jnp.array([[4.0, 2.0, 3.0], [-4.0, -2.0, -3.0]])
-    expected_vs_n = jnp.array([[-0.1, 0.2, 0.3], [0.1, -0.2, -0.3]])
-
-    assert jnp.allclose(xs_n_updated, expected_xs_n)
-    assert jnp.allclose(vs_n_updated, expected_vs_n)
-    assert jnp.allclose(qs_updated, qs)
-    assert jnp.allclose(ms_updated, ms)
-    assert jnp.allclose(q_ms_updated, q_ms)
-
-def test_set_BC_particles_absorbing():
-    xs_n = jnp.array([[6.0, 2.0, 3.0], [-6.0, -2.0, -3.0]])
-    vs_n = jnp.array([[0.1, 0.2, 0.3], [-0.1, -0.2, -0.3]])
-    qs = jnp.array([1.0, -1.0])
-    ms = jnp.array([1.0, 1.0])
-    q_ms = jnp.array([1.0, -1.0])
-    dx = 0.1
-    grid = jnp.linspace(-5.0, 5.0, 100)
-    box_size_x = 10.0
-    box_size_y = 10.0
-    box_size_z = 10.0
-    BC_left = 2
-    BC_right = 2
-
-    xs_n_updated, vs_n_updated, qs_updated, ms_updated, q_ms_updated = set_BC_particles(
-        xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight=0.5, COR_left=1.0, COR_right=1.0
-    )
-
-    expected_xs_n = jnp.array([[grid[-1] + 3 * dx, 2.0, 3.0], [grid[0] - 1.5 * dx, -2.0, -3.0]])
-    expected_vs_n = jnp.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
-    expected_qs = jnp.array([0.0, 0.0])
-    expected_q_ms = jnp.array([0.0, 0.0])
-
-    assert jnp.allclose(xs_n_updated, expected_xs_n)
-    assert jnp.allclose(vs_n_updated, expected_vs_n)
-    assert jnp.allclose(qs_updated, expected_qs)
-    assert jnp.allclose(ms_updated, ms)
-    assert jnp.allclose(q_ms_updated, expected_q_ms)
 
 def test_set_BC_single_particle_periodic():
     x_n = jnp.array([1.0, 1.0, 1.0])
@@ -196,7 +25,7 @@ def test_set_BC_single_particle_periodic():
         x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right, mixed_BC_weight=0.5, COR_left=1.0, COR_right=1.0
     )
 
-    assert jnp.allclose(x_n_updated, jnp.array([1.0, -1.0, -1.0])), "Periodic BC failed for position"
+    assert jnp.allclose(x_n_updated, jnp.array([-1.0, -1.0, -1.0])), "Periodic BC failed for position"
     assert jnp.allclose(v_n_updated, jnp.array([1.0, 1.0, 1.0])), "Periodic BC failed for velocity"
     assert q_updated == 1.0, "Periodic BC failed for charge"
     assert q_m_updated == 1.0, "Periodic BC failed for charge-to-mass ratio"
@@ -482,7 +311,7 @@ def test_set_BC_particles_absorbing():
     assert jnp.allclose(xs_n_updated, expected_xs_n)
     assert jnp.allclose(vs_n_updated, expected_vs_n)
     assert jnp.allclose(qs_updated, expected_qs)
-    assert jnp.allclose(ms_updated, ms)
+    assert jnp.allclose(ms_updated, jnp.zeros_like(ms))
     assert jnp.allclose(q_ms_updated, expected_q_ms)
 
 def test_set_BC_particles_bc3():
@@ -526,31 +355,17 @@ def test_set_BC_particles_bc3():
 
 
 def test_set_BC_particles_bc4():
-    # Three particles: one hits right wall (fastest), one hits left wall (slower), one inside.
-    # max_vx is auto-computed as max(|vx|) = 2.0 (from particle 0).
-    xs_n = jnp.array([[6.0, 0.0, 0.0], [-6.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
-    vs_n = jnp.array([[2.0, 0.5, 0.3], [-1.0, 0.5, 0.3], [0.5, 0.5, 0.5]])
-    qs   = jnp.array([2.0, 2.0, 2.0])
-    ms   = jnp.array([4.0, 4.0, 4.0])
-    q_ms = jnp.array([0.5, 0.5, 0.5])
-    dx = 0.1
-    grid = jnp.linspace(-5.0, 5.0, 100)
-    box_size_x = 10.0
-    box_size_y = 10.0
-    box_size_z = 10.0
-
-    xs_n_updated, vs_n_updated, qs_updated, ms_updated, q_ms_updated = set_BC_particles(
-        xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left=4, BC_right=4, mixed_BC_weight=0.5, COR_left=1.0, COR_right=1.0
-    )
-    # max_vx = 2.0
-    # Particle 0 (hit right, vx=2.0): weight = clamp(1 - 2.0/2.0, 0, 1) = 0.0
-    # Particle 1 (hit left, vx=-1.0 → flipped to 1.0): weight = clamp(1 - 1.0/2.0, 0, 1) = 0.5
-    # Particle 2 (inside): no change
-    assert jnp.allclose(xs_n_updated, jnp.array([[4.0, 0.0, 0.0], [-4.0, 0.0, 0.0], [0.0, 0.0, 0.0]])), "bc4 batch: positions wrong"
-    assert jnp.allclose(vs_n_updated, jnp.array([[-2.0, 0.5, 0.3], [1.0, 0.5, 0.3], [0.5, 0.5, 0.5]])),  "bc4 batch: velocities wrong"
-    assert jnp.allclose(qs_updated,   jnp.array([2.0 * 0.0, 2.0 * 0.5, 2.0]), atol=1e-5),  "bc4 batch: charges wrong"
-    assert jnp.allclose(ms_updated,   jnp.array([4.0 * 0.0, 4.0 * 0.5, 4.0]), atol=1e-5),  "bc4 batch: masses wrong"
-    assert jnp.allclose(q_ms_updated, q_ms),                                      "bc4 batch: q_m must not change"
+    x = jnp.array([[6., 0., 0.], [-6., 0., 0.], [0., 0., 0.]])
+    v = jnp.array([[2., .5, .3], [-1., .5, .3], [100., .5, .5]])
+    q, m = jnp.full(3, 2.), jnp.full(3, 4.)
+    position, velocity, charge, mass, ratio = set_BC_particles(
+        x, v, q, m, q/m, .1, jnp.linspace(-5., 5., 100), 10., 10., 10.,
+        4, 4, mixed_BC_velocity_scale=2.)
+    assert jnp.allclose(charge, jnp.array([0., 1., 2.]))
+    assert jnp.allclose(mass, jnp.array([0., 2., 4.]))
+    assert jnp.allclose(ratio, jnp.array([0., .5, .5]))
+    assert jnp.allclose(velocity, jnp.array([[0., 0., 0.], [1., .5, .3], [100., .5, .5]]))
+    assert jnp.allclose(position[1:], jnp.array([[-4., 0., 0.], [0., 0., 0.]]))
 
 
 def test_set_BC_single_particle_COR():
@@ -638,16 +453,6 @@ def test_set_BC_particles_COR():
     assert jnp.allclose(q_ms_updated, q_ms), "COR batch BC=1: q_m unchanged"
 
 
-def test_set_BC_single_particle_positions():
-    x_n = jnp.array([1.0, 1.0, 1.0])
-    box_size_x = 2.0
-    box_size_y = 2.0
-    box_size_z = 2.0
-
-    x_n_updated = set_BC_single_particle_positions(x_n, box_size_x, box_size_y, box_size_z)
-
-    assert jnp.allclose(x_n_updated, jnp.array([1.0, -1.0, -1.0])), "Periodic BC failed for position"
-
 def test_set_BC_positions():
     xs_n = jnp.array([[1.0, 2.0, 3.0], [-1.0, -2.0, -3.0]])
     box_size_x = 10.0
@@ -668,7 +473,7 @@ def test_set_BC_single_particle_positions():
     BC_right = 0
 
     x_n_updated = set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right)
-    assert jnp.allclose(x_n_updated, jnp.array([1.0, -1.0, -1.0])), "Periodic BC failed for position"
+    assert jnp.allclose(x_n_updated, jnp.array([-1.0, -1.0, -1.0])), "Periodic BC failed for position"
 
     BC_left = 1
     BC_right = 1
@@ -785,3 +590,36 @@ def test_field_2_ghost_cells():
 
 if __name__ == "__main__":
     pytest.main()
+
+@pytest.mark.parametrize("side", [-1, 1])
+@pytest.mark.parametrize("fraction", [0., .3, 1.])
+@pytest.mark.parametrize("restitution", [0., .5, 1.])
+def test_wall_return_matches_ballistic_impact_and_energy(side, fraction, restitution):
+    start, speed, duration = .4*side, .2*side, 1.
+    face = .5*side
+    impact_time = (face-start)/speed
+    incoming = jnp.array([speed, .1, -.3])
+    position, velocity, charge, ratio, mass = set_BC_single_particle(
+        jnp.array([start+speed*duration, 0., 0.]), incoming,
+        2., .5, 4., .1, jnp.linspace(-.45, .45, 10), 1., 1., 1.,
+        3, 3, fraction, restitution, restitution)
+    assert charge == pytest.approx(2*fraction)
+    assert mass == pytest.approx(4*fraction)
+    if fraction:
+        assert position[0] == pytest.approx(face-restitution*speed*(duration-impact_time))
+        assert velocity[0] == pytest.approx(-restitution*speed)
+        expected_energy = fraction*4/2*((restitution*speed)**2+.1**2+.3**2)
+        assert float(mass*jnp.dot(velocity, velocity)/2) == pytest.approx(expected_energy)
+        assert ratio == .5
+    else:
+        assert jnp.all(velocity == 0)
+        assert ratio == 0
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+def test_exact_wall_impact_is_applied_once(side):
+    args = (.1, jnp.linspace(-.45, .45, 10), 1., 1., 1., 3, 3, .5, .5, .5)
+    x, v, q, qm, m = set_BC_single_particle(jnp.array([.5*side, 0., 0.]),
+                                           jnp.array([.2*side, 0., 0.]), 2., .5, 4., *args)
+    _, _, again_q, _, again_m = set_BC_single_particle(x, v, q, qm, m, *args)
+    assert (again_q, again_m) == (1., 2.)

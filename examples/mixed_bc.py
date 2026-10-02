@@ -1,37 +1,40 @@
-## mixed_bc.py
-# Example of mixed boundary conditions (BC=3): at each wall collision, a fraction
-# of the macroparticle reflects and the rest is absorbed, controlled by mixed_BC_weight.
-# mixed_BC_weight=1.0 is equivalent to fully reflective (BC=1);
-# mixed_BC_weight=0.0 is equivalent to fully absorbing (BC=2).
-from jaxincell import plot
-from jaxincell import simulation, diagnostics
-import jax.numpy as jnp
-from jax import block_until_ready
+"""Near-ballistic control of fractional marker return at both walls."""
+import numpy as np
+from jaxincell import Simulation
 
-input_parameters = {
-    "length"                                        : 1,     # dimensions of the simulation box in (x, y, z)
-    "vth_electrons_over_c_x"                        : 0.1,   # thermal velocity of electrons over speed of light
-    "ion_temperature_over_electron_temperature_x"   : 1e-9,  # cold ions (fixed neutralizing background)
-    "ion_mass_over_proton_mass"                     : 1e9,   # heavy ions (essentially stationary)
-    "timestep_over_spatialstep_times_c"             : 0.5,   # dt * speed_of_light / dx
-    "particle_BC_left"                              : 3,     # mixed BC at left wall
-    "particle_BC_right"                             : 3,     # mixed BC at right wall
-    "field_BC_left"                                 : 1,     # Dirichlet (E=0) at left wall
-    "field_BC_right"                                : 1,     # Dirichlet (E=0) at right wall
-    "mixed_BC_weight"                               : 0.5,   # fraction of each macroparticle reflected; remainder absorbed
-    "print_info"                                    : True,  # print information about the simulation
-}
 
-solver_parameters = {
-    "field_solver"           : 0,    # Algorithm to solve E and B fields - 0: Curl_EB, 1: Gauss_1D_FFT, 2: Gauss_1D_Cartesian, 3: Poisson_1D_FFT
-    "number_grid_points"     : 32,   # Number of grid points
-    "number_pseudoelectrons" : 5000, # Number of pseudoelectrons
-    "total_steps"            : 500,  # Total number of time steps
-}
+def run_case(return_fraction=.5, restitution=1., code=3):
+    count = 32
+    positions = np.zeros((count, 3))
+    positions[:, 0] = np.linspace(-.004, .004, count)
+    velocities = np.zeros_like(positions)
+    velocities[:, 0] = 6e7*(-1.)**np.arange(count)
+    species = {"number_pseudoparticles": count, "weight": 1e-20,
+               "initial_positions": positions, "initial_velocities": velocities,
+               "vth_over_c_x": .01, "vth_over_c_y": 0., "vth_over_c_z": 0.}
+    parameters = {
+        "domain_parameters": {"length": .01, "number_grid_points": 16, "total_steps": 160,
+                              "timestep_over_spatialstep_times_c": .5,
+                              "particle_BC_left": code, "particle_BC_right": code,
+                              "field_BC_left": 1, "field_BC_right": 1,
+                              "mixed_BC_weight": return_fraction,
+                              "mixed_BC_velocity_scale": 1.2e8,
+                              "COR_left": restitution, "COR_right": restitution},
+        "species_parameters": {"electrons": {"electrons0": species},
+                               "ions": {"ions0": {**species, "initial_velocities": np.zeros_like(velocities)}}},
+        "solver_parameters": {"field_solver": 2, "filter_passes": 0, "print_info": False},
+    }
+    output = Simulation(parameters).run()
+    mass = np.asarray(output["masses_over_time"])[:, :count, 0]
+    speed2 = np.sum(np.asarray(output["velocities"])[:, :count]**2, axis=-1)
+    return np.asarray(output["time_array"]), np.sum(mass*speed2/2, axis=1)
 
-output = block_until_ready(simulation(input_parameters, **solver_parameters))
 
-# Post-process: segregate ions/electrons, compute energies, compute FFT
-diagnostics(output)
-
-plot(output)
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    time, energy = run_case()
+    plt.plot(time, energy/energy[0])
+    plt.xlabel("time (s)")
+    plt.ylabel("electron kinetic energy / first snapshot")
+    plt.tight_layout()
+    plt.savefig("mixed_bc.png", dpi=140)
