@@ -41,7 +41,7 @@ def test_clean_and_initialize_domain_parameters_rejects_invalid_values():
     Cases:
     - total_steps must be a positive integer.
     - length must be positive and transverse lengths must be nonnegative.
-    - particle and field boundary conditions must be one of 0, 1, or 2.
+    - particle boundary codes are 0 through 4; field codes are 0 through 2.
     """
     input_parameters = {"total_steps": -1}
     with pytest.raises(AssertionError, match="Total number of time steps must be an integer."):
@@ -62,13 +62,13 @@ def test_clean_and_initialize_domain_parameters_rejects_invalid_values():
     
     for bc_key in ["particle_BC_left", "particle_BC_right", "field_BC_left", "field_BC_right"]:
         input_parameters = {bc_key: -1}
-        with pytest.raises(AssertionError, match="Invalid .* boundary condition .* Must be 0 \\(periodic\\), 1 \\(reflecting\\), or 2 \\(absorbing\\)."):
+        with pytest.raises(AssertionError, match="Invalid .* boundary condition"):
             clean_and_initialize_domain_parameters({}, input_parameters)
         input_parameters = {bc_key: 5}
-        with pytest.raises(AssertionError, match="Invalid .* boundary condition .* Must be 0 \\(periodic\\), 1 \\(reflecting\\), or 2 \\(absorbing\\)."):
+        with pytest.raises(AssertionError, match="Invalid .* boundary condition"):
             clean_and_initialize_domain_parameters({}, input_parameters)
         input_parameters = {bc_key: 1.5}
-        with pytest.raises(AssertionError, match="Invalid .* boundary condition .* Must be 0 \\(periodic\\), 1 \\(reflecting\\), or 2 \\(absorbing\\)."):
+        with pytest.raises(AssertionError, match="Invalid .* boundary condition"):
             clean_and_initialize_domain_parameters({}, input_parameters)
 
 
@@ -98,7 +98,7 @@ def test_build_domain_hash_is_stable_and_sensitive_to_values():
 @pytest.mark.parametrize("kind", ["particle", "field"])
 @pytest.mark.parametrize("left,right", [(0, 1), (0, 2), (1, 0), (2, 0)])
 def test_periodic_boundaries_require_a_partner(kind, left, right):
-    with pytest.raises(AssertionError, match=f"Periodic {kind} boundaries must be paired"):
+    with pytest.raises(ValueError, match=f"periodic {kind} boundaries must be paired"):
         clean_and_initialize_domain_parameters({f"{kind}_BC_left": left, f"{kind}_BC_right": right})
 
 
@@ -123,3 +123,23 @@ def test_optional_transverse_cells_none_selects_one_dimensional_geometry():
     parameters = clean_and_initialize_domain_parameters({"number_grid_points_y": None,
                                                          "number_grid_points_z": None})
     assert parameters["number_grid_points_y"] == parameters["number_grid_points_z"] == 0
+
+
+@pytest.mark.parametrize("parameter", ["mixed_BC_weight", "COR_left", "COR_right"])
+@pytest.mark.parametrize("value", [-.1, 1.1, float("nan")])
+def test_wall_return_and_restitution_fractions_reject_invalid_values(parameter, value):
+    with pytest.raises(ValueError, match=parameter):
+        clean_and_initialize_domain_parameters({parameter: value})
+
+
+@pytest.mark.parametrize("value", [0., -1., float("nan")])
+def test_velocity_dependent_return_requires_a_positive_scale(value):
+    with pytest.raises(ValueError, match="mixed_BC_velocity_scale"):
+        clean_and_initialize_domain_parameters({"mixed_BC_velocity_scale": value})
+
+
+@pytest.mark.parametrize("kind", ["particle", "field"])
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_one_periodic_face_cannot_be_combined_with_a_wall(kind, side):
+    with pytest.raises(ValueError, match=f"periodic {kind} boundaries must be paired"):
+        clean_and_initialize_domain_parameters({f"{kind}_BC_{side}": 1})
