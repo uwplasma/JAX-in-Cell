@@ -58,20 +58,22 @@ format 1. `load_state(path, simulation)` checks the saved shape before continuat
 | `algorithm` | scheme | conserves | stability |
 |---|---|---|---|
 | `"explicit"` | second-order leapfrog with the Boris rotation; fast | energy error bounded rather than growing | $\omega_p\Delta t \lesssim 2$, $c\Delta t \le \Delta x$, $\Delta x \lesssim \lambda_D$ |
-| `"implicit"` | Crank-Nicolson, relativistic or not; about {{ scaling_implicit_over_explicit }} times an explicit step | energy and the discrete Gauss law to round-off; gives up the exact momentum | unconditional |
+| `"implicit"` | Crank-Nicolson, relativistic or not; about {{ scaling_implicit_over_explicit }} times an explicit step | energy at converged coupling and discrete Gauss law; gives up exact momentum | periodic linear vacuum is unconditional; particle Picard convergence is required |
 
-Use the implicit scheme when the energy budget matters, when the step you want breaks an
-explicit limit, or when the Debye length cannot be resolved.
+Use the implicit scheme when the energy budget matters or a desired step breaks an
+explicit limit. Verify particle convergence and refine the step and mesh for the observable;
+stable field inversion does not establish accuracy on an unresolved Debye scale.
 
 ```python
 Solver(algorithm="implicit", picard_iterations=8, substeps=2)
 ```
 
 * The Gauss law holds whatever the iteration count.
-* The energy error falls geometrically with `picard_iterations` —
+* In the convergent verification case, the energy error falls with `picard_iterations` —
   {{ energy_error_max_implicit_1 }} at one, {{ energy_error_max_implicit_4 }} at four,
   {{ energy_error_max_implicit_8 }} at eight — so raise it first if the budget is not
-  tight enough.
+  tight enough. A noncontractive iteration instead needs a smaller step; optional
+  `picard_tolerance` checks the accepted field/orbit residual ({doc}`../numerics/implicit`).
 * `substeps` resolves orbits that turn inside one field step without refining the field
   grid.
 * Both schemes are differentiable; {doc}`../numerics/implicit` explains why the iteration
