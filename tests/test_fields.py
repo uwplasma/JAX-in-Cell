@@ -146,6 +146,11 @@ def test_E_from_Gauss_1D_Cartesian_solves_discrete_divergence():
     )
     assert_allclose(electric_field, jnp.array([0.5, 0.375, 0.625, 0.0]))
 
+    # Periodic box: same differences, with the uniform part of E removed.
+    periodic_field = E_from_Gauss_1D_Cartesian(charge_density, dx, periodic=True)
+    assert_allclose(periodic_field, electric_field - jnp.mean(electric_field), atol=1e-12)
+    assert abs(float(jnp.mean(periodic_field))) < 1e-12
+
 
 def test_curlE_boundary_condition_cases():
     """Test jaxincell._fields.curlE.

@@ -1,7 +1,9 @@
 import jax.numpy as jnp
+import numpy as np
 from jax import lax
 from jax.debug import print as jprint
 from jax.random import PRNGKey, normal, uniform
+from jax.scipy.special import erfinv
 
 from ._constants import (
     elementary_charge,
@@ -48,6 +50,14 @@ def build_domain_state(domain_parameters):
         "grid": grid,
     }
 
+def van_der_corput(number, base):
+    """First `number` terms of the base-`base` van der Corput sequence, in (0, 1)."""
+    index, value, scale = np.arange(1, number + 1), np.zeros(number), 1.0 / base
+    while index.any():
+        index, digit = np.divmod(index, base)
+        value, scale = value + digit * scale, scale / base
+    return jnp.asarray(value)
+
 def initialize_species_phase_space(species, seed_position, seed_velocity, number_particles, box_size):
     positions = []
     velocities = []
@@ -69,12 +79,11 @@ def initialize_species_phase_space(species, seed_position, seed_velocity, number
             * jnp.sin(perturbation_wavenumber * axis_positions)
         )
 
-        axis_velocities = (
-            species[f"vth_over_c_{axis}"]
-            * speed_of_light
-            / jnp.sqrt(2)
-            * normal(PRNGKey(seed_velocity + axis_index + 4), shape=(number_particles,))
-        )
+        if species[f"quiet_velocities_{axis}"]:  # quiet start: Gaussian quantiles in van der Corput order
+            unit_normal = jnp.sqrt(2) * erfinv(2 * van_der_corput(number_particles, (2, 3, 5)[axis_index]) - 1)
+        else:
+            unit_normal = normal(PRNGKey(seed_velocity + axis_index + 4), shape=(number_particles,))
+        axis_velocities = species[f"vth_over_c_{axis}"] * speed_of_light / jnp.sqrt(2) * unit_normal
         axis_velocities += species[f"drift_speed_{axis}"]
         if species[f"velocity_plus_minus_{axis}"]:
             axis_velocities *= (-1) ** jnp.arange(0, number_particles)
@@ -374,7 +383,8 @@ def initialize_field_state(domain_parameters, solver_parameters, external_field_
     charge_density = calculate_charge_density(positions, charges, dx, grid, domain_parameters["particle_BC_left"], domain_parameters["particle_BC_right"],
                                             solver_parameters["filter_passes"], solver_parameters["filter_alpha"], solver_parameters["filter_strides"],
                                             field_BC_left=domain_parameters["field_BC_left"], field_BC_right=domain_parameters["field_BC_right"])
-    E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx)
+    periodic = domain_parameters["field_BC_left"] == 0 and domain_parameters["field_BC_right"] == 0
+    E_field_x = E_from_Gauss_1D_Cartesian(charge_density, dx, periodic=periodic)
     E_field = jnp.stack((E_field_x, jnp.zeros_like(grid), jnp.zeros_like(grid)), axis=1)
 
     G = domain_parameters['number_grid_points']

@@ -484,3 +484,16 @@ def test_pdf_over_frames_numpy_normalization_and_empty_bins():
     empty_pdf = plot_mod._pdf_over_frames_numpy(np.empty((3, 0)), edges)
     assert empty_pdf.shape == (3, 2)
     np.testing.assert_allclose(empty_pdf, np.zeros((3, 2), dtype=np.float32))
+
+
+def test_plot_energy_panel_shows_charge_and_momentum_errors(monkeypatch):
+    out = _synthetic_output(use_species=True, include_energy=True)
+    T = out["electric_field"].shape[0]
+    out["gauss_error_Linf_rel"] = np.full(T, 1e-13)
+    out["momentum_error_rel"] = np.linspace(0.0, 1e-6, T)
+    figures = []
+    monkeypatch.setattr(plot_mod.plt, "close", lambda fig=None: figures.append(fig))
+    plot_mod.plot(out, direction="x", show=False, save_mp4=None)
+    labels = [line.get_label() for ax in figures[-1].axes for line in ax.get_lines()]
+    assert "Relative charge (Gauss's law) error" in labels
+    assert "Relative momentum change" in labels

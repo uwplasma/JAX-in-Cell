@@ -1,3 +1,5 @@
+from functools import partial
+
 from jax import jit
 import jax.numpy as jnp
 from ._boundary_conditions import field_ghost_cells_E, field_ghost_cells_B
@@ -7,14 +9,18 @@ __all__ = ['E_from_Gauss_1D_FFT', 'E_from_Poisson_1D_FFT', 'E_from_Gauss_1D_Cart
 
 @jit
 def E_from_Gauss_1D_FFT(charge_density, dx):
-    """
-    Solve for the electric field E = -d(phi)/dx using FFT, 
-    where phi is derived from the 1D Gauss' law equation.
-    Parameters:
-    charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
-    dx : float, grid spacing in the x-direction
+    """Solve Gauss's law for the longitudinal electric field with an FFT.
+
+    Solves ``dE/dx = rho / epsilon_0`` in Fourier space, ``E(k) = -i rho(k) / (epsilon_0 k)``,
+    with the mean field set to zero. Exact for the discrete Fourier modes of a
+    periodic box.
+
+    Args:
+        charge_density (array): Charge density on the grid, shape ``(G,)``, in C/m^3.
+        dx (float): Grid spacing in metres.
+
     Returns:
-    E : 1D numpy array, electric field
+        array: Electric field on the grid, shape ``(G,)``, in V/m.
     """
     # Get the number of grid points
     nx = len(charge_density)
@@ -32,14 +38,18 @@ def E_from_Gauss_1D_FFT(charge_density, dx):
 
 @jit
 def E_from_Poisson_1D_FFT(charge_density, dx):
-    """
-    Solve for the electric field E = -d(phi)/dx using FFT, 
-    where phi is derived from the 1D Poisson equation.
-    Parameters:
-    charge_density : 1D numpy array, source term (right-hand side of Poisson equation)
-    dx : float, grid spacing in the x-direction
+    """Solve Poisson's equation for the potential with an FFT, then differentiate it.
+
+    Solves ``d2 phi/dx2 = -rho / epsilon_0`` in Fourier space and returns
+    ``E = -d phi/dx``, with the mean potential set to zero. Gives the same field as
+    :func:`E_from_Gauss_1D_FFT` and is provided as an independent route to it.
+
+    Args:
+        charge_density (array): Charge density on the grid, shape ``(G,)``, in C/m^3.
+        dx (float): Grid spacing in metres.
+
     Returns:
-    E : 1D numpy array, electric field
+        array: Electric field on the grid, shape ``(G,)``, in V/m.
     """
     # Get the number of grid points
     nx = len(charge_density)
@@ -59,8 +69,8 @@ def E_from_Poisson_1D_FFT(charge_density, dx):
     E = jnp.fft.ifft(E_k).real
     return E
 
-@jit
-def E_from_Gauss_1D_Cartesian(charge_density, dx):
+@partial(jit, static_argnames=("periodic",))
+def E_from_Gauss_1D_Cartesian(charge_density, dx, periodic=False):
     """
     Solve for the electric field at t=0 (E0) using the charge density distribution 
     and applying Gauss's law in a 1D system.
@@ -68,16 +78,21 @@ def E_from_Gauss_1D_Cartesian(charge_density, dx):
     Args:
         charge_density : 1D numpy array, source term (right-hand side of Gauss equation)
         dx : float, grid spacing in the x-direction
+        periodic : bool, periodic box; the uniform part of E is then set to zero
     
     Returns:
         array: The electric field at each grid point due to the particles, shape (G,).
     """
     # Construct divergence matrix for solving Gauss' Law
     divergence_matrix = jnp.diag(jnp.ones(len(charge_density)))-jnp.diag(jnp.ones(len(charge_density)-1),k=-1)
-    # divergence_matrix = divergence_matrix.at[0, -1].set(-1.0)
     
     # Solve for the electric field using Gauss' law in the 1D case
     E_field_from_Gauss = (dx / epsilon_0) * jnp.linalg.solve(divergence_matrix, charge_density)
+    # A periodic divergence matrix (corner entry -1) is singular: Gauss's law fixes E only up
+    # to a constant. The cumulative sum above fixes E at the left edge instead; <E> = 0 is the
+    # physical gauge of a periodic box, and the choice the FFT solvers make.
+    if periodic:
+        E_field_from_Gauss = E_field_from_Gauss - jnp.mean(E_field_from_Gauss)
     return E_field_from_Gauss
 
 
@@ -174,6 +189,22 @@ def field_update(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
 
 @jit
 def field_update1(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
+    """Advance the fields by ``dt``: Ampere's law first, then Faraday's law.
+
+    ``E`` is updated with the curl of the current ``B`` and the current density
+    ``j``; ``B`` is then updated with the curl of the new ``E``. Used for the
+    first half step of the explicit scheme.
+
+    Args:
+        E_fields, B_fields (array): Fields on the grid, shape ``(G, 3)``.
+        dx (float): Cell size.
+        dt (float): Time increment (half a step in the explicit scheme).
+        j (array): Current density, shape ``(G, 3)``.
+        field_BC_left, field_BC_right (int): Field boundary codes.
+
+    Returns:
+        tuple: Updated ``(E, B)``.
+    """
     #First, update E (Ampere's)
     curl_B = curlB(B_fields, E_fields, dx, dt, field_BC_left, field_BC_right)
     E_fields += dt*((speed_of_light**2)*curl_B-(j/epsilon_0))
@@ -184,6 +215,21 @@ def field_update1(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
 
 @jit
 def field_update2(E_fields, B_fields, dx, dt, j, field_BC_left, field_BC_right):
+    """Advance the fields by ``dt``: Faraday's law first, then Ampere's law.
+
+    The mirror image of :func:`field_update1`, used for the second half step of
+    the explicit scheme so that the composition over a full step is symmetric.
+
+    Args:
+        E_fields, B_fields (array): Fields on the grid, shape ``(G, 3)``.
+        dx (float): Cell size.
+        dt (float): Time increment (half a step in the explicit scheme).
+        j (array): Current density, shape ``(G, 3)``.
+        field_BC_left, field_BC_right (int): Field boundary codes.
+
+    Returns:
+        tuple: Updated ``(E, B)``.
+    """
     #First, update B (Faraday's)
     curl_E = curlE(E_fields, B_fields, dx, dt, field_BC_left, field_BC_right)
     B_fields -= dt*curl_E

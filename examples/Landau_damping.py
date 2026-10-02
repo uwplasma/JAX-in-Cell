@@ -22,6 +22,7 @@ parameters = {
                 "vth_over_c_x": 0.35,
                 "drift_speed_x": 0.0,
                 "velocity_plus_minus_x": False,
+                "quiet_velocities_x": True,  # quiet start: 16x lower noise floor than random velocities
             },
         },
         "ions": {

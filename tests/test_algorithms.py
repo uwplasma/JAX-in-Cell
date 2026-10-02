@@ -9,6 +9,8 @@
 
 # tests/test_algorithms.py
 
+from functools import partial
+
 import jax.numpy as jnp
 import pytest
 
@@ -591,7 +593,8 @@ def test_boris_step_field_solver_switcher_variants():
         )
         solver_function = {
             1: algorithms.E_from_Gauss_1D_FFT,
-            2: algorithms.E_from_Gauss_1D_Cartesian,
+            2: partial(algorithms.E_from_Gauss_1D_Cartesian,
+                       periodic=params["field_BC_left"] == 0 and params["field_BC_right"] == 0),
             3: algorithms.E_from_Poisson_1D_FFT,
         }[field_solver]
         assert jnp.allclose(carry1[0][:, 0], solver_function(charge_density, params["dx"]))
