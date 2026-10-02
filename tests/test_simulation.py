@@ -930,6 +930,24 @@ def test_simulation_run_delegates_to_simulation(monkeypatch):
 
 
 # Explicit initial position/velocity overrides are deferred until Simulation.run()
+
+@pytest.mark.parametrize("side", [-1, 1])
+def test_relativistic_absorbed_slots_remain_finite_in_following_pushes(side):
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=6, number_pseudoparticles=2)
+    initial = Simulation(parameters)
+    speed, dt, length = .02*299792458., float(initial.dt), float(initial.box_size[0])
+    for population in parameters["species_parameters"].values():
+        for species in population.values():
+            species.update(initial_positions=jnp.zeros((2, 3)).at[:, 0].set(side*(length/2-dt*speed/4)),
+                           initial_velocities=jnp.zeros((2, 3)).at[:, 0].set(side*speed))
+    parameters["domain_parameters"].update(particle_BC_left=2, particle_BC_right=2,
+                                             field_BC_left=1, field_BC_right=1)
+    parameters["solver_parameters"].update(relativistic=True, field_solver=2)
+    output = Simulation(parameters).run()
+    for key in ("positions", "velocities", "electric_field", "magnetic_field"):
+        assert np.isfinite(output[key]).all()
+    np.testing.assert_array_equal(output["velocities"], 0.)
+    assert np.all(side*np.asarray(output["positions"])[..., 0] > length/2)
 # grows a public initial-state override API again.
 #
 # def test_simulation_rejects_mismatched_positions_shape():
