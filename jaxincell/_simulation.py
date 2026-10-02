@@ -2,10 +2,12 @@ import jax.numpy as jnp
 from copy import deepcopy
 from functools import partial
 from jax_tqdm import scan_tqdm
-from jax import lax, jit, config
+from jax import lax, jit, config, random
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
+from ._collisions import collide, coulomb_logarithm
+from ._constants import mass_electron, elementary_charge, epsilon_0
 from ._parameters._sections import (
     DIFFERENTIABLE_INPUT_PARAMETERS,
     PARAMETER_SECTIONS,
@@ -250,9 +252,40 @@ class Simulation:
                 solver_parameters["number_of_particle_substeps_implicit_CN"]
             )
 
+        if self._solver_parameters["collisions"]:
+            # Species remain contiguous in initialization order; q/m does not identify a population.
+            blocks, start = [], 0
+            for kind in ("electrons", "ions"):
+                for species in species_parameters[kind].values():
+                    count = species["number_pseudoparticles"]
+                    blocks.append((start, count))
+                    start += count
+            pairs = tuple((a, b) for a in range(len(blocks)) for b in range(a, len(blocks)))
+            weights = particle_state["weights"].reshape(-1)
+            ids = particle_state["species_integer_index"]
+            physical_mass = particle_state["mass_integer_lookup"][ids]
+            physical_charge = particle_state["charge_integer_lookup"][ids]
+            log = self._solver_parameters["coulomb_logarithm"]
+            if log is None:
+                ne = weights[:blocks[0][1]].sum() / domain_parameters["length"]
+                te = mass_electron * particle_state["vth_electrons"] ** 2 / (2 * elementary_charge)
+                log = coulomb_logarithm(ne, te)
+            collision_key = random.PRNGKey(self._solver_parameters["seed"] or 0)
+
         @scan_tqdm(total_steps)
         def simulation_step(carry, step_index):
-            return step_func(carry, step_index)
+            new_carry, output = step_func(carry, step_index)
+            if self._solver_parameters["collisions"]:
+                # Scatter at integer time, then rebuild the following half drift.
+                x, v = output[:2]
+                v = collide(random.fold_in(collision_key, step_index), x, v, weights,
+                            physical_mass, physical_charge, blocks, pairs, log,
+                            dt, dx, domain_parameters["length"], grid.shape[0])
+                half = set_BC_positions(x + (dt / 2) * v, new_carry[6], dx, grid,
+                                        *box_size, particle_BC_left, particle_BC_right)
+                new_carry = (*new_carry[:4], half, v, *new_carry[6:])
+                output = (x, v, *output[2:])
+            return new_carry, output
 
 
         # Run simulation
@@ -263,7 +296,6 @@ class Simulation:
         magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
 
         # **Output results**
-        from ._constants import epsilon_0, mass_electron
         electron_species = next(iter(species_parameters["electrons"].values()))
         electron_weight = particle_state["weights"][0, 0]
         plasma_frequency = (
@@ -434,6 +466,10 @@ class Simulation:
             This should be called whenever parameters are updated after initialization to
             ensure that the simulation state is consistent with the new parameters.
         """
+        if self._solver_parameters["collisions"]:
+            assert self._domain_parameters["particle_BC_left"] == self._domain_parameters["particle_BC_right"] == 0, (
+                "Coulomb collisions currently require periodic particle boundaries."
+            )
         self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
         self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
         self.build_domain()

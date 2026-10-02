@@ -6,7 +6,8 @@ from ._constants import epsilon_0, mu_0, boltzmann_constant
 __all__ = ['diagnostics']
 
 def diagnostics(output):
-    # --- Keep legacy split first (unchanged) ---
+    weights = jnp.asarray(output.get("weights", jnp.ones(output["charges"].shape[0]))).reshape(-1)
+    # Legacy sign-based electron/ion split.
     isel = (output["charges"] >= 0)[:, 0]  # cannot use masks in jitted functions
     esel = (output["charges"] <  0)[:, 0]
     segregated = {
@@ -43,7 +44,10 @@ def diagnostics(output):
         else:
             name = f"species_{si}"
         # Calculate temperature per dimension [Tx, Ty, Tz] 
-        temperature_s = mv * jnp.var(vel_s, axis=1)/ boltzmann_constant
+        weights_s = weights[mask]
+        total_s = jnp.maximum(jnp.sum(weights_s), jnp.finfo(vel_s.dtype).tiny)
+        mean_s = jnp.sum(weights_s[None, :, None] * vel_s, axis=1, keepdims=True) / total_s
+        temperature_s = jnp.sum(mv * (vel_s - mean_s) ** 2, axis=1) / (boltzmann_constant * total_s)
 
         species_list.append({
             "name": name,
@@ -121,11 +125,13 @@ def diagnostics(output):
     # Sum over axis=-1 (particles) -> Result (Time,)
     total_ke_electrons = 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle, axis=-1)
     total_ke_ions      = 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle,      axis=-1)
-    # Calculate legacy temperature per dimension [Tx, Ty, Tz]
-    temp_electrons = jnp.mean(mass_electrons_array) * jnp.var(output['velocity_electrons'], axis=1)/ boltzmann_constant
-    temp_ions      = jnp.mean(mass_ions_array)      * jnp.var(output['velocity_ions'], axis=1)/ boltzmann_constant
-    # Debug print (optional, can be removed)
-    # print(mass_electrons_array) 
+    # Newtonian temperature components [Tx, Ty, Tz], in kelvin, with drift removed.
+    def temperature(velocities, masses, weights):
+        total = jnp.maximum(jnp.sum(weights), jnp.finfo(velocities.dtype).tiny)
+        mean = jnp.sum(weights[None, :, None] * velocities, axis=1, keepdims=True) / total
+        return jnp.sum(masses[None, :, None] * (velocities - mean) ** 2, axis=1) / (boltzmann_constant * total)
+    temp_electrons = temperature(output['velocity_electrons'], mass_electrons_array, weights[esel])
+    temp_ions = temperature(output['velocity_ions'], mass_ions_array, weights[isel])
 
     output.update({ 
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,

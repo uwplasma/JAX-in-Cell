@@ -1,121 +1,128 @@
-import os
-import time
-import numpy as np
+"""Electron/positron relaxation: full PIC and a collision-only energy control.
+
+Run ``python twospecies_tempdiff.py --collision-only --steps 4000 --output relaxation.png``.
+Full PIC is the default; the original dense benchmark under-resolves the Debye
+length, so total-energy growth must be checked before interpreting its temperatures.
+The collision model is nonrelativistic and weakly coupled, with small-angle/time-step
+accuracy; a Coulomb-logarithm floor does not extend that physical validity range.
+"""
+import argparse
+from pathlib import Path
+
+import jax
+import jax.numpy as jnp
+from jax import lax, random
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.optimize import curve_fit
-from jax import block_until_ready
-from jaxincell import simulation, load_parameters, diagnostics
 
-# -----------------------------------------------------------------------------
-# 1. Setup & Model Functions
-# -----------------------------------------------------------------------------
-def setup_plot_style(ax):
-    ax.grid(True, which='both', linestyle='--', alpha=0.5)
-    ax.tick_params(axis='both', which='major', labelsize=12)
-    ax.minorticks_on()
-    ax.set_xlabel(r"Time ($\omega_{pe}^{-1}$)", fontsize=14)
+from jaxincell import Simulation, load_parameters, diagnostics, boltzmann_constant, elementary_charge, speed_of_light
+from jaxincell._collisions import collide, coulomb_logarithm
 
-def temp_diff_model(t, Delta_T_0, gamma):
-    """
-    Standard relaxation model for the difference: 
-    d(Te - Tp)/dt = -gamma * (Te - Tp)
-    """
-    return Delta_T_0 * np.exp(-gamma * t)
 
-# -----------------------------------------------------------------------------
-# 2. Run Simulation
-# -----------------------------------------------------------------------------
-norm_factor = 25.1646059279994
-current_directory = os.path.dirname(os.path.abspath(__file__))
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--collision-only", action="store_true")
+    parser.add_argument("--steps", type=int)
+    parser.add_argument("--particles", type=int)
+    parser.add_argument("--store-every", type=int, default=1, help="Collision-only output interval")
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    parameters = load_parameters(Path(__file__).with_name("twospecies_temp.toml"))
+    if args.steps:
+        parameters["domain_parameters"]["total_steps"] = args.steps
+    if args.particles:
+        for kind in ("electrons", "ions"):
+            for species in parameters["species_parameters"][kind].values():
+                species["weight"] *= species["number_pseudoparticles"] / args.particles
+                species["number_pseudoparticles"] = args.particles
+    simulation = Simulation(parameters)
+    if args.collision_only:
+        # A zero-rate PIC run provides exactly the same initial realization and units.
+        setup = {**parameters, "domain_parameters": {**parameters["domain_parameters"], "total_steps": 1},
+                 "solver_parameters": {**parameters["solver_parameters"], "collisions": False}}
+        output = Simulation(setup).run()
+        x, v = output["initial_positions"], output["initial_velocities"]
+        w = output["weights"].reshape(-1)
+        ids = output["species_integer_index"]
+        m, q = output["mass_integer_lookup"][ids], output["charge_integer_lookup"][ids]
+        n = parameters["species_parameters"]["electrons"]["hot"]["number_pseudoparticles"]
+        te_ev = m[0] * (0.001 * speed_of_light) ** 2 / (2 * elementary_charge)
+        log = coulomb_logarithm(w[:n].sum() / output["length"], te_ev)
+        def step(v, index):
+            v = collide(random.fold_in(random.PRNGKey(1701), index), x, v, w, m, q,
+                        ((0, n), (n, n)), ((0, 0), (0, 1), (1, 1)), log,
+                        output["dt"], output["dx"], output["length"], len(output["grid"]))
+            return v, v
+        steps = simulation._domain_parameters["total_steps"]
+        assert args.store_every > 0, "store-every must be positive"
+        stored_steps = np.minimum(np.arange(args.store_every, steps + args.store_every, args.store_every), steps)
+        starts = np.r_[0, stored_steps[:-1]]
+        def chunk(v, bounds):
+            start, end = bounds
+            v = lax.fori_loop(start, end,
+                             lambda index, v: step(v, index)[0], v)
+            return v, v
+        _, velocity = jax.jit(lambda: lax.scan(chunk, v, (jnp.asarray(starts), jnp.asarray(stored_steps))))()
+        velocity = np.asarray(velocity)
+    else:
+        output = simulation.run()
+        velocity = np.asarray(output["velocities"])
+        stored_steps = np.arange(1, len(velocity) + 1)
+    w, mass, q = (np.asarray(output[k]).reshape(-1) for k in ("weights", "masses", "charges"))
+    initial = np.asarray(output["initial_velocities"])
+    all_velocity = np.concatenate([initial[None], velocity])
+    center = np.sum(mass[:, None] * initial, axis=0) / mass.sum()
+    equilibrium = np.sum(mass[:, None] * (initial - center) ** 2) / (3 * boltzmann_constant * w.sum())
+    temperatures = []
+    for mask in (q < 0, q > 0):
+        mean = np.average(all_velocity[:, mask], weights=w[mask], axis=1)
+        temperatures.append(np.sum(mass[mask][None, :, None] * (all_velocity[:, mask] - mean[:, None]) ** 2,
+                                   axis=(1, 2)) / (3 * boltzmann_constant * w[mask].sum()))
+    time = np.r_[0, stored_steps] * float(output["dt"]) * float(output["plasma_frequency"])
+    difference = temperatures[0] - temperatures[1]
+    def model(time, delta, gamma):
+        return delta * np.exp(-gamma * time)
+    # The Maxwellian rate is approximately constant for equal masses/densities;
+    # late finite-particle noise is excluded from this descriptive fit.
+    fit_mask = (difference > 0.2 * difference[0]) & (time > 0)
+    fit = None
+    if fit_mask.sum() > 3:
+        fit, _ = curve_fit(model, time[fit_mask], difference[fit_mask],
+                           p0=(difference[0], 0.1), bounds=(0, np.inf))
+        print(f"Fitted difference rate gamma/omega_pe={fit[1]:.6g}; nu_inter/omega_pe=3 gamma/4={0.75 * fit[1]:.6g}")
+    if args.collision_only:
+        energy = np.sum(mass[None, :, None] * all_velocity ** 2, axis=(1, 2)) / 2
+    else:
+        diagnostics(output)
+        energy = np.r_[np.sum(mass[:, None] * initial ** 2) / 2, np.asarray(output["total_energy"])]
+        # The plotted change uses the first stored total energy, including initialized fields.
+        energy[0] = energy[1]
+    print(f"Initial 3D energy equilibrium: {equilibrium:.8g} K; late temperatures: {temperatures[0][-1]:.8g}, {temperatures[1][-1]:.8g} K")
+    print(f"Maximum total-energy change: {np.max(np.abs(energy / energy[0] - 1)):.6g}")
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    axes[0].plot(time, temperatures[0], label="Electrons")
+    axes[0].plot(time, temperatures[1], label="Positrons")
+    axes[0].axhline(equilibrium, color="k", linestyle=":", label="Initial 3D energy equilibrium")
+    axes[0].set_ylabel("Temperature (K)")
+    axes[0].legend(fontsize=8)
+    axes[1].semilogy(time, np.abs(difference), label="Absolute temperature difference")
+    if fit is not None:
+        axes[1].semilogy(time, model(time, *fit), "--", label="Early-time exponential fit")
+    axes[1].set_ylabel("Temperature difference (K)")
+    axes[1].legend(fontsize=8)
+    axes[2].plot(time, energy / energy[0] - 1)
+    axes[2].set_ylabel("Relative total-energy change")
+    for ax in axes:
+        ax.set_xlabel(r"Time ($\omega_{pe}^{-1}$)")
+        ax.grid(alpha=0.25)
+    fig.suptitle("Collision-only control" if args.collision_only else "Full PIC: under-resolved dense benchmark")
+    fig.tight_layout()
+    if args.output:
+        fig.savefig(args.output, dpi=160)
+    else:
+        plt.show()
 
-input_file = 'twospecies_temp.toml'
-input_path = os.path.join(current_directory, input_file)
 
-print(f"--- Running Relaxation Benchmark: {input_file} ---")
-input_params, solver_params = load_parameters(input_path)
-
-start_time = time.time()
-output = block_until_ready(simulation(input_params, **solver_params))
-diagnostics(output)
-print(f"Simulation complete. ({time.time() - start_time:.2f}s)")
-
-# -----------------------------------------------------------------------------
-# 3. Extract and Normalize Data
-# -----------------------------------------------------------------------------
-time_ts = np.arange(len(output["electric_field_energy"]))
-time_norm = time_ts / norm_factor
-
-# Weighting factor to get actual Temperature (K or eV)
-weight = 4370228600000
-temp_e = np.array(output["temperature_electrons"][:, 0]) / weight
-temp_p = np.array(output["temperature_ions"][:, 0]) / weight
-
-# Calculate actual theoretical equilibrium from initial data
-t_eq = (temp_e[0] + temp_p[0]) / 2.0
-delta_T_data = temp_e - temp_p
-
-# -----------------------------------------------------------------------------
-# 4. Direct Unified Fit
-# -----------------------------------------------------------------------------
-print(f"\nSystem Equilibrium T: {t_eq:.4e}")
-
-try:
-    # Fit the difference directly
-    popt, pcov = curve_fit(
-        temp_diff_model,
-        time_norm,
-        delta_T_data,
-        p0=[delta_T_data[0], 0.05] # Guess initial delta and a small gamma
-    )
-    
-    fit_delta_0, fit_gamma = popt
-    perr = np.sqrt(np.diag(pcov))
-    
-    print(f"Unified Fit Result:")
-    print(f"  Gamma (Collision Rate): {fit_gamma:.6f} +/- {perr[1]:.6f}")
-    print(f"  Collision Rate: {fit_gamma*3/2:.6f} ")
-    print(f"  Initial Delta T:       {fit_delta_0:.4e}")
-
-    # Generate the symmetric fits for plotting
-    # For equal masses: Te = Teq + 0.5*DeltaT; Tp = Teq - 0.5*DeltaT
-    temp_e_fit = t_eq + 0.5 * temp_diff_model(time_norm, *popt)
-    temp_p_fit = t_eq - 0.5 * temp_diff_model(time_norm, *popt)
-
-except Exception as e:
-    print("Unified fitting failed:", e)
-    temp_e_fit = np.full_like(time_norm, t_eq)
-    temp_p_fit = np.full_like(time_norm, t_eq)
-    fit_gamma = 0.0
-
-# -----------------------------------------------------------------------------
-# 5. Plotting
-# -----------------------------------------------------------------------------
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-
-# --- Left: Linear Plot (Evolution) ---
-ax1.plot(time_norm, temp_e, label="Electrons (Data)", color='royalblue', alpha=0.6)
-ax1.plot(time_norm, temp_p, label="Positrons (Data)", color='crimson', alpha=0.6)
-
-ax1.plot(time_norm, temp_e_fit, 'k--', lw=2, label=f"Unified Fit ($\gamma$={fit_gamma:.4f})")
-ax1.plot(time_norm, temp_p_fit, 'k--', lw=2)
-
-ax1.axhline(y=t_eq, color='gray', linestyle=':', label="Theoretical Eq")
-
-setup_plot_style(ax1)
-ax1.set_ylabel("Temperature (K)", fontsize=14)
-ax1.set_title("Coupled Temperature Relaxation")
-ax1.legend()
-
-# --- Right: Semi-Log Plot (Verification) ---
-# Plot the absolute value of the temperature difference
-ax2.semilogy(time_norm, np.abs(delta_T_data), label=r"$|T_e - T_p|$ Data", color='purple', alpha=0.7)
-ax2.semilogy(time_norm, np.abs(temp_diff_model(time_norm, *popt)), 
-             'k--', lw=2.5, label="Exponential Fit")
-
-setup_plot_style(ax2)
-ax2.set_ylabel(r"$|\Delta T|$ (Log Scale)", fontsize=14)
-ax2.set_title("Relaxation Rate Verification")
-ax2.legend()
-
-plt.tight_layout()
-plt.show()
+if __name__ == "__main__":
+    main()

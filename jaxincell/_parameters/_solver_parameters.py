@@ -1,3 +1,5 @@
+import math
+
 from ._utils import build_parameter_hash, overlay_parameter_defaults
 
 __all__ = [
@@ -10,6 +12,8 @@ __all__ = [
 DEFAULT_SOLVER_PARAMETERS = {
         "print_info": True,                       # Print information about the simulation
         "field_solver": 0,                       # Algorithm for solving fields - 0: Gauss's law, 1: FDTD
+        "collisions": False,                      # Nonrelativistic binary Coulomb collisions (periodic Boris runs)
+        "coulomb_logarithm": None,                 # None: initial electron-ion NRL estimate; nonnegative value: fixed
         "relativistic": False,                    # Whether to use the relativistic version of the Boris push (only relevant if time_evolution_algorithm is 0 (Boris))
         "time_evolution_algorithm": 0,             # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson
         "max_number_of_Picard_iterations_implicit_CN": 20, # Maximum number of Picard iterations for implicit Crank-Nicholson method
@@ -35,6 +39,13 @@ def clean_and_initialize_solver_parameters(solver_parameters, input_parameters=N
         solver_parameters,
         input_parameters,
     )
+
+    assert type(solver_parameters["collisions"]) == bool, "collisions must be a boolean."
+    if solver_parameters["collisions"]:
+        assert not solver_parameters["relativistic"], "Coulomb collisions currently require nonrelativistic velocities."
+        assert solver_parameters["time_evolution_algorithm"] == 0, "Coulomb collisions currently require the Boris integrator."
+    log = solver_parameters["coulomb_logarithm"]
+    assert log is None or (math.isfinite(log) and log >= 0), "coulomb_logarithm must be None or finite and nonnegative."
 
     solver_parameters["tolerance_Picard_iterations_implicit_CN"] = float(solver_parameters["tolerance_Picard_iterations_implicit_CN"])
     if type(solver_parameters["filter_strides"]) != tuple:
