@@ -2,6 +2,7 @@ import builtins
 import importlib
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -673,6 +674,26 @@ def test_core_imports_and_optional_export_reports_missing_backend(monkeypatch, t
     monkeypatch.setitem(sys.modules, "openpmd_api", None)
     with pytest.raises(ImportError, match="pip install jaxincell"):
         write_openpmd(tiny_openpmd_output(tmp_path))
+
+
+def test_export_rejects_unknown_options_and_empty_history(monkeypatch, tmp_path):
+    monkeypatch.setattr("jaxincell.openpmd._require_openpmd_api", fake_openpmd_module)
+    output = tiny_openpmd_output(tmp_path)
+    with pytest.raises(ValueError, match="Unknown openPMD options"):
+        write_openpmd(output, misspelled_stride=2)
+    output["time_array"] = output["time_array"][:0]
+    output["positions"] = output["positions"][:0]
+    with pytest.raises(ValueError, match="at least one stored step"):
+        write_openpmd(output)
+    assert not FakeSeries.created
+
+
+def test_relative_sidecar_lists_the_relative_data_filename(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jaxincell.openpmd._require_openpmd_api", fake_openpmd_module)
+    paths = write_openpmd(tiny_openpmd_output(tmp_path), openpmd_filename="relative.h5")
+    for key, sidecar in paths["sidecar"].items():
+        assert Path(sidecar).read_text().strip() == Path(paths["data"][key]).name
 
 
 @pytest.mark.parametrize("algorithm, relativistic", [(0, False), (0, True), (1, False)])
