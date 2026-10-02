@@ -118,7 +118,23 @@ def _write_particles(io, it, out, s, area, keep):
             _constant(io, sp[rec][io.Record_Component.SCALAR], values[first], count)
 
 
-def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, simulation=None):
+def _external_fields(out, simulation, meshes):
+    external = []
+    if simulation is not None:
+        d = simulation.domain
+        if d.cells != len(out.grid) or not np.allclose((d.length, d.dx), (out.length, out.dx), rtol=1e-12, atol=0):
+            raise ValueError("simulation geometry does not match the output's cells, length and dx")
+        for name in ("external_E", "external_B") if meshes else ():
+            field = getattr(simulation, name)
+            if field is not None:
+                data = np.asarray(field, dtype=np.float64)
+                lengths = (float(d.length),) if data.ndim == 2 else (
+                    float(d.length), float(d.length_y), float(d.length_z))
+                external.append((name, data, lengths))
+    return external
+
+
+def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, simulation=None, overwrite=False):
     """Write ``out`` to the openPMD series ``path`` and return the path.
 
     Args:
@@ -133,29 +149,28 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, 
             fields as separate ``external_E``/``external_B`` meshes. Flat E/B keep their face/centre
             staggering; 3D tensors are centred with the domain's x/y/z periods. No field histories
             are added to ``out``. Omitted fields are not written, and ``meshes=False`` skips them.
+        overwrite: Allow replacing an existing file. By default it is protected.
 
     Raises:
         ImportError: If the optional dependency ``openpmd-api`` is missing.
-        ValueError: If the supplied simulation's x geometry differs from the output.
+        ValueError: Invalid cadence/area, no stored steps, or incompatible simulation geometry.
+        FileExistsError: If the output path exists and ``overwrite`` is false.
     """
     try:
         import openpmd_api as io
     except ImportError as exc:
         raise ImportError("write_openpmd needs the optional openpmd-api: pip install openpmd-api") from exc
-    external = []
-    if simulation is not None:
-        d = simulation.domain
-        if d.cells != len(out.grid) or not np.allclose((d.length, d.dx), (out.length, out.dx), rtol=1e-12, atol=0):
-            raise ValueError("simulation geometry does not match the output's cells, length and dx")
-        for name in ("external_E", "external_B") if meshes else ():
-            field = getattr(simulation, name)
-            if field is not None:
-                data = np.asarray(field, dtype=np.float64)
-                lengths = (float(d.length),) if data.ndim == 2 else (
-                    float(d.length), float(d.length_y), float(d.length_z))
-                external.append((name, data, lengths))
+    if isinstance(every, (bool, np.bool_)) or not isinstance(every, (int, np.integer)) or every < 1:
+        raise ValueError("every must be a positive integer")
+    if not np.isfinite(area) or area <= 0:
+        raise ValueError("area must be finite and positive")
+    if not len(out.t):
+        raise ValueError("openPMD export requires at least one stored step")
+    external = _external_fields(out, simulation, meshes)
     root, ext = os.path.splitext(os.fspath(path))
     path = root + (ext or ".json")
+    if not overwrite and os.path.lexists(path):
+        raise FileExistsError(f"{path} already exists; pass overwrite=True to replace it")
     series = io.Series(path, io.Access.create)
     series.set_software("JAX-in-Cell", __version__)
     for s in range(0, len(out.t), every):

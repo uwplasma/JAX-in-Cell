@@ -72,10 +72,11 @@ stored as given.
 
 ### The time loop
 
-`_run` is jitted with `steps`, `store_every` and `store_particles` as static
-arguments. Inside, `lax.scan` runs the chunks and an inner `lax.scan` runs the
-`store_every - 1` steps that are not kept, so thinning the history costs nothing and
-the whole loop is a single XLA program with no Python in it.
+`_advance` is jitted with the chunk count, `store_every`, `store_particles` and
+`snapshot_steps` as static arguments. Regular storage uses nested `lax.scan` loops,
+keeping each chunk's last output. Irregular storage uses the same physics step and a
+fixed-size history buffer; the scan returns no per-step history. Both paths keep a
+separate final state and support reverse-mode differentiation.
 
 The step function itself is a method on `Simulation`, chosen once from
 `solver.algorithm`. Because `Simulation` is a pytree and `self` is traced, the method

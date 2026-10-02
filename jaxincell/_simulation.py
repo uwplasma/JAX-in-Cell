@@ -202,7 +202,7 @@ class Output:
         if spilt <= 0:
             return ()
         return (f"a source overwrote live particles: the largest weight destroyed was {spilt:.3g}, "
-                f"against {float(jnp.sum(jnp.asarray(self.weight)[-1])) if self.weight is not None else 0:.3g} "
+                f"against {float(jnp.sum(jnp.asarray(self.state.w))):.3g} "
                 "left alive. Species.n is a capacity and has to hold every particle alive at once, so it "
                 "grows with the emission rate and with how long a particle lives -- a smaller time step and "
                 "a longer box both lengthen that. Nothing this run reports is trustworthy.",)
@@ -1205,7 +1205,7 @@ class Simulation:
 
     # -- the run ---------------------------------------------------------------------------------
     def run(self, steps, seed=0, store_every=1, store_particles=True, moments=False, state=None,
-            verbose=False):
+            verbose=False, snapshot_steps=None):
         """Advance ``steps`` time steps and return an :class:`Output`.
 
         Args:
@@ -1213,6 +1213,9 @@ class Simulation:
             seed: Integer seed of the random numbers (traced, so ``jax.vmap``
                 over seeds gives an ensemble with one compilation).
             store_every: Keep every ``store_every``-th state in the output.
+            snapshot_steps: Instead keep these zero-based post-step indices, sorted and deduplicated.
+                Integers must lie in ``[0, steps)``; an empty sequence keeps no history. Requires
+                ``store_every=1``. Every step still advances, and ``Output.state`` is always the final state.
             store_particles: Keep the particle histories (the bulk of the memory).
             moments: Which velocity moments to sum over every step and store the running sums
                 of, so that a mean profile over a long window needs no particle history:
@@ -1234,9 +1237,24 @@ class Simulation:
                 gives. It turns itself off when anything is traced, so ``jax.jit``,
                 ``jax.grad`` and ``jax.vmap`` of a run are silent whatever is asked for.
         """
-        if store_every < 1 or steps % store_every:
+        if isinstance(steps, (bool, np.bool_)) or not isinstance(steps, (int, np.integer)) or steps < 0:
+            raise ValueError("steps must be a nonnegative integer")
+        if (isinstance(store_every, (bool, np.bool_)) or not isinstance(store_every, (int, np.integer))
+                or store_every < 1 or steps % store_every):
             raise ValueError(f"steps ({steps}) must be a multiple of store_every ({store_every}), "
                              "which must be at least one")
+        if snapshot_steps is not None:
+            if store_every != 1:
+                raise ValueError("snapshot_steps requires store_every=1")
+            try:
+                schedule = tuple(snapshot_steps)
+            except TypeError as exc:
+                raise ValueError("snapshot_steps must be a sequence of integer indices") from exc
+            if any(isinstance(s, (bool, np.bool_)) or not isinstance(s, (int, np.integer)) for s in schedule):
+                raise ValueError("snapshot_steps must contain integer indices")
+            if any(s < 0 or s >= steps for s in schedule):
+                raise ValueError("snapshot_steps indices must lie in [0, steps)")
+            snapshot_steps = tuple(sorted(set(map(int, schedule))))
         level = "full" if moments is True else moments
         if level not in (False, None, *self.MOMENT_LEVELS):
             raise ValueError(f"moments is False, True, or one of {', '.join(map(repr, self.MOMENT_LEVELS))}, "
@@ -1245,11 +1263,11 @@ class Simulation:
         # differentiated path; under jit, grad or vmap it turns itself off without being asked
         traced = any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves((self, state, seed)))
         meter = None if traced else reporter(verbose, steps)
-        return _run(self, steps, seed, store_every, store_particles, level or None, state, meter)
+        return _run(self, steps, seed, store_every, store_particles, level or None, state, meter, snapshot_steps)
 
 
-@partial(jax.jit, static_argnames=("chunks", "store_every", "store_particles"))
-def _advance(sim, carry, extra, chunks, store_every, store_particles):
+@partial(jax.jit, static_argnames=("chunks", "store_every", "store_particles", "snapshot_steps"))
+def _advance(sim, carry, extra, chunks, store_every, store_particles, snapshot_steps=None):
     """``chunks * store_every`` steps from ``carry``, keeping the state at the end of each chunk.
 
     This is the whole loop, and it is the only compiled thing here. A run of one group is the
@@ -1263,19 +1281,43 @@ def _advance(sim, carry, extra, chunks, store_every, store_particles):
     def advance(pair, _):
         return step(pair[0]), None
 
-    def chunk(carry, _):
-        # The output of the last step rides along with the state, so that the step is
-        # traced once, not once for the first store_every - 1 steps and again for the last.
-        (carry, (x, v, w, E, B, J, rho)), _ = lax.scan(advance, (carry, placeholder), None, length=store_every)
+    def stored(carry, values):
+        x, v, w, E, B, J, rho = values
         if not store_particles:
             x = v = w = None
-        return carry, (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.steps, carry.sigma,
-                       carry.moments)
+        return (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.steps, carry.sigma, carry.moments)
+
+    if snapshot_steps is not None:
+        history = jax.tree.map(lambda a: jnp.zeros((len(snapshot_steps),) + a.shape, a.dtype),
+                               stored(carry, placeholder))
+        if not snapshot_steps:
+            (carry, _), _ = lax.scan(advance, (carry, placeholder), None, length=chunks)
+            return carry, history
+        schedule = jnp.asarray((*snapshot_steps, chunks))  # sentinel after the last requested step
+
+        def snapshot(pair, index):
+            carry, cursor, history = pair
+            carry, values = step(carry)
+
+            def save(history):
+                return jax.tree.map(lambda a, b: a.at[cursor].set(b), history, stored(carry, values))
+
+            keep = index == schedule[cursor]
+            history = lax.cond(keep, save, lambda h: h, history)
+            return (carry, cursor + keep, history), None
+
+        (carry, _, history), _ = lax.scan(snapshot, (carry, jnp.int32(0), history), jnp.arange(chunks))
+        return carry, history
+
+    def chunk(carry, _):
+        # Carry the last step's output so the physics step is traced only once.
+        (carry, values), _ = lax.scan(advance, (carry, placeholder), None, length=store_every)
+        return carry, stored(carry, values)
 
     return lax.scan(chunk, carry, None, length=chunks)
 
 
-def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose):
+def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose, snapshot_steps):
     """Drive :func:`_advance`, in one group or in several with a meter between them."""
     carry, extra = sim.initial_state(random.PRNGKey(seed)) if state is None else (state, sim.per_particle)
     if moments:
@@ -1286,10 +1328,12 @@ def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose
     histories, done = [], 0
     try:
         for count in _groups(chunks, verbose):
-            carry, history = _advance(sim, carry, extra, count, store_every, store_particles)
+            schedule = None if snapshot_steps is None else tuple(s - done for s in snapshot_steps
+                                                                 if done <= s < done + count)
+            carry, history = _advance(sim, carry, extra, count, store_every, store_particles, schedule)
             histories.append(history)
+            done += count * store_every
             if verbose is not None:
-                done += count * store_every
                 jax.block_until_ready(carry.E)             # the meter reports finished work
                 verbose(done, steps)
     finally:
@@ -1324,7 +1368,7 @@ def _join(histories):
 
 #: Keys ``[run]`` may hold: the arguments of :meth:`Simulation.run` that a file can give,
 #: and ``plot``, which the command line reads.
-RUN_KEYS = ("steps", "seed", "store_every", "store_particles", "moments", "verbose", "plot")
+RUN_KEYS = ("steps", "seed", "store_every", "store_particles", "moments", "verbose", "snapshot_steps", "plot")
 
 
 def _only(where, given, allowed):

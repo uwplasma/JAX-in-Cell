@@ -7,7 +7,7 @@ when the physical parameters change.
 
 ```python
 output = simulation.run(steps, seed=0, store_every=1, store_particles=True,
-                        moments=False, state=None, verbose=False)
+                        moments=False, state=None, verbose=False, snapshot_steps=None)
 ```
 
 ## Arguments
@@ -17,6 +17,7 @@ output = simulation.run(steps, seed=0, store_every=1, store_particles=True,
 | `steps` | time steps; must be a multiple of `store_every` | — |
 | `seed` | seed of the random numbers; traced, so `jax.vmap` over it gives an ensemble from one compilation | `0` |
 | `store_every` | keep every n-th state | `1` |
+| `snapshot_steps` | keep an explicit sequence of zero-based post-step indices instead; requires `store_every=1` | `None` |
 | `store_particles` | keep the particle histories, the bulk of the memory | `True` |
 | `moments` | running velocity-moment sums ({doc}`sources`) | `False` |
 | `state` | a previous `Output.state` to continue from | `None` |
@@ -26,7 +27,7 @@ output = simulation.run(steps, seed=0, store_every=1, store_particles=True,
 
 | | |
 |---|---|
-| static — changing one rebuilds the program | `steps`, `store_every`, `store_particles`, the particle counts, the cell count, the boundary types, every switch in {class}`~jaxincell.Solver` |
+| static — changing one rebuilds the program | `steps`, `store_every`, `snapshot_steps`, `store_particles`, the particle counts, the cell count, the boundary types, every switch in {class}`~jaxincell.Solver` |
 | pytree leaves — free to change | lengths, densities, drifts, thermal speeds, the filter weight, the restitution, the external fields |
 
 ```python
@@ -97,7 +98,15 @@ Two ways out:
 ```python
 output = simulation.run(20000, store_every=20)        # 1/20 of the samples
 output = simulation.run(20000, store_particles=False) # fields only
+output = simulation.run(20000, snapshot_steps=[0, 99, 19999]) # irregular samples
 ```
+
+`snapshot_steps` accepts Python or NumPy integers, sorts and removes duplicates, and rejects
+indices outside `[0, steps)`. Index 0 is the state after the first step, at `dt`; on a restart
+the indices refer to the new run and timestamps remain absolute. An empty sequence stores
+no histories. The simulation always advances every requested step, and `Output.state` holds
+the final state even when the schedule omits it. Stored arrays occupy space proportional to
+the number of snapshots; differentiation can also retain intermediate states.
 
 `store_particles=False` keeps the fields and the charge density, which is all the field
 diagnostics need, and is the right choice for a growth-rate measurement. `kinetic`,
@@ -165,7 +174,7 @@ Every table is a constructor.
 | `[collisions]` | {class}`~jaxincell.Collisions` |
 | `[impacts]` | {class}`~jaxincell.Impacts` |
 | `[external]` | uniform external fields, `E` and `B` as three components broadcast over the grid |
-| `[run]` | the arguments of `run` — `steps`, `seed`, `store_every`, `store_particles`, `moments`, `verbose` — and `plot`, which the command line reads |
+| `[run]` | the arguments of `run` — `steps`, `seed`, `store_every`, `snapshot_steps`, `store_particles`, `moments`, `verbose` — and `plot`, which the command line reads |
 
 * Every species states its `mass`, by name or in kilograms, optionally times `mass_ratio`.
   A species without one, or with a name other than `"electron"` or `"proton"`, is a

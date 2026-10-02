@@ -75,6 +75,10 @@ from jaxincell.openpmd import write_openpmd
 write_openpmd(output, "run.h5")       # needs `pip install jaxincell[openpmd]`
 ```
 
+Existing paths are protected; pass `overwrite=True` to replace one deliberately. Export
+requires at least one stored step, a positive integer `every`, and finite positive `area`.
+Sparse snapshots retain their actual timestamps; `every` counts stored snapshots.
+
 * One iteration per stored step.
 * Meshes for `E`, `B`, `J` and `rho`, with the right staggering recorded in the file.
 * One particle species per `Output.names`, carrying position, momentum and weighting per

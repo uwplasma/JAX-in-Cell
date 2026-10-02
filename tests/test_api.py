@@ -127,6 +127,68 @@ def test_store_every_store_particles_and_restart():
     assert light.x is None and light.E.shape == (10, 16, 3)
 
 
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+@pytest.mark.parametrize("schedule", [[4, 0, 2, 2], [], [0]])
+def test_irregular_snapshots_preserve_history_final_state_and_restart(algorithm, schedule):
+    sim = small_simulation(n=16, algorithm=algorithm).replace(domain=Domain(length=.01, cells=16, dt_over_dx_c=.4))
+    full = sim.run(6, seed=2, moments="flux")
+    selected = sorted(set(schedule))
+    sparse = sim.run(6, seed=2, snapshot_steps=np.asarray(schedule, dtype=np.int64), moments="flux")
+    for a, b in zip(jax.tree.leaves(sparse.state), jax.tree.leaves(full.state)):
+        np.testing.assert_allclose(a, b, rtol=1e-12, atol=1e-12)
+    for name in ("t", "steps", "x", "v", "weight", "E", "B", "J", "rho", "sigma", "moments"):
+        np.testing.assert_allclose(getattr(sparse, name), np.asarray(getattr(full, name))[selected],
+                                   rtol=1e-12, atol=1e-12)
+    assert sparse.validate() is sparse
+    resumed = sim.run(2, snapshot_steps=[1], state=sparse.state)
+    np.testing.assert_allclose(resumed.t, [8 * sim.domain.dt], rtol=1e-14)
+    whole = sim.run(8, seed=2, snapshot_steps=[7], moments="flux")
+    np.testing.assert_allclose(resumed.E, whole.E, rtol=1e-12, atol=1e-12)
+
+
+def test_irregular_snapshots_support_grad_vmap_progress_and_toml(tmp_path):
+    sim = small_simulation(n=16)
+    e, i = sim.species
+    schedule = [0, 2, 5]
+
+    def objective(drift, sparse):
+        varied = sim.replace(species=(e.replace(drift=(drift, 0, 0)), i))
+        out = varied.run(6, snapshot_steps=schedule if sparse else None, store_particles=False)
+        return jnp.sum((out.E if sparse else out.E[jnp.asarray(schedule)]) ** 2)
+
+    np.testing.assert_allclose(jax.value_and_grad(objective)(6e7, True),
+                               jax.value_and_grad(objective)(6e7, False), rtol=1e-10)
+    batch = jax.vmap(lambda seed: sim.run(6, seed=seed, snapshot_steps=schedule).E)(jnp.arange(2))
+    assert batch.shape == (2, 3, 16, 3)
+    seen = []
+    loud = sim.run(6, snapshot_steps=schedule, verbose=lambda done, total: seen.append((done, total)))
+    np.testing.assert_allclose(loud.E, sim.run(6, snapshot_steps=schedule).E, rtol=1e-12, atol=1e-12)
+    assert seen[-1] == (6, 6)
+    path = tmp_path / "sparse.toml"
+    input_file(path, n=16, steps=6)
+    path.write_text(path.read_text() + "snapshot_steps = [0, 2, 5]\n")
+    loaded, run = load_toml(path)
+    assert loaded.run(**{k: v for k, v in run.items() if k != "plot"}).E.shape[0] == 3
+
+
+@pytest.mark.parametrize("schedule", [1, [True], [1.0], [[1]], [-1], [6]])
+def test_irregular_snapshots_reject_invalid_indices(schedule):
+    with pytest.raises(ValueError, match="snapshot_steps"):
+        small_simulation(n=8).run(6, snapshot_steps=schedule)
+
+
+def test_irregular_snapshots_reject_competing_cadence_and_preserve_source_failures():
+    sim = small_simulation(n=8)
+    with pytest.raises(ValueError, match="store_every=1"):
+        sim.run(6, store_every=2, snapshot_steps=[1])
+    empty = sim.run(0, snapshot_steps=[])
+    assert empty.E.shape == (0, 16, 3) and int(empty.state.steps) == 0
+    state = empty.state.replace(wall=empty.state.wall.replace(overflow=jnp.asarray(1.0)))
+    failed = sim.run(2, snapshot_steps=[], state=state)
+    with pytest.raises(RuntimeError, match="overwrote live particles"):
+        failed.validate()
+
+
 def test_a_progress_meter_reports_without_changing_the_run(capsys):
     """A long run has to say how far it has got, and saying so must not change it.
 
@@ -441,6 +503,37 @@ def test_openpmd_export_round_trips():
         assert position.shape == (out.counts[0],)
         assert np.allclose(position, np.asarray(out.x[4, : out.counts[0], 0]))
         series.close()
+
+
+def test_openpmd_protects_existing_files_and_preserves_sparse_times(tmp_path):
+    io = pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+
+    out = small_simulation(n=8).run(6, snapshot_steps=[0, 2, 5])
+    path = tmp_path / "protected.json"
+    path.write_text("original data")
+    with pytest.raises(FileExistsError, match="overwrite=True"):
+        write_openpmd(out, path)
+    assert path.read_text() == "original data"
+    write_openpmd(out, path, every=np.int64(2), overwrite=True)
+    series = io.Series(str(path), io.Access.read_only)
+    assert list(series.iterations) == [0, 2]
+    assert series.iterations[2].time == pytest.approx(float(out.t[2]), rel=1e-14, abs=0)
+    assert series.iterations[2].dt == pytest.approx(float(out.dt), rel=1e-14, abs=0)
+    series.close()
+
+
+@pytest.mark.parametrize("options", [{"every": 0}, {"every": -1}, {"every": True}, {"every": 1.5},
+                                     {"area": 0}, {"area": np.nan}, {"area": np.inf}, {"empty": True}])
+def test_openpmd_rejects_invalid_options_before_creating_a_file(tmp_path, options):
+    pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+
+    out = small_simulation(n=8).run(2, snapshot_steps=[] if options.get("empty") else None)
+    path = tmp_path / "invalid.json"
+    with pytest.raises(ValueError):
+        write_openpmd(out, path, **{k: v for k, v in options.items() if k != "empty"})
+    assert not path.exists()
 
 
 def test_openpmd_exports_the_prescribed_fields_that_turn_the_particles(tmp_path):
