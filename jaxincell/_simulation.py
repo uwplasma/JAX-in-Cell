@@ -680,7 +680,7 @@ class Simulation:
         if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
                 bool(np.any(np.asarray(field_state[name])))
                 for name in ("external_electric_field", "external_magnetic_field")):
-            raise ValueError("Implicit CN does not apply prescribed grid fields; use the explicit solver.")
+            raise ValueError("Implicit CN does not support prescribed grid fields; use the explicit solver.")
         self.external_magnetic_field = field_state["external_magnetic_field"]
         self.external_electric_field = field_state["external_electric_field"]
         self.padded_external_magnetic_field = field_state["padded_external_magnetic_field"]

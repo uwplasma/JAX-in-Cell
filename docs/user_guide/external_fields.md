@@ -113,6 +113,8 @@ Batches retain their full cadence weight, including the last partial run interva
 approximating a continuous source requires cadence and timestep refinement.
 
 Gauss's law is recomputed immediately after birth and at the end of every step.
+Periodic Gauss uses a uniform neutralizing background for net charge; inject matched
+positive and negative populations when that background is not the intended physics.
 Periodic fields use a uniform compensating background for net charge; use matched
 electron/ion sources when that background is unwanted. Wall fields retain the
 Cartesian solver's zero left-face field convention; this is not a collector/sheath

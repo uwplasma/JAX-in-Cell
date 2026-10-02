@@ -326,7 +326,7 @@ def test_collisions_reject_unvalidated_wall_coupling():
     from tests.test_simulation import small_simulation_parameters
     p = small_simulation_parameters(total_steps=2)
     p["solver_parameters"]["collisions"] = True
-    p["domain_parameters"]["particle_BC_right"] = 1
+    p["domain_parameters"].update(particle_BC_left=1, particle_BC_right=1)
     with pytest.raises(AssertionError, match="periodic particle boundaries"):
         Simulation(p)
 
@@ -402,11 +402,11 @@ def test_parameter_updates_cannot_enable_unvalidated_wall_collisions(section):
     from tests.test_simulation import small_simulation_parameters
     p = small_simulation_parameters(total_steps=2)
     p["solver_parameters"]["collisions"] = section == "domain"
-    p["domain_parameters"]["particle_BC_right"] = 0 if section == "domain" else 1
+    p["domain_parameters"].update(particle_BC_left=int(section == "solver"), particle_BC_right=int(section == "solver"))
     sim = Simulation(p)
     with pytest.raises(AssertionError, match="periodic particle boundaries"):
         if section == "domain":
-            sim.domain_parameters = {**sim.domain_parameters, "particle_BC_right": 1}
+            sim.domain_parameters = {**sim.domain_parameters, "particle_BC_left": 1, "particle_BC_right": 1}
         else:
             sim.solver_parameters = {**sim.solver_parameters, "collisions": True}
 
@@ -416,7 +416,7 @@ def test_parameter_updates_cannot_enable_unvalidated_wall_collisions(section):
 def test_sources_cannot_enable_unvalidated_collision_coupling(section):
     from tests.test_simulation import small_simulation_parameters
     p = small_simulation_parameters(total_steps=1)
-    p["solver_parameters"]["collisions"] = section != "solver"
+    p["solver_parameters"].update(collisions=section != "solver", field_solver=2)
     p["source_parameters"] = {"source_term_active": int(section != "source")}
     if section == "constructor":
         with pytest.raises(ValueError, match="collisions with particle sources"):

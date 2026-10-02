@@ -166,7 +166,7 @@ def test_cn_rejects_ignored_prescribed_grid_fields(kind, component):
     p = small_simulation_parameters(total_steps=1)
     p["solver_parameters"]["time_evolution_algorithm"] = 1
     p["external_field_parameters"] = {f"external_{kind}_field": {component: jnp.ones((8, 3))}}
-    with pytest.raises(ValueError, match="does not apply prescribed grid fields"):
+    with pytest.raises(ValueError, match="does not support prescribed grid fields"):
         Simulation(p)
 
 

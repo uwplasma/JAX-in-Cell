@@ -202,8 +202,11 @@ def test_cartesian_gauss_gradients_match_the_discrete_charge_response(grid_size,
 
     # A unit charge in cell j raises each downstream face by dx. A periodic
     # zero-mean field subtracts dx (N-j)/N from every face's response.
+    # Its uniform neutralizing background also projects charge perturbations to zero mean.
     mean_weight = math.fsum(weights) / grid_size if periodic else 0.
     response = np.array([math.fsum(weights[j:]) - (grid_size - j) * mean_weight for j in range(grid_size)])
+    if periodic:
+        response -= math.fsum(response) / grid_size
     density_gradient, spacing_gradient = grad(sensor, argnums=(0, 1))(source, dx)
     assert_allclose(density_gradient, dx * response, rtol=2e-13, atol=2e-13)
     assert_allclose(spacing_gradient, math.fsum(np.asarray(source) * response), rtol=2e-13, atol=2e-12)
