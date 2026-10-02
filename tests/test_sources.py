@@ -1317,8 +1317,9 @@ def test_a_particle_emitted_past_the_far_wall_is_collected_on_the_step_it_was_em
     speed it arrived with -- on the step the source emitted it, and the charge closes.
 
     A beam crossing 0.3 of the box a step, emitted ten at a time every ten steps, stands at
-    depths :math:`(1 - s_j)\\,3L`; the eight with :math:`s_j < 0.767` reach the wall by the end of
-    the step and the other two are still inside."""
+    depths :math:`(1 - s_j)\\,3L`; the seven with :math:`s_j < (3 + 0.15 - 1)/3` reach the wall at the physical
+    endpoint, and the other three are still inside. The additional flight is half a
+    step, 0.15 L; a future half endpoint would incorrectly count eight."""
     length, cells, v0, k, emit = 1e-2, 16, 1e5, 10, 10
     mass = 1e4 * mass_electron
     domain = Domain(length=length, cells=cells, time_step=0.3 * length / v0, particle_bc="absorbing",
@@ -1330,10 +1331,10 @@ def test_a_particle_emitted_past_the_far_wall_is_collected_on_the_step_it_was_em
     arrived, injected = np.asarray(out.wall.arrived)[:, 0, 1], np.asarray(out.wall.injected)[:, 0, 0]
     assert np.all(arrived[:-1] == 0) and np.all(injected[:-1] == 0)          # nothing before the window closes
     assert injected[-1] == pytest.approx(emit * weight, rel=1e-12, abs=0)
-    assert arrived[-1] == pytest.approx(8 * weight, rel=1e-12, abs=0)
+    assert arrived[-1] == pytest.approx(7 * weight, rel=1e-12, abs=0)
     # at the speed they crossed with, to the beam's own feeble field
-    assert float(out.wall.energy_in[-1, 0, 1]) == pytest.approx(8 * weight * 0.5 * mass * v0 ** 2, rel=1e-8, abs=0)
-    assert int(np.sum(np.asarray(out.state.w) > 0)) == 2
+    assert float(out.wall.energy_in[-1, 0, 1]) == pytest.approx(7 * weight * 0.5 * mass * v0 ** 2, rel=1e-8, abs=0)
+    assert int(np.sum(np.asarray(out.state.w) > 0)) == 3
     assert np.all(np.abs(np.asarray(out.x[-1])[np.asarray(out.weight[-1]) > 0, 0]) < length / 2)
     assert np.asarray(charge_balance(out)).max() < 1e-12
 

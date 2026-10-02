@@ -21,8 +21,10 @@ $x \to ((x + L/2) \bmod L) - L/2$. Nothing else changes.
 
 **Reflective.** At wall $x_w$, the overshoot is reduced with the returned velocity:
 $x \to x_w-e(x-x_w)$ and $v_x \to -e v_x$, with $e=$ `restitution`. The two
-walls may have different coefficients. At the default `restitution=1.0` this is a specular bounce, and the total energy
-is conserved: {{ boundary_energy_error_reflective }} over the run above. Values below
+walls may have different coefficients. At the default `restitution=1.0` the impact
+preserves kinetic energy. The plotted reference run reports a total-energy change
+of {{ boundary_energy_error_reflective }}; field and timestep errors remain distinct
+from the wall law and require refinement. Values below
 one model a lossy wall and remove energy on purpose. A particle segment must resolve
 at most one impact; reduce `dt` or increase implicit `substeps` when necessary.
 An unresolved second crossing makes the state non-finite, and `out.validate()`
@@ -36,8 +38,10 @@ particles still occupy memory. `Output.weight` is zero for them, which is how th
 diagnostics and the plots tell them apart. A species can have part of each particle
 sent back instead, as {ref}`partial-reflection` describes.
 
-**Thermal.** The position is mirrored as at a reflective wall, but the velocity is
-drawn afresh, as if the particle came from a Maxwellian reservoir behind the wall at the
+**Thermal.** The velocity is drawn at the physical impact, and the explicit return
+advances from that wall over the remaining flight using the sampled velocity and
+the local field. Its distance is not a specular overshoot. The draw is as if the
+particle came from a Maxwellian reservoir behind the wall at the
 temperature of its species. The normal component follows the flux distribution
 $(v/\sigma^2)\,e^{-v^2/2\sigma^2}$, sampled as $\sigma\sqrt{-2\ln U}$ with $U$ uniform,
 and the tangential ones the Maxwellian, with $\sigma = v_{th}/\sqrt2$. This is the
@@ -109,8 +113,10 @@ code once did, is not: a lone particle in a periodic box pushed itself with up t
 its own field, and near a wall the unstored left face read as zero or as its neighbour
 while the stored right face read as itself. The implicit scheme gathers the transverse
 fields this way and takes their current as its transpose; its longitudinal field and current
-are the discrete gradient and the continuity current of {doc}`implicit`, which keep both the
-energy and the charge whatever the walls. What stays one-sided is the transverse Yee update at the walls ({doc}`field_solvers`):
+are the discrete gradient and continuity current of {doc}`implicit`. The longitudinal
+work identity requires a converged particle solve; wall exchange belongs in the
+open-system ledger. This does not certify total closed energy for every transverse
+wall stencil. The transverse Yee update is one-sided at the walls ({doc}`field_solvers`):
 the right wall face is stored and advanced, the left one is only a ghost value, so an
 electromagnetic wave meets the two walls of a reflective or absorbing box slightly
 differently.

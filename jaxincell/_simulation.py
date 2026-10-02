@@ -1076,7 +1076,9 @@ class Simulation:
         returned = self._thermalise(key, returned, hits)
         wall = self._record(wall, hits, m, incoming, returned)
         u = self._accelerate(returned, fields, qm, -interval)
-        bounced = x + fraction[:, None] * drift + (1 - fraction[:, None]) * dt * self._velocity(u)
+        remaining = (1 - fraction[:, None]) * dt
+        flight = self._velocity(self._accelerate(returned, fields, qm, remaining / 2))
+        bounced = x + fraction[:, None] * drift + remaining * flight
         x = jnp.where((hit & (w > 0))[:, None], bounced, mapped)
         x = x.at[:, 0].set(jnp.where((w > 0) & (jnp.abs(x[:, 0]) > d.length / 2), jnp.nan, x[:, 0]))
         periods = jnp.asarray(box[1:])
