@@ -82,6 +82,18 @@ write_openpmd(output, "run.h5")       # needs `pip install jaxincell[openpmd]`
 * The momentum is the one the pusher advances: $\gamma m\mathbf v$ for a relativistic run,
   $m\mathbf v$ otherwise.
 
+For magnetic moments or other diagnostics that need prescribed fields, pass the simulation:
+
+```python
+write_openpmd(output, "run.h5", simulation=sim)
+```
+
+Its static fields are separate `external_E`/`external_B` meshes alongside the self-fields.
+Flat E and B retain their face and centre staggering; 3D tensors use the domain's x/y/z
+periods and cell centres. The exporter checks the simulation's x geometry against the output.
+These fields are read from `sim` at export time, so pass the simulation used for the run.
+They add no histories to `Output`, and `meshes=False` skips all mesh records.
+
 openPMD's `weighting` counts physical particles, while `Output.weight` counts them per unit
 area of the $y$-$z$ plane ({doc}`units`). The export multiplies by the transverse area the
 run stands for, `area` in m², recorded on the `weighting` record as `transverseArea`:

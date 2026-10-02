@@ -83,19 +83,16 @@ cell does not collide.
 
 ### Two species
 
-The longer of the two lists in the cell drives. Each of its particles collides once,
-with the partner of the same rank in the other list, cycling through that list when
-it is shorter (`rank % count`). A particle of the shorter list thus collides
-$N_{\rm long}/N_{\rm short}$ times per step on average. Simply dropping the
-unmatched particles, which is what a rank-for-rank match does, would leave two thirds
-of them uncollided at a count ratio of three to one.
+The two randomly ordered lists are matched rank for rank, once per particle.
+Every particle in the shorter list collides; a random fraction
+$N_{\rm short}/N_{\rm long}$ of the longer list does. The sampled pair density
+[below](#unequal-weights-and-the-density-that-enters) accounts for those left
+unmatched, so each species scatters off the whole density of the other on average.
 
-The several collisions of a particle of the shorter list are computed from the
-velocities at the start of the step and added. Momentum stays exact; kinetic energy
-is exact in cells holding as many particles of both species, and otherwise carries an
-error of second order in the scattering angle. Exactness would need as many
-sequential passes as the largest count ratio of any cell, which is not known when
-the program is compiled.
+No particle receives two simultaneous kicks. With equal weights every cell
+conserves momentum and kinetic energy exactly even when its species counts differ.
+The earlier scheme cycled through the shorter list and added kicks computed from
+the same starting velocities; their cross terms created an energy error.
 
 ### Unequal weights and the density that enters
 
@@ -118,17 +115,15 @@ $c = 2$ within one, where $n_a = n_b$ is the density of the species.
 The rule follows from asking that every particle receive, on average, one
 collision's worth of scattering off the whole density of the other species. With
 weights $w_a$, $w_b$ and counts $N_a \ge N_b$ in a cell of length $\Delta x$: a
-particle of $a$ collides once and accepts with probability $w_b/w_{\max}$, so it needs
-$n\,w_b/w_{\max} = n_b = N_b w_b/\Delta x$; a particle of $b$ collides $N_a/N_b$
-times and accepts with $w_a/w_{\max}$, so it needs $(N_a/N_b)\,n\,w_a/w_{\max} = n_a$.
-Both give $n = N_b w_{\max}/\Delta x$, which is {eq}`pair-density` with $N_a$ pairs.
+particle of $a$ is selected with probability $N_b/N_a$ and accepts with probability
+$w_b/w_{\max}$, so it needs $(N_b/N_a)n\,w_b/w_{\max} = n_b$; a particle of $b$
+is always selected and needs $n\,w_a/w_{\max} = n_a$.
+Both give $n = N_a w_{\max}/\Delta x$, which is {eq}`pair-density` with $N_b$ pairs.
 
-For equal weights {eq}`pair-density` reduces to $\min(n_a, n_b)$ between species, as
-in the original scheme, and to $n_a$ within one. Note what does the work in that
-case: the acceptance is one, and a particle of the shorter list sees the larger
-density through the number of its collisions. The plain $\min(n_a, n_b)$ is wrong as
-soon as the shorter list also carries the smaller weight: at four times fewer and four
-times lighter particles, it makes both species scatter four times too slowly.
+For equal weights this is $\max(n_a, n_b)$ between species and $n_a$ within one.
+The larger scattering variance compensates for sampling fewer pairs; keep its
+collisional time step small and check [convergence](#time-step). Dropping unmatched
+particles without changing the density would scatter both species too slowly.
 
 ## Where in the step
 
@@ -180,20 +175,16 @@ at $\nu/\omega \approx 0.1$ over sixteen periods. The largest relative energy er
 second order with {eq}`collision-split` and at the collisionless level; the earlier placement
 multiplied the energy by 23 at $\omega\Delta t = 0.4$.
 
-In a homogeneous thermal plasma the self-consistent field is small and the placement hardly
-matters. Electrons and ions of 25 electron masses, 20000 each on 64 cells with self-collisions
-only, $\ln\Lambda = 10^4$ ($\nu_{ee}/\omega_{pe}\approx 0.05$), for $200/\omega_{pe}$: the total
-energy moves by $3\times10^{-5}$ at $\omega_{pe}\Delta t = 0.4$ and $1\times10^{-5}$ at $0.1$,
-against $1\times10^{-5}$ collisionless, either way. With electron-ion collisions as well it
-moves by $6.7\times10^{-3}$ and $2.5\times10^{-3}$, and in a relaxation run ($T_i = 4T_e$) by
-$9.0\times10^{-4}$ and $2.8\times10^{-4}$. That drift is the operator's own, not the splitting's:
-a particle of the shorter list in a cell collides several times from the same start
-velocities ([two species](#two-species)), whose energy error is second order in the angle,
-so first order in $\Delta t$ per unit time, as measured.
+The equal-weight collision operator now conserves kinetic energy even with unequal
+cell counts (`tests/test_collisions.py`, including count ratios of nine to one and
+unequal physical masses). This removes the drift from simultaneous reused partners;
+it does not remove errors from the particle-field coupling or time discretisation.
+Unequal weights retain the statistical energy and momentum conservation of the
+acceptance rule [above](#unequal-weights-and-the-density-that-enters).
 
 The implicit scheme collides after its step, with $x^{n+1}$ and $\mathbf u^{n+1}$ both at
-$t^{n+1}$, so the scattering there too leaves the conserved energy unchanged; the splitting
-is of first order, as in the explicit scheme before this correction, but exact in energy.
+$t^{n+1}$, so equal-weight scattering there too leaves the conserved energy unchanged.
+The splitting is of first order, as in the explicit scheme before this correction, but exact in energy.
 
 ## The Coulomb logarithm
 
@@ -242,7 +233,8 @@ The test suite repeats this check, and pins the pairing itself
 (`tests/test_collisions.py`): every particle collides with a partner in its own cell
 at 50 000 cells and 100 000 particles; within a species every live particle takes
 part in exactly one collision or two half collisions, and one step conserves momentum
-and energy to round-off, at 2, 3, 4, 10 and 100 particles per cell; with unequal
+and energy to round-off, at 2, 3, 4, 10 and 100 particles per cell; with unequal cell
+counts and equal weights, each cell conserves energy and momentum; with unequal
 numbers and weights each species scatters off the density of the other to within
 the statistical error; gradients stay finite for identical velocities; and the
 oscillator of [where in the step](#where-in-the-step) keeps its collisionless energy error.

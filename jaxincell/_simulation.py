@@ -579,7 +579,7 @@ class Simulation:
         gamma = self._gamma(u)                 # 1.0, a scalar, in a Newtonian run
         return m * jnp.sum(u * u, axis=1) / (jnp.reshape(gamma, (-1,)) + 1 if jnp.ndim(gamma) else gamma + 1)
 
-    def _at_impact(self, u, hits, fields, qm, dt):
+    def _at_impact(self, u, hits, fields, qm, dt, time_fraction=0.5):
         """The carried momentum of each particle at the moment it met a wall.
 
         A particle is pushed once over the whole step and then drifts, so one that meets a wall
@@ -592,10 +592,12 @@ class Simulation:
         backwards over the part of the step that follows the impact puts it back, and the
         control in ``test_gradients`` then converges: the error falls as the time step, from
         1.1e-3 to 1.3e-4 over a factor of eight, where before it sat at 6.2e-2 whatever the step.
+        ``time_fraction`` locates the carried momentum on the drift: one half for the
+        explicit leapfrog and one for an implicit sub-step's end momentum.
         """
         fraction = hits[3]
-        # a particle meets at most one wall in a step; elsewhere a half means no correction
-        interval = (jnp.where(fraction[0] != 0.5, fraction[0], fraction[1]) - 0.5) * dt
+        # A particle meets at most one wall on this drift segment.
+        interval = (jnp.where(hits[0][0] > 0, fraction[0], fraction[1]) - time_fraction) * dt
         return self._accelerate(u, fields, qm, interval[:, None])
 
     def _record(self, wall, hits, m, u_in, u_out):
@@ -1119,14 +1121,26 @@ class Simulation:
                 slope = jax.jvp(potential, (x_mid[:, 0],), (jnp.ones_like(shift),))[1]
                 small = jnp.abs(shift) < tiny
                 E_x = jnp.where(small, slope, (phi_end - phi_start) / jnp.where(small, tiny, shift)) + E_mean
-                u_new = self._accelerate(us, fields.at[:, 0].add(E_x), qms, dtau)
+                fields = fields.at[:, 0].add(E_x)
+                u_new = self._accelerate(us, fields, qms, dtau)
                 v_new = self._mean_velocity(us, u_new)
                 x_free = xs + dtau * v_new
+                incident, reflection = qms, self._reflection(v_new)
                 x_new, u_bounced, w_new, qms, hits = apply_particle_bc(x_free, u_new, ws, qms, box, d.particle_bc,
-                                                                       d.restitution, self._reflection(v_new), dx,
-                                                                       self._weight_floor())
+                                                                       d.restitution, reflection, dx,
+                                                                       self._weight_floor(),
+                                                                       displacement=dtau * v_new[:, 0])
+                u_impact = self._at_impact(u_new, hits, fields, incident, dtau, time_fraction=1.0)
+                # Both sides of the ledger refer to the crossing; correcting only arrival
+                # would make an elastic wall appear to exchange energy.
+                _, u_returned, _, _, _ = apply_particle_bc(x_free, u_impact, ws, incident, box, d.particle_bc,
+                                                           d.restitution, reflection, dx, self._weight_floor())
                 u_bounced = self._thermalise(k_sub, x_free, u_bounced)
-                wall = self._record(wall, hits, m, u_new, u_bounced)
+                if 3 in d.particle_bc:
+                    thermal_hit = ((x_free[:, 0] < -L / 2) & (d.particle_bc[0] == 3)
+                                   | (x_free[:, 0] > L / 2) & (d.particle_bc[1] == 3))
+                    u_returned = jnp.where(thermal_hit[:, None], u_bounced, u_returned)
+                wall = self._record(wall, hits, m, u_impact, u_returned)
                 u_new = u_bounced
                 rho_new = deposit_x(x_new[:, 0], q * w_new)
                 J = transpose(jnp.concatenate([(q * ws)[:, None] * v_new, jnp.zeros_like(v_new)], axis=1))[0] / dx
