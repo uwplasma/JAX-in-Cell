@@ -771,3 +771,47 @@ def test_real_openpmd_collected_slots_have_zero_weight_and_physical_charge_mass(
     np.testing.assert_array_equal(records["charge"], [-1, -1])
     np.testing.assert_array_equal(records["mass"], [3, 3])
     series.close()
+
+
+def test_real_openpmd_partial_wall_histories_preserve_physical_particle_records(tmp_path):
+    io = pytest.importorskip("openpmd_api")
+    output = tiny_openpmd_output(tmp_path)
+    output.update(mass_integer_lookup=np.array([3., 3.]), charge_integer_lookup=np.array([-1., 1.]))
+    output["masses_over_time"] = np.repeat(output["masses"][None], 3, axis=0)
+    output["masses_over_time"][2, :2, 0] *= [.3, 0.]
+    output["time_array"] = np.array([.1, .5, .9])
+    paths = write_openpmd(output, openpmd_filename=str(tmp_path / "partial.json"))
+    series = io.Series(paths["data"]["combined"], io.Access.read_only)
+    it = series.iterations[2]
+    assert it.time == pytest.approx(.9)
+    particles = it.particles["electron_beam"]
+    records = {name: particles[name][io.Record_Component.SCALAR].load_chunk()
+               for name in ("weighting", "charge", "mass")}
+    momentum = particles["momentum"]["x"].load_chunk()
+    series.flush()
+    np.testing.assert_array_equal(records["weighting"], [.6, 0.])
+    np.testing.assert_array_equal(records["charge"], [-1., -1.])
+    np.testing.assert_array_equal(records["mass"], [3., 3.])
+    np.testing.assert_array_equal(momentum, 3*output["velocities"][2, :2, 0])
+    series.close()
+
+
+@pytest.mark.parametrize("dimensions, shape", [(('x', 'y', 'z'), (4, 2, 3, 3)), (('x', 'z'), (4, 3, 3))])
+def test_real_openpmd_tensor_electric_field_axes_and_x_face_coordinates(tmp_path, dimensions, shape):
+    io = pytest.importorskip("openpmd_api")
+    output = tiny_openpmd_output(tmp_path)
+    field = np.arange(np.prod(shape), dtype=float).reshape(shape)
+    output.update(dimensions=dimensions, box_size=(1., .2, .3), external_electric_field=field)
+    paths = write_openpmd(output, openpmd_filename=str(tmp_path / "tensor_E.json"))
+    series = io.Series(paths["data"]["combined"], io.Access.read_only)
+    mesh = series.iterations[0].meshes['external_E']
+    assert mesh.axis_labels == list(dimensions)
+    for axis, dim in enumerate(dimensions):
+        length = output["box_size"]['xyz'.index(dim)]
+        coordinates = mesh.grid_global_offset[axis] + (np.arange(shape[axis]) + mesh['x'].position[axis]) * mesh.grid_spacing[axis]
+        expected = -length/2 + (np.arange(shape[axis]) + (1 if dim == 'x' else .5)) * length/shape[axis]
+        np.testing.assert_allclose(coordinates, expected, atol=1e-16, rtol=1e-14)
+    values = mesh['z'].load_chunk()
+    series.flush()
+    np.testing.assert_array_equal(values, field[..., 2])
+    series.close()

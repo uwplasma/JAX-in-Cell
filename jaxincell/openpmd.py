@@ -312,15 +312,16 @@ def _write_meshes(iteration, output, iteration_index, io, keep=None):
         mesh = iteration.meshes[name]
         mesh.geometry = io.Geometry.cartesian
         mesh.data_order = io.Data_Order.C if hasattr(io, "Data_Order") else "C"
-        tensor = data.ndim > 2
-        lengths = tuple(map(float, output["box_size"])) if tensor else (float(output["length"]),)
+        rank = data.ndim - (record_type == "vector")
+        dimensions = output.get("dimensions", tuple("xyz"[:rank])) if rank > 1 else ("x",)
+        lengths = tuple(float(output["box_size"]["xyz".index(dim)]) for dim in dimensions) if rank > 1 else (float(output["length"]),)
         spacing = [length / cells for length, cells in zip(lengths, data.shape)]
-        mesh.axis_labels = list("xyz"[:len(lengths)])
+        mesh.axis_labels = list(dimensions)
         mesh.grid_spacing = spacing
         mixed = name == "J" and output.get("solver_parameters", {}).get("time_evolution_algorithm", 0) == 0
-        faces = not tensor and (name in ("E", "external_E") or (name == "J" and not mixed))
-        mesh.grid_global_offset = [-length / 2 + (spacing[0] / 2 if mixed else spacing[0] if faces else 0)
-                                   for length in lengths]
+        faces = name in ("E", "external_E") or (name == "J" and not mixed)
+        mesh.grid_global_offset = [-length / 2 + (spacing[0] / 2 if mixed else spacing[0] if faces else 0) * (axis == 0)
+                                   for axis, length in enumerate(lengths)]
         try:
             mesh.grid_unit_SI = 1.0
         except Exception:
@@ -334,7 +335,8 @@ def _write_meshes(iteration, output, iteration_index, io, keep=None):
         if record_type == "vector":
             for component_index, component_name in enumerate(("x", "y", "z")):
                 mesh[component_name].position = [0.5 if mixed and component_index == 0 else
-                                                 0.0 if mixed or faces else 0.5] * len(lengths)
+                                                 0.0 if axis == 0 and (mixed or faces) else 0.5
+                                                 for axis in range(len(lengths))]
                 _store(mesh[component_name], data[..., component_index], io, keep)
         else:
             scalar_component = getattr(io, "Mesh_Record_Component", None)
@@ -366,6 +368,9 @@ def _write_particles(iteration, output, iteration_index, io, keep=None):
     all_weights = np.asarray(output["weights"], dtype=np.float64).reshape(-1)
     all_charges = np.asarray(output["charges"], dtype=np.float64).reshape(-1)
     all_masses = np.asarray(output["masses"], dtype=np.float64).reshape(-1)
+    if "masses_over_time" in output:
+        physical_mass = np.asarray(output["mass_integer_lookup"])[species_index]
+        all_weights = np.asarray(output["masses_over_time"])[iteration_index, :, 0] / physical_mass
     particle_push = (
         "Boris"
         if output["solver_parameters"]["time_evolution_algorithm"] == 0
@@ -394,6 +399,9 @@ def _write_particles(iteration, output, iteration_index, io, keep=None):
             out=np.zeros_like(macro_masses),
             where=weights != 0,
         )
+        if "charge_integer_lookup" in output:
+            charges = np.asarray(output["charge_integer_lookup"])[integer_index] * np.ones_like(weights)
+            masses = np.asarray(output["mass_integer_lookup"])[integer_index] * np.ones_like(weights)
         # Main stores initial weights; a collected slot is parked outside its absorbing wall.
         bc = output.get("domain_parameters", output)
         collected = ((positions[:, 0] < -output["length"] / 2) & (bc.get("particle_BC_left", 0) == 2)
