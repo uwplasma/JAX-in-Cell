@@ -380,6 +380,25 @@ def test_parameter_updates_cannot_enable_unvalidated_wall_collisions(section):
             sim.solver_parameters = {**sim.solver_parameters, "collisions": True}
 
 
+@pytest.mark.parametrize("section", ["constructor", "source", "solver"])
+@pytest.mark.filterwarnings("ignore:source_term_active.*:UserWarning")
+def test_sources_cannot_enable_unvalidated_collision_coupling(section):
+    from tests.test_simulation import small_simulation_parameters
+    p = small_simulation_parameters(total_steps=1)
+    p["solver_parameters"]["collisions"] = section != "solver"
+    p["source_parameters"] = {"source_term_active": int(section != "source")}
+    if section == "constructor":
+        with pytest.raises(ValueError, match="collisions with particle sources"):
+            Simulation(p)
+    else:
+        sim = Simulation(p)
+        with pytest.raises(ValueError, match="collisions with particle sources"):
+            if section == "source":
+                sim.source_parameters = {"source_term_active": 1}
+            else:
+                sim.solver_parameters = {**sim.solver_parameters, "collisions": True}
+
+
 @pytest.mark.parametrize("gamma_dt", [1e-3, 1e-4])
 def test_maxwellian_temperature_difference_has_coupled_relaxation_rate(gamma_dt):
     """The NRL temperature-transfer rate applies to each species: for equal
