@@ -577,6 +577,9 @@ class Solver:
         filter_alpha: Centre weight of the three-point filter.
         filter_strides: Cell offsets of the filter stencil.
         picard_iterations: Fixed-point iterations of the implicit scheme.
+        picard_tolerance: Optional positive residual tolerance. Replays one complete
+            fixed-point map after the fixed scan; a failed check makes the output
+            invalid. None (default) adds no work and performs no convergence check.
         substeps: Particle sub-steps per field step in the implicit scheme.
         shape_order: B-spline degree, 2 (quadratic) or 5 (quintic). Quintic weighting
             requires periodic particle and field boundaries, for either integrator.
@@ -592,11 +595,14 @@ class Solver:
     filter_alpha: float = 0.5
     filter_strides: tuple = (1,)
     picard_iterations: int = 8
+    picard_tolerance: object = None
     substeps: int = 2
     shape_order: int = 2
     orbit_force: str = "secant"
 
     def __post_init__(self):
+        if _template(self):
+            return
         _require(self.algorithm in ("explicit", "implicit"),
                  f"algorithm is 'explicit' or 'implicit', not {self.algorithm!r}")
         _require(self.model in ("electromagnetic", "electrostatic"),
@@ -609,6 +615,12 @@ class Solver:
                  "orbit_force='integral' requires algorithm='implicit'")
         _require(self.filter_passes >= 0 and self.picard_iterations >= 1 and self.substeps >= 1,
                  "filter_passes cannot be negative, and picard_iterations and substeps must be at least one")
+        _require(self.picard_tolerance is None or self.algorithm == "implicit",
+                 "picard_tolerance requires algorithm='implicit'")
+        _require(self.picard_tolerance is None or not _plain(self.picard_tolerance)
+                 or (np.isfinite(self.picard_tolerance) and self.picard_tolerance > 0),
+                 "picard_tolerance must be finite and positive, or None")
+        object.__setattr__(self, "picard_tolerance", _float(self.picard_tolerance))
         object.__setattr__(self, "filter_alpha", _float(self.filter_alpha))
         object.__setattr__(self, "filter_strides", tuple(int(s) for s in self.filter_strides))
 

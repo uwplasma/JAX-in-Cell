@@ -255,6 +255,34 @@ Stiff particle coupling can make Picard diverge, in which case more iterations d
 not repair the step. Substeps resolve particle orbits but do not certify convergence
 of the field-particle solve.
 
+For an explicit check, set `Solver(algorithm="implicit", picard_tolerance=1e-8)`
+and call `output.validate()`. The fixed scan still executes exactly
+`picard_iterations` iterations. Afterwards one additional **complete** fixed-point
+map is replayed from the accepted fields and sub-step orbits, with the same thermal
+wall keys. It evaluates $F(z)-z$; the last iterate's update is not the residual of
+$z$. The replay does not replace the accepted solution or advance its random stream,
+impacts or moment sums. `picard_tolerance=None` (default) performs no replay or check.
+
+Electric and magnetic residuals use their own old/accepted maximum field magnitudes;
+each species' sub-step mean velocities and momentum per mass use their old/accepted
+maximum magnitudes. Sub-step positions use one cell size, with minimum-image differences in
+periodic coordinates. Weight residuals use the old/accepted maximum weight;
+charge and current use the initial absolute-charge density and its transport speed.
+All comparisons are dimensionless. A failed check marks the accepted electric field
+nonfinite so `Output.validate()` rejects it using the existing invalid-state contract.
+No new archive or state fields are needed. Differentiated objectives must also reject
+nonfinite states; a derivative of an unchecked finite observable is not a convergence
+certificate. Successful checked runs retain derivatives of the same fixed scan.
+
+For a uniform cold transverse plasma, Picard's linear amplification factor is
+$-(\omega_p\Delta t/2)^2$: it contracts at $\omega_p\Delta t=0.5$ and diverges at
+2.2. The optional check accepts the first after eight iterations and rejects the
+second even after 32. In vacuum, a direct solve at $c\Delta t/\Delta x=4.5$ passes
+after one iteration despite a large change from the old field. This illustrates why
+vacuum stability and converged particle coupling are separate conditions. Tolerance
+passing does not establish phase, grid or distribution accuracy; compare observables
+and gradients against timestep and iteration refinement.
+
 Periodic vacuum modes have unit amplification modulus and phase advance
 $2\arctan[C\sin(k\Delta x/2)]$, independently of `picard_iterations`. This is the
 Crank-Nicolson solution of the discrete Maxwell equations, not exact continuum

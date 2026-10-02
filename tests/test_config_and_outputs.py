@@ -547,3 +547,29 @@ def test_save_run_writes_the_record_an_example_leaves(tmp_path):
     assert (folder / "figure.png").exists()
     bare = save_run(tmp_path / "bare", "demo", {}, {})
     assert not (bare / "data.npz").exists() and not (bare / "figure.png").exists()
+
+
+@pytest.mark.parametrize("tolerance", [0., -1., np.inf, np.nan])
+def test_picard_residual_tolerance_must_be_finite_and_positive(tolerance):
+    with pytest.raises(ValueError, match="picard_tolerance"):
+        Solver(algorithm="implicit", picard_tolerance=tolerance)
+
+
+def test_picard_residual_tolerance_is_only_for_the_implicit_solver():
+    with pytest.raises(ValueError, match="picard_tolerance requires"):
+        Solver(picard_tolerance=1e-6)
+    solver = Solver(algorithm="implicit", picard_tolerance=1e-6)
+    assert jax.tree.structure(solver) == jax.tree.structure(solver.replace(picard_tolerance=1e-8))
+    axes = jax.tree.map(lambda _: None, solver).replace(picard_tolerance=0)
+    assert type(axes.picard_tolerance) is int and axes.picard_tolerance == 0
+
+
+def test_picard_residual_rejects_invalid_traced_tolerances():
+    neutral = Species("neutral", 1, charge=0., mass=1., density=1., vth=0.)
+    domain = Domain(length=1., cells=4, dt_over_dx_c=4.5)
+    solver = Solver(algorithm="implicit", picard_iterations=1, picard_tolerance=1e-6)
+
+    def field(tolerance):
+        return Simulation(domain, [neutral], solver.replace(picard_tolerance=tolerance)).run(1).state.E
+    result = np.asarray(jax.jit(jax.vmap(field))(jnp.array([0., -1., jnp.inf, jnp.nan, 1e-6])))
+    assert np.isnan(result[:4]).all() and np.isfinite(result[4]).all()

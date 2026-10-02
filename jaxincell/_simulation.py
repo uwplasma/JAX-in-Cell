@@ -225,9 +225,11 @@ class Output:
         It reads values, so it belongs on the host: inside ``jit`` or ``grad`` there is nothing
         to read. A differentiated objective takes :attr:`overflow` out with its result instead
         and rejects the trial itself; :meth:`validate` is the host-side shortcut."""
-        if not all(np.all(np.isfinite(np.asarray(a))) for a in jax.tree.leaves(self.state)):
+        leaves = jax.tree.leaves(self.state.replace(key=random.key_data(self.state.key)))
+        if not all(np.all(np.isfinite(np.asarray(a))) for a in leaves):
             return ("non-finite final state: resolve at most one wall crossing per particle segment "
-                    "and converge the implicit iteration; reduce dt or increase substeps or picard_iterations.",)
+                    "and converge the implicit iteration (including picard_tolerance); reduce dt or increase "
+                    "substeps or picard_iterations.",)
         spilt = float(jnp.max(jnp.asarray(self.state.wall.overflow)))
         if spilt <= 0:
             return ()
@@ -1126,6 +1128,49 @@ class Simulation:
                       wall, totals)
         return state, (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
+    def _check_picard(self, picard, state, initial, q):
+        if self.solver.picard_tolerance is None:
+            return state
+        # A complete replay at the accepted fields/orbits is F(z)-z; successive
+        # accepted updates alone are not the residual of the returned solution.
+        replay, _ = picard(state, None)
+        tolerance = self.solver.picard_tolerance
+        E_a, B_a, (x_a, v_a), ((_, u_a, w_a, _, rho_a, _), J_a) = state
+        E_b, B_b, (x_b, v_b), ((_, u_b, w_b, _, rho_b, _), J_b) = replay
+        tiny = jnp.finfo(initial.x.dtype).tiny
+
+        def maximum(a):
+            return jnp.max(jnp.abs(a))
+
+        def relative(a, b, old):
+            scale = jnp.maximum(jnp.maximum(maximum(a), maximum(old)), tiny)
+            return maximum(b - a) / scale
+
+        # Fields keep their own SI scales, positions use one cell, and each species
+        # has its own velocity/momentum-per-mass scale.
+        valid = jnp.isfinite(tolerance) & (tolerance > 0)
+        valid &= jnp.maximum(relative(E_a, E_b, initial.E), relative(B_a, B_b, initial.B)) <= tolerance
+        d = self.domain
+        periods = jnp.asarray((d.length, d.length_y, d.length_z))
+        periodic = jnp.asarray((d.particle_bc == (0, 0), True, True)) & (periods > 0)
+        difference = x_b - x_a
+        difference -= jnp.where(periodic, periods * jnp.round(difference / jnp.where(periodic, periods, 1.0)), 0.0)
+        valid &= maximum(difference) / d.dx <= tolerance
+        v = self._velocity(initial.u)
+        for start, count in self.blocks:
+            section = slice(start, start + count)
+            residual = jnp.maximum(relative(v_a[:, section], v_b[:, section], v[section]),
+                                   relative(u_a[section], u_b[section], initial.u[section]))
+            valid &= residual <= tolerance
+        valid &= relative(w_a, w_b, initial.w) <= tolerance
+        charge_scale = jnp.maximum(jnp.sum(jnp.abs(q) * initial.w) / d.length, tiny)
+        current_scale = jnp.maximum(charge_scale * jnp.maximum(maximum(v_a), maximum(v)), tiny)
+        valid &= maximum(rho_b - rho_a) / charge_scale <= tolerance
+        valid &= maximum(J_b - J_a) / current_scale <= tolerance
+        # Reuse the invalid-state/validate contract, with no new state or archive field.
+        # The accepted particles, ledger and RNG stream are untouched.
+        return (jnp.where(valid, E_a, jnp.nan), B_a, state[2], state[3])
+
     def _implicit_step(self, st, extra):
         """Crank-Nicolson with a direct Maxwell solve and fixed particle Picard scan (docs/numerics/implicit.md).
 
@@ -1233,6 +1278,7 @@ class Simulation:
         orbits = (free(jnp.arange(1.0, n_sub + 1)), jnp.broadcast_to(v, (n_sub,) + v.shape))
         state, _ = lax.scan(picard, (E, B, orbits, ((x, u, w, qm, rho, st.wall), jnp.zeros_like(E))), None,
                             length=self.solver.picard_iterations)
+        state = self._check_picard(picard, state, st, q)
         E_new, B_new, _, ((x, u, w, qm, rho_next, wall), J) = state
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
         v = self._velocity(u)

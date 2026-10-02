@@ -714,3 +714,99 @@ def test_the_electrons_of_a_maintained_sheath_are_the_kinetic_mapping_of_the_sou
             assert bound > 0.2 * relation and held > 0.75 * bound, (bound, held, relation)
         else:
             assert bound == 0.0 and abs(measured / relation - 1) < 0.01, (measured, relation)
+
+
+@pytest.mark.parametrize("omega_dt, iterations, converged", [(0.5, 8, True), (0.5, 1, False),
+                                                             (2.2, 8, False), (2.2, 32, False)])
+def test_optional_picard_residual_checks_the_cold_transverse_plasma(omega_dt, iterations, converged):
+    """The uniform cold transverse plasma is an independent midpoint oscillator.
+    Picard's amplification is -(omega_p dt/2)^2, so .5 contracts and 2.2 diverges.
+    A finite last iterate or exact Gauss law does not establish convergence."""
+    density = 1e18
+    omega = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
+    domain = Domain(length=1., cells=8, time_step=omega_dt / omega)
+    electrons = Species.electrons(n=128, density=density, vth=0., sampling="low_noise")
+    solver = Solver(algorithm="implicit", substeps=1, picard_iterations=iterations, picard_tolerance=1e-8)
+    sim = Simulation(domain, [electrons], solver)
+    initial = sim.initial_state(random.key(24))[0]
+    initial = initial.replace(E=initial.E.at[:, 1].set(1.))
+    out = sim.run(1, state=initial)
+    if converged:
+        out.validate()
+        a = (omega_dt / 2) ** 2
+        np.testing.assert_allclose(out.E[0, :, 1], (1 - a) / (1 + a), rtol=1e-8, atol=0)
+        expected_velocity = -e_charge / mass_electron * domain.dt / (1 + a)
+        np.testing.assert_allclose(out.v[0, :, 1], expected_velocity, rtol=1e-8, atol=0)
+    else:
+        with pytest.raises(RuntimeError, match="picard_tolerance"):
+            out.validate()
+        assert np.isnan(np.asarray(out.state.E)).all()
+        unchecked = sim.replace(solver=solver.replace(picard_tolerance=None)).run(1, state=initial)
+        assert np.isfinite(np.asarray(unchecked.state.E)).all()
+
+
+def test_optional_picard_residual_accepts_a_single_vacuum_solve_above_cfl():
+    """One vacuum solve changes the accepted fields substantially, but replaying
+    the complete map returns them exactly: a last-update check would reject it."""
+    cells, courant, steps = 16, 4.5, 12
+    domain = Domain(length=1., cells=cells, dt_over_dx_c=courant)
+    neutral = Species("neutral", 1, charge=0., mass=1., density=1., vth=0.)
+    solver = Solver(algorithm="implicit", picard_iterations=1, picard_tolerance=1e-12)
+    sim = Simulation(domain, [neutral], solver)
+    initial = sim.initial_state(random.key(25))[0]
+    profile = (-1.) ** jnp.arange(cells)
+    field = jnp.zeros((cells, 3)).at[:, 1].set(profile)
+    initial = initial.replace(E=field)
+    out = sim.run(steps, state=initial).validate()
+    phase = np.arange(1, steps + 1) * 2 * np.arctan(courant)
+    np.testing.assert_allclose(out.E[:, :, 1], np.cos(phase)[:, None] * np.asarray(profile), rtol=0, atol=2e-13)
+    unchecked = sim.replace(solver=solver.replace(picard_tolerance=None)).run(steps, state=initial)
+    checked_state = out.state.replace(key=random.key_data(out.state.key))
+    reference_state = unchecked.state.replace(key=random.key_data(unchecked.state.key))
+    for checked, reference in zip(jax.tree.leaves(checked_state), jax.tree.leaves(reference_state)):
+        np.testing.assert_array_equal(checked, reference)
+
+
+def test_optional_picard_replay_preserves_constant_magnetic_orbits_and_derivatives():
+    """In a prescribed constant B, the independent Boris angle and its derivative
+    remain valid. The diagnostic replay leaves the accepted orbit unchanged."""
+    steps, dt, omega_dt = 6, 1e-8, .8
+    domain = Domain(length=1., length_y=1., length_z=1., cells=8, time_step=dt)
+    x, v = jnp.zeros((1, 3)), jnp.array([[1e6, 0., 0.]])
+    electrons = Species.electrons(n=1, density=1e-15, x=x, v=v)
+    solver = Solver(algorithm="implicit", substeps=1, picard_iterations=4, picard_tolerance=1e-10)
+    base_B = omega_dt * mass_electron / (e_charge * dt)
+    Simulation(domain, [electrons], solver, external_B=jnp.zeros((8, 3)).at[:, 2].set(base_B)).run(steps).validate()
+
+    def objective(scale, checked=True):
+        field = jnp.zeros((8, 3)).at[:, 2].set(scale * base_B)
+        method = solver if checked else solver.replace(picard_tolerance=None)
+        sim = Simulation(domain, [electrons], method, external_B=field)
+        out = sim.run(steps)
+        return (out.v[-1, 0, 0] + .3 * out.v[-1, 0, 1]) / 1e6
+    angle = steps * 2 * np.arctan(omega_dt / 2)
+    value = np.cos(angle) + .3 * np.sin(angle)
+    derivative = steps * omega_dt / (1 + (omega_dt / 2) ** 2) * (-np.sin(angle) + .3 * np.cos(angle))
+    assert float(objective(1.)) == pytest.approx(value, rel=0, abs=2e-12)
+    assert float(objective(1.)) == float(objective(1., False))
+    assert float(jax.grad(objective)(1.)) == pytest.approx(derivative, rel=0, abs=2e-11)
+    assert float(jax.jacfwd(objective)(1.)) == pytest.approx(derivative, rel=0, abs=2e-11)
+    h = 1e-5
+    finite = float((objective(1 + h) - objective(1 - h)) / (2 * h))
+    assert finite == pytest.approx(derivative, rel=0, abs=2e-8)
+
+
+def test_optional_picard_replay_does_not_redraw_thermal_walls_or_add_impacts():
+    n = 10
+    domain = Domain(length=1., cells=8, time_step=1e-7, particle_bc="thermal", field_bc="reflective")
+    x = jnp.zeros((n, 3)).at[:, 0].set(.49)
+    v = jnp.zeros((n, 3)).at[:, 0].set(1e6)
+    electrons = Species.electrons(n=n, density=1e-15, vth=(1e6, 3e5, 2e5), x=x, v=v)
+    solver = Solver(algorithm="implicit", substeps=1, picard_iterations=4, picard_tolerance=1e-10)
+    sim = Simulation(domain, [electrons], solver)
+    out = sim.run(1, seed=26).validate()
+    reference = sim.replace(solver=solver.replace(picard_tolerance=None)).run(1, seed=26)
+    assert float(out.wall.arrived[0, 0, 1]) > 0
+    assert np.any(np.asarray(out.v[0, :, 1:]))
+    for checked, baseline in zip(jax.tree.leaves(out.state), jax.tree.leaves(reference.state)):
+        np.testing.assert_array_equal(checked, baseline)

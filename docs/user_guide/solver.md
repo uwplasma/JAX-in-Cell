@@ -22,6 +22,7 @@ solver = Solver(algorithm="explicit", model="electromagnetic", field_solver="amp
 | `filter_alpha` | centre weight of the three-point filter (a pytree leaf) | `0.5` |
 | `filter_strides` | cell offsets of the filter stencil | `(1,)` |
 | `picard_iterations` | fixed-point iterations of the implicit scheme | `8` |
+| `picard_tolerance` | optional dimensionless residual check by one complete replay; call `Output.validate()` | `None` |
 | `substeps` | particle sub-steps per field step, implicit only | `2` |
 | `shape_order` | B-spline degree: `2` (quadratic, three cells) or `5` (quintic, six cells); quintic requires periodic particle and field boundaries with either integrator | `2` |
 
