@@ -796,3 +796,24 @@ def test_cn_step_shapes_and_substepping():
         input_carry=cn_carry0,
         box_size=params["box_size"],
     )
+
+
+@pytest.mark.parametrize("phase", [.25, .75])
+@pytest.mark.parametrize("side", [-1, 1])
+def test_fractional_wall_trajectory_at_integer_output_time(phase, side):
+    grid = jnp.linspace(-.45, .45, 10)
+    velocity = jnp.array([[.2*side, 0., 0.]])
+    position = jnp.array([[side*(.5-.2*phase), 0., 0.]])
+    zero = jnp.zeros((1, 1))
+    field = jnp.zeros((10, 3))
+    carry = (field, field, position-velocity/2, position, position+velocity/2,
+             velocity, zero, jnp.full((1, 1), 4.), zero)
+    solver = {"filter_passes": 0, "filter_alpha": .5, "filter_strides": (1,), "relativistic": False}
+    new, data = Boris_step(carry, 0, solver,
+                          {"padded_external_electric_field": jnp.zeros((13, 3)),
+                           "padded_external_magnetic_field": jnp.zeros((13, 3))},
+                          {"x": .1}, 1., {"x": grid}, (1., 1., 1.), ("x",), 3, 3, 1, 1, 2,
+                          mixed_BC_weight=.3, COR_left=.5, COR_right=.5)
+    assert float(data[0][0, 0]) == pytest.approx(side*(.5-.5*.2*(1-phase)))
+    assert float(data[1][0, 0]) == pytest.approx(-.5*.2*side)
+    assert float(new[7][0, 0]) == pytest.approx(4*.3)

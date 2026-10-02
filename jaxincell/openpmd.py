@@ -366,6 +366,9 @@ def _write_particles(iteration, output, iteration_index, io, keep=None):
     all_weights = np.asarray(output["weights"], dtype=np.float64).reshape(-1)
     all_charges = np.asarray(output["charges"], dtype=np.float64).reshape(-1)
     all_masses = np.asarray(output["masses"], dtype=np.float64).reshape(-1)
+    if "masses_over_time" in output:
+        physical_mass = np.asarray(output["mass_integer_lookup"])[species_index]
+        all_weights = np.asarray(output["masses_over_time"])[iteration_index, :, 0] / physical_mass
     particle_push = (
         "Boris"
         if output["solver_parameters"]["time_evolution_algorithm"] == 0
@@ -394,6 +397,9 @@ def _write_particles(iteration, output, iteration_index, io, keep=None):
             out=np.zeros_like(macro_masses),
             where=weights != 0,
         )
+        if "charge_integer_lookup" in output:
+            charges = np.asarray(output["charge_integer_lookup"])[integer_index] * np.ones_like(weights)
+            masses = np.asarray(output["mass_integer_lookup"])[integer_index] * np.ones_like(weights)
         # Main stores initial weights; a collected slot is parked outside its absorbing wall.
         bc = output.get("domain_parameters", output)
         collected = ((positions[:, 0] < -output["length"] / 2) & (bc.get("particle_BC_left", 0) == 2)

@@ -229,10 +229,8 @@ class Simulation:
         velocities = particle_state["velocities"]
 
         # Leapfrog integration: positions at half-step before the start
-        positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
-            positions + (dt / 2) * velocities, velocities,
-            charges, masses, charge_to_mass_ratios,
-            dx, grid, *box_size, particle_BC_left, particle_BC_right)
+        positions_plus1_2 = positions + dt/2*velocities
+        qs, ms, q_ms = charges, masses, charge_to_mass_ratios
 
         positions_minus1_2 = set_BC_positions(
             positions - (dt / 2) * velocities,
@@ -246,7 +244,9 @@ class Simulation:
             )
             step_func = lambda carry, step_index: Boris_step(
                 carry, step_index, solver_parameters, runtime_external_field_parameters, dxyz, dt, grid_xyz, box_size, dimensions,
-                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
+                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver'],
+                **{key: domain_parameters[key] for key in
+                   ("mixed_BC_weight", "COR_left", "COR_right", "mixed_BC_velocity_scale")}
             )
         else:
             initial_carry = (
@@ -279,6 +279,7 @@ class Simulation:
                 log = coulomb_logarithm(ne, te)
             collision_key = random.PRNGKey(self._solver_parameters["seed"] or 0)
 
+        changing_weights = particle_BC_left >= 2 or particle_BC_right >= 2
         collisionless_step = step_func
         def collision_step(carry, step_index):
             new_carry, output = collisionless_step(carry, step_index)
@@ -292,7 +293,7 @@ class Simulation:
                                         *box_size, particle_BC_left, particle_BC_right)
                 new_carry = (*new_carry[:4], half, v, *new_carry[6:])
                 output = (x, v, *output[2:])
-            return new_carry, output
+            return new_carry, (*output, new_carry[7], new_carry[6]) if changing_weights else output
         step_func = collision_step
 
         # Keep the requested snapshots in fixed-size buffers carried through the scan.
@@ -332,7 +333,7 @@ class Simulation:
             scan_body, (initial_carry, snapshot_buffers, jnp.array(0, dtype=int)), jnp.arange(total_steps)
         )
         positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time, mus_over_time = snapshot_buffers
+        magnetic_field_over_time, current_density_over_time, charge_density_over_time, mus_over_time = snapshot_buffers[:7]
 
         # **Output results**
         electron_species = next(iter(species_parameters["electrons"].values()))
@@ -400,6 +401,8 @@ class Simulation:
             "padded_external_magnetic_field": field_state["padded_external_magnetic_field"],
         }
 
+        if changing_weights:
+            temporary_output.update(masses_over_time=snapshot_buffers[7], charges_over_time=snapshot_buffers[8])
         return temporary_output
 
     def assemble_output(self, simulation_output, input_parameters):
@@ -532,6 +535,13 @@ class Simulation:
         self.build_domain()
         self.resolve_snapshot_steps()
         self.initialize_particles()
+        if (self._solver_parameters["time_evolution_algorithm"] == 1 or self._solver_parameters["relativistic"]) and (
+                any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right"))
+                or any(self._domain_parameters[f"COR_{side}"] != 1 for side in ("left", "right"))):
+            raise ValueError("mixed or inelastic walls currently require nonrelativistic Boris")
+        if any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right")) and (
+                self._solver_parameters["field_solver"] != 2):
+            raise ValueError("mixed walls require field_solver=2 to account for collected charge")
         self.initialize_fields()
         if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
             bool(jnp.any(field != 0)) for field in (self.external_electric_field, self.external_magnetic_field)
