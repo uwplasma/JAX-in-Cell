@@ -297,7 +297,7 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     import numpy as np
 
     from jaxincell import load_state, save_state
-    from jaxincell._archive import WALL_FORMAT
+    from jaxincell._archive import VOLUME_FORMAT
 
     domain = Domain(length=1e-2, cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
     species = Species("electrons", 2000, -1.0, mass_electron, 0.0,
@@ -332,8 +332,8 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     # an archive of another format is refused rather than half read, and so is one that is not
     # a state at all
     stored = dict(np.load(path))
-    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(WALL_FORMAT + 1)})
-    with pytest.raises(ValueError, match=f"format {WALL_FORMAT + 1}"):
+    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(VOLUME_FORMAT + 1)})
+    with pytest.raises(ValueError, match=f"format {VOLUME_FORMAT + 1}"):
         load_state(tmp_path / "future.npz")
     np.savez(tmp_path / "partial.npz", **{k: v for k, v in stored.items() if k != "rho"})
     with pytest.raises(ValueError, match="not a state archive"):
@@ -365,6 +365,9 @@ def test_restart_position_conventions_and_legacy_wall_rejection(tmp_path, algori
     np.savez(tmp_path / "legacy.npz", **{**old, "format": np.asarray(1)})
     legacy = load_state(tmp_path / "legacy.npz")
     if boundary == "thermal":
+        np.savez(tmp_path / "wrong_phase.npz", **{**stored, "x_phase": np.asarray("half")})
+        with pytest.raises(ValueError, match="format 4 requires"):
+            load_state(tmp_path / "wrong_phase.npz")
         with pytest.raises(ValueError, match="future impacts"):
             load_state(tmp_path / "legacy.npz", sim)
         with pytest.raises(ValueError, match="future impacts"):

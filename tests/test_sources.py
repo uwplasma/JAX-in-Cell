@@ -573,8 +573,7 @@ def test_the_collector_field_is_the_charge_it_holds_and_the_clouds_reaching_past
     sim = Simulation(domain, [electrons, ions], Solver(model="electrostatic"))
     out = sim.run(400, store_every=100)
     collected = np.asarray(out.wall.collected)[:, :, 1] @ np.array([-e_charge, e_charge])
-    # from the integer-time positions the last deposit used, not the half-step ones the
-    # leapfrog carries in the state
+    # Use the physical integer-time positions of the final charge deposit.
     overlap = float(sim._overlap_charge(out.x[-1], out.weight[-1])[1])
     assert np.asarray(out.E[:, -1, 0])[-1] == pytest.approx(-(collected[-1] + overlap) / epsilon_0, rel=1e-10)
     assert abs(overlap / collected[-1]) > 1e-4        # and it is not a rounding-sized correction
