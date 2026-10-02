@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use JAX-in-Cell, please cite it as below."
+title: "JAX-in-Cell: a differentiable particle-in-cell code for plasma physics"
+type: software
+authors:
+  - family-names: Ma
+    given-names: Longyu
+    affiliation: "Department of Physics, University of Wisconsin-Madison"
+  - family-names: Jorge
+    given-names: Rogerio
+    affiliation: "Department of Physics, University of Wisconsin-Madison"
+  - family-names: Lu
+    given-names: Hongke
+    affiliation: "Department of Physics, University of Wisconsin-Madison"
+  - family-names: Tran
+    given-names: Aaron
+    affiliation: "Department of Physics, University of Wisconsin-Madison"
+  - family-names: Woolford
+    given-names: Christopher
+    affiliation: "Department of Physics, University of Wisconsin-Madison"
+repository-code: "https://github.com/uwplasma/JAX-in-Cell"
+url: "https://jax-in-cell.readthedocs.io"
+license: MIT
+version: "0.1"
+date-released: "2025-12-15"
+keywords:
+  - plasma physics
+  - particle-in-cell
+  - kinetic simulation
+  - JAX
+  - differentiable programming

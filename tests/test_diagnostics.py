@@ -352,3 +352,30 @@ def test_diagnostics_dominant_frequency_for_oscillatory_energy():
     diagnostics(constant_output)
 
     assert jnp.isclose(constant_output["dominant_frequency"], 0.0)
+
+
+def test_diagnostics_gauss_law_error_and_momentum():
+    T, G, dx = 3, 8, 0.5
+    rho = jnp.stack([jnp.sin(2 * jnp.pi * jnp.arange(G) / G) * (t + 1) for t in range(T)])
+    Ex = jnp.cumsum(rho, axis=1) * dx / epsilon_0          # backward-difference Gauss solution
+    electric_field = jnp.zeros((T, G, 3)).at[..., 0].set(Ex)
+    velocities = jnp.array([
+        [[1.0, 0.0, 0.0], [-0.5, 0.0, 0.0]],
+        [[1.0, 0.0, 0.0], [-0.5, 0.0, 0.0]],
+        [[2.0, 0.0, 0.0], [-0.5, 0.0, 0.0]],
+    ])
+    output = _minimal_diagnostic_output(electric_field=electric_field, velocities=velocities, dx=dx)
+    output["charge_density"] = rho
+    diagnostics(output)
+
+    # masses are 1 (electron) and 2 (ion): P_x = 0, 0, 1 and sum m|v| at t = 0 is 2
+    assert jnp.allclose(output["total_momentum"][:, 0], jnp.array([0.0, 0.0, 1.0]))
+    assert jnp.allclose(output["momentum_error_rel"], jnp.array([0.0, 0.0, 0.5]))
+    assert jnp.all(output["gauss_error_Linf_rel"] < 1e-12)
+
+    # breaking Gauss's law at one node shows up in the error
+    output = _minimal_diagnostic_output(electric_field=electric_field.at[1, 3, 0].add(1.0), dx=dx)
+    output["charge_density"] = rho
+    diagnostics(output)
+    assert output["gauss_error_Linf_rel"][1] > 1e-12
+    assert jnp.all(output["gauss_error_Linf_rel"][jnp.array([0, 2])] < 1e-12)
