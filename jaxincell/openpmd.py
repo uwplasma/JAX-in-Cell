@@ -136,7 +136,19 @@ def _external_fields(out, simulation, meshes):
     return external
 
 
-def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, simulation=None, overwrite=False):
+def _paths(path, overwrite, sidecar):
+    root, ext = os.path.splitext(os.fspath(path))
+    path = root + (ext or ".json")
+    pointer = re.sub(r"%(?:0\d+)?T", "", root).rstrip("_-") + ".pmd" if sidecar else None
+    for name in (path, pointer) if pointer is not None else (path,):
+        existing = glob.glob(re.sub(r"%(?:0\d+)?T", "*", glob.escape(name)))
+        if not overwrite and (os.path.lexists(name) or existing):
+            raise FileExistsError(f"{name} already exists; pass overwrite=True to replace it")
+    return path, pointer
+
+
+def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, simulation=None, overwrite=False,
+                  sidecar=False):
     """Write ``out`` to the openPMD series ``path`` and return the path.
 
     Args:
@@ -152,6 +164,7 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, 
             staggering; 3D tensors are centred with the domain's x/y/z periods. No field histories
             are added to ``out``. Omitted fields are not written, and ``meshes=False`` skips them.
         overwrite: Allow replacing an existing file. By default it is protected.
+        sidecar: Write a ``.pmd`` discovery file containing the relative series filename or template.
 
     Raises:
         ImportError: If the optional dependency ``openpmd-api`` is missing.
@@ -169,11 +182,7 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, 
     if not len(out.t):
         raise ValueError("openPMD export requires at least one stored step")
     external = _external_fields(out, simulation, meshes)
-    root, ext = os.path.splitext(os.fspath(path))
-    path = root + (ext or ".json")
-    existing = glob.glob(re.sub(r"%(?:0\d+)?T", "*", glob.escape(path)))
-    if not overwrite and (os.path.lexists(path) or existing):
-        raise FileExistsError(f"{path} already exists; pass overwrite=True to replace it")
+    path, pointer = _paths(path, overwrite, sidecar)
     series = io.Series(path, io.Access.create)
     series.set_software("JAX-in-Cell", __version__)
     for s in range(0, len(out.t), every):
@@ -185,4 +194,7 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, 
             _write_particles(io, it, out, s, area, keep)
         series.flush()
     series.close()
+    if pointer is not None:
+        with open(pointer, "w", encoding="utf-8") as file:
+            file.write(os.path.basename(path) + "\n")
     return path

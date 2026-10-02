@@ -79,6 +79,8 @@ Existing paths are protected; pass `overwrite=True` to replace one deliberately.
 requires at least one stored step, a positive integer `every`, and finite positive `area`.
 Sparse snapshots retain their actual timestamps; `every` counts stored snapshots.
 A `%T` or `%06T` filename selects file-based output; existing expanded files are protected too.
+`sidecar=True` writes a `.pmd` discovery file with the relative filename or template. Existing
+sidecars are protected by the same overwrite option.
 Separate particle and mesh series use the same writer:
 
 ```python

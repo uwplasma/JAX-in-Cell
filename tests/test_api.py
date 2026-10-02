@@ -558,6 +558,20 @@ def test_openpmd_protects_existing_file_based_series(tmp_path, template):
     series.close()
 
 
+@pytest.mark.parametrize("template", ["run.json", "run_%06T.json"])
+def test_openpmd_optional_sidecars_keep_relative_templates_and_protect_existing_pointers(tmp_path, template):
+    pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+    out = small_simulation(n=8).run(2)
+    pointer = tmp_path / "run.pmd"
+    pointer.write_text("original pointer\n")
+    with pytest.raises(FileExistsError, match="run.pmd"):
+        write_openpmd(out, tmp_path / template, sidecar=True)
+    assert list(tmp_path.iterdir()) == [pointer] and pointer.read_text() == "original pointer\n"
+    write_openpmd(out, tmp_path / template, sidecar=True, overwrite=True)
+    assert pointer.read_text() == template + "\n"
+
+
 @pytest.mark.parametrize("options", [{"every": 0}, {"every": -1}, {"every": True}, {"every": 1.5},
                                      {"area": 0}, {"area": np.nan}, {"area": np.inf}, {"empty": True}])
 def test_openpmd_rejects_invalid_options_before_creating_a_file(tmp_path, options):
