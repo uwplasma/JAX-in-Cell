@@ -117,6 +117,11 @@ def diagnostics(output):
     total_ke_electrons = jnp.sum(kinetic_p[:, esel], axis=-1)
     total_ke_ions = jnp.sum(kinetic_p[:, isel], axis=-1)
 
+    def temperature(velocities, masses, weights):
+        total = jnp.maximum(jnp.sum(weights), jnp.finfo(velocities.dtype).tiny)
+        mean = jnp.sum(weights[None, :, None] * velocities, axis=1, keepdims=True) / total
+        return jnp.sum(masses[None, :, None] * (velocities - mean) ** 2, axis=1) / (boltzmann_constant * total)
+
     output.update({ 
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
         'electric_field_energy':         (epsilon_0/2) * integral_E_squared,
@@ -128,6 +133,8 @@ def diagnostics(output):
         'kinetic_energy':           total_ke_electrons + total_ke_ions,
         'kinetic_energy_electrons': total_ke_electrons,
         'kinetic_energy_ions':      total_ke_ions,
+        'temperature_electrons': temperature(velocity[:, esel], mass[esel], weights[esel]),
+        'temperature_ions': temperature(velocity[:, isel], mass[isel], weights[isel]),
         
         'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
         'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
