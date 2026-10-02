@@ -352,3 +352,30 @@ def test_collisions_at_the_integer_time_keep_the_leapfrog_energy_error():
     coarse, fine = (_oscillators_energy_error(omega_dt, True) for omega_dt in (0.4, 0.2))
     assert coarse < 1.5 * _oscillators_energy_error(0.4, False)
     assert coarse > 3 * fine
+
+
+@pytest.mark.parametrize("gamma_dt", [1e-3, 1e-4])
+def test_maxwellian_temperature_difference_has_coupled_relaxation_rate(gamma_dt):
+    """The NRL temperature-transfer rate applies to each species: for equal
+    densities the evolving difference decays at 4 nu_inter/3, not 2 nu_inter/3.
+    Independent Maxwellian realizations include both phase-space and collision noise."""
+    from jaxincell import boltzmann_constant as kb
+    n, density, ta, tb, logarithm = 4096, 1e20, 3000.0, 300.0, 10.0
+    nu = 16 * np.sqrt(np.pi) * e_charge ** 4 * density * logarithm / (
+        (4 * np.pi * epsilon_0) ** 2 * mass_electron ** 2
+        * (2 * kb * (ta + tb) / mass_electron) ** 1.5)
+    gamma, dt = 4 * nu / 3, gamma_dt / (4 * nu / 3)
+
+    def realization(key):
+        phase, collision = random.split(key)
+        sigma = jnp.repeat(jnp.sqrt(kb * jnp.array([ta, tb]) / mass_electron), n)
+        v = random.normal(phase, (2 * n, 3)) * sigma[:, None]
+        new = collide(collision, jnp.zeros_like(v), v, jnp.full(2 * n, density / n),
+                      jnp.full(2 * n, mass_electron), jnp.full(2 * n, -e_charge),
+                      ((0, n), (n, n)), ((0, 1),), logarithm, dt, 1.0, 1.0, 1)
+        def difference(v):
+            t = mass_electron / kb * jnp.var(v.reshape(2, n, 3), axis=1).mean(axis=1)
+            return t[0] - t[1]
+        return (difference(v) - difference(new)) / (dt * gamma * (ta - tb))
+    ratios = np.asarray(jax.jit(jax.vmap(realization))(random.split(random.PRNGKey(22), 256)))
+    assert abs(ratios.mean() - 1) < 6 * ratios.std(ddof=1) / np.sqrt(len(ratios)) + 0.02
