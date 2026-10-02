@@ -177,7 +177,8 @@ def test_each_species_scatters_off_the_density_of_the_other(n_a, w_a, n_b, w_b):
     background particle (m_a/M)^2 4 u^2 <delta^2>(n_a), whichever list is longer and
     whichever is heavier, as if it had collided once with the whole density of the
     other species. The Nanbu-Yonemura acceptance alone gets this wrong when the
-    shorter list carries the smaller weight, unless the variance uses n_a n_b / n_ab."""
+    shorter list carries the smaller weight, unless the pair density compensates for
+    both sampled counts and weight acceptance."""
     u, coulomb_log, dt = 1e6, 10.0, 1.0
     n = n_a + n_b
     v = np.zeros((n, 3))
@@ -190,14 +191,23 @@ def test_each_species_scatters_off_the_density_of_the_other(n_a, w_a, n_b, w_b):
         reduced_mass = mass_electron / 2
         return (e_charge ** 2 / epsilon_0 / reduced_mass) ** 2 * density * coulomb_log * dt / (8 * np.pi * u ** 3)
 
-    scale = 1e-3 / variance(min(n_a * w_a, n_b * w_b))            # the smaller variance is 1e-3
+    # Sampling/acceptance enlarges the variance of an individual pair. Keep that
+    # variance small, rather than only the smaller species' effective variance.
+    pair_density = max(n_a, n_b) * max(w_a, w_b)
+    scale = 1e-3 / variance(pair_density)
+    pair_s2 = variance(pair_density) * scale
     new = np.asarray(collide(random.PRNGKey(5), jnp.zeros((n, 3)), jnp.asarray(v), weight, mass, charge,
                              ((0, n_a), (n_a, n_b)), ((0, 1),), coulomb_log, dt * scale, 1.0, 1.0, 1))
     kick = ((new - v) ** 2).sum(axis=1)
     for block, density in ((slice(0, n_a), n_b * w_b), (slice(n_a, n), n_a * w_a)):
         s2 = variance(density) * scale
-        expected = 0.25 * 4 * u ** 2 * s2 / (1 + 3 * s2)          # <delta^2 / (1 + delta^2)> to second order
-        assert abs(kick[block].mean() / expected - 1) < 0.08
+        expected = u ** 2 * s2 / (1 + 3 * pair_s2)     # Gaussian angular average through second order
+        samples = kick[block] / expected
+        sem = samples.std(ddof=1) / np.sqrt(samples.size)
+        # Independent angular/acceptance draws; unmatched zeros make this estimate
+        # conservative for sampling without replacement. The small finite-angle
+        # bias at pair_s2=.001 is below the 1% allowance, separate from seed noise.
+        assert abs(samples.mean() - 1) < 4 * sem + 0.01
 
 
 @pytest.mark.parametrize("within", [True, False])
