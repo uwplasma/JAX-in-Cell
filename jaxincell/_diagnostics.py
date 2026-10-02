@@ -101,14 +101,18 @@ def diagnostics(output):
         return jnp.sum(y, axis=-1) * dx
 
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
-    abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
     integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
-    integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dx'])
 
     abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
-    abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
     integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
-    integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
+    def external_energy(field):
+        power = jnp.sum(field**2, axis=-1)
+        if field.ndim == 4 or len(output.get('dimensions', ('x',))) > 1:
+            power = jnp.mean(power, axis=tuple(range(1, power.ndim)))
+        return power, integrate(power, output['dx'])
+
+    abs_externalE_squared, integral_externalE_squared = external_energy(output['external_electric_field'])
+    abs_externalB_squared, integral_externalB_squared = external_energy(output['external_magnetic_field'])
 
     total_ke_electrons = jnp.sum(kinetic_p[:, esel], axis=-1)
     total_ke_ions = jnp.sum(kinetic_p[:, isel], axis=-1)
@@ -136,6 +140,17 @@ def diagnostics(output):
                     output["kinetic_energy"])
 
     output.update({'total_energy': total_energy})
+
+    if "mus" in output:
+        all_mu = output["mus"]
+        if all_mu.ndim == 3 and all_mu.shape[-1] == 1:
+            all_mu = all_mu[..., 0]
+        output.update({
+            "all_mu": all_mu, "total_mu": jnp.sum(all_mu, axis=-1),
+            "electron_mus": all_mu[:, esel], "ion_mus": all_mu[:, isel],
+            "electron_total_mu": jnp.sum(all_mu[:, esel], axis=-1),
+            "ion_total_mu": jnp.sum(all_mu[:, isel], axis=-1),
+        })
 
     total_momentum = jnp.sum(momentum_p, axis=-2)
     momentum_scale = jnp.sum(jnp.linalg.norm(momentum_p[0], axis=-1))

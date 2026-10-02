@@ -43,8 +43,8 @@ def small_simulation_parameters(total_steps=10, number_grid_points=8, number_pse
         "domain_parameters": {
             "total_steps": total_steps,
             "number_grid_points": number_grid_points,
-            "number_grid_points_y": 3,
-            "number_grid_points_z": 3,
+            "number_grid_points_y": 0,
+            "number_grid_points_z": 0,
             "length": 0.01,
             "length_y": 0.01,
             "length_z": 0.01,
@@ -115,6 +115,8 @@ def assert_simulation_output_contract(
         "fields",
         "external_electric_field",
         "external_magnetic_field",
+        "padded_external_electric_field",
+        "padded_external_magnetic_field",
     }
 
     assert expected_keys <= set(output)
@@ -135,6 +137,8 @@ def assert_simulation_output_contract(
     assert output["time_array"].shape == (total_steps,)
     assert output["external_electric_field"].shape == (number_grid_points, 3)
     assert output["external_magnetic_field"].shape == (number_grid_points, 3)
+    assert output["padded_external_electric_field"].shape == (number_grid_points + 3, 3)
+    assert output["padded_external_magnetic_field"].shape == (number_grid_points + 3, 3)
     assert output["fields"][0].shape == (number_grid_points, 3)
     assert output["fields"][1].shape == (number_grid_points, 3)
     assert output["number_grid_points"] == number_grid_points
@@ -989,6 +993,19 @@ def test_parameter_sections_return_defensive_copies(section):
     assert getattr(sim, section)
 
 
+@pytest.mark.parametrize("key", ["particle_BC_left", "particle_BC_right", "field_BC_left", "field_BC_right", "relativistic"])
+def test_cn_rejects_unsupported_boundary_and_relativistic_inputs(key):
+    p = small_simulation_parameters(total_steps=1)
+    p["solver_parameters"]["time_evolution_algorithm"] = 1
+    section = "solver_parameters" if key == "relativistic" else "domain_parameters"
+    p[section][key] = True if key == "relativistic" else 1
+    if key != "relativistic":
+        kind = key.split("_")[0]
+        p[section][f"{kind}_BC_left"] = p[section][f"{kind}_BC_right"] = 1
+    with pytest.raises(ValueError, match="Implicit CN supports"):
+        Simulation(p)
+
+
 # Explicit initial position/velocity overrides are deferred until Simulation.run()
 # grows a public initial-state override API again.
 #
@@ -997,3 +1014,25 @@ def test_parameter_sections_return_defensive_copies(section):
 #
 # def test_simulation_rejects_mismatched_velocities_shape():
 #     ...
+
+
+def test_tensor_field_interior_changes_hash_and_first_snapshot_time():
+    p = small_simulation_parameters(total_steps=2, number_pseudoparticles=2)
+    p["domain_parameters"].update(number_grid_points_y=8, number_grid_points_z=8)
+    field = np.zeros((8, 8, 8, 3))
+    p["external_field_parameters"] = {"external_magnetic_field": {"B": field}}
+    sim = Simulation(p)
+    first_hash = sim.external_field_hash
+    field[4, 4, 4, 2] = 1.
+    sim.external_field_parameters = {"external_magnetic_field": {"B": field}}
+    assert sim.external_field_hash != first_hash
+    out = sim.run()
+    np.testing.assert_array_equal(out["time_array"], np.arange(1, 3)*out["dt"])
+
+
+@pytest.mark.parametrize("name, component", [("external_electric_field", "E"), ("external_magnetic_field", "B")])
+def test_external_field_shape_rejected(name, component):
+    p = small_simulation_parameters(total_steps=1)
+    p["external_field_parameters"] = {name: {component: np.zeros((8, 2))}}
+    with pytest.raises(ValueError, match="must have shape"):
+        Simulation(p)

@@ -76,6 +76,13 @@ def test_cn_magnetic_gather_uses_charge_grid_centres(monkeypatch):
     np.testing.assert_allclose(state[3], expected, rtol=1e-13, atol=1e-15)
 
 
+def _cn_solver_parameters(params):
+    params_cn = dict(params)
+    for metadata_key in ("dxyz", "grid_xyz", "dimensions"):
+        params_cn.pop(metadata_key, None)
+    return params_cn
+
+
 def _small_parameters_for_algorithms():
     """
     Build a tiny, cheap parameter set using the same initialization
@@ -115,8 +122,8 @@ def _small_parameters_for_algorithms():
             "length_y": 0.01,
             "length_z": 0.01,
             "number_grid_points": number_grid_points,
-            "number_grid_points_y": 3,
-            "number_grid_points_z": 3,
+            "number_grid_points_y": 0,
+            "number_grid_points_z": 0,
             "total_steps": 2,
         }
     )
@@ -174,6 +181,8 @@ def _small_parameters_for_algorithms():
         **external_field_parameters,
         "external_electric_field": field_state["external_electric_field"],
         "external_magnetic_field": field_state["external_magnetic_field"],
+        "padded_external_electric_field": field_state["padded_external_electric_field"],
+        "padded_external_magnetic_field": field_state["padded_external_magnetic_field"],
     }
 
     params = {
@@ -181,8 +190,11 @@ def _small_parameters_for_algorithms():
         **solver_parameters,
         "box_size": domain_state["box_size"],
         "dx": domain_state["dx"],
+        "dxyz": domain_state["dxyz"],
         "dt": domain_state["dt"],
         "grid": domain_state["grid"],
+        "grid_xyz": domain_state["grid_xyz"],
+        "dimensions": domain_state["dimensions"],
         "fields": field_state["fields"],
         "initial_positions": particle_state["positions"],
         "initial_velocities": particle_state["velocities"],
@@ -289,7 +301,7 @@ def _assert_boris_step_contract(
         ms_new,
         q_ms_new,
     ) = carry
-    pos_step, vel_step, E_step, B_step, J_step, rho_step = step_data
+    pos_step, vel_step, E_step, B_step, J_step, rho_step, mu_step = step_data
     n_particles = qs_new.shape[0]
 
     assert E_new.shape == (number_grid_points, 3)
@@ -346,7 +358,7 @@ def _assert_cn_step_contract(
     box_size=None,
 ):
     E_new, B_new, pos_new, vel_new, qs_new, ms_new, q_ms_new = carry
-    pos_step, vel_step, E_step, B_step, J_step, rho_step = step_data
+    pos_step, vel_step, E_step, B_step, J_step, rho_step, mu_step = step_data
     n_particles = qs_new.shape[0]
 
     assert E_new.shape == (number_grid_points, 3)
@@ -417,10 +429,11 @@ def test_boris_step_relativistic_and_field_solver_branch():
         step_index=0,
         solver_parameters=params_rel,
         external_field_parameters=external_field_parameters,
-        dx=dx,
+        dxyz=params["dxyz"],
         dt=dt,
-        grid=grid,
+        gridxyz=params["grid_xyz"],
         box_size=box_size,
+        dimensions=params["dimensions"],
         particle_BC_left=particle_BC_left,
         particle_BC_right=particle_BC_right,
         field_BC_left=field_BC_left,
@@ -475,10 +488,11 @@ def test_boris_step_selects_nonrelativistic_or_relativistic_pusher(monkeypatch):
             step_index=0,
             solver_parameters=params_branch,
             external_field_parameters=external_field_parameters,
-            dx=params["dx"],
+            dxyz=params["dxyz"],
             dt=params["dt"],
-            grid=params["grid"],
+            gridxyz=params["grid_xyz"],
             box_size=params["box_size"],
+            dimensions=params["dimensions"],
             particle_BC_left=params["particle_BC_left"],
             particle_BC_right=params["particle_BC_right"],
             field_BC_left=params["field_BC_left"],
@@ -519,14 +533,22 @@ def test_boris_step_adds_external_fields_before_particle_push(monkeypatch):
         **external_field_parameters,
         "external_electric_field": external_electric_field,
         "external_magnetic_field": external_magnetic_field,
+        "padded_external_electric_field": jnp.concatenate(
+            (external_electric_field[-2:], external_electric_field, external_electric_field[:1]),
+            axis=0,
+        ),
+        "padded_external_magnetic_field": jnp.concatenate(
+            (external_magnetic_field[-2:], external_magnetic_field, external_magnetic_field[:1]),
+            axis=0,
+        ),
     }
     captured_fields = {}
 
     def zero_current_density(*args, **kwargs):
         return jnp.zeros((G, 3))
 
-    def first_grid_field_value(x_n, field, dx, grid, grid_start, field_BC_left, field_BC_right):
-        return field[0]
+    def first_grid_field_value(x_n, internal_field, external_field, dxyz, gridxyz, grid_offset, dimensions, field_BC_left, field_BC_right):
+        return internal_field[0] + external_field[0], external_field[0]
 
     def capture_nonrelativistic_pusher(dt, positions, velocities, q_ms, E_field, B_field):
         captured_fields["E_field"] = E_field
@@ -542,10 +564,11 @@ def test_boris_step_adds_external_fields_before_particle_push(monkeypatch):
         step_index=0,
         solver_parameters=params,
         external_field_parameters=external_field_parameters,
-        dx=params["dx"],
+        dxyz=params["dxyz"],
         dt=params["dt"],
-        grid=params["grid"],
+        gridxyz=params["grid_xyz"],
         box_size=params["box_size"],
+        dimensions=params["dimensions"],
         particle_BC_left=params["particle_BC_left"],
         particle_BC_right=params["particle_BC_right"],
         field_BC_left=params["field_BC_left"],
@@ -573,10 +596,11 @@ def test_boris_step_nonrelativistic_branch_and_zero_field_solver_path():
         step_index=0,
         solver_parameters=params,
         external_field_parameters=external_field_parameters,
-        dx=params["dx"],
+        dxyz=params["dxyz"],
         dt=params["dt"],
-        grid=params["grid"],
+        gridxyz=params["grid_xyz"],
         box_size=params["box_size"],
+        dimensions=params["dimensions"],
         particle_BC_left=params["particle_BC_left"],
         particle_BC_right=params["particle_BC_right"],
         field_BC_left=params["field_BC_left"],
@@ -612,10 +636,11 @@ def test_boris_step_field_solver_switcher_variants():
             step_index=0,
             solver_parameters=params,
             external_field_parameters=external_field_parameters,
-            dx=params["dx"],
+            dxyz=params["dxyz"],
             dt=params["dt"],
-            grid=params["grid"],
+            gridxyz=params["grid_xyz"],
             box_size=params["box_size"],
+            dimensions=params["dimensions"],
             particle_BC_left=params["particle_BC_left"],
             particle_BC_right=params["particle_BC_right"],
             field_BC_left=params["field_BC_left"],
@@ -657,10 +682,11 @@ def test_boris_step_field_solver_switcher_variants():
             step_index=0,
             solver_parameters=params,
             external_field_parameters=external_field_parameters,
-            dx=params["dx"],
+            dxyz=params["dxyz"],
             dt=params["dt"],
-            grid=params["grid"],
+            gridxyz=params["grid_xyz"],
             box_size=params["box_size"],
+            dimensions=params["dimensions"],
             particle_BC_left=params["particle_BC_left"],
             particle_BC_right=params["particle_BC_right"],
             field_BC_left=params["field_BC_left"],
@@ -699,7 +725,7 @@ def test_cn_step_picard_stopping_conditions():
 
     expected_positions_shape = params["initial_positions"].shape
     for test_case in test_cases:
-        params_cn = dict(params)
+        params_cn = _cn_solver_parameters(params)
         params_cn["tolerance_Picard_iterations_implicit_CN"] = test_case[
             "tolerance_Picard_iterations_implicit_CN"
         ]
@@ -743,7 +769,7 @@ def test_cn_step_shapes_and_substepping():
     params, _, G, _ = _small_parameters_for_algorithms()
 
     # Use slightly relaxed Picard settings to keep the test cheap
-    params_cn = dict(params)
+    params_cn = _cn_solver_parameters(params)
     params_cn["tolerance_Picard_iterations_implicit_CN"] = 1e-3
     params_cn["max_number_of_Picard_iterations_implicit_CN"] = 2
 
