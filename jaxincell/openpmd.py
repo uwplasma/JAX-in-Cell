@@ -1,6 +1,7 @@
 """openPMD export of a :class:`jaxincell.Output` (optional dependency ``openpmd-api``).
 
-One group-based series, one iteration per exported stored step ``s`` (``time = out.t[s]``,
+One series (group-based by default, file-based with a ``%T`` filename), one iteration per stored step ``s``
+(``time = out.t[s]``,
 ``dt = out.dt``, ``timeUnitSI = 1``); float64 SI data with ``unitSI = 1`` and ``unitDimension``.
 
 Layout:
