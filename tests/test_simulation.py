@@ -976,3 +976,16 @@ def test_external_field_shape_rejected(name, component):
     p["external_field_parameters"] = {name: {component: np.zeros((8, 2))}}
     with pytest.raises(ValueError, match="must have shape"):
         Simulation(p)
+
+
+@pytest.mark.parametrize("name, component", [("external_electric_field", "E"), ("external_magnetic_field", "B")])
+def test_cn_rejects_nonzero_prescribed_fields_at_construction_and_update(name, component):
+    p = small_simulation_parameters(total_steps=1)
+    p["solver_parameters"]["time_evolution_algorithm"] = 1
+    simulation = Simulation(p)
+    prescribed = {name: {component: np.ones((8, 3))}}
+    with pytest.raises(ValueError, match="does not support prescribed"):
+        simulation.external_field_parameters = prescribed
+    p["external_field_parameters"] = prescribed
+    with pytest.raises(ValueError, match="does not support prescribed"):
+        Simulation(p)

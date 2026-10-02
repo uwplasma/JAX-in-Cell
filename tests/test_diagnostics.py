@@ -379,3 +379,17 @@ def test_diagnostics_gauss_law_error_and_momentum():
     diagnostics(output)
     assert output["gauss_error_Linf_rel"][1] > 1e-12
     assert jnp.all(output["gauss_error_Linf_rel"][jnp.array([0, 2])] < 1e-12)
+
+
+@pytest.mark.parametrize("transverse_shape", [(3,), (3, 2)])
+def test_prescribed_energy_averages_transverse_centres(transverse_shape):
+    # PIC still represents a unit-area planar column; tensor sampling adds no volume.
+    electric = jnp.zeros((2, 4, 3))
+    field = np.zeros((4, *transverse_shape, 3))
+    field[..., 0] = np.arange(field[..., 0].size).reshape(field.shape[:-1])
+    output = _minimal_diagnostic_output(electric_field=electric, external_electric_field=field)
+    output["dimensions"] = ("x", "y") if len(transverse_shape) == 1 else ("x", "y", "z")
+    diagnostics(output)
+    transverse_count = np.prod(transverse_shape)
+    expected = epsilon_0 / 2 * .5 * np.sum(field[..., 0]**2) / transverse_count
+    assert float(output["external_electric_field_energy"]) == pytest.approx(expected, rel=1e-13)

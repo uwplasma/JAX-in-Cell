@@ -93,3 +93,9 @@ def test_build_domain_hash_is_stable_and_sensitive_to_values():
     total_steps_changed_parameters = clean_and_initialize_domain_parameters({"total_steps": 400})
     total_steps_changed_hash = build_domain_hash(total_steps_changed_parameters)
     assert default_hash != total_steps_changed_hash
+
+
+def test_optional_transverse_cells_none_selects_one_dimensional_geometry():
+    parameters = clean_and_initialize_domain_parameters({"number_grid_points_y": None,
+                                                         "number_grid_points_z": None})
+    assert parameters["number_grid_points_y"] == parameters["number_grid_points_z"] == 0
