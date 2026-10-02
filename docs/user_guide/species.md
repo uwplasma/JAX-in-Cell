@@ -116,9 +116,9 @@ chains of references are rejected. Because `vth_over_c_x` of the first electron
 population defaults to `0.05`, the common pattern `"vth_over_c_x": "_electrons0"` for
 ions works without further input.
 
-After initialisation every velocity component is clipped to $\pm 0.99c$ in Newtonian
-runs. Relativistic runs limit the total speed to $0.99c$ while preserving direction;
-this changes velocities that exceed the limit.
+Initialisation limits the total speed to $0.99c$ while preserving direction in both
+modes. Slower velocities are unchanged. This cap does not make the Newtonian pusher
+relativistic; use the relativistic solver for relativistic dynamics.
 
 ## Positions and perturbations
 
