@@ -49,7 +49,7 @@ They are ordered by how much of the code they use, not by how interesting they a
 `sheath_optimization.py` also takes `--oblique`, which runs the same experiment in a
 magnetic field 30 degrees to the wall, and writes its own folder of results.
 
-Three of them take `--quick`, a smoke run with far fewer particles over a shorter time:
+Scripts offering `--quick` provide a smoke run with fewer particles or a shorter time:
 `sheath_unmagnetized.py` in 10 seconds, `sheath_magnetized.py` in two minutes and
 `sheath_optimization.py` in forty seconds, which is what continuous integration runs. It
 checks that they execute and reproduces the structure, with more noise, and each of them

@@ -19,7 +19,7 @@ from ._progress import reporter
 from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, s2_weights,
                     current_from_continuity, curl_B, curl_E, deposit, gather, gather_xyz, half_step_fields, smooth,
                     orbit_field_average, to_centres, to_faces, wall_faces_E, with_ghosts, wrap_positions)
-from ._sources import check_sources, crossing_flux, inject
+from ._sources import check_sources, crossing_flux, inject, volume_inject
 
 
 def _enable_double_precision(environ):
@@ -129,6 +129,9 @@ class Wall:
         overflow: Largest live weight a source has overwritten, zero while the pool of
             dead slots holds. A positive value means the capacity ``Species.n`` is too
             small and particles were destroyed to make room.
+        birth_budget: Optional ``(species, 6)`` cumulative volume-birth budget:
+            weight, kinetic energy, three momentum components, and the self-field
+            energy change from Gauss reprojection. Wall columns remain two-sided.
     """
     arrived: object
     collected: object
@@ -141,6 +144,7 @@ class Wall:
     truncated: object
     spectrum: object
     overflow: object
+    birth_budget: object = None
 
     def charge(self, charge_per_particle):
         """Charge on each wall, C/m^2, from ``charge_per_particle`` per species."""
@@ -248,7 +252,7 @@ class Output:
         and rejects the trial itself; :meth:`validate` is the host-side shortcut."""
         leaves = jax.tree.leaves(self.state.replace(key=random.key_data(self.state.key)))
         if not all(np.all(np.isfinite(np.asarray(a))) for a in leaves):
-            return ("non-finite final state: resolve at most one wall crossing per particle segment "
+            return ("non-finite final state: check finite source parameters; resolve at most one wall crossing per segment "
                     "and converge the implicit iteration (including picard_tolerance); reduce dt or increase "
                     "substeps or picard_iterations.",)
         spilt = float(jnp.max(jnp.asarray(self.state.wall.overflow)))
@@ -588,7 +592,9 @@ class Simulation:
         no source exactly as it was."""
         if not self.sources:
             return 0.0
-        floors = [jnp.broadcast_to(sp.source.min_weight * crossing_flux(sp.source) * self.domain.dt
+        floors = [jnp.broadcast_to(sp.source.min_weight *
+                                   (sp.source.rate * self.domain.length if sp.source.model == "volume"
+                                    else crossing_flux(sp.source)) * self.domain.dt
                                    * sp.source.every / sp.source.emit
                                    if sp.source is not None else 0.0, (sp.n,)) for sp in self.species]
         return jnp.concatenate(floors)
@@ -600,7 +606,8 @@ class Simulation:
         spectrum = None if bins is None else jnp.zeros((len(self.species), 2,
                                                         bins.energy_bins + 1, bins.angle_bins))
         return Wall(zeros, zeros, zeros, zeros, zeros, zeros, vectors, vectors, zeros, spectrum,
-                    jnp.zeros(()))
+                    jnp.zeros(()), jnp.zeros((len(self.species), 6))
+                    if any(sp.source.model == "volume" for sp, _ in self.sources) else None)
 
     def _spectrum(self, wall, arrived, m, u_in):
         """Add this step's crossings to the energy-incidence accumulator.
@@ -701,7 +708,7 @@ class Simulation:
         start of the first run) with ``(step + 1) % k == 0``, the window of the ``k`` steps
         that end there, and does nothing on the others: the arrays and the ledger pass through
         unchanged, and neither the draw nor the partial sort of the pool is done."""
-        if not self.sources:
+        if not any(sp.source.model != "volume" for sp, _ in self.sources):
             return x, u, w, qm, wall
         d = self.domain
 
@@ -712,7 +719,7 @@ class Simulation:
         injected, energy, momentum = wall.injected, wall.energy_injected, wall.momentum_injected
         overflow = wall.overflow
         for i, (sp, block) in enumerate(zip(self.species, self.blocks)):
-            if sp.source is None:
+            if sp.source is None or sp.source.model == "volume":
                 continue
             key, k = random.split(key)
             plane = jnp.full((1, 3), (-1.0 if sp.source.side == "left" else 1.0) * d.length / 2)
@@ -744,6 +751,43 @@ class Simulation:
             overflow = jnp.maximum(overflow, spill)
         return x, u, w, qm, wall.replace(injected=injected, energy_injected=energy,
                                          momentum_injected=momentum, overflow=overflow)
+
+    def _volume_births(self, st):
+        """Prescribed pulses at the integer step start, with their Gauss projection work."""
+        d, (_, q) = self.domain, self.per_particle
+        box = (d.length, d.length_y, d.length_z)
+        for i, (sp, block) in enumerate(zip(self.species, self.blocks)):
+            if sp.source is None or sp.source.model != "volume":
+                continue
+
+            def emit(st, i=i, sp=sp, block=block):
+                x = (wrap_positions(st.x - .5 * d.dt * st.u, st.w, box, d.particle_bc, d.dx)
+                     if st.x_phase == "half" else st.x)
+                x, u, w, qm, weight, spill = volume_inject(sp.source, block, x, st.u, st.w, st.qm,
+                                                           sp.charge_si / sp.mass, d.dt, d.length, d.dx)
+                sigma = self._surface_charge(st.wall, x, w)
+                rho = self._smooth(deposit(x[:, 0], q * w, d.grid[0], d.dx, d.cells, d.particle_bc,
+                                           self.solver.shape_order))
+                Ex = E_x_from_rho(rho, d.dx, d.field_bc,
+                                  self._electrode_field(st.wall, self._electrode_overlap(sigma, st.wall)))
+                work = .5 * epsilon_0 * d.dx * jnp.sum((Ex - st.E[:, 0]) * (Ex + st.E[:, 0]))
+                total = weight * sp.source.emit
+                velocity = jnp.asarray(sp.source.drift)
+                budget = jnp.r_[total, total * .5 * sp.mass * jnp.sum(velocity ** 2),
+                                total * sp.mass * velocity, work]
+                wall = st.wall.replace(birth_budget=st.wall.birth_budget.at[i].add(budget),
+                                       overflow=jnp.maximum(st.wall.overflow, spill))
+                if st.x_phase == "half":
+                    x = wrap_positions(x + .5 * d.dt * u, w, box, d.particle_bc, d.dx)
+                return st.replace(x=x, u=u, w=w, qm=qm, rho=rho, sigma=sigma,
+                                  E=st.E.at[:, 0].set(Ex), wall=wall)
+
+            st = lax.cond((st.steps % sp.source.every == 0) & (sp.source.rate > 0), emit, lambda st: st, st)
+            valid = (jnp.isfinite(sp.source.rate) & (sp.source.rate >= 0)
+                     & jnp.all(jnp.isfinite(jnp.asarray(sp.source.drift)))
+                     & jnp.all(jnp.asarray(sp.source.vth) == 0))
+            st = st.replace(E=jnp.where(valid, st.E, jnp.nan))
+        return st
 
     #: What each row of :meth:`Simulation.moments` holds, in order.
     MOMENTS = ("n", "nvx", "nvy", "nvz", "nvxvx", "nvyvy", "nvzvz", "nvxvy", "nvxvz", "nvyvz")
@@ -950,6 +994,8 @@ class Simulation:
             dead = w <= 0
             x = x.at[:, 0].set(jnp.where(dead, -L / 2 - PARK * dx, x[:, 0]))
             qm = jnp.where(dead, 0.0, qm)
+            u = jnp.where(dead[:, None], 0.0, u)
+            v = self._velocity(u)
         wall = self._empty_wall()
         if self.solver.algorithm == "explicit" and d.particle_bc == (0, 0):
             # Only the periodic leapfrog precomputes a future half position.
@@ -1197,6 +1243,8 @@ class Simulation:
         box = (L, d.length_y, d.length_z)
         m, q = extra
         key, k_collide, k_wall, k_source = self._split_step_key(st.key)
+        if st.wall.birth_budget is not None:
+            st = self._volume_births(st)
         walls = d.particle_bc != (0, 0)
         if walls:
             k_first, k_wall = random.split(k_wall)
@@ -1534,6 +1582,8 @@ def _advance(sim, carry, extra, chunks, store_every, store_particles, snapshot_s
 def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose, snapshot_steps):
     """Drive :func:`_advance`, in one group or in several with a meter between them."""
     carry, extra = sim.initial_state(random.PRNGKey(seed)) if state is None else (state, sim.per_particle)
+    if any(sp.source.model == "volume" for sp, _ in sim.sources) and carry.wall.birth_budget is None:
+        raise ValueError("a volume Source restart needs its birth_budget; this state has none")
     phase = sim._x_phase()
     if carry.x_phase == "legacy" and phase != "wall":
         carry = carry.replace(x_phase=phase)

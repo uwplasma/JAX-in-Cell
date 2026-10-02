@@ -154,8 +154,8 @@ def _boundary_codes(value, name):
 
 @pytree_dataclass(static=("side", "emit", "model", "every"))
 class Source:
-    """A maintained inflow of one species through one wall: a reservoir of plasma
-    behind the plane that supplies a prescribed flux, independently of what leaves.
+    """A reservoir through one wall, or prescribed volume production when ``rate``
+    is supplied. The reservoir supplies a flux independently of what leaves.
 
     The distribution behind the plane is a Maxwellian at rest or a cold beam; the
     flux that crosses is the velocity density weighted by the normal speed
@@ -215,6 +215,11 @@ class Source:
             The remainder is given to the wall, so the charge and energy ledgers
             stay exact; what changes is where the last :math:`10^{-3}` of a
             particle lands.
+        rate: SI volume production rate, :math:`\\mathrm{m^{-3}s^{-1}}`, selecting
+            ``model='volume'``. It emits quiet x sites with y=z=0 at the start
+            of steps 0, ``every``, ... with prescribed three-component ``drift``;
+            each pulse supplies ``rate * length * every * dt`` per unit area.
+            ``density``, ``side`` and the reservoir distributions do not apply.
     """
     density: float = 0.0
     vth: tuple = (0.0, 0.0, 0.0)
@@ -225,16 +230,20 @@ class Source:
     min_weight: float = 1e-3
     samples: object = None
     every: int = 1
+    rate: object = None
 
     def __post_init__(self):
         if _template(self):
             return
         object.__setattr__(self, "density", _float(self.density))
         object.__setattr__(self, "min_weight", _float(self.min_weight))
+        object.__setattr__(self, "rate", _float(self.rate))
         for name in ("vth", "drift"):
             object.__setattr__(self, name, _components(getattr(self, name), name))
         _require(self.side in ("left", "right"), f"side is 'left' or 'right', not {self.side!r}")
-        _require(self.emit >= 1, "a Source emits at least one particle per emission")
+        _require(isinstance(self.emit, (int, np.integer)) and not isinstance(self.emit, bool)
+                 and self.emit >= 1, "Source emit is a whole positive particle count")
+        object.__setattr__(self, "emit", int(self.emit))
         _require(isinstance(self.every, (int, np.integer)) and not isinstance(self.every, bool)
                  and self.every >= 1,
                  f"every is a whole number of steps between emissions, at least one, not {self.every!r}")
@@ -250,14 +259,26 @@ class Source:
                      "Source samples are the reservoir's velocities, of shape (k, 3), not "
                      f"{jax.numpy.shape(self.samples)}")
         if self.model is None:
-            object.__setattr__(self, "model", "sampled" if self.samples is not None
+            object.__setattr__(self, "model", "volume" if self.rate is not None else
+                               "sampled" if self.samples is not None
                                else self._model_from_leaves())
-        _require(self.model in ("beam", "maxwellian", "drifting", "sampled"),
-                 f"model is 'beam', 'maxwellian', 'drifting' or 'sampled', not {self.model!r}")
+        _require(self.model in ("beam", "maxwellian", "drifting", "sampled", "volume"),
+                 f"model is 'beam', 'maxwellian', 'drifting', 'sampled' or 'volume', not {self.model!r}")
+        _require((self.model == "volume") == (self.rate is not None), "a volume Source needs rate; "
+                 "reservoir sources use density instead")
         _require((self.model == "sampled") == (self.samples is not None),
                  "model='sampled' is the one that draws from samples, and the one that needs them: "
                  f"model is {self.model!r} and samples are {'given' if self.samples is not None else 'not'}")
         inward = 1.0 if self.side == "left" else -1.0
+        if self.model == "volume":
+            _require(jax.numpy.ndim(self.rate) == 0, "a volume rate must be a scalar")
+            _require(not _plain(self.rate) or (np.isfinite(self.rate) and self.rate >= 0),
+                     "a volume rate must be finite and nonnegative")
+            _require((not all(_plain(u) for u in self.vth) or all(u == 0 for u in self.vth))
+                     and self.samples is None,
+                     "a volume Source uses prescribed drift, not vth or samples")
+            _require(not all(_plain(u) for u in self.drift) or all(np.isfinite(u) for u in self.drift),
+                     "a prescribed volume velocity must be finite")
         if self.model == "beam" and _plain(self.drift[0]):
             _require(inward * self.drift[0] > 0,
                      f"a cold beam entering through the {self.side} wall needs a normal drift towards the box, "
@@ -479,8 +500,8 @@ class Species:
             * ``"random"``: uniformly random positions and random velocities.
         x, v: Optional arrays of shape ``(n, 3)`` that replace the generated
             phase space.
-        source: A :class:`Source` that maintains this species through one wall,
-            or ``None``. The particles it emits occupy the species' own dead slots,
+        source: A :class:`Source` supplying this species through a wall or by volume
+            births, or ``None``. The particles it emits occupy the species' own dead slots,
             so ``n`` is a capacity rather than a fixed population.
         reflection: Fraction of each particle that an absorbing wall sends back
             instead of collecting: a number, a function of the normal impact

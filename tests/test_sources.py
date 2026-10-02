@@ -1381,3 +1381,220 @@ def test_a_sheath_fed_every_k_steps_is_differentiable_in_the_reservoir():
     step = 1e-4 * density
     secant = (float(wall_potential(density + step)) - float(wall_potential(density - step))) / (2 * step)
     assert slope == pytest.approx(secant, rel=1e-4, abs=0)
+
+
+@pytest.mark.parametrize("boundary", ["periodic", "reflective"])
+def test_volume_pulses_have_physical_birth_times_velocities_and_budgets(boundary):
+    """Three pulses at t=0,.1,.2 have ages .25,.15,.05 at the final output."""
+    domain = Domain(length=1., cells=8, time_step=.05, particle_bc=boundary,
+                    field_bc=boundary, length_y=1., length_z=1.)
+    velocity = np.array([.1, .2, -.3])
+    source = Source(rate=2., drift=velocity, emit=4, every=2)
+    species = Species("neutral", 16, 0., 2., 0., drift=(1., 2., 3.), source=source)
+    sim = Simulation(domain, [species], Solver(model="electrostatic"))
+    initial, _ = sim.initial_state(random.PRNGKey(0))
+    np.testing.assert_array_equal(initial.u, np.zeros((16, 3)))
+    np.testing.assert_array_equal(initial.qm, np.zeros(16))
+    out = sim.run(5).validate()
+    live = np.asarray(out.weight[-1]) > 0
+    assert live.sum() == 12
+    ages = np.repeat([.25, .15, .05], 4)
+    sites = np.tile(-.5+(np.arange(4)+.5)/4, 3)
+    expected_x = sites + ages*velocity[0]
+    np.testing.assert_allclose(np.sort(out.x[-1, live, 0]), np.sort(expected_x), atol=3e-16)
+    np.testing.assert_allclose(np.sort(out.x[-1, live, 1]), np.sort(ages*velocity[1]), atol=3e-16)
+    np.testing.assert_allclose(np.sort(out.x[-1, live, 2]), np.sort(ages*velocity[2]), atol=3e-16)
+    np.testing.assert_allclose(out.v[-1, live], np.tile(velocity, (12, 1)), atol=0)
+    np.testing.assert_array_equal(out.v[-1, ~live], np.zeros((4, 3)))
+    weight = 2*.05*2/4
+    np.testing.assert_allclose(out.weight[-1, live], weight, atol=0)
+    total = 12*weight
+    expected_budget = np.r_[total, .5*2*total*np.dot(velocity, velocity), 2*total*velocity, 0.]
+    np.testing.assert_allclose(out.state.wall.birth_budget[0], expected_budget, atol=2e-16)
+    assert out.wall.injected.shape == (5, 1, 2)
+    assert float(jnp.sum(out.wall.injected)) == 0.
+    prefix = sim.run(3)
+    for name in ("x", "v", "weight", "rho", "E"):
+        np.testing.assert_array_equal(getattr(prefix, name), getattr(out, name)[:3])
+
+
+def test_volume_births_preserve_sparse_restart_and_feature_archive(tmp_path):
+    from jaxincell import load_state, save_state
+    from jaxincell._archive import VOLUME_FORMAT
+    domain = Domain(length=1., cells=8, time_step=.05)
+    species = Species("neutral", 16, 0., 2., 0., source=Source(rate=2., drift=(.1, .2, -.3), emit=4, every=2))
+    sim = Simulation(domain, [species], Solver(model="electrostatic"))
+    whole = sim.run(5, snapshot_steps=(1, 4), store_particles=False)
+    first = sim.run(3, snapshot_steps=(), store_particles=False)
+    path = save_state(tmp_path / "volume", first.state, sim)
+    with np.load(path) as data:
+        stored = dict(data)
+    assert int(stored["format"]) == VOLUME_FORMAT
+    rest = sim.run(2, snapshot_steps=(1,), state=load_state(path, sim), store_particles=False)
+    for a, b in zip(jax.tree.leaves(whole.state), jax.tree.leaves(rest.state)):
+        np.testing.assert_array_equal(a, b)
+    np.testing.assert_array_equal(rest.wall.birth_budget[-1], whole.wall.birth_budget[-1])
+    assert first.wall.birth_budget.shape == (0, 1, 6)
+    np.savez(tmp_path / "broken.npz", **{k: v for k, v in stored.items() if k != "wall.birth_budget"})
+    with pytest.raises(ValueError, match="format 5"):
+        load_state(tmp_path / "broken.npz")
+    for budget in (np.zeros(6), np.zeros((2, 6))):
+        np.savez(tmp_path / "broken.npz", **{**stored, "wall.birth_budget": budget})
+        with pytest.raises(ValueError, match="format 5"):
+            load_state(tmp_path / "broken.npz")
+    with pytest.raises(ValueError, match="birth_budget"):
+        sim.run(1, state=first.state.replace(wall=first.state.wall.replace(birth_budget=None)))
+
+
+@pytest.mark.parametrize("reflection", [0., .4])
+def test_volume_birth_and_wall_loss_budgets_are_independent(reflection):
+    domain = Domain(length=1., cells=8, time_step=.4, particle_bc="absorbing", field_bc="reflective",
+                    restitution=.5)
+    species = Species("neutral", 8, 0., 1., 0., reflection=reflection,
+                      source=Source(rate=1., drift=(1., 0., 0.), emit=4, every=2, min_weight=0.))
+    out = Simulation(domain, [species], Solver(model="electrostatic")).run(1).validate()
+    assert float(out.state.wall.birth_budget[0, 0]) == pytest.approx(.8, rel=1e-14)
+    assert float(out.state.wall.birth_budget[0, 1]) == pytest.approx(.4, rel=1e-14)
+    assert float(out.state.wall.birth_budget[0, 2]) == pytest.approx(.8, rel=1e-14)
+    assert float(out.wall.arrived[0, 0, 1]) == pytest.approx(.4, rel=1e-14)
+    assert float(out.wall.collected[0, 0, 1]) == pytest.approx(.4*(1-reflection), rel=1e-14)
+    assert float(out.wall.energy_in[0, 0, 1]) == pytest.approx(.2, rel=1e-14)
+    assert float(out.wall.energy_out[0, 0, 1]) == pytest.approx(.05*reflection, rel=1e-14, abs=0.)
+    assert float(jnp.sum(out.state.w)+jnp.sum(out.state.wall.collected)) == pytest.approx(.8, rel=1e-14)
+    dead = np.asarray(out.state.w) == 0
+    np.testing.assert_array_equal(out.state.u[dead], np.zeros((dead.sum(), 3)))
+    np.testing.assert_array_equal(out.state.qm[dead], np.zeros(dead.sum()))
+
+
+@pytest.mark.parametrize("paired", [False, True])
+@pytest.mark.parametrize("boundary", ["periodic", "reflective"])
+def test_volume_gauss_projection_has_a_measured_work_and_background(paired, boundary):
+    domain = Domain(length=1., cells=16, time_step=1e-4, particle_bc=boundary, field_bc=boundary)
+    source = Source(rate=2e-8, drift=(0., 0., 0.), emit=3)
+    populations = [Species("positive", 9, 1/e_charge, 1., 0., source=source)]
+    if paired:
+        populations.append(Species("negative", 9, -1/e_charge, 2., 0., source=source))
+    sim = Simulation(domain, populations, Solver(model="electrostatic"))
+    initial, _ = sim.initial_state(random.PRNGKey(0))
+    born = sim._volume_births(initial)
+    Ex, rho = np.asarray(born.E[:, 0]), np.asarray(born.rho)
+    rhs = (rho-rho.mean())/epsilon_0
+    scale = source.rate*domain.dt/epsilon_0
+    left = np.roll(Ex, 1) if boundary == "periodic" else np.r_[0., Ex[:-1]]
+    np.testing.assert_allclose((Ex-left)/domain.dx, rhs, atol=1e-14*scale)
+    if boundary == "periodic":
+        assert abs(Ex.mean()) < 1e-14*scale
+    work = float(jnp.sum(born.wall.birth_budget[:, 5]))
+    energy = .5*epsilon_0*domain.dx*np.dot(Ex, Ex)
+    assert abs(work-energy) < 1e-13*epsilon_0*scale**2
+    if paired:
+        assert np.max(np.abs(Ex)) < 1e-14*scale
+        assert float(born.wall.birth_budget[0, 5]) > 0
+        assert float(born.wall.birth_budget[1, 5]) < 0
+    else:
+        assert rho.mean() > 0 and work > 0
+    out = sim.run(2).validate()
+    assert float(jnp.max(gauss_residual(out))) < 1e-12
+    assert float(jnp.max(charge_balance(out))) < 1e-12
+
+
+def test_volume_pulse_refinement_and_weight_derivatives():
+    positions = []
+    for dt in (.1, .05):
+        steps = round(.6/dt)
+        domain = Domain(length=1., cells=8, time_step=dt)
+        source = Source(rate=2., drift=(.1, 0., 0.), emit=1, every=2)
+        species = Species("neutral", 12, 0., 1., 0., source=source)
+        out = Simulation(domain, [species], Solver(model="electrostatic")).run(steps).validate()
+        assert float(jnp.sum(out.state.w)) == pytest.approx(1.2, rel=1e-14)
+        live = np.asarray(out.state.w) > 0
+        mean = float(jnp.mean(out.x[-1, live, 0]))
+        assert mean == pytest.approx(.1*(.6+2*dt)/2, rel=1e-14)
+        positions.append(mean)
+    assert positions[1]-.03 == pytest.approx((positions[0]-.03)/2, rel=1e-13)
+
+    def weight(rate, dt):
+        species = Species("neutral", 12, 0., 1., 0., source=Source(rate=rate, emit=1, every=2))
+        return Simulation(Domain(length=1., cells=8, time_step=dt), [species],
+                          Solver(model="electrostatic")).run(6).state.wall.birth_budget[0, 0]
+
+    derivative = jax.jit(jax.grad(weight, argnums=(0, 1)))(2., .1)
+    np.testing.assert_allclose(derivative, [.6, 12.], rtol=1e-14, atol=0)
+
+
+def test_volume_births_take_the_full_first_boris_rotation():
+    """A birth at t=0 receives one full kick, not the reservoir's backdated velocity."""
+    dt = .1
+    domain = Domain(length=1., cells=8, time_step=dt, length_y=1., length_z=1.)
+    velocity = np.array([1., .3, .4])
+    species = Species("charged", 2, 1/e_charge, 1., 0.,
+                      source=Source(rate=1e-30, drift=velocity, emit=1))
+    marker = Species("passive", 1, 0., 1., 1., vth=0.)
+    B = jnp.zeros((8, 3)).at[:, 2].set(1.)
+    out = Simulation(domain, [species, marker], Solver(model="electrostatic"), external_B=B).run(1).validate()
+    index = int(np.flatnonzero(np.asarray(out.weight[0, :2]) > 0)[0])
+    angle = 2*np.arctan(dt/2)
+    expected = np.array([velocity[0]*np.cos(angle)+velocity[1]*np.sin(angle),
+                         velocity[1]*np.cos(angle)-velocity[0]*np.sin(angle), velocity[2]])
+    np.testing.assert_allclose(out.v[0, index], expected, rtol=1e-14, atol=0)
+    np.testing.assert_allclose(out.x[0, index], .5*dt*(velocity+expected), atol=1e-16)
+    np.testing.assert_array_equal(out.state.wall.birth_budget[1], np.zeros(6))
+
+
+def test_volume_capacity_and_unsupported_models_fail_explicitly():
+    source = Source(rate=1., emit=1)
+    species = Species("neutral", 1, 0., 1., 0., source=source)
+    sim = Simulation(Domain(length=1., cells=8, time_step=.1), [species], Solver(model="electrostatic"))
+    with pytest.raises(RuntimeError, match="capacity"):
+        sim.run(2, store_particles=False, snapshot_steps=()).validate()
+    for solver in (Solver(), Solver(algorithm="implicit", model="electrostatic"),
+                   Solver(model="electrostatic", relativistic=True)):
+        with pytest.raises(ValueError, match="Source"):
+            Simulation(sim.domain, [species], solver)
+    for kwargs in ({"rate": -1.}, {"rate": np.nan}, {"rate": 1., "vth": .1},
+                   {"rate": 1., "drift": (np.inf, 0., 0.)}, {"rate": jnp.ones(2)}, {"model": "volume"}):
+        with pytest.raises(ValueError):
+            Source(emit=1, **kwargs)
+    for count in (1.5, True, False, 0, -1):
+        with pytest.raises(ValueError, match="whole positive"):
+            Source(rate=1., emit=count)
+    assert Source(rate=1., emit=np.int64(2)).emit == 2
+    with pytest.raises(ValueError, match="crossing flux"):
+        crossing_flux(source)
+    with pytest.raises(ValueError, match="crossing distribution"):
+        sample_crossing(random.PRNGKey(0), source, 1, 1.)
+    idle = species.replace(density=1., source=source.replace(rate=0.))
+    out = sim.replace(species=(idle,)).run(3).validate()
+    np.testing.assert_array_equal(out.state.w, [1.])
+    np.testing.assert_array_equal(out.state.wall.birth_budget, np.zeros((1, 6)))
+    assert float(out.state.wall.overflow) == 0.
+
+
+def test_traced_volume_controls_cannot_hide_invalid_rates_or_velocities():
+    source = Source(rate=0., emit=1, vth=jnp.zeros(3))
+    species = Species("neutral", 2, 0., 1., 0., source=source)
+    sim = Simulation(Domain(length=1., cells=8, time_step=.1), [species], Solver(model="electrostatic"))
+
+    @jax.jit
+    def run(rate, velocity, thermal):
+        changed = source.replace(rate=rate, drift=(velocity, 0., 0.), vth=(thermal, 0., 0.))
+        return sim.replace(species=(species.replace(source=changed),)).run(1)
+
+    for rate, velocity, thermal in ((-1., 0., 0.), (np.nan, 0., 0.), (0., np.nan, 0.), (0., 0., .1)):
+        with pytest.raises(RuntimeError, match="non-finite"):
+            run(rate, velocity, thermal).validate()
+    idle = run(0., 0., 0.).validate()
+    np.testing.assert_array_equal(idle.state.wall.birth_budget, np.zeros((1, 6)))
+
+
+def test_volume_and_reservoir_supply_keep_independent_budgets_in_one_run():
+    domain = Domain(length=1., cells=8, time_step=.05, particle_bc="absorbing", field_bc=("open", "absorbing"))
+    volume = Species("volume", 8, 0., 1., 0., source=Source(rate=2., drift=(1., 0., 0.), emit=2, every=2))
+    reservoir = Species("reservoir", 8, 0., 2., 0.,
+                        source=Source(density=3., drift=(.4, 0., 0.), emit=2, model="beam"))
+    passive = Species("passive", 1, 0., 1., 0.)
+    out = Simulation(domain, [volume, reservoir, passive], Solver(model="electrostatic")).run(2).validate()
+    np.testing.assert_allclose(out.state.wall.birth_budget[:, 0], [.2, 0., 0.], rtol=1e-14, atol=0.)
+    np.testing.assert_allclose(out.state.wall.injected[:, 0], [0., .12, 0.], rtol=1e-14, atol=0.)
+    assert float(jnp.sum(out.state.w)) == pytest.approx(.32, rel=1e-14)
+    assert float(jnp.sum(out.state.wall.arrived)) == 0.

@@ -1,6 +1,7 @@
 # Sources and electrodes
 
-A {class}`~jaxincell.Source` is a reservoir of plasma behind one plane of the box, supplying
+A {class}`~jaxincell.Source` can supply prescribed volume births with `rate` (below), or
+act as a reservoir of plasma behind one plane of the box, supplying
 a prescribed flux independently of what leaves, so a source-to-collector problem reaches a
 steady state and can be compared with theory. Without one the box drains: an absorbing wall
 empties it, and a thermal wall returns what reaches it but cannot replace what another wall
@@ -30,14 +31,61 @@ out = Simulation(domain, [electrons, ions], Solver(model="electrostatic")).run(3
 | argument | meaning | default |
 |---|---|---|
 | `density` | reservoir number density $n_{\rm in}$, m$^{-3}$ | `0.0` |
+| `rate` | SI volumetric production rate, m$^{-3}$s$^{-1}$; selects `model="volume"` | `None` |
 | `vth` | thermal speed per component of the reservoir; zero makes a cold beam | `(0.0, 0.0, 0.0)` |
-| `drift` | drift velocity of the reservoir, m/s | `(0.0, 0.0, 0.0)` |
+| `drift` | reservoir drift, or all three prescribed volume-birth velocity components, m/s | `(0.0, 0.0, 0.0)` |
 | `side` | `"left"` or `"right"`, the wall the plasma enters through | `"left"` |
 | `emit` | particles emitted per emission | `0` |
 | `every` | emit once every this many steps, each particle carrying that many steps of flux; keep $v\,k\Delta t$ small against a cell and $\lvert\Omega\rvert k\Delta t$ below about 0.25 | `1` |
 | `model` | which crossing distribution the sampler draws from; decided when the object is built | `None` |
 | `min_weight` | fraction of the emitted weight at or below which a wall keeps the remainder instead of reflecting again | `1e-3` |
 | `samples` | velocities of the reservoir itself, `(k, 3)` in m/s | `None` |
+
+## Prescribed volume births
+
+`Source(rate=R, drift=(vx, vy, vz), emit=N, every=k)` emits at absolute integer
+steps `0, k, 2k, ...`, before the particle step. Every pulse fills `N` dead slots
+at quiet x sites $-L/2+(j+1/2)L/N$, with $y=z=0$, prescribed velocity and weight
+$w=R L k\Delta t/N$. `rate` is finite, nonnegative and scalar; `vth` must be zero.
+The rate-zero pulse is an exact no-op, including when the pool is full. Its rate
+derivative is zero; use positive rates when optimizing the production rate.
+
+This is a left-endpoint pulse quadrature: even a final incomplete cadence receives
+the full $k\Delta t$ pulse. A short run is a prefix of a longer one; refine
+$k\Delta t$ to approximate continuous production. The volumetric SI rate differs
+from the older per-grid-site source rate: summing that rate over sites requires
+division by $L$ to obtain a uniform volumetric rate. A wall reservoir describes a
+different physical supply and uses its crossing flux instead.
+
+```python
+from jaxincell import Domain, Simulation, Solver, Source, Species, save_state, load_state
+
+source = Source(rate=1e20, drift=(2000., 300., -100.), emit=4, every=2)
+species = Species.electrons(n=24, density=0., active=0, source=source)
+sim = Simulation(Domain(length=1e-3, cells=16, time_step=1e-10),
+                 [species], Solver(model="electrostatic"))
+first = sim.run(3, snapshot_steps=(0, 2)).validate()
+save_state("pulse.npz", first.state, sim)
+last = sim.run(3, state=load_state("pulse.npz", sim)).validate()
+print(last.state.wall.birth_budget)  # cumulative weight, KE, Px, Py, Pz, projection work
+```
+
+Only explicit nonrelativistic electrostatics supports volume births. Gauss is
+recomputed after each species pulse; the measured self-field energy change is
+recorded separately from the injected kinetic energy. `Wall.birth_budget` has
+shape `(species, 6)` with units m$^{-2}$, J/m$^2$, three momenta kg/(m s), and
+J/m$^2$; charge follows from the species charge and weight. Existing `(species, 2)`
+wall exchanges retain their meaning. The budget is archived and sampled together
+with the state; it is `None` without volume sources. Capacity overflow invalidates
+the result: reserve enough slots for all live births or allow wall losses to free them.
+
+Periodic and paired reflective Gauss closures remove the mean charge with a uniform
+neutralizing background. The raw charge density and birth charge ledger retain the
+injected net charge; `gauss_residual` checks the projected density. Pair oppositely
+charged sources when a neutral physical production mechanism is intended.
+For collisions starting from an empty cold population, supply a physical
+`Collisions(coulomb_log=...)`; the automatic logarithm uses the configured initial
+density and thermal speed, which are both zero in this example.
 
 ## What crosses a plane
 

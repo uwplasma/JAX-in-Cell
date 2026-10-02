@@ -1,4 +1,9 @@
-"""A maintained plasma supply: the inflow of one species through one wall.
+"""A maintained plasma supply: a wall reservoir or prescribed volume births.
+
+``Source(rate=...)`` instead supplies quiet x sites with y=z=0 and prescribed
+three-component velocities. Pulses start at integer steps 0, k, 2k, ... and each
+carries ``rate * length * k * dt`` physical particles per unit area, including
+the last pulse of an incomplete cadence. It is not a boundary flux distribution.
 
 A thermal wall returns what reaches it and so cannot replace what another wall
 collects; a sheath between a thermal wall and a collector drains. A source
@@ -35,8 +40,9 @@ the flux would not be: a particle number is an integer, and
 import jax
 import jax.numpy as jnp
 from jax import lax, random
+from ._core import PARK
 
-__all__ = ["crossing_flux", "sample_crossing", "inject", "check_sources"]
+__all__ = ["crossing_flux", "sample_crossing", "inject", "volume_inject", "check_sources"]
 
 _BISECTIONS = 60   # halvings of the quantile bracket: 2^-60 of it is below double precision
 
@@ -68,6 +74,8 @@ def crossing_flux(source):
     the plane, :math:`u<0`, still sends the tail of its distribution across, and
     :math:`|u|` in its place would turn that trickle into a full beam.
     """
+    if source.model == "volume":
+        raise ValueError("a volume Source has rate, not a crossing flux")
     if source.model == "sampled":
         return source.density * jnp.mean(_crossing_speed(source))
     sigma, u = source.sigma[0], _inward(source) * source.drift[0]
@@ -161,6 +169,8 @@ def sample_crossing(key, source, n, inward):
     tangential direction, such as the entrance condition of a magnetised presheath, is
     not a product of three one-dimensional draws.
     """
+    if source.model == "volume":
+        raise ValueError("a volume Source uses prescribed drift, not a crossing distribution")
     if source.model == "sampled":
         weights = _crossing_speed(source)
         drawn = random.choice(key, weights.shape[0], (n,), p=weights / jnp.sum(weights))
@@ -253,6 +263,25 @@ def inject(key, source, block, x, v, w, qm, charge_over_mass, dt, length, field,
             qm.at[slots].set(charge_over_mass), weight, velocity, overflow)
 
 
+def volume_inject(source, block, x, u, w, qm, charge_over_mass, dt, length, dx):
+    """One integer-time pulse; dead slots acquire real weight and prescribed velocity.
+
+    The whole cadence weight is supplied even for a final incomplete window, so a
+    short run is a prefix of a longer run. Capacity is fixed; overflow is explicit.
+    """
+    start, n = block
+    slots = start + lax.top_k(-lax.dynamic_slice(w, (start,), (n,)), source.emit)[1]
+    spill = jnp.max(w[slots])
+    weight = source.rate * length * dt * source.every / source.emit
+    position = jnp.zeros((source.emit, 3)).at[:, 0].set(
+        -length / 2 + (jnp.arange(source.emit) + .5) * length / source.emit)
+    position = position.at[:, 0].set(jnp.where(weight > 0, position[:, 0], -length / 2 - PARK * dx))
+    velocity = jnp.broadcast_to(jnp.asarray(source.drift), position.shape)
+    return (x.at[slots].set(position), u.at[slots].set(jnp.where(weight > 0, velocity, 0.0)),
+            w.at[slots].set(weight), qm.at[slots].set(jnp.where(weight > 0, charge_over_mass, 0.0)),
+            weight, spill)
+
+
 def check_sources(species, solver, domain):
     """Reject the source combinations that are not implemented, before a run starts."""
     sources = [s.source for s in species if s.source is not None]
@@ -266,12 +295,14 @@ def check_sources(species, solver, domain):
                          "box without a trajectory through the wall, so the continuity current that Ampere's law "
                          "integrates would miss it. The electrostatic solve takes E_x from the charge density and "
                          "is exact with a source.")
-    if 0 in domain.particle_bc or 0 in domain.field_bc:
+    if any(s.model != "volume" for s in sources) and (0 in domain.particle_bc or 0 in domain.field_bc):
         raise ValueError("a Source needs walls: a periodic box has no plane to supply plasma through.")
     for s in species:
         if s.source is None:
             continue
-        if domain.particle_bc[0 if s.source.side == "left" else 1] != 2:
+        if s.source.model == "volume" and solver.relativistic:
+            raise ValueError("a volume Source needs nonrelativistic electrostatics, which solves Gauss")
+        if s.source.model != "volume" and domain.particle_bc[0 if s.source.side == "left" else 1] != 2:
             raise ValueError(f"the {s.source.side} wall must be particle_bc='absorbing' for a Source on it: "
                              "a reservoir takes back whatever reaches it.")
         if s.source.emit > s.n:

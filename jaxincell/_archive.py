@@ -30,6 +30,7 @@ FORMAT = 1      #: Version of the archive layout, written into every file and ch
 QUINTIC_FORMAT = 2  # an S2-only reader must refuse a state whose charge used S5
 INTEGRAL_FORMAT = 3  # a secant-only reader must refuse an integral-force restart
 WALL_FORMAT = 4  # a half-position reader must refuse an integer-position explicit wall restart
+VOLUME_FORMAT = 5  # a reservoir-only reader must refuse a state with a volume birth budget
 
 
 def _fields(obj):
@@ -132,6 +133,7 @@ def save_state(path, state, simulation=None):
             arrays["shape_order"] = np.asarray(simulation.solver.shape_order)
             arrays["orbit_force"] = np.asarray("integral")
     arrays["format"] = np.asarray(WALL_FORMAT if state.x_phase == "wall" else arrays["format"])
+    arrays["format"] = np.asarray(VOLUME_FORMAT if state.wall.birth_budget is not None else arrays["format"])
     np.savez(path, **arrays)
     return path
 
@@ -178,9 +180,9 @@ def load_state(path, simulation=None):
     with np.load(str(path), allow_pickle=False) as data:
         stored = {key: data[key] for key in data.files}
     version = int(stored.pop("format", -1))
-    if version not in (FORMAT, QUINTIC_FORMAT, INTEGRAL_FORMAT, WALL_FORMAT):
+    if version not in (FORMAT, QUINTIC_FORMAT, INTEGRAL_FORMAT, WALL_FORMAT, VOLUME_FORMAT):
         raise ValueError(f"{path} is a format {version} archive; this jaxincell reads formats "
-                         f"{FORMAT}, {QUINTIC_FORMAT}, {INTEGRAL_FORMAT} and {WALL_FORMAT}; "
+                         f"{FORMAT}, {QUINTIC_FORMAT}, {INTEGRAL_FORMAT}, {WALL_FORMAT} and {VOLUME_FORMAT}; "
                          "it was written by a different version")
     if version == QUINTIC_FORMAT and not np.array_equal(stored.get("shape_order"), np.asarray(5)):
         raise ValueError("archive format 2 requires stored shape_order=5")
@@ -188,6 +190,10 @@ def load_state(path, simulation=None):
     phase = str(stored.get("x_phase", "legacy"))
     if version == WALL_FORMAT and phase != "wall":
         raise ValueError("archive format 4 requires the explicit wall position convention x_phase='wall'")
+    if version == VOLUME_FORMAT and ("wall.birth_budget" not in stored or phase not in ("half", "wall")
+                                     or np.shape(stored["wall.birth_budget"]) !=
+                                     np.shape(stored.get("wall.arrived"))[:1] + (6,)):
+        raise ValueError("archive format 5 requires a volume birth_budget and explicit position convention")
     if simulation is not None:
         if phase != simulation._x_phase() and not (phase == "legacy" and simulation._x_phase() != "wall"):
             raise ValueError("archive position convention does not match this simulation; old explicit wall "

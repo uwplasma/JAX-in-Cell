@@ -90,12 +90,15 @@ def gauss_residual(out):
     deposit with the wall ledger, covers every cell and both walls, and passes or fails on its
     own."""
     E = out.E[:, :, 0]
+    rho = out.rho
+    if out.field_bc in ((0, 0), (1, 1)):
+        rho = rho - jnp.mean(rho, axis=1, keepdims=True)
     if out.field_bc[0] == 0:
         div = (E - jnp.roll(E, 1, axis=1)) / out.dx
-        rhs = out.rho / epsilon_0
+        rhs = rho / epsilon_0
     else:
         div = (E[:, 1:] - E[:, :-1]) / out.dx
-        rhs = out.rho[:, 1:] / epsilon_0
+        rhs = rho[:, 1:] / epsilon_0
     charge = out.charge * (out.state.w if out.weight is None else out.weight)
     one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
     return jnp.max(jnp.abs(div - rhs), axis=1) / _nonzero(one_sign / (out.length * epsilon_0))
@@ -131,6 +134,8 @@ def charge_balance(out):
     held = out.dx * jnp.sum(out.rho, axis=1) + jnp.sum(out.sigma, axis=1)
     per_species = jnp.stack([out.charge[block][0] for _, block in _blocks(out)])   # one particle's
     put_in = jnp.sum(per_species[None, :, None] * out.wall.injected, axis=(1, 2))
+    if out.wall.birth_budget is not None:
+        put_in = put_in + jnp.sum(per_species * out.wall.birth_budget[:, :, 0], axis=1)
     charge = out.charge * (out.state.w if out.weight is None else out.weight)
     one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
     return jnp.abs((held - held[0]) - (put_in - put_in[0])) / _nonzero(one_sign)
