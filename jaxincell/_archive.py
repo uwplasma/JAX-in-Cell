@@ -27,6 +27,7 @@ __all__ = ["save_state", "load_state", "provenance"]
 
 FORMAT = 1      #: Version of the archive layout, written into every file and checked on reading.
 QUINTIC_FORMAT = 2  # an S2-only reader must refuse a state whose charge used S5
+INTEGRAL_FORMAT = 3  # a secant-only reader must refuse an integral-force restart
 
 
 def _fields(obj):
@@ -119,8 +120,22 @@ def save_state(path, state, simulation=None):
         if simulation.solver.shape_order == 5:
             arrays["format"] = np.asarray(QUINTIC_FORMAT)
             arrays["shape_order"] = np.asarray(5)
+        if simulation.solver.orbit_force == "integral":
+            arrays["format"] = np.asarray(INTEGRAL_FORMAT)
+            arrays["shape_order"] = np.asarray(simulation.solver.shape_order)
+            arrays["orbit_force"] = np.asarray("integral")
     np.savez(path, **arrays)
     return path
+
+
+def _check_integral_format(version, stored):
+    """Format 3 must identify its force and shape even without a supplied simulation."""
+    if version == INTEGRAL_FORMAT and (not np.array_equal(stored.get("orbit_force"), np.asarray("integral"))
+                                       or not np.array_equal(stored.get("algorithm"), np.asarray("implicit"))
+                                       or not any(np.array_equal(stored.get("shape_order"), np.asarray(order))
+                                                  for order in (2, 5))):
+        raise ValueError("archive format 3 requires orbit_force='integral', "
+                         "algorithm='implicit' and shape_order=2 or 5")
 
 
 def load_state(path, simulation=None):
@@ -128,7 +143,7 @@ def load_state(path, simulation=None):
     :class:`~jaxincell._simulation.State`.
 
     With ``simulation``, the archive is checked against it first -- the species names and counts,
-    the cell count, integrator and particle shape -- because a state restored into a differently shaped run
+    the cell count, integrator, particle shape and orbit force -- because a state restored into a differently shaped run
     fails somewhere later and less clearly. Without it, the state is returned as it stands.
 
     Raises:
@@ -140,18 +155,21 @@ def load_state(path, simulation=None):
     with np.load(str(path), allow_pickle=False) as data:
         stored = {key: data[key] for key in data.files}
     version = int(stored.pop("format", -1))
-    if version not in (FORMAT, QUINTIC_FORMAT):
+    if version not in (FORMAT, QUINTIC_FORMAT, INTEGRAL_FORMAT):
         raise ValueError(f"{path} is a format {version} archive; this jaxincell reads formats "
-                         f"{FORMAT} and {QUINTIC_FORMAT}; it was written by a different version")
+                         f"{FORMAT}, {QUINTIC_FORMAT} and {INTEGRAL_FORMAT}; it was written by a different version")
     if version == QUINTIC_FORMAT and not np.array_equal(stored.get("shape_order"), np.asarray(5)):
         raise ValueError("archive format 2 requires stored shape_order=5")
+    _check_integral_format(version, stored)
     if simulation is not None:
         stored.setdefault("shape_order", np.asarray(2))  # archives predating shape selection used S2
+        stored.setdefault("orbit_force", np.asarray("secant"))
         wanted = {"names": np.asarray([s.name for s in simulation.species]),
                   "counts": np.asarray([s.n for s in simulation.species]),
                   "cells": np.asarray(simulation.domain.cells),
                   "algorithm": np.asarray(simulation.solver.algorithm),
-                  "shape_order": np.asarray(simulation.solver.shape_order)}
+                  "shape_order": np.asarray(simulation.solver.shape_order),
+                  "orbit_force": np.asarray(simulation.solver.orbit_force)}
         for key, want in wanted.items():
             if key in stored and not np.array_equal(stored[key], want):
                 raise ValueError(f"{path} was written by a run whose {key} is {stored[key].tolist()!r}, "

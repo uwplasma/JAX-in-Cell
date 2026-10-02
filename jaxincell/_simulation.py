@@ -18,7 +18,7 @@ from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, s
 from ._progress import reporter
 from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, s2_weights,
                     current_from_continuity, curl_B, curl_E, deposit, gather, gather_xyz, half_step_fields, smooth,
-                    to_centres, to_faces, wall_faces_E, with_ghosts, wrap_positions)
+                    orbit_field_average, to_centres, to_faces, wall_faces_E, with_ghosts, wrap_positions)
 from ._sources import check_sources, crossing_flux, inject
 
 
@@ -333,6 +333,8 @@ class Simulation:
         Silently skipping a switch, as the scheme once did, makes a run look filtered
         when it is not."""
         s = self.solver
+        if s.orbit_force == "integral" and (self.domain.particle_bc != (0, 0) or self.domain.field_bc != (0, 0)):
+            raise ValueError("orbit_force='integral' requires periodic particle and field boundaries")
         if s.algorithm != "implicit":
             return
         if s.filter_passes:
@@ -1129,6 +1131,11 @@ class Simulation:
                 slope = jax.jvp(potential, (x_mid[:, 0],), (jnp.ones_like(shift),))[1]
                 small = jnp.abs(shift) < tiny
                 E_x = jnp.where(small, slope, (phi_end - phi_start) / jnp.where(small, tiny, shift)) + E_mean
+                if self.solver.orbit_force == "integral":
+                    short = jnp.abs(shift) <= dx
+                    integral = orbit_field_average(E_half[:, 0], x_start[:, 0], jnp.where(short, shift, 0.),
+                                                   d.faces[0], dx, self.solver.shape_order)
+                    E_x = jnp.where(short, integral, E_x)
                 u_new = self._accelerate(us, fields.at[:, 0].add(E_x), qms, dtau)
                 v_new = self._mean_velocity(us, u_new)
                 x_free = xs + dtau * v_new

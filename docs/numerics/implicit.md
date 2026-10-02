@@ -102,6 +102,35 @@ still need separate checks. The code writes none of these operators out: $\mathc
 and $\mathcal D^{\mathsf T}$ are `jax.linear_transpose` of `current_from_continuity` and of
 `deposit`, and the slope is `jax.jvp` of $\Phi$.
 
+### Optional short-orbit precision
+
+`Solver(algorithm="implicit", orbit_force="integral")` evaluates the same longitudinal
+force by a polynomial integral for periodic particle sub-steps with
+$|\ell|=|\Delta\tau\bar v_x|\leq\Delta x$. The default `orbit_force="secant"`, all
+nonperiodic runs and longer sub-steps retain the potential calculation above.
+The integral uses the local starting cell and the nominal unwrapped displacement:
+
+```{math}
+\bar E_p=\int_0^1 F(x_p+s\ell)\,ds.
+```
+
+Here $F$ is the linear ($S_1$) or quartic ($S_4$) face interpolant, including its mean.
+The orbit is split at spline knots. A linear piece averages to its midpoint value;
+a quartic piece of signed length $d$ averages to
+$F(x_m)+d^2 F''(x_m)/24+d^4 F^{(4)}(x_m)/1920$.
+This avoids subtracting nearby potentials or first rounding a global endpoint.
+At zero displacement its derivative is $F'(x_p)/2$ wherever $F$ is differentiable;
+a quadratic particle shape has a one-sided limit at a face-field knot.
+
+Charge deposition, current, transverse force and Picard iteration are unchanged.
+Rounded endpoint deposition and finite iteration still require independent work,
+continuity and phase checks. This improves force precision; it does not restore
+continuous momentum conservation or establish long-time kinetic accuracy.
+Write `save_state(path, state, simulation=sim)` to retain the selected force and shape:
+these integral-force archives use format 3, which secant-only readers reject.
+A bare `State` carries no solver metadata; saving it without `simulation` writes
+format 1 and cannot identify the selected force. Default archives retain their existing formats.
+
 ## Why both laws hold
 
 **Charge.** Summed over the sub-steps, {eq}`implicit-continuity` telescopes, and Ampere's law

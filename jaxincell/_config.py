@@ -551,7 +551,7 @@ class Species:
 
 
 @pytree_dataclass(static=("algorithm", "model", "field_solver", "relativistic", "filter_passes",
-                          "filter_strides", "picard_iterations", "substeps", "shape_order"))
+                          "filter_strides", "picard_iterations", "substeps", "shape_order", "orbit_force"))
 class Solver:
     """Numerical choices.
 
@@ -580,6 +580,9 @@ class Solver:
         substeps: Particle sub-steps per field step in the implicit scheme.
         shape_order: B-spline degree, 2 (quadratic) or 5 (quintic). Quintic weighting
             requires periodic particle and field boundaries, for either integrator.
+        orbit_force: ``"secant"`` (default) or ``"integral"``. The latter evaluates the
+            longitudinal spline integral without potential subtraction for implicit
+            periodic particle sub-steps no longer than a cell; longer orbits use the secant.
     """
     algorithm: str = "explicit"
     model: str = "electromagnetic"
@@ -591,6 +594,7 @@ class Solver:
     picard_iterations: int = 8
     substeps: int = 2
     shape_order: int = 2
+    orbit_force: str = "secant"
 
     def __post_init__(self):
         _require(self.algorithm in ("explicit", "implicit"),
@@ -600,6 +604,9 @@ class Solver:
         _require(self.field_solver in ("ampere", "gauss"),
                  f"field_solver is 'ampere' or 'gauss', not {self.field_solver!r}")
         _require(self.shape_order in (2, 5), "shape_order must be 2 or 5")
+        _require(self.orbit_force in ("secant", "integral"), "orbit_force must be 'secant' or 'integral'")
+        _require(self.orbit_force == "secant" or self.algorithm == "implicit",
+                 "orbit_force='integral' requires algorithm='implicit'")
         _require(self.filter_passes >= 0 and self.picard_iterations >= 1 and self.substeps >= 1,
                  "filter_passes cannot be negative, and picard_iterations and substeps must be at least one")
         object.__setattr__(self, "filter_alpha", _float(self.filter_alpha))

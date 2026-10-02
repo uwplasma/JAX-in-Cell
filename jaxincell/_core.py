@@ -58,6 +58,61 @@ def s5_weights(x, x0, dx):
     return k[:, None] + jnp.arange(-2, 4, dtype=jnp.int32), w
 
 
+def _face_spline(field, base, position, degree):
+    """Periodic B0/B1/B2/B4 face interpolation in a local cell coordinate."""
+    if degree == 1:
+        index = jnp.floor(position).astype(jnp.int32)
+        t = position - index
+        indices = index[..., None] + jnp.array([0, 1])
+        weights = jnp.stack((1 - t, t), axis=-1)
+    else:
+        index = jnp.floor(position + .5).astype(jnp.int32)
+        t = position - index + .5
+        a = 1 - t
+        if degree == 0:
+            indices, weights = index[..., None], jnp.ones(position.shape + (1,))
+        elif degree == 2:
+            indices = index[..., None] + jnp.arange(-1, 2)
+            weights = jnp.stack((a * a / 2, .5 + t - t * t, t * t / 2), axis=-1)
+        else:  # B4: positive polynomials on its five-point support
+            indices = index[..., None] + jnp.arange(-2, 3)
+            weights = jnp.stack((a**4, 1 + a * (4 + a * (6 + a * (4 - 4 * a))),
+                                 11 + t * (12 + t * (-6 + t * (-12 + 6 * t))),
+                                 1 + t * (4 + t * (6 + t * (4 - 4 * t))), t**4), axis=-1) / 24
+    return jnp.sum(field[(base[..., None] + indices) % len(field)] * weights, axis=-1)
+
+
+def orbit_field_average(field, x, displacement, first_face, dx, shape_order):
+    """Periodic longitudinal field mean along an orbit no longer than one cell.
+
+    Quadratic charge weights give a linear face field; quintic weights give a
+    quartic one. Split at its knots and integrate each polynomial in orbit fractions,
+    avoiding potential subtraction and rounded global endpoints. The field includes
+    its mean. At zero displacement this expression retains the derivative F'(x)/2
+    wherever F is differentiable. The caller retains the secant for longer orbits.
+    """
+    coordinate = (x - first_face) / dx
+    base = jnp.floor(coordinate).astype(jnp.int32)
+    local, shift = coordinate - base, displacement / dx
+    offset = 0. if shape_order == 2 else .5
+    lower = jnp.floor(jnp.minimum(local, local + shift) - offset) + offset
+    knots = lower[..., None] + jnp.array([1., 2.])
+    fractions = (knots - local[..., None]) / jnp.where(shift == 0., 1., shift)[..., None]
+    cuts = jnp.sort(jnp.concatenate((jnp.zeros(local.shape + (1,)), jnp.clip(fractions, 0., 1.),
+                                    jnp.ones(local.shape + (1,))), axis=-1), axis=-1)
+    width = jnp.diff(cuts)
+    middle = local[..., None] + shift[..., None] * (cuts[..., :-1] + cuts[..., 1:]) / 2
+    base = jnp.broadcast_to(base[..., None], middle.shape)
+    value = _face_spline(field, base, middle, 1 if shape_order == 2 else 4)
+    if shape_order == 5:
+        d2 = jnp.roll(field, 1) - 2 * field + jnp.roll(field, -1)
+        d4 = jnp.roll(d2, 1) - 2 * d2 + jnp.roll(d2, -1)
+        delta = shift[..., None] * width
+        value += delta**2 * _face_spline(d2, base, middle, 2) / 24
+        value += delta**4 * _face_spline(d4, base, middle, 0) / 1920
+    return jnp.sum(width * value, axis=-1)
+
+
 def shape_weights(x, x0, dx, shape_order=2):
     """Particle weights for the static spline degree, quadratic (2) or quintic (5)."""
     if shape_order == 2:
