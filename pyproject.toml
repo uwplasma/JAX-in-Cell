@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0.0", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["jaxincell"]
+packages = ["jaxincell", "jaxincell._parameters"]
 
 [tool.setuptools_scm]
 write_to = "jaxincell/version.py"
@@ -27,9 +27,9 @@ keywords = ["Plasma",
      "Simulation",
      "JAX"]
  
-dependencies = [ "jax", "jaxlib", "jax_tqdm", "matplotlib"]
+dependencies = [ "jax", "jax_tqdm", "matplotlib"]
  
-requires-python = ">=3.5"
+requires-python = ">=3.9"
 
 [project.urls]
 Homepage = "https://github.com/uwplasma/JAX-in-Cell"
