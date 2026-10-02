@@ -523,6 +523,24 @@ def test_openpmd_protects_existing_files_and_preserves_sparse_times(tmp_path):
     series.close()
 
 
+@pytest.mark.parametrize("template", ["run_%T.json", "run_%06T.json"])
+def test_openpmd_protects_existing_file_based_series(tmp_path, template):
+    io = pytest.importorskip("openpmd_api")
+    from jaxincell.openpmd import write_openpmd
+    out = small_simulation(n=8).run(6, snapshot_steps=[0, 2, 5])
+    path = tmp_path / template
+    write_openpmd(out, path, every=2)
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    with pytest.raises(FileExistsError, match="overwrite=True"):
+        write_openpmd(out, path)
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+    write_openpmd(out, path, every=2, overwrite=True)
+    series = io.Series(str(path), io.Access.read_only)
+    assert list(series.iterations) == [0, 2]
+    assert series.iterations[2].time == pytest.approx(float(out.t[2]), rel=1e-14, abs=0)
+    series.close()
+
+
 @pytest.mark.parametrize("options", [{"every": 0}, {"every": -1}, {"every": True}, {"every": 1.5},
                                      {"area": 0}, {"area": np.nan}, {"area": np.inf}, {"empty": True}])
 def test_openpmd_rejects_invalid_options_before_creating_a_file(tmp_path, options):

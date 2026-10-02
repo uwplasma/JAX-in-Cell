@@ -78,6 +78,13 @@ write_openpmd(output, "run.h5")       # needs `pip install jaxincell[openpmd]`
 Existing paths are protected; pass `overwrite=True` to replace one deliberately. Export
 requires at least one stored step, a positive integer `every`, and finite positive `area`.
 Sparse snapshots retain their actual timestamps; `every` counts stored snapshots.
+A `%T` or `%06T` filename selects file-based output; existing expanded files are protected too.
+Separate particle and mesh series use the same writer:
+
+```python
+write_openpmd(output, "meshes.json", particles=False)
+write_openpmd(output, "particles.json", meshes=False)
+```
 
 * One iteration per stored step.
 * Meshes for `E`, `B`, `J` and `rho`, with the right staggering recorded in the file.

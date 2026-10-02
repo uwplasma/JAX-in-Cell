@@ -31,7 +31,9 @@ Layout:
     recorded as the attribute ``transverseArea`` (m^2), since a 1D weight counts particles per unit
     area of the y-z plane.
 """
+import glob
 import os
+import re
 
 import numpy as np
 
@@ -169,7 +171,8 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, 
     external = _external_fields(out, simulation, meshes)
     root, ext = os.path.splitext(os.fspath(path))
     path = root + (ext or ".json")
-    if not overwrite and os.path.lexists(path):
+    existing = glob.glob(re.sub(r"%(?:0\d+)?T", "*", glob.escape(path)))
+    if not overwrite and (os.path.lexists(path) or existing):
         raise FileExistsError(f"{path} already exists; pass overwrite=True to replace it")
     series = io.Series(path, io.Access.create)
     series.set_software("JAX-in-Cell", __version__)
