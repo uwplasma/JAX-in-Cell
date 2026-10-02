@@ -515,3 +515,13 @@ def test_diagnostics_tensor_external_energy_averages_transverse_coordinates(tran
     density = np.mean(np.sum(np.asarray(field)**2, axis=-1), axis=tuple(range(1, field.ndim-1))) / (2*mu_0)
     np.testing.assert_allclose(output["external_magnetic_field_energy_density"], density, rtol=1e-14, atol=0)
     np.testing.assert_allclose(output["total_energy"], np.sum(density)*output["dx"], rtol=1e-14, atol=0)
+
+
+@pytest.mark.parametrize("scale", [1., 1e-12])
+def test_diagnostics_nonuniform_snapshot_times_do_not_report_an_fft_frequency(scale):
+    output = _minimal_diagnostic_output(electric_field=jnp.ones((4, 4, 3)), dt=scale)
+    output["time_array"] = scale*jnp.array([1., 2., 4., 5.])
+    diagnostics(output)
+    assert np.isnan(output["dominant_frequency"])
+    assert np.isfinite(output["total_energy"]).all()
+    np.testing.assert_array_equal(output["time_array"], scale*np.array([1., 2., 4., 5.]))
