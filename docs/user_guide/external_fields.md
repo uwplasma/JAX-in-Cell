@@ -24,7 +24,7 @@ staggered locations as the self-consistent fields (electric field at cell faces,
 magnetic field at cell centres). They are constant in time, are added to $\mathbf E$
 and $\mathbf B$ before the fields are interpolated to the particles, and do not enter
 Maxwell's equations. The external field energies are reported separately by
-{func}`jaxincell.diagnostics`. The arrays are stored in single precision.
+{func}`jaxincell.diagnostics`. Input array precision is preserved; omitted fields use the active JAX precision.
 
 ```{warning}
 The scalar parameters `external_electric_field_amplitude`,
@@ -54,6 +54,22 @@ waves: particles gyrate in the $y$-$z$ plane while the fields remain functions o
 only. Keep $c\,\Delta t/\Delta x \le 1$ in that case, because the transverse currents
 excite electromagnetic waves, and resolve the gyration with
 $\Omega_c \Delta t \ll 1$, where $\Omega_c = |q| B / m$.
+
+## Prescribed fields on a tensor grid
+
+Set `number_grid_points_y` and/or `number_grid_points_z` in `domain_parameters`.
+Their default zero disables that direction; `length_y` and `length_z` default to
+`length`. Supply a field of shape `(Nx, Ny, Nz, 3)` for the enabled directions
+(or `(Nx, Ny, 3)` when only y is enabled). Electric fields retain their x-face
+locations, magnetic fields their x-centre locations; both use centres in y and z.
+These directions are periodic. Only prescribed fields gain transverse variation;
+the self-consistent Maxwell solve remains one dimensional.
+
+The Boris pusher supports these fields. CN rejects nonzero prescribed fields
+because its current implementation does not include them. Prescribed fields can
+exchange energy and momentum with particles; `total_energy` includes their static
+energy for compatibility and is not a closed-system conservation test. Tensor-grid
+field energies average over the ignorable directions. See `examples/3d_field_runs.py`.
 
 ## Sources
 

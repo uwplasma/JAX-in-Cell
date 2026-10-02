@@ -4,6 +4,7 @@ from jax_tqdm import scan_tqdm
 from jax import lax, jit, config
 
 import jax.numpy as jnp
+import numpy as np
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
@@ -310,7 +311,7 @@ class Simulation:
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
-            "time_array":  jnp.linspace(0, total_steps * dt, total_steps),
+            "time_array":  (jnp.arange(total_steps) + 1) * dt,
             "grid": grid,
             "grid_xyz": grid_xyz,
             "dt": dt,
@@ -518,6 +519,10 @@ class Simulation:
             particle_state,
         )
         self.fields = field_state["fields"]
+        if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
+                bool(np.any(np.asarray(field_state[name])))
+                for name in ("external_electric_field", "external_magnetic_field")):
+            raise ValueError("The implicit CN path does not support prescribed external fields; use Boris.")
         self.external_magnetic_field = field_state["external_magnetic_field"]
         self.external_electric_field = field_state["external_electric_field"]
         self.padded_external_magnetic_field = field_state["padded_external_magnetic_field"]

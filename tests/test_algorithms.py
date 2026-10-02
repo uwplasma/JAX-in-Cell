@@ -301,7 +301,7 @@ def _assert_boris_step_contract(
         ms_new,
         q_ms_new,
     ) = carry
-    pos_step, vel_step, E_step, B_step, J_step, rho_step = step_data
+    pos_step, vel_step, E_step, B_step, J_step, rho_step, mu_step = step_data
     n_particles = qs_new.shape[0]
 
     assert E_new.shape == (number_grid_points, 3)
@@ -358,7 +358,7 @@ def _assert_cn_step_contract(
     box_size=None,
 ):
     E_new, B_new, pos_new, vel_new, qs_new, ms_new, q_ms_new = carry
-    pos_step, vel_step, E_step, B_step, J_step, rho_step = step_data
+    pos_step, vel_step, E_step, B_step, J_step, rho_step, mu_step = step_data
     n_particles = qs_new.shape[0]
 
     assert E_new.shape == (number_grid_points, 3)
@@ -548,7 +548,7 @@ def test_boris_step_adds_external_fields_before_particle_push(monkeypatch):
         return jnp.zeros((G, 3))
 
     def first_grid_field_value(x_n, internal_field, external_field, dxyz, gridxyz, grid_offset, dimensions, field_BC_left, field_BC_right):
-        return internal_field[0] + external_field[0]
+        return internal_field[0] + external_field[0], external_field[0]
 
     def capture_nonrelativistic_pusher(dt, positions, velocities, q_ms, E_field, B_field):
         captured_fields["E_field"] = E_field

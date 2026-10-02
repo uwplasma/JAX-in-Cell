@@ -409,16 +409,18 @@ def initialize_field_state(domain_parameters, solver_parameters, external_field_
     magnetic_field_input = secB.get("B") if isinstance(secB, dict) else secB
     electric_field_input = secE.get("E") if isinstance(secE, dict) else secE
     if magnetic_field_input is not None:
-        external_magnetic_field = jnp.asarray(magnetic_field_input, dtype=jnp.float32)
+        external_magnetic_field = jnp.asarray(magnetic_field_input)
     else:
-        external_magnetic_field = jnp.zeros((*G_xyz, 3), dtype=jnp.float32)
-    assert external_magnetic_field.shape == (*G_xyz, 3)
+        external_magnetic_field = jnp.zeros((*G_xyz, 3), dtype=float)
+    if external_magnetic_field.shape != (*G_xyz, 3):
+        raise ValueError(f"external_magnetic_field must have shape {(*G_xyz, 3)}")
 
     if electric_field_input is not None:
-        external_electric_field = jnp.asarray(electric_field_input, dtype=jnp.float32)
+        external_electric_field = jnp.asarray(electric_field_input)
     else:
-        external_electric_field = jnp.zeros((*G_xyz, 3), dtype=jnp.float32)
-    assert external_electric_field.shape == (*G_xyz, 3)
+        external_electric_field = jnp.zeros((*G_xyz, 3), dtype=float)
+    if external_electric_field.shape != (*G_xyz, 3):
+        raise ValueError(f"external_electric_field must have shape {(*G_xyz, 3)}")
 
     padded_external_electric_field, padded_external_magnetic_field = set_external_fields(
         external_electric_field,

@@ -31,9 +31,12 @@ def fields_to_particles_grid(x_n, internal_field, external_field, dxyz, gridxyz,
     interpolation_gridxyz = {}
 
     for dim in dimensions:
-        position_dim = position[dim]
         d_dim = dxyz[dim]
-        grid_dim = gridxyz[dim] + grid_offset * d_dim
+        length = len(gridxyz[dim]) * d_dim
+        periodic = dim != "x" or ((field_BC_left == 0) & (field_BC_right == 0))
+        position_dim = jnp.where(periodic, (position[dim] + length/2) % length - length/2, position[dim])
+        position[dim] = position_dim
+        grid_dim = gridxyz[dim] + (grid_offset if dim == "x" else 0) * d_dim
         grid_start_dim = grid_dim[0] - 1/2 * d_dim
         grid_dim = jnp.insert(grid_dim, 0, grid_dim[0]-d_dim, axis=0)
         interpolation_gridxyz[dim] = grid_dim
@@ -58,8 +61,11 @@ def fields_to_particles_grid(x_n, internal_field, external_field, dxyz, gridxyz,
     external_field_at_particle = external_field
     for dim in dimensions:
         i = ijk[dim]
-        position_dim = position[dim]
         d_dim = dxyz[dim]
+        length = len(gridxyz[dim]) * d_dim
+        periodic = dim != "x" or ((field_BC_left == 0) & (field_BC_right == 0))
+        position_dim = jnp.where(periodic, (position[dim] + length/2) % length - length/2, position[dim])
+        position[dim] = position_dim
         grid_dim = interpolation_gridxyz[dim]
         external_field_at_particle = (
             0.5*external_field_at_particle[i]*(0.5+(grid_dim[i] - position_dim)/d_dim)**2

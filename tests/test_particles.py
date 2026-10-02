@@ -94,7 +94,7 @@ def test_fields_to_particles_grid_interpolates_with_boundary_conditions():
                 ("x",),
                 field_BC_left,
                 field_BC_right,
-            )
+            )[0]
             for position in positions
         ])
         e_grid_expected = jnp.stack([
@@ -122,7 +122,7 @@ def test_fields_to_particles_grid_interpolates_with_boundary_conditions():
                 ("x",),
                 field_BC_left,
                 field_BC_right,
-            )
+            )[0]
             for position in positions
         ])
         b_grid_expected = jnp.stack([
@@ -155,7 +155,7 @@ def test_fields_to_particles_grid_interpolates_with_boundary_conditions():
         ("x",),
         0,
         0,
-    )
+    )[0]
     external_only_expected = old_fields_to_particles_grid(
         positions[1],
         external_field,
@@ -533,7 +533,7 @@ def test_particle_helpers_are_differentiable_for_small_inputs():
                 ("x",),
                 1,
                 1,
-            )
+            )[0]
         )
 
     grid_interpolation_gradient = grad(grid_interpolation_loss)(field)
@@ -562,3 +562,38 @@ def test_particle_helpers_are_differentiable_for_small_inputs():
     assert boris_gradient.shape == electric_fields.shape
     assert bool(jnp.all(jnp.isfinite(boris_gradient)))
     assert float(jnp.linalg.norm(boris_gradient)) > 0
+
+
+def test_external_tensor_gather_uses_centres_in_ignorable_directions():
+    """Independent periodic quadratic tensor weights, including exact seams."""
+    import itertools
+    import numpy as np
+    from jax import vmap
+    rng = np.random.default_rng(42)
+    dimensions = ("x", "y", "z")
+    counts, lengths = (8, 5, 3), (2., 3., 4.)
+    steps = {d: L/n for d, n, L in zip(dimensions, counts, lengths)}
+    grids = {d: jnp.linspace(-L/2+steps[d]/2, L/2-steps[d]/2, n)
+             for d, n, L in zip(dimensions, counts, lengths)}
+    field = rng.normal(size=counts+(3,))
+    padded, _ = set_external_fields(jnp.asarray(field), jnp.asarray(field), dimensions)
+    positions = np.vstack((rng.uniform(-.5, .5, (8, 3))*lengths,
+                           np.array(list(itertools.product(*[(-L/2, L/2) for L in lengths])))))
+    for offset in (0., .5):
+        expected = []
+        for position in positions:
+            indices, weights = [], []
+            for d, n, L, x in zip(dimensions, counts, lengths, position):
+                spacing = steps[d]
+                origin = -L/2+spacing/2+(offset*spacing if d == "x" else 0.)
+                coordinate = (x-origin)/spacing
+                k = int(np.floor(coordinate+.5))
+                a = coordinate-k
+                indices.append(np.array([k-1, k, k+1]) % n)
+                weights.append(np.array([.5*(.5-a)**2, .75-a*a, .5*(.5+a)**2]))
+            expected.append(sum(weights[0][i]*weights[1][j]*weights[2][k]*
+                                field[indices[0][i], indices[1][j], indices[2][k]]
+                                for i, j, k in itertools.product(range(3), repeat=3)))
+        actual = vmap(lambda x: fields_to_particles_grid(x, jnp.zeros((counts[0], 3)), padded,
+                                                        steps, grids, offset, dimensions, 0, 0)[1])(positions)
+        np.testing.assert_allclose(actual, expected, rtol=2e-13, atol=2e-13)

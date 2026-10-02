@@ -954,3 +954,25 @@ def test_cn_rejects_unsupported_boundary_and_relativistic_inputs(key):
 #
 # def test_simulation_rejects_mismatched_velocities_shape():
 #     ...
+
+
+def test_tensor_field_interior_changes_hash_and_first_snapshot_time():
+    p = small_simulation_parameters(total_steps=2, number_pseudoparticles=2)
+    p["domain_parameters"].update(number_grid_points_y=8, number_grid_points_z=8)
+    field = np.zeros((8, 8, 8, 3))
+    p["external_field_parameters"] = {"external_magnetic_field": {"B": field}}
+    sim = Simulation(p)
+    first_hash = sim.external_field_hash
+    field[4, 4, 4, 2] = 1.
+    sim.external_field_parameters = {"external_magnetic_field": {"B": field}}
+    assert sim.external_field_hash != first_hash
+    out = sim.run()
+    np.testing.assert_array_equal(out["time_array"], np.arange(1, 3)*out["dt"])
+
+
+@pytest.mark.parametrize("name, component", [("external_electric_field", "E"), ("external_magnetic_field", "B")])
+def test_external_field_shape_rejected(name, component):
+    p = small_simulation_parameters(total_steps=1)
+    p["external_field_parameters"] = {name: {component: np.zeros((8, 2))}}
+    with pytest.raises(ValueError, match="must have shape"):
+        Simulation(p)
