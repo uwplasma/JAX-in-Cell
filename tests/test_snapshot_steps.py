@@ -106,6 +106,23 @@ number_pseudoparticles = 2
     assert out["positions"].shape == (2, 4, 3)
 
 
+@pytest.mark.parametrize("schedule", [[], [0]])
+def test_snapshot_cli_reports_completed_time_and_skips_empty_histories(tmp_path, monkeypatch, capsys, schedule):
+    from jaxincell.__main__ import main
+    parameters = small_simulation_parameters(total_steps=3, number_grid_points=4, number_pseudoparticles=2)
+    parameters["solver_parameters"]["snapshot_steps"] = schedule
+    simulation = Simulation(parameters)
+    monkeypatch.setattr("jaxincell.__main__.load_parameters", lambda path: parameters)
+    monkeypatch.setattr("jaxincell.__main__.Simulation", lambda given: simulation)
+    seen = []
+    monkeypatch.setattr("jaxincell.__main__.diagnostics", lambda out: seen.append("diagnostics"))
+    monkeypatch.setattr("jaxincell.__main__.plot", lambda out: seen.append("plot"))
+    main(["input.toml"])
+    assert seen == (["diagnostics", "plot"] if schedule else [])
+    text = capsys.readouterr().out
+    assert "steps 3" in text and f"final time {3 * scalar(simulation.dt):.3e} s" in text
+
+
 def test_snapshot_steps_preserves_gradients():
     """Test differentiation through snapshot recording.
 
