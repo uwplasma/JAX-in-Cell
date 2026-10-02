@@ -205,6 +205,11 @@ the code inverts it directly using the discrete curl symbol, not the continuum $
 The radiating ghost depends on midpoint $\mathbf B$, which is solved together with
 $\mathbf E$. Thus vacuum propagation requires no particle iteration to converge.
 
+The nonperiodic banded solve uses
+[`lax.custom_linear_solve`](https://docs.jax.dev/en/latest/_autosummary/jax.lax.custom_linear_solve.html)
+with its exact banded transpose. This gives forward and reverse derivatives even
+on JAX versions without native tridiagonal differentiation; the primal solve remains banded.
+
 The particle-field coupling remains nonlinear. Starting from the old fields and
 every particle streaming freely at its present velocity, each Picard iteration:
 

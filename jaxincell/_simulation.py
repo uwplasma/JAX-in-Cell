@@ -57,7 +57,13 @@ def _implicit_fields(E, B, J, dt, dx, bc):
         diagonal = diagonal.at[-1].set(1 if bc[1] == 1 else 1 + courant + 2 * a2)
         lower = jnp.full(E.shape[0], -a2, dtype=rhs.dtype).at[0].set(0).at[-1].set(0 if bc[1] == 1 else -2 * a2)
         upper = jnp.full(E.shape[0], -a2, dtype=rhs.dtype).at[-1].set(0)
-        E_half = lax.linalg.tridiagonal_solve(lower, diagonal, upper, rhs[:, 1:])
+        # Implicit differentiation also supports JAX versions without a native banded AD rule.
+        E_half = lax.custom_linear_solve(
+            lambda y: diagonal[:, None] * y + lower[:, None] * jnp.roll(y, 1, axis=0)
+            + upper[:, None] * jnp.roll(y, -1, axis=0), rhs[:, 1:],
+            solve=lambda _, b: lax.linalg.tridiagonal_solve(lower, diagonal, upper, b),
+            transpose_solve=lambda _, b: lax.linalg.tridiagonal_solve(
+                jnp.roll(upper, 1).at[0].set(0), diagonal, jnp.roll(lower, -1).at[-1].set(0), b))
     E_new = E.at[:, 0].add(-dt * J[:, 0] / epsilon_0).at[:, 1:].set(2 * E_half - E[:, 1:])
     E_mean = 0.5 * (E + E_new)
     B_half = B - (dt / 2) * curl_E(E_mean, jnp.zeros_like(B), dx, bc)

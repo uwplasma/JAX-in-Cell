@@ -864,7 +864,8 @@ def test_implicit_maxwell_wall_equations_and_boundary_work(bc, n, courant):
                                    (np.eye(2 * n) + courant * A / 2) @ y - source)
         assert np.allclose(new, expected, rtol=0, atol=3e-14)
         midpoint = .5 * (y + new)
-        assert np.max(np.abs(new - y - courant * A @ midpoint + source)) < 8e-14
+        scale = np.abs(new) + np.abs(y) + courant * (np.abs(A) @ np.abs(midpoint)) + np.abs(source)
+        assert np.max(np.abs(new - y - courant * A @ midpoint + source)) < 32 * np.finfo(float).eps * np.max(scale)
         energy_change = .5 * (np.dot(new, new) - np.dot(y, y))
         work = np.dot(midpoint, courant * A @ midpoint - source)
         assert energy_change == pytest.approx(work, abs=1e-12, rel=0)
@@ -895,6 +896,21 @@ def test_implicit_maxwell_time_step_gradient(bc):
     assert float(jax.jacfwd(objective)(courant)) == pytest.approx(expected, abs=3e-13, rel=0)
     finite_difference = (float(objective(courant + 1e-5)) - float(objective(courant - 1e-5))) / 2e-5
     assert finite_difference == pytest.approx(expected, abs=5e-9, rel=0)
+
+    direction, current_direction = rng.normal(size=(2, 2 * n))
+    current_direction[n:] = 0
+    rhs = (np.eye(2 * n) + courant * A / 2) @ direction - courant * current_direction
+    expected = weights @ np.linalg.solve(np.eye(2 * n) - courant * A / 2, rhs)
+
+    def field_objective(t):
+        e = E.at[:, 1].add(t * direction[:n])
+        b = B.at[:, 2].add(t * direction[n:] / c)
+        j = J.at[:, 1].add(t * epsilon_0 * c / h * current_direction[:n])
+        e, b = _implicit_fields(e, b, j, courant * h / c, h, bc)
+        return jnp.dot(jnp.asarray(weights), jnp.concatenate([e[:, 1], c * b[:, 2]]))
+
+    assert float(jax.grad(field_objective)(0.)) == pytest.approx(expected, abs=3e-13, rel=0)
+    assert float(jax.jacfwd(field_objective)(0.)) == pytest.approx(expected, abs=3e-13, rel=0)
 
 
 def test_implicit_vacuum_time_and_gradient_refinement():
