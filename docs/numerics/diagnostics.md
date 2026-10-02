@@ -57,6 +57,9 @@ $2\pi f$. The resolution is $2\pi/(S\Delta t)$ with $S$ the number of steps, whi
 the plasma frequency use it only as a rough check. The FFT uses the number of
 stored rows and their uniform time spacing when `time_array` is supplied. A single
 stored row or a constant signal has zero dominant frequency.
+Nonuniform snapshot times return `NaN` for this FFT diagnostic; energies and
+particle moments remain available. Analyse uneven samples with a method such as
+the [Lomb–Scargle periodogram](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.lombscargle.html).
 
 ## Species views
 

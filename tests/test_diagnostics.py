@@ -486,3 +486,13 @@ def test_relativistic_kinetic_energy_has_a_stable_low_speed_limit():
     output["solver_parameters"] = {"relativistic": True}
     diagnostics(output)
     np.testing.assert_allclose(output["kinetic_energy"], 4.5 * (1e-8 * speed_of_light) ** 2, rtol=1e-12)
+
+
+@pytest.mark.parametrize("scale", [1., 1e-12])
+def test_diagnostics_nonuniform_snapshot_times_do_not_report_an_fft_frequency(scale):
+    output = _minimal_diagnostic_output(electric_field=jnp.ones((4, 4, 3)), dt=scale)
+    output["time_array"] = scale*jnp.array([1., 2., 4., 5.])
+    diagnostics(output)
+    assert np.isnan(output["dominant_frequency"])
+    assert np.isfinite(output["total_energy"]).all()
+    np.testing.assert_array_equal(output["time_array"], scale*np.array([1., 2., 4., 5.]))
