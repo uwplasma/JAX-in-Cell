@@ -20,6 +20,7 @@ having.
 """
 import dataclasses
 
+from jax import dtypes, random
 import jax.numpy as jnp
 import numpy as np
 
@@ -110,6 +111,9 @@ def save_state(path, state, simulation=None):
             for inner in _fields(value):
                 if getattr(value, inner) is not None:
                     arrays[f"wall.{inner}"] = np.asarray(getattr(value, inner))
+        elif name == "key" and dtypes.issubdtype(value.dtype, dtypes.prng_key):
+            arrays[name] = np.asarray(random.key_data(value))
+            arrays["key_impl"] = np.asarray(str(random.key_impl(value)))
         elif value is not None:
             arrays[name] = np.asarray(value)
     if simulation is not None:
@@ -181,6 +185,8 @@ def load_state(path, simulation=None):
     for name in _fields(State):
         if name == "wall":
             values.append(wall)
+        elif name == "key" and "key_impl" in stored:
+            values.append(random.wrap_key_data(jnp.asarray(stored[name]), impl=str(stored["key_impl"])))
         elif name in stored:
             values.append(jnp.asarray(stored[name]))
         elif name == "moments":

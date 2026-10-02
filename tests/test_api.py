@@ -1038,3 +1038,22 @@ def test_every_input_file_is_one_the_loader_accepts():
         sim, run = load_toml(path)
         assert sim.species and run.get("steps", 500) > 0, path.name
         assert all(s.n >= 1 for s in sim.species), path.name
+
+
+@pytest.mark.parametrize("implementation", ["threefry2x32", "rbg"])
+def test_typed_random_key_archive_preserves_generator_and_restart(tmp_path, implementation):
+    from jaxincell import save_state, load_state
+    simulation = small_simulation(n=20)
+    key = jax.random.key(3, impl=implementation)
+    state, _ = simulation.initial_state(key)
+    output = simulation.run(2, state=state)
+    path = save_state(tmp_path/"typed", output.state, simulation)
+    restored = load_state(path, simulation)
+    assert str(jax.random.key_impl(restored.key)) == implementation
+    np.testing.assert_array_equal(jax.random.key_data(restored.key), jax.random.key_data(output.state.key))
+    expected = simulation.run(2, state=output.state)
+    continued = simulation.run(2, state=restored)
+    for a, b in zip(jax.tree_util.tree_leaves(expected), jax.tree_util.tree_leaves(continued)):
+        if hasattr(a, "dtype") and jax.dtypes.issubdtype(a.dtype, jax.dtypes.prng_key):
+            a, b = jax.random.key_data(a), jax.random.key_data(b)
+        np.testing.assert_array_equal(a, b)
