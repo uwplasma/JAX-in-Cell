@@ -18,7 +18,7 @@ import jax.numpy as jnp
 
 from ._config import epsilon_0, speed_of_light as c
 
-__all__ = ["s2_weights", "map_indices", "deposit", "PARITY", "PARK", "to_centres",
+__all__ = ["s2_weights", "s5_weights", "shape_weights", "map_indices", "deposit", "PARITY", "PARK", "to_centres",
            "with_ghosts", "gather", "gather_xyz", "current_from_continuity", "to_faces", "wall_faces_E", "curl_E",
            "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic",
            "apply_particle_bc", "wrap_positions", "smooth"]
@@ -37,6 +37,91 @@ def s2_weights(x, x0, dx):
     return k[:, None] + jnp.array([-1, 0, 1], dtype=jnp.int32), w
 
 
+def s5_weights(x, x0, dx):
+    """Centred quintic B-spline: six weights, support ``|x-x_i| < 3*dx``.
+
+    Polynomials on one cell avoid cancellation between truncated fifth powers.
+    All six weights are nonnegative for the fractional position ``d`` in [0, 1].
+    This is SHARP's integrated cell weight W^5 (arXiv:1702.04732, Appendix B).
+    """
+    s = (x - x0) / dx
+    k = jnp.floor(s).astype(jnp.int32)
+    d, t = s - k, 1 - (s - k)
+
+    def near(a):
+        return 1 + a * (5 + a * (10 + a * (10 + a * (5 - 5 * a))))
+
+    def centre(a):
+        return 66 - a**2 * (60 - a**2 * (30 - 10 * a))
+
+    w = jnp.stack([t**5, near(t), centre(d), centre(t), near(d), d**5], axis=-1) / 120
+    return k[:, None] + jnp.arange(-2, 4, dtype=jnp.int32), w
+
+
+def _face_spline(field, base, position, degree):
+    """Periodic B0/B1/B2/B4 face interpolation in a local cell coordinate."""
+    if degree == 1:
+        index = jnp.floor(position).astype(jnp.int32)
+        t = position - index
+        indices = index[..., None] + jnp.array([0, 1])
+        weights = jnp.stack((1 - t, t), axis=-1)
+    else:
+        index = jnp.floor(position + .5).astype(jnp.int32)
+        t = position - index + .5
+        a = 1 - t
+        if degree == 0:
+            indices, weights = index[..., None], jnp.ones(position.shape + (1,))
+        elif degree == 2:
+            indices = index[..., None] + jnp.arange(-1, 2)
+            weights = jnp.stack((a * a / 2, .5 + t - t * t, t * t / 2), axis=-1)
+        else:  # B4: positive polynomials on its five-point support
+            indices = index[..., None] + jnp.arange(-2, 3)
+            weights = jnp.stack((a**4, 1 + a * (4 + a * (6 + a * (4 - 4 * a))),
+                                 11 + t * (12 + t * (-6 + t * (-12 + 6 * t))),
+                                 1 + t * (4 + t * (6 + t * (4 - 4 * t))), t**4), axis=-1) / 24
+    return jnp.sum(field[(base[..., None] + indices) % len(field)] * weights, axis=-1)
+
+
+def orbit_field_average(field, x, displacement, first_face, dx, shape_order):
+    """Periodic longitudinal field mean along an orbit no longer than one cell.
+
+    Quadratic charge weights give a linear face field; quintic weights give a
+    quartic one. Split at its knots and integrate each polynomial in orbit fractions,
+    avoiding potential subtraction and rounded global endpoints. The field includes
+    its mean. At zero displacement this expression retains the derivative F'(x)/2
+    wherever F is differentiable. The caller retains the secant for longer orbits.
+    """
+    coordinate = (x - first_face) / dx
+    base = jnp.floor(coordinate).astype(jnp.int32)
+    local, shift = coordinate - base, displacement / dx
+    offset = 0. if shape_order == 2 else .5
+    lower = jnp.floor(jnp.minimum(local, local + shift) - offset) + offset
+    knots = lower[..., None] + jnp.array([1., 2.])
+    fractions = (knots - local[..., None]) / jnp.where(shift == 0., 1., shift)[..., None]
+    cuts = jnp.sort(jnp.concatenate((jnp.zeros(local.shape + (1,)), jnp.clip(fractions, 0., 1.),
+                                    jnp.ones(local.shape + (1,))), axis=-1), axis=-1)
+    width = jnp.diff(cuts)
+    middle = local[..., None] + shift[..., None] * (cuts[..., :-1] + cuts[..., 1:]) / 2
+    base = jnp.broadcast_to(base[..., None], middle.shape)
+    value = _face_spline(field, base, middle, 1 if shape_order == 2 else 4)
+    if shape_order == 5:
+        d2 = jnp.roll(field, 1) - 2 * field + jnp.roll(field, -1)
+        d4 = jnp.roll(d2, 1) - 2 * d2 + jnp.roll(d2, -1)
+        delta = shift[..., None] * width
+        value += delta**2 * _face_spline(d2, base, middle, 2) / 24
+        value += delta**4 * _face_spline(d4, base, middle, 0) / 1920
+    return jnp.sum(width * value, axis=-1)
+
+
+def shape_weights(x, x0, dx, shape_order=2):
+    """Particle weights for the static spline degree, quadratic (2) or quintic (5)."""
+    if shape_order == 2:
+        return s2_weights(x, x0, dx)
+    if shape_order == 5:
+        return s5_weights(x, x0, dx)
+    raise ValueError("shape_order must be 2 or 5")
+
+
 def map_indices(idx, n, bc):
     """Bring stencil indices outside ``[0, n)`` back according to the wall codes:
     periodic wraps, reflective clamps to the boundary cell (zero-gradient
@@ -51,10 +136,10 @@ def map_indices(idx, n, bc):
     return jnp.clip(idx, 0, n - 1), keep
 
 
-def deposit(x, q, x0, dx, n, bc):
+def deposit(x, q, x0, dx, n, bc, shape_order=2):
     """Density on the grid from particle positions ``x`` and amounts ``q``
-    (charge, or charge times a velocity component): :math:`\\sum_p q_p S_2(x_i - x_p)`."""
-    idx, w = s2_weights(x, x0, dx)
+    (charge, or charge times a velocity component), with the selected spline degree."""
+    idx, w = shape_weights(x, x0, dx, shape_order)
     idx, keep = map_indices(idx, n, bc)
     return jnp.zeros(n).at[idx].add(jnp.where(keep, w, 0.0) * (q / dx)[:, None])
 
@@ -71,7 +156,7 @@ def to_centres(E, left, right):
     return 0.5 * (faces[:-1] + faces[1:])
 
 
-def with_ghosts(F, bc, parity=None):
+def with_ghosts(F, bc, parity=None, shape_order=2):
     """A centred field ``(n, C)`` with one centre added beyond each wall, ``(n + 2, C)``,
     which is as far as the cloud of a particle inside the box reaches.
 
@@ -84,7 +169,13 @@ def with_ghosts(F, bc, parity=None):
     Beyond an open plane is more of the same plasma, so the field continues unchanged;
     zero there would be the field of a conductor that is not present, and a particle
     within half a cloud of the plane would feel its image.
-    Without ``parity`` the field is a prescribed one and simply continues beyond a wall."""
+    Without ``parity`` the field is a prescribed one and simply continues beyond a wall.
+    ``shape_order=5`` adds three centres per wall and requires periodic walls."""
+    if shape_order == 5:
+        if bc != (0, 0):
+            raise ValueError("quintic ghosts require periodic walls")
+        return F[jnp.arange(-3, F.shape[0] + 3) % F.shape[0]]
+
     def ghost(code, edge, far):
         if code == 0:
             return far
@@ -95,27 +186,29 @@ def with_ghosts(F, bc, parity=None):
     return jnp.concatenate([ghost(bc[0], F[0], F[-1])[None], F, ghost(bc[1], F[-1], F[0])[None]])
 
 
-def gather(F, x, x0, dx):
+def gather(F, x, x0, dx, shape_order=2):
     """Interpolate a centred field with its ghost centres, ``(n + 2, C)`` from
     :func:`with_ghosts`, to positions ``x`` with the spline of the deposit, giving
     ``(N, C)``; ``x0`` is the first centre inside the box. Indices are clipped only for
-    particles parked beyond a wall, whose force is zero anyway."""
-    idx, w = s2_weights(x, x0 - dx, dx)
+    particles parked beyond a wall, whose force is zero anyway. Quintic fields have
+    three ghost centres per wall, provided by ``with_ghosts(..., shape_order=5)``."""
+    idx, w = shape_weights(x, x0 - (3 if shape_order == 5 else 1) * dx, dx, shape_order)
     return jnp.einsum("nk,nkc->nc", w, F[jnp.clip(idx, 0, F.shape[0] - 1)])
 
 
-def gather_xyz(G, x, x0, dx, periods):
+def gather_xyz(G, x, x0, dx, periods, shape_order=2):
     """Interpolate a field given on an ``(x, y, z)`` grid of centres, ``(n + 2, ny, nz, C)``
     with the ghost centres of :func:`with_ghosts` along ``x``, to positions ``x`` ``(N, 3)``,
     giving ``(N, C)``. Along ``x`` it is :func:`gather`; along ``y`` and ``z`` the same spline
     on ``ny`` and ``nz`` centres spanning the periods ``(L_y, L_z)`` of the ignorable
     coordinates, periodic in both, as the particles are. The weights are a tensor product,
-    so a grid with ``ny = nz = 1`` gathers as :func:`gather` does, to round-off."""
-    ix, wx = s2_weights(x[:, 0], x0 - dx, dx)
+    so a grid with ``ny = nz = 1`` gathers as :func:`gather` does, to round-off.
+    ``shape_order`` selects the same degree along all three coordinates."""
+    ix, wx = shape_weights(x[:, 0], x0 - (3 if shape_order == 5 else 1) * dx, dx, shape_order)
     ix = jnp.clip(ix, 0, G.shape[0] - 1)
     ny, nz = G.shape[1], G.shape[2]
-    iy, wy = s2_weights(x[:, 1], -periods[0] / 2 + periods[0] / (2 * ny), periods[0] / ny)
-    iz, wz = s2_weights(x[:, 2], -periods[1] / 2 + periods[1] / (2 * nz), periods[1] / nz)
+    iy, wy = shape_weights(x[:, 1], -periods[0] / 2 + periods[0] / (2 * ny), periods[0] / ny, shape_order)
+    iz, wz = shape_weights(x[:, 2], -periods[1] / 2 + periods[1] / (2 * nz), periods[1] / nz, shape_order)
     values = G[ix[:, :, None, None], (iy % ny)[:, None, :, None], (iz % nz)[:, None, None, :]]
     return jnp.einsum("na,nb,nc,nabcf->nf", wx, wy, wz, values)
 

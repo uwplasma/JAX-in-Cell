@@ -109,6 +109,12 @@ def _sourced(emit=2, capacity=64, active=None):
     (lambda: Domain(field_bc="thermal"), "thermal wall"),
     (lambda: Solver(algorithm="leapfrog"), "algorithm is"),
     (lambda: Solver(field_solver="poisson"), "field_solver is"),
+    (lambda: Solver(orbit_force="midpoint"), "orbit_force must be"),
+    (lambda: Solver(orbit_force="integral"), "requires algorithm='implicit'"),
+    (lambda: Simulation(Domain(particle_bc='reflective'), [Species.electrons(4, 1)],
+                        Solver(algorithm='implicit', orbit_force='integral')), 'requires periodic'),
+    (lambda: Simulation(Domain(field_bc='reflective'), [Species.electrons(4, 1)],
+                        Solver(algorithm='implicit', orbit_force='integral')), 'requires periodic'),
     (lambda: Solver(substeps=0), "at least one"),
     (lambda: Domain(length=-1.0), "length must be positive"),
     (lambda: Domain(length_y=0.0), "length_y must be positive"),
@@ -291,7 +297,7 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     import numpy as np
 
     from jaxincell import load_state, save_state
-    from jaxincell._archive import FORMAT
+    from jaxincell._archive import INTEGRAL_FORMAT
 
     domain = Domain(length=1e-2, cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
     species = Species("electrons", 2000, -1.0, mass_electron, 0.0,
@@ -326,8 +332,8 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     # an archive of another format is refused rather than half read, and so is one that is not
     # a state at all
     stored = dict(np.load(path))
-    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(FORMAT + 1)})
-    with pytest.raises(ValueError, match=f"format {FORMAT}"):
+    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(INTEGRAL_FORMAT + 1)})
+    with pytest.raises(ValueError, match=f"format {INTEGRAL_FORMAT + 1}"):
         load_state(tmp_path / "future.npz")
     np.savez(tmp_path / "partial.npz", **{k: v for k, v in stored.items() if k != "rho"})
     with pytest.raises(ValueError, match="not a state archive"):

@@ -5,6 +5,33 @@ current density $\mathbf J$. Depositing them naively breaks Gauss's law; this pa
 derives the deposit the code actually uses and shows why the law then holds to
 round-off.
 
+## Particle shape
+
+`Solver(shape_order=2)` uses the quadratic B-spline $S_2$, supported on three cells.
+For periodic runs, `shape_order=5` selects the centred quintic cell weight,
+the convolution of six unit-width box functions:
+
+```{math}
+W^5(r)=\frac{1}{120}\sum_{j=0}^{6}(-1)^j\binom{6}{j}(r+3-j)_+^5,
+\qquad r=\frac{x_i-x_p}{\Delta x},\qquad (a)_+=\max(a,0).
+```
+
+Its six nonnegative weights sum to one and reproduce the particle's first moment.
+The code evaluates local polynomials and gathers from three periodic ghost centres
+per wall. The same shape is used for charge, transverse current, moments and gathers;
+the continuity solve below applies to either shape. Wider weighting suppresses short
+grid wavelengths, but does not increase the order of the field difference or time step.
+Quintic wall closures are not implemented, so nonperiodic combinations are rejected.
+The {doc}`implicit` scheme uses the potential's discrete gradient for longitudinal work.
+The default quadratic kernels keep their original arithmetic.
+
+This is $W^5$ in [Shalaby et al. (2017), SHARP](https://arxiv.org/abs/1702.04732),
+Eq. (15) and Appendix B, Table 4: their raw particle shape $S^5$ has degree four,
+and integration across a cell gives this degree-five weight. The explicit scheme deposits
+at centres and gathers the face-averaged field, implementing their momentum-conserving Eq. (23).
+The solver retains its second-order Maxwell split and mean-current response; SHARP's
+Simpson force quadrature and higher-order mean-field update are separate methods.
+
 ## Why the obvious current is not good enough
 
 The particle representation of {doc}`equations` suggests
@@ -101,7 +128,7 @@ same charge-conserving current, from the two ends of every sub-step ({doc}`impli
 
 ## Momentum conservation
 
-The field is gathered with the same $S_2$ the charge was deposited with, and from the same
+The field is gathered with the same spline the charge was deposited with, and from the same
 grid: $E_x$ is first averaged from the faces to the centres,
 $E_i = \tfrac12(E_{i-1/2} + E_{i+1/2}) = -(\phi_{i+1} - \phi_{i-1})/2\Delta x$, a centred
 difference. The gather is then the transpose of the deposit composed with an antisymmetric
@@ -130,8 +157,8 @@ over the run above. The test suite checks the self-force, the image forces at ev
 
 ## Cost
 
-Each particle touches three cells, so one deposit is $3N$ scatter-adds and one gather
-is $3N$ reads, independent of $N_x$. A step performs two charge deposits and four
+Each particle touches three cells with $S_2$, or six with $W^5$, so a deposit or gather
+touches $3N$ or $6N$ entries, independent of $N_x$. A step performs two charge deposits and four
 transverse-current deposits, and two gathers, one for $\mathbf E$ and one for
 $\mathbf B$. Two charge deposits and not four: the density at $t^n$ is the one the
 previous step ended on, carried in the state, and the density at $t^{n+1/2}$ that the

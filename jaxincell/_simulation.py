@@ -18,7 +18,7 @@ from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, s
 from ._progress import reporter
 from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, s2_weights,
                     current_from_continuity, curl_B, curl_E, deposit, gather, gather_xyz, half_step_fields, smooth,
-                    to_centres, to_faces, wall_faces_E, with_ghosts, wrap_positions)
+                    orbit_field_average, to_centres, to_faces, wall_faces_E, with_ghosts, wrap_positions)
 from ._sources import check_sources, crossing_flux, inject
 
 
@@ -313,6 +313,9 @@ class Simulation:
         names = [s.name for s in self.species]
         if len(set(names)) != len(names):
             raise ValueError(f"species names must be distinct, got {names}")
+        if self.solver.shape_order == 5 and (self.domain.particle_bc != (0, 0)
+                                             or self.domain.field_bc != (0, 0)):
+            raise ValueError("shape_order=5 requires periodic particle and field boundaries")
         self._check_implicit()
         self._check_external()
         self._check_collisions()
@@ -330,6 +333,8 @@ class Simulation:
         Silently skipping a switch, as the scheme once did, makes a run look filtered
         when it is not."""
         s = self.solver
+        if s.orbit_force == "integral" and (self.domain.particle_bc != (0, 0) or self.domain.field_bc != (0, 0)):
+            raise ValueError("orbit_force='integral' requires periodic particle and field boundaries")
         if s.algorithm != "implicit":
             return
         if s.filter_passes:
@@ -720,7 +725,7 @@ class Simulation:
             xs, vs, ws = x[start:start + n, 0], v[start:start + n], w[start:start + n]
 
             def density_of(amount, xs=xs):
-                return deposit(xs, amount, d.grid[0], d.dx, d.cells, d.particle_bc)
+                return deposit(xs, amount, d.grid[0], d.dx, d.cells, d.particle_bc, self.solver.shape_order)
 
             amounts = [ws] + [ws * vs[:, k] for k in range(3)] + [ws * vs[:, i] * vs[:, j] for i, j in pairs]
             out.append(jnp.stack([density_of(a) for a in amounts[:rows]]))
@@ -909,7 +914,8 @@ class Simulation:
             x_integer = wrap_positions(x - 0.5 * dt * self._velocity(u), w, box, d.particle_bc, dx)
         else:
             x_integer = x
-        rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells, d.particle_bc))
+        rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells,
+                                   d.particle_bc, self.solver.shape_order))
         E = jnp.zeros((d.cells, 3)).at[:, 0].set(
             E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall, self._overlap_charge(x_integer, w)[1])))
         B = jnp.zeros((d.cells, 3))
@@ -926,13 +932,15 @@ class Simulation:
         with velocities ``v``. An electrostatic run has no use for the transverse currents
         and does not deposit them, which is two passes over the particles saved per half step;
         the longitudinal current is kept, since it is a diagnostic in its own right."""
-        d = self.domain
-        rho_new = self._smooth(deposit(x[:, 0], q, d.grid[0], d.dx, d.cells, d.particle_bc))
+        d, order = self.domain, self.solver.shape_order
+        rho_new = self._smooth(deposit(x[:, 0], q, d.grid[0], d.dx, d.cells, d.particle_bc, order))
         J_x = current_from_continuity(rho_old, rho_new, dt_half, d.dx, wall_current, d.field_bc)
         if self.solver.electrostatic:
             return rho_new, jnp.stack([J_x, jnp.zeros_like(J_x), jnp.zeros_like(J_x)], axis=1)
-        J_y = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 1], d.grid[0], d.dx, d.cells, d.particle_bc)), d.field_bc)
-        J_z = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 2], d.grid[0], d.dx, d.cells, d.particle_bc)), d.field_bc)
+        J_y = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 1], d.grid[0], d.dx, d.cells,
+                                            d.particle_bc, order)), d.field_bc)
+        J_z = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 2], d.grid[0], d.dx, d.cells,
+                                            d.particle_bc, order)), d.field_bc)
         return rho_new, jnp.stack([J_x, J_y, J_z], axis=1)
 
     def _fields_at(self, x, E, B, rho):
@@ -947,23 +955,26 @@ class Simulation:
         own field. ``rho`` gives the field at an absorbing left wall. External fields are
         added as given, continued unchanged beyond a wall; one given on an ``(x, y, z)`` grid
         is gathered at the particle's ``y`` and ``z`` too (:meth:`external_fields_at`)."""
-        d, bc = self.domain, self.domain.field_bc
+        d, bc, order = self.domain, self.domain.field_bc, self.solver.shape_order
         F = with_ghosts(jnp.concatenate([to_centres(E, *wall_faces_E(E, B, rho, d.dx, bc)), B], axis=1), bc,
-                        jnp.asarray(PARITY))
+                        jnp.asarray(PARITY), order)
         flat = [f is not None and jnp.ndim(f) == 2 for f in (self.external_E, self.external_B)]
         if any(flat):
             E_ext = jnp.asarray(self.external_E) if flat[0] else jnp.zeros_like(E)
             B_ext = jnp.asarray(self.external_B) if flat[1] else jnp.zeros_like(B)
-            F = F + with_ghosts(jnp.concatenate([to_centres(E_ext, E_ext[0], E_ext[-1]), B_ext], axis=1), bc)
-        fields = gather(F, x[:, 0], d.grid[0], d.dx)
+            left = E_ext[-1] if order == 5 else E_ext[0]
+            F = F + with_ghosts(jnp.concatenate([to_centres(E_ext, left, E_ext[-1]), B_ext], axis=1), bc,
+                                shape_order=order)
+        fields = gather(F, x[:, 0], d.grid[0], d.dx, order)
         if any(f is not None and jnp.ndim(f) == 4 for f in (self.external_E, self.external_B)):
             fields = fields + self._external_xyz(x)
         return fields
 
     def _external_xyz(self, x):
         """The external fields given on an ``(x, y, z)`` grid, at positions ``x``, ``(N, 6)``."""
-        d = self.domain
-        parts = [gather_xyz(with_ghosts(jnp.asarray(f), d.field_bc), x, d.grid[0], d.dx, (d.length_y, d.length_z))
+        d, order = self.domain, self.solver.shape_order
+        parts = [gather_xyz(with_ghosts(jnp.asarray(f), d.field_bc, shape_order=order), x, d.grid[0], d.dx,
+                            (d.length_y, d.length_z), order)
                  if f is not None and jnp.ndim(f) == 4 else jnp.zeros((x.shape[0], 3), x.dtype)
                  for f in (self.external_E, self.external_B)]
         return jnp.concatenate(parts, axis=1)
@@ -972,13 +983,14 @@ class Simulation:
         """The external E and B at positions ``x`` ``(N, 3)``, as ``(N, 6)``, gathered as the
         push gathers them: with the spline of the deposit along ``x`` and, for a field given on
         an ``(x, y, z)`` grid, along ``y`` and ``z`` as well. Zero where no field is given."""
-        d = self.domain
+        d, order = self.domain, self.solver.shape_order
         zero = jnp.zeros((d.cells, 3))
         flat = [jnp.asarray(f) if f is not None and jnp.ndim(f) == 2 else zero
                 for f in (self.external_E, self.external_B)]
-        F = with_ghosts(jnp.concatenate([to_centres(flat[0], flat[0][0], flat[0][-1]), flat[1]], axis=1),
-                        d.field_bc)
-        return gather(F, x[:, 0], d.grid[0], d.dx) + self._external_xyz(x)
+        left = flat[0][-1] if order == 5 else flat[0][0]
+        F = with_ghosts(jnp.concatenate([to_centres(flat[0], left, flat[0][-1]), flat[1]], axis=1),
+                        d.field_bc, shape_order=order)
+        return gather(F, x[:, 0], d.grid[0], d.dx, order) + self._external_xyz(x)
 
     def _accelerate(self, v, fields, qm, dt):
         """The Boris step in the fields ``(N, 6)`` gathered at the particles."""
@@ -1098,7 +1110,7 @@ class Simulation:
         keys = random.split(k_wall, n_sub)
 
         def deposit_x(positions, amounts):
-            return deposit(positions, amounts, d.grid[0], dx, d.cells, d.particle_bc)
+            return deposit(positions, amounts, d.grid[0], dx, d.cells, d.particle_bc, self.solver.shape_order)
 
         def substeps(E_half, B_half, orbits):
             # E_x as a potential at the particles: the transpose of the continuity current, then of the deposit
@@ -1121,6 +1133,11 @@ class Simulation:
                 slope = jax.jvp(potential, (x_mid[:, 0],), (jnp.ones_like(shift),))[1]
                 small = jnp.abs(shift) < tiny
                 E_x = jnp.where(small, slope, (phi_end - phi_start) / jnp.where(small, tiny, shift)) + E_mean
+                if self.solver.orbit_force == "integral":
+                    short = jnp.abs(shift) <= dx
+                    integral = orbit_field_average(E_half[:, 0], x_start[:, 0], jnp.where(short, shift, 0.),
+                                                   d.faces[0], dx, self.solver.shape_order)
+                    E_x = jnp.where(short, integral, E_x)
                 fields = fields.at[:, 0].add(E_x)
                 u_new = self._accelerate(us, fields, qms, dtau)
                 v_new = self._mean_velocity(us, u_new)
