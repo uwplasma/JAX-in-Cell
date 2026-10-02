@@ -380,8 +380,8 @@ def test_inelastic_ballistic_wall_trajectory(algorithm, side, restitution):
     positions = jnp.array([[side*s, 0., 0.] for s in (.35, .4, .45)])
     velocities = jnp.tile(jnp.array([side*.2, .03, -.04]), (3, 1))
     species = Species("neutral", 3, 0., 1., 1., x=positions, v=velocities)
-    simulation = Simulation(domain, (species,), Solver(algorithm=algorithm, model="electrostatic",
-                                                      filter_passes=0, substeps=1))
+    solver = Solver(algorithm=algorithm, model="electrostatic", filter_passes=0, substeps=1)
+    simulation = Simulation(domain, (species,), solver)
     out = simulation.run(1).validate()
     expected = side*(.5-restitution*(np.abs(np.asarray(positions[:, 0]))+.2-.5))
     np.testing.assert_allclose(out.x[0, :, 0], expected, atol=2e-16)
