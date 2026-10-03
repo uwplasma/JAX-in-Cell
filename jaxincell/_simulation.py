@@ -220,10 +220,11 @@ class Simulation:
         velocities = particle_state["velocities"]
 
         # Leapfrog integration: positions at half-step before the start
-        positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
-            positions + (dt / 2) * velocities, velocities,
-            charges, masses, charge_to_mass_ratios,
-            dx, grid, *box_size, particle_BC_left, particle_BC_right)
+        positions_plus1_2 = positions + dt/2*velocities
+        qs, ms, q_ms = charges, masses, charge_to_mass_ratios
+        if particle_BC_left == 0 and particle_BC_right == 0:
+            positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
+                positions_plus1_2, velocities, qs, ms, q_ms, dx, grid, *box_size, 0, 0)
 
         positions_minus1_2 = set_BC_positions(
             positions - (dt / 2) * velocities,
@@ -237,7 +238,9 @@ class Simulation:
             )
             step_func = lambda carry, step_index: Boris_step(
                 carry, step_index, solver_parameters, runtime_external_field_parameters, dx, dt, grid, box_size,
-                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
+                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver'],
+                **{key: domain_parameters[key] for key in
+                   ("mixed_BC_weight", "COR_left", "COR_right", "mixed_BC_velocity_scale")}
             )
         else:
             initial_carry = (
@@ -250,9 +253,12 @@ class Simulation:
                 solver_parameters["number_of_particle_substeps_implicit_CN"]
             )
 
+        mixed_walls = particle_BC_left >= 2 or particle_BC_right >= 2
+
         @scan_tqdm(total_steps)
         def simulation_step(carry, step_index):
-            return step_func(carry, step_index)
+            carry, data = step_func(carry, step_index)
+            return carry, (data, carry[7], carry[6]) if mixed_walls else data
 
 
         # Run simulation
@@ -260,7 +266,7 @@ class Simulation:
 
         # Unpack results
         positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results[0] if mixed_walls else results
 
         # **Output results**
         from ._constants import epsilon_0, mass_electron
@@ -317,6 +323,8 @@ class Simulation:
             "external_magnetic_field": field_state["external_magnetic_field"],
         }
 
+        if mixed_walls:
+            temporary_output.update(masses_over_time=results[1], charges_over_time=results[2])
         return temporary_output
 
     def assemble_output(self, simulation_output, input_parameters):
@@ -444,6 +452,13 @@ class Simulation:
         self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
         self.build_domain()
         self.initialize_particles()
+        if (self._solver_parameters["time_evolution_algorithm"] == 1 or self._solver_parameters["relativistic"]) and (
+                any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right"))
+                or any(self._domain_parameters[f"COR_{side}"] != 1 for side in ("left", "right"))):
+            raise ValueError("mixed or inelastic walls currently require nonrelativistic Boris")
+        if any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right")) and (
+                self._solver_parameters["field_solver"] != 2):
+            raise ValueError("mixed walls require field_solver=2 to account for collected charge")
         self.initialize_fields()
         if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
             bool(jnp.any(field != 0)) for field in (self.external_electric_field, self.external_magnetic_field)
