@@ -11,13 +11,31 @@ from ._fields import (E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, curlB,curl
 try: import tomllib
 except ModuleNotFoundError: import pip._vendor.tomli as tomllib
 
-__all__ = ['Boris_step', 'CN_step']
+__all__ = ['Boris_step', 'CN_step', 'calculate_mu']
+
+
+def calculate_mu(velocities, magnetic_field, masses):
+    strength2 = jnp.sum(magnetic_field**2, axis=-1, keepdims=True)
+    active_field = strength2 > 0.
+    safe_magnetic_field_strength = jnp.sqrt(jnp.where(active_field, strength2, 1.))
+    b_hat = magnetic_field / safe_magnetic_field_strength
+    v_parallel = jnp.sum(velocities * b_hat, axis=-1, keepdims=True) * b_hat
+    v_perpendicular = velocities - v_parallel
+    mu = (
+        0.5
+        * masses
+        * jnp.sum(v_perpendicular ** 2, axis=-1, keepdims=True)
+        / safe_magnetic_field_strength
+    )
+    return jnp.where(active_field, mu, 0.0)
 
 #Boris step
-def Boris_step(carry, step_index, solver_parameters, external_field_parameters, dx, dt, grid, box_size,
+def Boris_step(carry, step_index, solver_parameters, external_field_parameters,
+                      dxyz, dt, gridxyz, box_size, dimensions,
                       particle_BC_left, particle_BC_right,
                       field_BC_left, field_BC_right,
-                      field_solver):
+                      field_solver, mixed_BC_weight=1., COR_left=1., COR_right=1.,
+                      mixed_BC_velocity_scale=speed_of_light, physical_masses=None):
     """One explicit leapfrog step with the Boris pusher.
 
     Deposits the current from the motion ``x^n -> x^{n+1/2}``, advances the fields
@@ -47,6 +65,8 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
         particle_BC_left, particle_BC_right (int): Particle boundary codes.
         field_BC_left, field_BC_right (int): Field boundary codes.
         field_solver (int): ``0`` electromagnetic, ``1`` Gauss's law by FFT.
+        physical_masses (array or None): Optional physical masses, shape ``(N, 1)``;
+            appends the per-step particle-loss and wall-transfer budget for sources.
 
     Returns:
         tuple: The new carry and the per-step output
@@ -55,6 +75,30 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
 
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
+    dx = dxyz['x']
+    grid = gridxyz['x']
+
+    wall_motion = particle_BC_left != 0 or particle_BC_right != 0
+    if physical_masses is not None:
+        wall_budget = jnp.zeros(10)
+
+        def wall_transfer(before, after):
+            v0, q0, m0 = before
+            v1, q1, m1 = after
+            lost_mass = m0 - m1
+            return jnp.concatenate((jnp.array([jnp.sum(lost_mass / physical_masses), jnp.sum(q0 - q1),
+                                               jnp.sum(lost_mass * v0**2) / 2]),
+                                    jnp.sum(lost_mass * v0, axis=0),
+                                    jnp.array([jnp.sum(lost_mass * v0**2 + m1 * (v0 - v1) * (v0 + v1)) / 2]),
+                                    jnp.sum(lost_mass * v0 + m1 * (v0 - v1), axis=0)))
+    if wall_motion:
+        before_wall = velocities, qs, ms
+        positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
+            positions + dt/2*velocities, velocities, qs, ms, q_ms, dx, grid,
+            *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight, COR_left, COR_right,
+            mixed_BC_velocity_scale)
+        if physical_masses is not None:
+            wall_budget += wall_transfer(before_wall, (velocities, qs, ms))
 
     fpasses  = solver_parameters["filter_passes"]
     falpha   = solver_parameters["filter_alpha"]
@@ -74,17 +118,13 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
                 field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     E_field, B_field = field_update1(E_field, B_field, dx, dt/2, electrostatic(J), field_BC_left, field_BC_right)
     
-    # Add external fields
-    total_E = E_field + external_field_parameters["external_electric_field"]
-    total_B = B_field + external_field_parameters["external_magnetic_field"]
-
-    # Interpolate fields to particle positions
+    # Interpolate internal and external fields to particle positions
     def interpolate_fields(x_n):
-        E = fields_to_particles_grid(x_n, total_E, dx, grid + dx/2, grid[0], field_BC_left, field_BC_right)
-        B = fields_to_particles_grid(x_n, total_B, dx, grid, grid[0] - dx/2, field_BC_left, field_BC_right)
-        return E, B
+        E, _ = fields_to_particles_grid(x_n, E_field, external_field_parameters['padded_external_electric_field'], dxyz, gridxyz, 1/2, dimensions, field_BC_left, field_BC_right)
+        B, B_ext = fields_to_particles_grid(x_n, B_field, external_field_parameters['padded_external_magnetic_field'], dxyz, gridxyz, 0, dimensions, field_BC_left, field_BC_right)
+        return E, B, B_ext
 
-    E_field_at_x, B_field_at_x = vmap(interpolate_fields)(positions_plus1_2)
+    E_field_at_x, B_field_at_x, B_ext_at_x = vmap(interpolate_fields)(positions_plus1_2)
 
     # Particle update: Boris pusher
     positions_plus3_2, velocities_plus1 = lax.cond(
@@ -93,14 +133,29 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
         lambda _: boris_step(dt, positions_plus1_2, velocities, q_ms, E_field_at_x, B_field_at_x),
         operand=None
     )
+    mus = calculate_mu(
+        0.5 * (velocities + velocities_plus1),
+        B_ext_at_x,
+        ms,
+    )
 
-    # Apply boundary conditions
-    positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
-        positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
-        *box_size, particle_BC_left, particle_BC_right)
-    
-    positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
-                                    qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
+    if wall_motion:
+        before_wall = velocities_plus1, qs, ms
+        positions_plus1, velocities_plus1, qs, ms, q_ms = set_BC_particles(
+            positions_plus1_2 + dt/2*velocities_plus1, velocities_plus1, qs, ms, q_ms, dx, grid,
+            *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight, COR_left, COR_right,
+            mixed_BC_velocity_scale)
+        if physical_masses is not None:
+            wall_budget += wall_transfer(before_wall, (velocities_plus1, qs, ms))
+        positions_plus3_2 = positions_plus1 + dt/2*velocities_plus1
+    else:
+        positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
+            positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
+            *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight, COR_left, COR_right,
+            mixed_BC_velocity_scale)
+        positions_plus1 = set_BC_positions(positions_plus3_2 - dt/2*velocities_plus1,
+                                          qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
+    mus = jnp.where(qs != 0, mus, 0.0)
 
     # Second half step, x^{n+1/2} -> x^{n+1}
     J = current_density(positions_plus1_2, positions_plus1, positions_plus1, velocities_plus1,
@@ -138,7 +193,9 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
     charge_density = calculate_charge_density(positions, qs, dx, grid, particle_BC_left, particle_BC_right,
                                               filter_passes=fpasses, filter_alpha=falpha, filter_strides=fstrides,
                                               field_BC_left=field_BC_left, field_BC_right=field_BC_right)
-    step_data = (positions, velocities, E_field, B_field, J, charge_density)
+    step_data = (positions, velocities, E_field, B_field, J, charge_density, mus)
+    if physical_masses is not None:
+        step_data += (wall_budget,)
     
     return carry, step_data
 
@@ -310,6 +367,8 @@ def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
                                               filter_passes=0, filter_alpha=0.5, filter_strides=(1, 2, 4),
                                               field_BC_left=field_BC_left, field_BC_right=field_BC_right)
     carry = (E_field, B_field, positions_plus1, velocities_plus1, qs, ms, q_ms)
-    step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density)
+    B_at_particles = vmap(lambda x: fields_to_particles_periodic_CN(x, B_field, dx, grid[0]))(positions_plus1)
+    mus = calculate_mu(velocities_plus1, B_at_particles, ms)
+    step_data = (positions_plus1, velocities_plus1, E_field, B_field, J, charge_density, mus)
     
     return carry, step_data

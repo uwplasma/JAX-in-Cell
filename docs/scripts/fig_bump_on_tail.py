@@ -60,22 +60,22 @@ parameters = {
                           "number_grid_points": NX, "total_steps": STEPS},
     "species_parameters": {
         "electrons": {
-            "electrons0": {"number_pseudoparticles": N, "grid_points_per_Debye_length": 2.565,
+            "electrons0": {"number_pseudoparticles": N, "dx_over_Debye_length": 2.565,
                            "vth_over_c_x": VTH_E, "drift_speed_x": DRIFT_BULK,
                            # the first electron population defaults to a +/- split;
                            # the loaded velocities are a single drifting Maxwellian
                            "velocity_plus_minus_x": False,
                            "initial_positions": xe, "initial_velocities": ve},
-            "beam": {"number_pseudoparticles": N, "grid_points_per_Debye_length": 0.44427103214,
+            "beam": {"number_pseudoparticles": N, "dx_over_Debye_length": 0.44427103214,
                      "vth_over_c_x": VTH_E, "drift_speed_x": DRIFT_BEAM,
                      "initial_positions": xb, "initial_velocities": vb}},
         "ions": {
-            "ions0": {"number_pseudoparticles": N, "grid_points_per_Debye_length": 2.565,
+            "ions0": {"number_pseudoparticles": N, "dx_over_Debye_length": 2.565,
                       "mass_over_proton_mass": 1, "vth_over_c_x": "_electrons0",
                       "ion_temperature_over_electron_temperature_x": 1.0,
                       "initial_positions": xi, "initial_velocities": vi},
             "beam_neutralizer": {"number_pseudoparticles": N,
-                                 "grid_points_per_Debye_length": 0.44427103214,
+                                 "dx_over_Debye_length": 0.44427103214,
                                  "mass_over_proton_mass": 1, "vth_over_c_x": VTH_BN,
                                  "initial_positions": xn, "initial_velocities": vn}}},
     "solver_parameters": {"field_solver": 0, "filter_passes": 0, "print_info": False},

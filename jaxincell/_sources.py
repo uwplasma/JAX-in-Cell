@@ -55,25 +55,26 @@ def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, 
     Returns:
         tuple: Charge contributions to the left and right boundaries.
     """
-    # Compute charges outside the grid boundaries
+    # Compare interval endpoints: subtracting a wall position from its cell centre
+    # can round the distance above dx/2 and discard an entire half-cloud.
     extra_charge_left = (charge / dx) * jnp.where(
-        jnp.abs(position - grid[0]) <= dx / 2,
+        (grid[0] - dx / 2 <= position) & (position <= grid[0] + dx / 2),
         0.5 * (0.5 + (grid[0] - position) / dx) ** 2,
         0
     )
     extra_charge_right = (charge / dx) * jnp.where(
-        jnp.abs(position - grid[-1]) <= dx / 2,
+        (grid[-1] - dx / 2 <= position) & (position <= grid[-1] + dx / 2),
         0.5 * (0.5 + (position - grid[-1]) / dx) ** 2,
         0
     )
 
     # Apply boundary conditions
     charge_left = jnp.select(
-        [particle_BC_left == 0, particle_BC_left == 1, particle_BC_left == 2],
+        [particle_BC_left == 0, (particle_BC_left == 1) | (particle_BC_left == 3) | (particle_BC_left == 4), particle_BC_left == 2],
         [extra_charge_right, extra_charge_left, 0]
     )
     charge_right = jnp.select(
-        [particle_BC_right == 0, particle_BC_right == 1, particle_BC_right == 2],
+        [particle_BC_right == 0, (particle_BC_right == 1) | (particle_BC_right == 3) | (particle_BC_right == 4), particle_BC_right == 2],
         [extra_charge_left, extra_charge_right, 0]
     )
 

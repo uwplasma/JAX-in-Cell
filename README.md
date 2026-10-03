@@ -162,6 +162,38 @@ explains how each rate is fitted.
 The pusher always advances all three velocity components; no 1D3V case on `main` is
 yet compared with a reference.
 
+## Coulomb collisions
+
+Set `solver_parameters.collisions = true` to add nonrelativistic Takizuka–Abe
+binary collisions to a periodic Boris run. Every configured species collides with
+itself and every other species. `coulomb_logarithm` fixes the nonnegative logarithm;
+omitting it uses the initial electron-ion NRL estimate, floored at 2 in cold plasma.
+That floor prevents NaNs; the weak-coupling and small-angle assumptions still apply.
+Relativistic, implicit, wall and particle-source collision coupling are explicitly rejected until
+validated. Collisions are disabled by default and do not change collisionless defaults.
+
+Equal macro weights conserve momentum and kinetic energy per collision, including
+unequal cell populations; unequal weights conserve them in expectation. Pair-local
+normalization follows [Higginson et al. (2020)](https://doi.org/10.1016/j.jcp.2020.109450)
+and avoids biased rates when weights correlate with velocity. Gradients through a
+realized velocity trajectory are tested; derivatives of weight-dependent discrete
+acceptance do not provide an unbiased derivative of ensemble expectations.
+
+The author's hot-electron/cold-positron example can run without particle-field heating:
+
+```bash
+python twospecies_tempdiff.py --collision-only --steps 40000 --store-every 40 --output relaxation.png
+```
+
+Omit `--collision-only` for full PIC. Its original dense
+configuration under-resolves the Debye length, so the plotted total-energy change
+must be checked. Temperatures use all three velocity components with drift removed,
+and equilibrium uses the initial 3D energy. For equal densities and masses the
+temperature-difference decay rate is `gamma = 4 nu_inter / 3`; a fitted exponential
+is descriptive and requires time-step, sampling and Maxwellian checks before it can
+validate a rate. Temperature component diagnostics are in kelvin with physical
+weights; no manual division by pseudo-particle weight is needed.
+
 ## Documentation
 
 The [documentation](https://jax-in-cell.readthedocs.io/) contains a tutorial, a

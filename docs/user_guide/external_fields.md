@@ -24,15 +24,17 @@ staggered locations as the self-consistent fields (electric field at cell faces,
 magnetic field at cell centres). They are constant in time, are added to $\mathbf E$
 and $\mathbf B$ before the fields are interpolated to the particles, and do not enter
 Maxwell's equations. The external field energies are reported separately by
-{func}`jaxincell.diagnostics`. The arrays are stored in single precision.
+{func}`jaxincell.diagnostics`. Input array precision is preserved; omitted fields use the active JAX precision.
 
 ```{warning}
 The scalar parameters `external_electric_field_amplitude`,
 `external_electric_field_wavenumber`, `external_magnetic_field_amplitude`,
 `external_magnetic_field_wavenumber`, `external_electric_field_function` and
 `external_magnetic_field_function` are accepted and validated, but on the `main`
-branch they do not create a field. The electric-field amplitude only appears in the
-`print_info` summary as the normalised field strength
+branch they do not create a field. Setting a non-zero amplitude or a field function
+raises a `UserWarning` at construction saying so, because the run would otherwise
+proceed silently with no external field. The electric-field amplitude only appears in
+the `print_info` summary as the normalised field strength
 $-q_e E_0 \lambda_D / k_B T_e$. Use the array form above to apply an external field.
 ```
 
@@ -55,6 +57,22 @@ only. Keep $c\,\Delta t/\Delta x \le 1$ in that case, because the transverse cur
 excite electromagnetic waves, and resolve the gyration with
 $\Omega_c \Delta t \ll 1$, where $\Omega_c = |q| B / m$.
 
+## Prescribed fields on a tensor grid
+
+Set `number_grid_points_y` and/or `number_grid_points_z` in `domain_parameters`.
+Their default zero disables that direction; `length_y` and `length_z` default to
+`length`. Supply a field of shape `(Nx, Ny, Nz, 3)` for the enabled directions
+(or `(Nx, Ny, 3)` when only y is enabled). Electric fields retain their x-face
+locations, magnetic fields their x-centre locations; both use centres in y and z.
+These directions are periodic. Only prescribed fields gain transverse variation;
+the self-consistent Maxwell solve remains one dimensional.
+
+The Boris pusher supports these fields. CN rejects nonzero prescribed fields
+because its current implementation does not include them. Prescribed fields can
+exchange energy and momentum with particles; `total_energy` includes their static
+energy for compatibility and is not a closed-system conservation test. Tensor-grid
+field energies average over the ignorable directions. See `examples/3d_field_runs.py`.
+
 ## Sources
 
 The `source_parameters` section describes particle injection: which populations are
@@ -70,7 +88,50 @@ sourced, how often, at what rate, where in the box and with what velocity.
 | `width_of_source` | `1` |
 | `injection_speed_x`, `injection_speed_y`, `injection_speed_z` | `1e7`, `0`, `0` |
 
-The section is validated (lengths of the per-source tuples must match
-`source_species`) and copied into the output, but no code path on `main` creates
-particles from it. The implementation lives on the `ds/source_particles` branch of the
-repository. Leave the section out, or keep `source_term_active = 0`.
+Set `source_term_active = 1` to inject markers with the nonrelativistic Boris
+integrator and `field_solver = 2` (Cartesian Gauss). Other integrators and field
+solvers reject active sources: their charge-creation current is not implemented.
+The electromagnetic transverse update still requires the explicit light-wave
+Courant limit. Source parameters are static configuration values.
+
+`source_species` indexes the same ordered populations as `species_integer_index`:
+all named electron populations followed by all named ion populations. Each source
+parameter accepts a scalar or a tuple matching `source_species`; separate sources
+may target the same population. Injection velocities specify all three components,
+with norm below $c$.
+
+A batch is born at the beginning of steps `0, cadence, 2*cadence, ...`, including
+the last batch before `total_steps`. All slots are reserved before compilation;
+unborn slots have zero live charge, mass and velocity. Birth positions are grid
+centres with $y=z=0$. Left/right sources occupy `width_of_source` centres, whole-box
+sources occupy every centre. A centred source with mismatched grid/width parity
+uses one extra centre and half-weight endcaps to retain symmetry.
+`source_particles_per_second` is the rate **per grid site per unit area**. Each
+marker carries `rate * cadence * dt`, multiplied by its endcap factor. Thus the
+effective total rate is `width * rate` (or `G * rate` for the whole box).
+Batches retain their full cadence weight, including the last partial run interval;
+approximating a continuous source requires cadence and timestep refinement.
+
+Gauss's law is recomputed immediately after birth and at the end of every step.
+Periodic Gauss uses a uniform neutralizing background for net charge; inject matched
+positive and negative populations when that background is not the intended physics.
+Periodic fields use a uniform compensating background for net charge; use matched
+electron/ion sources when that background is unwanted. Wall fields retain the
+Cartesian solver's zero left-face field convention; this is not a collector/sheath
+boundary model. Births exchange energy and momentum with an external reservoir,
+so total simulation energy is not a closed-system invariant. See the separate
+birth, wall-loss and field-projection histories in {doc}`output`.
+
+For example, add matched sources to an existing two-population parameter tree:
+
+```python
+parameters["solver_parameters"].update(field_solver=2, relativistic=False,
+                                       time_evolution_algorithm=0)
+parameters["source_parameters"] = dict(
+    source_term_active=1, source_species=(0, 1),
+    how_often_source_should_produce_quasiparticles=5,
+    source_particles_per_second=1e12, location_of_source=0, width_of_source=1,
+    injection_speed_x=1e7, injection_speed_y=0., injection_speed_z=0.,
+)
+output = Simulation(parameters).run()
+```

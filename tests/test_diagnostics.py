@@ -54,6 +54,26 @@ def _minimal_diagnostic_output(
     }
 
 
+def test_diagnostics_use_changing_macroparticle_masses_for_energy_and_momentum():
+    """Independent two-particle ledger: fractional inelastic returns followed by
+    complete ion collection. Lost weight must leave both energy and momentum."""
+    velocity = jnp.array([[[2., 1., 0.], [-1., 0., 2.]],
+                          [[-1., 1., 0.], [.5, 0., 2.]],
+                          [[.5, 1., 0.], [0., 0., 0.]]])
+    output = _minimal_diagnostic_output(electric_field=jnp.ones((3, 4, 3)).at[..., 1:].set(0.),
+                                        velocities=velocity, masses=jnp.array([[2.], [6.]]), dx=.25)
+    output["masses_over_time"] = jnp.array([[[2.], [6.]], [[1.], [3.]], [[.5], [0.]]])
+    diagnostics(output)
+    np.testing.assert_allclose(output["kinetic_energy_electrons"], [5., 1., .3125], rtol=1e-14)
+    np.testing.assert_allclose(output["kinetic_energy_ions"], [15., 6.375, 0.], rtol=1e-14)
+    np.testing.assert_allclose(output["kinetic_energy"], [20., 7.375, .3125], rtol=1e-14)
+    momentum = np.array([[-2., 2., 12.], [.5, 1., 6.], [.25, .5, 0.]])
+    np.testing.assert_allclose(output["total_momentum"], momentum, rtol=1e-14)
+    expected_change = np.linalg.norm(momentum - momentum[0], axis=1) / (8 * np.sqrt(5))
+    np.testing.assert_allclose(output["momentum_error_rel"], expected_change, rtol=1e-14)
+    np.testing.assert_allclose(output["total_energy"], np.array([20., 7.375, .3125]) + epsilon_0 / 2, rtol=1e-14)
+
+
 def test_diagnostics_basic_energy_and_species():
     """
     Check that diagnostics:
@@ -486,3 +506,89 @@ def test_relativistic_kinetic_energy_has_a_stable_low_speed_limit():
     output["solver_parameters"] = {"relativistic": True}
     diagnostics(output)
     np.testing.assert_allclose(output["kinetic_energy"], 4.5 * (1e-8 * speed_of_light) ** 2, rtol=1e-12)
+
+
+def test_diagnostics_partial_wall_weights_use_stored_mass_histories():
+    v = jnp.array([[[1., 0., 0.], [3., 0., 0.]], [[1., 0., 0.], [3., 0., 0.]]])
+    output = _minimal_diagnostic_output(electric_field=jnp.zeros((2, 4, 3)), velocities=v,
+                                        masses=jnp.array([[4.], [8.]]), charges=-jnp.ones((2, 1)))
+    output.update(weights=jnp.array([[2.], [4.]]), species_integer_index=jnp.zeros(2, dtype=int),
+                  mass_integer_lookup=jnp.array([2.]), charge_integer_lookup=jnp.array([-1.]),
+                  masses_over_time=jnp.array([[[4.], [8.]], [[4.], [2.]]]))
+    raw = np.asarray(output["masses_over_time"]).copy()
+    for _ in range(2):
+        diagnostics(output)
+        np.testing.assert_array_equal(output["masses_over_time"], raw)
+        np.testing.assert_allclose(output["kinetic_energy"], [38., 11.], atol=0)
+        np.testing.assert_allclose(output["total_momentum"][:, 0], [28., 10.], atol=0)
+        np.testing.assert_allclose(output["species"][0]["temperature_components"][:, 0] * boltzmann_constant,
+                                   [16/9, 16/9], rtol=1e-14, atol=0)
+
+
+@pytest.mark.parametrize("transverse_shape", [(2,), (2, 3)])
+def test_diagnostics_tensor_external_energy_averages_transverse_coordinates(transverse_shape):
+    shape = (4, *transverse_shape, 3)
+    field = jnp.arange(np.prod(shape), dtype=float).reshape(shape)
+    output = _minimal_diagnostic_output(electric_field=jnp.zeros((2, 4, 3)), external_magnetic_field=field)
+    output["dimensions"] = ("x", "y", "z")[:len(transverse_shape)+1]
+    diagnostics(output)
+    density = np.mean(np.sum(np.asarray(field)**2, axis=-1), axis=tuple(range(1, field.ndim-1))) / (2*mu_0)
+    np.testing.assert_allclose(output["external_magnetic_field_energy_density"], density, rtol=1e-14, atol=0)
+    np.testing.assert_allclose(output["total_energy"], np.sum(density)*output["dx"], rtol=1e-14, atol=0)
+
+
+@pytest.mark.parametrize("scale", [1., 1e-12])
+def test_diagnostics_nonuniform_snapshot_times_do_not_report_an_fft_frequency(scale):
+    output = _minimal_diagnostic_output(electric_field=jnp.ones((4, 4, 3)), dt=scale)
+    output["time_array"] = scale*jnp.array([1., 2., 4., 5.])
+    diagnostics(output)
+    assert np.isnan(output["dominant_frequency"])
+    assert np.isfinite(output["total_energy"]).all()
+    np.testing.assert_array_equal(output["time_array"], scale*np.array([1., 2., 4., 5.]))
+
+
+@pytest.mark.parametrize("transverse_shape", [(3,), (3, 2)])
+def test_prescribed_energy_averages_transverse_centres(transverse_shape):
+    # PIC still represents a unit-area planar column; tensor sampling adds no volume.
+    electric = jnp.zeros((2, 4, 3))
+    field = np.zeros((4, *transverse_shape, 3))
+    field[..., 0] = np.arange(field[..., 0].size).reshape(field.shape[:-1])
+    output = _minimal_diagnostic_output(electric_field=electric, external_electric_field=field)
+    output["dimensions"] = ("x", "y") if len(transverse_shape) == 1 else ("x", "y", "z")
+    diagnostics(output)
+    transverse_count = np.prod(transverse_shape)
+    expected = epsilon_0 / 2 * .5 * np.sum(field[..., 0]**2) / transverse_count
+    assert float(output["external_electric_field_energy"]) == pytest.approx(expected, rel=1e-13)
+
+
+@pytest.mark.parametrize("transverse_axis", ["y", "z"])
+def test_real_planar_run_preserves_axes_energy_and_optional_writer(tmp_path, transverse_axis):
+    import importlib.util
+    from jaxincell import Simulation
+    from tests.test_simulation import small_simulation_parameters
+    p = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    p["domain_parameters"].update(number_grid_points_y=0, number_grid_points_z=0, length_y=.03, length_z=.05)
+    p["domain_parameters"][f"number_grid_points_{transverse_axis}"] = 3
+    field = np.zeros((4, 3, 3))
+    field[..., 2] = np.arange(1, 4) * .001
+    p["external_field_parameters"] = {"external_magnetic_field": {"B": field}}
+    output = Simulation(p).run()
+    assert output["dimensions"] == ("x", transverse_axis)
+    # Exercise the merged optional writer when present; this feature alone stays independent of I/O.
+    if importlib.util.find_spec("jaxincell.openpmd") and importlib.util.find_spec("openpmd_api"):
+        import openpmd_api as io
+        from jaxincell.openpmd import write_openpmd
+        paths = write_openpmd(output, openpmd_filename=str(tmp_path / "planar.json"))
+        series = io.Series(paths["data"]["combined"], io.Access.read_only)
+        mesh = series.iterations[0].meshes["external_B"]
+        assert mesh.axis_labels == ["x", transverse_axis]
+        expected_spacing = [.01/4, (.03 if transverse_axis == "y" else .05)/3]
+        np.testing.assert_allclose(mesh.grid_spacing, expected_spacing, rtol=1e-14, atol=0)
+        values = mesh["z"].load_chunk()
+        series.flush()
+        np.testing.assert_array_equal(values, field[..., 2])
+        series.close()
+    diagnostics(output)
+    expected = .01 * np.mean(np.sum(field**2, axis=-1)) / (2*mu_0)
+    assert np.ndim(output["external_magnetic_field_energy"]) == 0
+    np.testing.assert_allclose(output["external_magnetic_field_energy"], expected, rtol=2e-14, atol=0)

@@ -8,7 +8,7 @@ def scalar(value):
 def base_simulation_parameters():
     base_species = {
         "number_pseudoparticles": 2,
-        "grid_points_per_Debye_length": 1.0,
+        "dx_over_Debye_length": 1.0,
         "weight": 1.0,
         "perturbation_amplitude_x": 0.0,
         "perturbation_amplitude_y": 0.0,
@@ -33,8 +33,8 @@ def base_simulation_parameters():
         "domain_parameters": {
             "total_steps": 1,
             "number_grid_points": 4,
-            "number_grid_points_y": 3,
-            "number_grid_points_z": 3,
+            "number_grid_points_y": 0,
+            "number_grid_points_z": 0,
             "length": 0.01,
             "length_y": 0.01,
             "length_z": 0.01,

@@ -1,11 +1,17 @@
-import jax.numpy as jnp
 from copy import deepcopy
 from functools import partial
 from jax_tqdm import scan_tqdm
-from jax import lax, jit, config
+from jax import lax, jit, config, eval_shape, random
+
+import jax.numpy as jnp
+import numpy as np
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
+from ._collisions import collide, coulomb_logarithm
+from ._constants import mass_electron, elementary_charge, epsilon_0
+from ._fields import E_from_Gauss_1D_Cartesian
+from ._sources import calculate_charge_density
 from ._parameters._sections import (
     DIFFERENTIABLE_INPUT_PARAMETERS,
     PARAMETER_SECTIONS,
@@ -178,6 +184,7 @@ class Simulation:
             domain_parameters,
             solver_parameters,
             domain_state,
+            source_parameters,
         )
         print_simulation_information(
             domain_parameters,
@@ -198,14 +205,19 @@ class Simulation:
             **external_field_parameters,
             "external_electric_field": field_state["external_electric_field"],
             "external_magnetic_field": field_state["external_magnetic_field"],
+            "padded_external_electric_field": field_state["padded_external_electric_field"],
+            "padded_external_magnetic_field": field_state["padded_external_magnetic_field"],
         }
 
         total_steps = domain_parameters["total_steps"]
 
         # Extract parameters for convenience
-        dx = domain_state["dx"]
+        dxyz = domain_state["dxyz"]
+        dx = dxyz['x']
         dt = domain_state["dt"]
-        grid = domain_state["grid"]
+        grid_xyz = domain_state["grid_xyz"]
+        grid = grid_xyz['x']
+        dimensions = domain_state["dimensions"]
         box_size = domain_state["box_size"]
         E_field, B_field = field_state["fields"]
         charges = particle_state["charges"]
@@ -220,10 +232,11 @@ class Simulation:
         velocities = particle_state["velocities"]
 
         # Leapfrog integration: positions at half-step before the start
-        positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
-            positions + (dt / 2) * velocities, velocities,
-            charges, masses, charge_to_mass_ratios,
-            dx, grid, *box_size, particle_BC_left, particle_BC_right)
+        positions_plus1_2 = positions + dt/2*velocities
+        qs, ms, q_ms = charges, masses, charge_to_mass_ratios
+        if particle_BC_left == 0 and particle_BC_right == 0:
+            positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
+                positions_plus1_2, velocities, qs, ms, q_ms, dx, grid, *box_size, 0, 0)
 
         positions_minus1_2 = set_BC_positions(
             positions - (dt / 2) * velocities,
@@ -236,8 +249,12 @@ class Simulation:
                 positions_plus1_2, velocities, qs, ms, q_ms,
             )
             step_func = lambda carry, step_index: Boris_step(
-                carry, step_index, solver_parameters, runtime_external_field_parameters, dx, dt, grid, box_size,
-                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
+                carry, step_index, solver_parameters, runtime_external_field_parameters, dxyz, dt, grid_xyz, box_size, dimensions,
+                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver'],
+                **{key: domain_parameters[key] for key in
+                   ("mixed_BC_weight", "COR_left", "COR_right", "mixed_BC_velocity_scale")},
+                physical_masses=(particle_state["mass_integer_lookup"][particle_state["species_integer_index"]][:, None]
+                                 if source_parameters["source_term_active"] else None),
             )
         else:
             initial_carry = (
@@ -250,20 +267,119 @@ class Simulation:
                 solver_parameters["number_of_particle_substeps_implicit_CN"]
             )
 
+        if self._solver_parameters["collisions"]:
+            # Species remain contiguous in initialization order; q/m does not identify a population.
+            blocks, start = [], 0
+            for kind in ("electrons", "ions"):
+                for species in species_parameters[kind].values():
+                    count = species["number_pseudoparticles"]
+                    blocks.append((start, count))
+                    start += count
+            pairs = tuple((a, b) for a in range(len(blocks)) for b in range(a, len(blocks)))
+            weights = particle_state["weights"].reshape(-1)
+            ids = particle_state["species_integer_index"]
+            physical_mass = particle_state["mass_integer_lookup"][ids]
+            physical_charge = particle_state["charge_integer_lookup"][ids]
+            log = self._solver_parameters["coulomb_logarithm"]
+            if log is None:
+                ne = weights[:blocks[0][1]].sum() / domain_parameters["length"]
+                te = mass_electron * particle_state["vth_electrons"] ** 2 / (2 * elementary_charge)
+                log = coulomb_logarithm(ne, te)
+            collision_key = random.PRNGKey(self._solver_parameters["seed"] or 0)
+
+        changing_weights = particle_BC_left >= 2 or particle_BC_right >= 2
+        collisionless_step = step_func
+        def collision_step(carry, step_index):
+            new_carry, output = collisionless_step(carry, step_index)
+            if self._solver_parameters["collisions"]:
+                # Scatter at integer time, then rebuild the following half drift.
+                x, v = output[:2]
+                v = collide(random.fold_in(collision_key, step_index), x, v, weights,
+                            physical_mass, physical_charge, blocks, pairs, log,
+                            dt, dx, domain_parameters["length"], grid.shape[0])
+                half = set_BC_positions(x + (dt / 2) * v, new_carry[6], dx, grid,
+                                        *box_size, particle_BC_left, particle_BC_right)
+                new_carry = (*new_carry[:4], half, v, *new_carry[6:])
+                output = (x, v, *output[2:])
+            return new_carry, (*output, new_carry[7], new_carry[6]) if changing_weights else output
+        step_func = collision_step
+
+        sources = source_parameters["source_term_active"]
+        if sources:
+            initial_carry = initial_carry, jnp.zeros(17)
+
+            def source_step(carry, step_index):
+                state, budget = carry
+                E, B, xm, x, xp, v, q, m, qm = state
+                born = (particle_state["source_birth_steps"] == step_index)[:, None]
+                xb, vb = particle_state["source_birth_positions"], particle_state["source_birth_velocities"]
+                q = jnp.where(born, particle_state["nominal_charges"], q)
+                m = jnp.where(born, particle_state["nominal_masses"], m)
+                qm = jnp.where(born, particle_state["nominal_charge_to_mass_ratios"], qm)
+                x, v = jnp.where(born, xb, x), jnp.where(born, vb, v)
+                xm, xp = jnp.where(born, xb - dt/2*vb, xm), jnp.where(born, xb + dt/2*vb, xp)
+
+                def birth_field(E):
+                    rho = calculate_charge_density(x, q, dx, grid, particle_BC_left, particle_BC_right,
+                                                   solver_parameters["filter_passes"], solver_parameters["filter_alpha"],
+                                                   solver_parameters["filter_strides"], field_BC_left, field_BC_right)
+                    Ex = E_from_Gauss_1D_Cartesian(rho, dx, periodic=field_BC_left == 0 and field_BC_right == 0)
+                    return E.at[:, 0].set(Ex)
+
+                E_born = lax.cond(jnp.any(born), birth_field, lambda E: E, E)
+                births = jnp.concatenate((jnp.array([jnp.sum(born * particle_state["weights"]), jnp.sum(born * q),
+                                                    jnp.sum(born * m * vb**2) / 2]),
+                                         jnp.sum(born * m * vb, axis=0)))
+                state, data = collisionless_step((E_born, B, xm, x, xp, v, q, m, qm), step_index)
+                field_work = epsilon_0 * dx / 2 * jnp.sum(E_born[:, 0]**2 - E[:, 0]**2)
+                budget += jnp.concatenate((births, data[-1], jnp.array([field_work])))
+                return (state, budget), (*data[:-1], state[7], state[6], state[8], budget)
+
+        step_func = source_step if sources else collision_step
+
+        # Keep the requested snapshots in fixed-size buffers carried through the scan.
+        # An unset snapshot_steps records every step.
+        num_snapshots = len(self._snapshot_steps)
+        snapshot_steps_arr = jnp.array(self._snapshot_steps, dtype=int)
+        time_array = (snapshot_steps_arr + 1) * dt
+        # The sentinel keeps the lookup valid after the last requested snapshot.
+        snapshot_steps_with_end = jnp.array((*self._snapshot_steps, total_steps), dtype=int)
+
+        _, sample_step_data = eval_shape(step_func, initial_carry, 0)
+        snapshot_buffers = tuple(
+            jnp.zeros((num_snapshots,) + leaf.shape, dtype=leaf.dtype)
+            for leaf in sample_step_data
+        )
+
         @scan_tqdm(total_steps)
-        def simulation_step(carry, step_index):
-            return step_func(carry, step_index)
+        def scan_body(carry_and_buffers, step_index):
+            sim_carry, buffers, next_snapshot = carry_and_buffers
+            new_sim_carry, step_data = step_func(sim_carry, step_index)
 
+            should_save = step_index == snapshot_steps_with_end[next_snapshot]
 
-        # Run simulation
-        _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
+            def save_snapshot(buffers):
+                return tuple(
+                    buf.at[next_snapshot].set(value)
+                    for buf, value in zip(buffers, step_data)
+                )
 
-        # Unpack results
+            if num_snapshots:
+                buffers = lax.cond(should_save, save_snapshot, lambda buffers: buffers, buffers)
+            next_snapshot += should_save.astype(next_snapshot.dtype)
+            # Returning None prevents scan from stacking a second output history.
+            return (new_sim_carry, buffers, next_snapshot), None
+
+        (final_carry, snapshot_buffers, _), _ = lax.scan(
+            scan_body, (initial_carry, snapshot_buffers, jnp.array(0, dtype=int)), jnp.arange(total_steps)
+        )
         positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+        magnetic_field_over_time, current_density_over_time, charge_density_over_time, mus_over_time = snapshot_buffers[:7]
 
         # **Output results**
-        from ._constants import epsilon_0, mass_electron
+        if sources:
+            final_carry, final_budget = final_carry
+
         electron_species = next(iter(species_parameters["electrons"].values()))
         electron_weight = particle_state["weights"][0, 0]
         plasma_frequency = (
@@ -299,24 +415,52 @@ class Simulation:
             "magnetic_field":  magnetic_field_over_time,
             "current_density": current_density_over_time,
             "charge_density":  charge_density_over_time,
+            "mus": mus_over_time,
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
-            "time_array":  (jnp.arange(total_steps) + 1) * dt,
+            "time_array":  time_array,
+            "final_state": {
+                "time": total_steps * dt,
+                "electric_field": final_carry[0], "magnetic_field": final_carry[1],
+                "positions": final_carry[3 if solver_parameters["time_evolution_algorithm"] == 0 else 2],
+                "velocities": final_carry[-4], "charges": final_carry[-3],
+                "masses": final_carry[-2], "charge_to_mass_ratios": final_carry[-1],
+            },
             "grid": grid,
+            "grid_xyz": grid_xyz,
             "dt": dt,
             "plasma_frequency": plasma_frequency,
             "max_initial_vth_electrons": particle_state["vth_electrons"],
             "vth_electrons_over_c": particle_state["vth_electrons_over_c"],
             "charge_electrons": particle_state["charge_electrons"],
             'dx': dx,
+            'dxyz': dxyz,
             'length': box_size[0],
             "box_size": box_size,
             "fields": field_state["fields"],
             "external_electric_field": field_state["external_electric_field"],
             "external_magnetic_field": field_state["external_magnetic_field"],
+            "padded_external_electric_field": field_state["padded_external_electric_field"],
+            "padded_external_magnetic_field": field_state["padded_external_magnetic_field"],
         }
 
+        if changing_weights:
+            temporary_output.update(masses_over_time=snapshot_buffers[7], charges_over_time=snapshot_buffers[8])
+        if sources:
+            physical_masses = particle_state["mass_integer_lookup"][particle_state["species_integer_index"]]
+            temporary_output.update(
+                masses=particle_state["nominal_masses"], charges=particle_state["nominal_charges"],
+                charge_to_mass_ratios=particle_state["nominal_charge_to_mass_ratios"],
+                masses_over_time=snapshot_buffers[7], charges_over_time=snapshot_buffers[8], charge_to_mass_ratios_over_time=snapshot_buffers[9],
+                weights_over_time=snapshot_buffers[7][..., 0] / physical_masses,
+                alive_particles=snapshot_buffers[7][..., 0] > 0, source_birth_steps=particle_state["source_birth_steps"],
+                injected_weight=snapshot_buffers[10][:, 0], injected_charge=snapshot_buffers[10][:, 1], injected_energy=snapshot_buffers[10][:, 2],
+                injected_momentum=snapshot_buffers[10][:, 3:6], lost_weight=snapshot_buffers[10][:, 6], lost_charge=snapshot_buffers[10][:, 7],
+                lost_energy=snapshot_buffers[10][:, 8], lost_momentum=snapshot_buffers[10][:, 9:12], wall_energy_transfer=snapshot_buffers[10][:, 12],
+                wall_momentum_transfer=snapshot_buffers[10][:, 13:16], source_field_work=snapshot_buffers[10][:, 16],
+            )
+            temporary_output["final_state"]["source_budget"] = final_budget
         return temporary_output
 
     def assemble_output(self, simulation_output, input_parameters):
@@ -341,6 +485,7 @@ class Simulation:
             **source_parameters,
             **solver_parameters,
             **simulation_output,
+            "dimensions": self.dimensions,
             "domain_parameters": domain_parameters,
             "species_parameters": parameter_sections["species_parameters"],
             "external_field_parameters": external_field_parameters,
@@ -434,21 +579,31 @@ class Simulation:
             This should be called whenever parameters are updated after initialization to
             ensure that the simulation state is consistent with the new parameters.
         """
+        if (self._solver_parameters["time_evolution_algorithm"] == 1 or self._solver_parameters["relativistic"]) and (
+                any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right"))
+                or any(self._domain_parameters[f"COR_{side}"] != 1 for side in ("left", "right"))):
+            raise ValueError("mixed or inelastic walls currently require nonrelativistic Boris")
         if self._solver_parameters["time_evolution_algorithm"] == 1:
             if self._solver_parameters["relativistic"] or any(
                 self._domain_parameters[key] != 0
                 for key in ("particle_BC_left", "particle_BC_right", "field_BC_left", "field_BC_right")
             ):
                 raise ValueError("Implicit CN supports Newtonian particles with periodic particle and field boundaries only.")
+        if self._solver_parameters["collisions"]:
+            if self._source_parameters["source_term_active"]:
+                raise ValueError("Coulomb collisions with particle sources are not yet validated.")
+            assert self._domain_parameters["particle_BC_left"] == self._domain_parameters["particle_BC_right"] == 0, (
+                "Coulomb collisions currently require periodic particle boundaries."
+            )
         self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
         self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
         self.build_domain()
+        self.resolve_snapshot_steps()
         self.initialize_particles()
+        if any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right")) and (
+                self._solver_parameters["field_solver"] != 2):
+            raise ValueError("mixed walls require field_solver=2 to account for collected charge")
         self.initialize_fields()
-        if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
-            bool(jnp.any(field != 0)) for field in (self.external_electric_field, self.external_magnetic_field)
-        ):
-            raise ValueError("Implicit CN does not apply prescribed grid fields; use the explicit solver.")
         self.build_hash_values()
 
     def clean_runtime_input_parameters(self, input_parameters=None):
@@ -466,16 +621,32 @@ class Simulation:
         return {
             "box_size": self.box_size,
             "dx": self.dx,
+            "dxyz": self.dxyz,
             "dt": self.dt,
             "grid": self.grid,
+            "grid_xyz": self.grid_xyz,
+            "number_grid_points_xyz": self.number_grid_points_xyz,
+            "dimensions": self.dimensions,
         }
 
     def build_domain(self):
         domain_state = build_domain_state(self._domain_parameters)
         self.box_size = domain_state["box_size"]
         self.dx = domain_state["dx"]
+        self.dxyz = domain_state["dxyz"]
         self.dt = domain_state["dt"]
         self.grid = domain_state["grid"]
+        self.grid_xyz = domain_state["grid_xyz"]
+        self.number_grid_points_xyz = domain_state["number_grid_points_xyz"]
+        self.dimensions = domain_state["dimensions"]
+
+    def resolve_snapshot_steps(self):
+        snapshot_steps = self._solver_parameters["snapshot_steps"]
+        if snapshot_steps is None:
+            snapshot_steps = tuple(range(self._domain_parameters["total_steps"]))
+        else:
+            assert all(s < self._domain_parameters["total_steps"] for s in snapshot_steps), "Snapshot steps must be less than total_steps."
+        self._snapshot_steps = snapshot_steps
 
     def initialize_particles(self):
         domain_state = self.current_domain_state()
@@ -484,9 +655,14 @@ class Simulation:
             self._domain_parameters,
             self._solver_parameters,
             domain_state,
+            self._source_parameters,
         )
         for key, value in particle_state.items():
             setattr(self, key, value)
+        if not self._source_parameters["source_term_active"]:
+            for key in ("source_birth_steps", "source_birth_positions", "source_birth_velocities",
+                        "nominal_charges", "nominal_masses", "nominal_charge_to_mass_ratios"):
+                self.__dict__.pop(key, None)
 
     def initialize_fields(self):
         domain_state = self.current_domain_state()
@@ -502,8 +678,14 @@ class Simulation:
             particle_state,
         )
         self.fields = field_state["fields"]
+        if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
+                bool(np.any(np.asarray(field_state[name])))
+                for name in ("external_electric_field", "external_magnetic_field")):
+            raise ValueError("Implicit CN does not support prescribed grid fields; use the explicit solver.")
         self.external_magnetic_field = field_state["external_magnetic_field"]
         self.external_electric_field = field_state["external_electric_field"]
+        self.padded_external_magnetic_field = field_state["padded_external_magnetic_field"]
+        self.padded_external_electric_field = field_state["padded_external_electric_field"]
 
     def set_parameter_section(self, section_name, new_parameters):
         """
@@ -561,7 +743,7 @@ class Simulation:
     @solver_parameters.setter
     def solver_parameters(self, new_solver_parameters):
         self.set_parameter_section("solver_parameters", new_solver_parameters)
-    
+
     @property
     def input_parameters(self):
         return deepcopy(self._input_parameters)

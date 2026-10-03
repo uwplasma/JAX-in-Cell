@@ -23,6 +23,10 @@ Reflective (`1`)
 : The position is mirrored back into the box, $x \to -L - x$ at the left wall and
   $x \to L - x$ at the right wall, and $v_x$ changes sign. The other velocity components
   are unchanged. Charge deposited beyond the wall is folded back onto the boundary cell.
+  With two reflective walls, the position and velocity map accounts for repeated
+  elastic reflections. This does not relax the current-deposition displacement limit.
+  With different wall types, choose a step short enough that one push cannot reach
+  the opposite wall after reflecting.
 
 Absorbing (`2`)
 : The particle is removed from the dynamics: its charge and charge-to-mass ratio are set
@@ -62,10 +66,33 @@ The ghost-cell formulas are written out in {doc}`../numerics/boundaries`.
   animation of the bump-on-tail instability with walls uses.
 * Absorbing particles with absorbing fields lets a plasma leave the box.
 
-Mixed choices run but are rarely physical. Two limitations to keep in mind:
+Periodic boundaries must be paired on both sides for each kind. Different
+nonperiodic choices run but are rarely physical. Two limitations to keep in mind:
 
 * The implicit scheme deposits current and interpolates fields with periodic wrapping
   regardless of the `field_BC_*` values; particle conditions are still applied. Use it
   with periodic boundaries.
 * With `field_solver = 1` the FFT solution of Gauss's law assumes periodicity in $x$
   even when the walls are reflective or absorbing.
+
+## Fractional return and restitution
+
+Particle code `3` returns `mixed_BC_weight` of each impacting marker; code `4`
+returns `clip(1 - abs(v_x)/mixed_BC_velocity_scale, 0, 1)`. The velocity scale is a
+positive prescribed wall property, independent of other particles. The returned
+fraction multiplies charge and mass equally, preserving charge-to-mass ratio;
+fully collected markers have zero charge, mass and velocity.
+
+`COR_left` and `COR_right` are normal restitution coefficients in `[0, 1]`.
+The reflected endpoint is `wall - COR*(endpoint-wall)`, with normal velocity
+`-COR*v_x`. Both half drifts resolve impacts at their physical time; the output
+reports the end of the full step. Resolve at most one wall impact per half drift.
+An unresolved second crossing produces a nonfinite position: reduce the time step.
+
+Fractional walls require Newtonian Boris and `field_solver=2` (Cartesian Gauss).
+The longitudinal field is reconstructed after collection; this is an imposed wall
+model, without a self-consistent wall circuit or a closed electromagnetic energy
+ledger. `masses_over_time` and `charges_over_time` retain returned marker weights
+for kinetic energy and momentum diagnostics. Periodic runs retain their usual
+output and memory cost. See `examples/mixed_bc.py` and
+`examples/bc_parameter_comparison.py` for near-ballistic controls.

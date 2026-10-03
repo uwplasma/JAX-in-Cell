@@ -321,3 +321,24 @@ def test_build_source_hash_is_stable_and_sensitive_to_values():
     species_changed_parameters = clean_and_initialize_source_parameters({"source_species": 0})
     species_changed_hash = build_source_hash(species_changed_parameters)
     assert default_hash != species_changed_hash
+
+
+def test_active_source_parameters_do_not_warn(recwarn):
+    """Test jaxincell._parameters._source_parameters.clean_and_initialize_source_parameters.
+
+    Cases:
+    - source_term_active = 1 is validated and preserved without an obsolete warning.
+    """
+    cleaned = clean_and_initialize_source_parameters({"source_term_active": 1})
+    assert cleaned["source_term_active"] == 1
+    assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []
+
+
+def test_inactive_source_does_not_warn(recwarn):
+    """Test jaxincell._parameters._source_parameters.clean_and_initialize_source_parameters.
+
+    Cases:
+    - the default, inactive source is silent.
+    """
+    clean_and_initialize_source_parameters({})
+    assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []

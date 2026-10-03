@@ -19,7 +19,8 @@ def diagnostics(output):
         "charge_ions":        output["charges"]   [   isel],
     }
     output.update(**segregated)
-    mass, velocity = output["masses"].reshape(-1), output["velocities"]
+    initial_mass, velocity = output["masses"].reshape(-1), output["velocities"]
+    mass = jnp.asarray(output["masses_over_time"])[..., 0] if "masses_over_time" in output else initial_mass
     v2 = jnp.sum(velocity ** 2, axis=-1)
     if output.get("solver_parameters", {}).get("relativistic", output.get("relativistic", False)):
         root = jnp.sqrt(1 - v2 / speed_of_light ** 2)
@@ -27,6 +28,9 @@ def diagnostics(output):
     else:
         gamma, kinetic_p = jnp.ones_like(v2), 0.5 * mass * v2
     momentum_p = (mass * gamma)[..., None] * velocity
+    if "weights_over_time" in output:
+        output.update(weights_electrons=output["weights_over_time"][:, esel],
+                      weights_ions=output["weights_over_time"][:, isel])
 
     # Simulation populations have identities independent of their charge, mass or weight.
     # Keep the old charge/mass grouping for dictionaries without population metadata.
@@ -41,19 +45,26 @@ def diagnostics(output):
              for kind in ("electrons", "ions")
              for label, sp in output.get("species_parameters", {}).get(kind, {}).items()]
     weights = jnp.asarray(output.get("weights", jnp.ones_like(output["masses"]))).reshape(-1)
+    initial_weights = weights
+    if "weights_over_time" in output:
+        weights = jnp.asarray(output["weights_over_time"])
+    elif "masses_over_time" in output:
+        weights = weights * mass / jnp.where(initial_mass > 0, initial_mass, 1.)
 
     species_list = []
     for si in np.unique(labels):
         mask = (labels == si)
         pos_s = output["positions"][:, mask, :]
         vel_s = output["velocities"][:, mask, :]
-        w_s, m_s = weights[mask], jnp.asarray(m[mask])
-        norm = jnp.sum(w_s)
-        norm = jnp.where(norm > 0, norm, 1.0)
-        qv = float(output["charge_integer_lookup"][si]) if "charge_integer_lookup" in output else float(jnp.sum(q[mask]) / norm)
-        mv = float(output["mass_integer_lookup"][si]) if "mass_integer_lookup" in output else float(jnp.sum(m_s) / norm)
-        mean = jnp.sum(w_s[None, :, None] * vel_s, axis=1) / norm
-        temperature = jnp.sum(m_s[None, :, None] * (vel_s - mean[:, None, :]) ** 2, axis=1) / (boltzmann_constant * norm)
+        w_s, m_s = weights[..., mask], mass[..., mask]
+        norm = jnp.sum(jnp.broadcast_to(w_s, vel_s.shape[:-1]), axis=-1)
+        norm = jnp.where(norm > 0, norm, 1.)
+        initial_norm = jnp.sum(initial_weights[mask])
+        initial_norm = jnp.where(initial_norm > 0, initial_norm, 1.)
+        qv = float(output["charge_integer_lookup"][si]) if "charge_integer_lookup" in output else float(jnp.sum(q[mask]) / initial_norm)
+        mv = float(output["mass_integer_lookup"][si]) if "mass_integer_lookup" in output else float(jnp.sum(m[mask]) / initial_norm)
+        mean = jnp.sum(w_s[..., None] * vel_s, axis=1) / norm[:, None]
+        temperature = jnp.sum(m_s[..., None] * (vel_s - mean[:, None, :]) ** 2, axis=1) / (boltzmann_constant * norm[:, None])
 
         # Legacy names for dictionaries without configured population labels.
         if "species_integer_index" in output and si < len(names):
@@ -76,7 +87,6 @@ def diagnostics(output):
             "temperature": jnp.mean(temperature, axis=-1),
             "kinetic_energy": jnp.sum(kinetic_p[:, mask], axis=-1),
         })
-
     output["species"] = species_list
 
     E_field_over_time = output['electric_field']
@@ -96,22 +106,35 @@ def diagnostics(output):
     magnitude = jnp.abs(fft_values)
     peak_index = jnp.argmax(magnitude)
     dominant_frequency = jnp.abs(freqs[peak_index])
+    if "time_array" in output and total_steps > 2 and not np.allclose(
+            np.diff(np.asarray(output["time_array"])), dt, rtol=1e-10, atol=0):
+        dominant_frequency = jnp.asarray(jnp.nan)
 
     def integrate(y, dx):
         return jnp.sum(y, axis=-1) * dx
 
     abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
-    abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
     integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
-    integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dx'])
 
     abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
-    abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
     integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
-    integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
+    def external_energy(field):
+        power = jnp.sum(field**2, axis=-1)
+        if field.ndim == 4 or len(output.get('dimensions', ('x',))) > 1:
+            power = jnp.mean(power, axis=tuple(range(1, power.ndim)))
+        return power, integrate(power, output['dx'])
+
+    abs_externalE_squared, integral_externalE_squared = external_energy(output['external_electric_field'])
+    abs_externalB_squared, integral_externalB_squared = external_energy(output['external_magnetic_field'])
 
     total_ke_electrons = jnp.sum(kinetic_p[:, esel], axis=-1)
     total_ke_ions = jnp.sum(kinetic_p[:, isel], axis=-1)
+
+    def temperature(velocities, masses, weights):
+        total = jnp.sum(jnp.broadcast_to(weights, velocities.shape[:-1]), axis=-1)
+        total = jnp.where(total > 0, total, 1.)
+        mean = jnp.sum(weights[..., None] * velocities, axis=1, keepdims=True) / total[:, None, None]
+        return jnp.sum(masses[..., None] * (velocities - mean) ** 2, axis=1) / (boltzmann_constant * total[:, None])
 
     output.update({ 
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
@@ -124,6 +147,8 @@ def diagnostics(output):
         'kinetic_energy':           total_ke_electrons + total_ke_ions,
         'kinetic_energy_electrons': total_ke_electrons,
         'kinetic_energy_ions':      total_ke_ions,
+        'temperature_electrons': temperature(velocity[:, esel], mass[..., esel], weights[..., esel]),
+        'temperature_ions': temperature(velocity[:, isel], mass[..., isel], weights[..., isel]),
         
         'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
         'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
@@ -136,6 +161,17 @@ def diagnostics(output):
                     output["kinetic_energy"])
 
     output.update({'total_energy': total_energy})
+
+    if "mus" in output:
+        all_mu = output["mus"]
+        if all_mu.ndim == 3 and all_mu.shape[-1] == 1:
+            all_mu = all_mu[..., 0]
+        output.update({
+            "all_mu": all_mu, "total_mu": jnp.sum(all_mu, axis=-1),
+            "electron_mus": all_mu[:, esel], "ion_mus": all_mu[:, isel],
+            "electron_total_mu": jnp.sum(all_mu[:, esel], axis=-1),
+            "ion_total_mu": jnp.sum(all_mu[:, isel], axis=-1),
+        })
 
     total_momentum = jnp.sum(momentum_p, axis=-2)
     momentum_scale = jnp.sum(jnp.linalg.norm(momentum_p[0], axis=-1))

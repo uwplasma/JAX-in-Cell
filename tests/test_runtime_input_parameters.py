@@ -1,9 +1,11 @@
 from copy import deepcopy
 
+import jax
 import jax.numpy as jnp
 import pytest
 
 from jaxincell import Simulation
+from jaxincell._constants import speed_of_light
 from jaxincell._parameters._sections import PARAMETER_SECTIONS
 from jaxincell._parameters._species_parameters import resolve_species_references
 from jaxincell._routing import build_runtime_parameter_sections
@@ -18,14 +20,14 @@ def test_runtime_input_parameters_are_cleaned_to_canonical_section_overrides():
             "length": 0.02,
             "ions": {
                 "ions0": {
-                    "grid_points_per_Debye_length": 1.5,
+                    "dx_over_Debye_length": 1.5,
                     "drift_speed_x": 3.0,
                     "mass_over_proton_mass": 2.0,
                 },
             },
             "electrons": {
                 "electrons0": {
-                    "grid_points_per_Debye_length": 1.5,
+                    "dx_over_Debye_length": 1.5,
                 },
             },
         }
@@ -34,12 +36,12 @@ def test_runtime_input_parameters_are_cleaned_to_canonical_section_overrides():
     assert set(cleaned_input_parameters) == set(PARAMETER_SECTIONS)
     assert cleaned_input_parameters["domain_parameters"] == {"length": 0.02}
     assert cleaned_input_parameters["species_parameters"]["ions"]["_ions0"] == {
-        "grid_points_per_Debye_length": 1.5,
+        "dx_over_Debye_length": 1.5,
         "drift_speed_x": 3.0,
         "mass_over_proton_mass": 2.0,
     }
     assert cleaned_input_parameters["species_parameters"]["electrons"]["_electrons0"] == {
-        "grid_points_per_Debye_length": 1.5,
+        "dx_over_Debye_length": 1.5,
     }
     assert cleaned_input_parameters["external_field_parameters"] == {}
     assert cleaned_input_parameters["source_parameters"] == {}
@@ -148,7 +150,7 @@ def test_initial_input_parameters_route_all_values_but_only_expose_differentiabl
 
     assert scalar(sim.domain_parameters["length"]) == 0.02
     assert sim.domain_parameters["total_steps"] == 2
-    assert "grid_points_per_Debye_length" not in sim.domain_parameters
+    assert "dx_over_Debye_length" not in sim.domain_parameters
     assert scalar(sim.solver_parameters["filter_alpha"]) == 0.25
     assert sim.solver_parameters["filter_passes"] == 0
     assert scalar(sim.species_parameters["ions"]["_ions0"]["mass_over_proton_mass"]) == 2.0
@@ -420,7 +422,7 @@ def test_runtime_input_parameters_loose_species_values_apply_to_all_species_of_t
     cleaned_input_parameters = sim.clean_runtime_input_parameters(
         {
             "ions": {"drift_speed_x": 3.0},
-            "electrons": {"grid_points_per_Debye_length": 1.5},
+            "electrons": {"dx_over_Debye_length": 1.5},
         }
     )
 
@@ -429,8 +431,8 @@ def test_runtime_input_parameters_loose_species_values_apply_to_all_species_of_t
         "_ions1": {"drift_speed_x": 3.0},
     }
     assert cleaned_input_parameters["species_parameters"]["electrons"] == {
-        "_electrons0": {"grid_points_per_Debye_length": 1.5},
-        "_electrons1": {"grid_points_per_Debye_length": 1.5},
+        "_electrons0": {"dx_over_Debye_length": 1.5},
+        "_electrons1": {"dx_over_Debye_length": 1.5},
     }
 
     with pytest.raises(ValueError, match="ions\\.number_pseudoparticles"):
@@ -479,3 +481,57 @@ def test_initial_input_parameters_nested_species_edge_cases_are_documented():
     assert "unknown_numeric_key" not in exposed_input_parameters["ions"]["ions0"]
     assert scalar(exposed_input_parameters["electrons"]["electrons0"]["drift_speed_x"]) == -4.0
     assert "number_pseudoparticles" not in exposed_input_parameters["electrons"]["electrons0"]
+
+
+def test_runtime_input_parameters_accept_the_deprecated_Debye_length_name():
+    sim = Simulation(base_simulation_parameters())
+    with pytest.warns(DeprecationWarning):
+        cleaned = sim.clean_runtime_input_parameters({"electrons": {"electrons0": {"grid_points_per_Debye_length": 1.5}}})
+    assert cleaned["species_parameters"]["electrons"]["_electrons0"] == {"dx_over_Debye_length": 1.5}
+
+
+@pytest.mark.parametrize("via_setter", [False, True])
+@pytest.mark.parametrize("labeled", [False, True])
+@pytest.mark.parametrize("canonical", [False, True])
+def test_initial_Debye_alias_keeps_differentiable_input(via_setter, labeled, canonical):
+    parameters = base_simulation_parameters()
+    values = {"grid_points_per_Debye_length": 1.5}
+    if canonical:
+        values["dx_over_Debye_length"] = 0.5
+    inputs = {"electrons": {"electrons0": values} if labeled else values}
+    original = deepcopy(inputs)
+    with pytest.warns(DeprecationWarning, match="dx_over_Debye_length"):
+        if via_setter:
+            sim = Simulation(parameters)
+            sim.input_parameters = inputs
+        else:
+            parameters["input_parameters"] = inputs
+            sim = Simulation(parameters)
+    expected = 0.5 if canonical else 1.5
+    exposed = sim.input_parameters["electrons"]
+    if labeled:
+        exposed = exposed["electrons0"]
+    assert set(exposed) == {"dx_over_Debye_length"}
+    assert scalar(exposed["dx_over_Debye_length"]) == expected
+    assert scalar(sim.species_parameters["electrons"]["_electrons0"]["dx_over_Debye_length"]) == expected
+    assert inputs == original
+
+
+@pytest.mark.parametrize("canonical", [False, True])
+def test_runtime_Debye_alias_gradient_and_canonical_precedence(canonical):
+    parameters = base_simulation_parameters()
+    parameters["species_parameters"]["electrons"]["electrons0"]["weight"] = 0.0
+    sim = Simulation(parameters)
+
+    def plasma_frequency(alias):
+        values = {"grid_points_per_Debye_length": alias}
+        if canonical:
+            values["dx_over_Debye_length"] = 0.5
+        return sim.run({"electrons": {"electrons0": values}})["plasma_frequency"]
+
+    with pytest.warns(DeprecationWarning, match="dx_over_Debye_length"):
+        value, gradient = jax.value_and_grad(plasma_frequency)(1.5)
+    # omega_pe = vth / (sqrt(2) * lambda_D), with lambda_D = dx / g.
+    slope = 0.01 * speed_of_light / (jnp.sqrt(2) * sim.dx)
+    assert scalar(value) == pytest.approx(scalar(slope) * (0.5 if canonical else 1.5))
+    assert scalar(gradient) == pytest.approx(0.0 if canonical else scalar(slope))
