@@ -70,6 +70,9 @@ because its current implementation does not include them. Prescribed fields can
 exchange energy and momentum with particles; `total_energy` includes their static
 energy for compatibility and is not a closed-system conservation test. Tensor-grid
 field energies average over the ignorable directions. See `examples/3d_field_runs.py`.
+Run it with `MPLBACKEND=Agg python examples/3d_field_runs.py` to compare x, x/y,
+x/z and x/y/z sampling. Its magnetic components vary transverse to themselves,
+so the prescribed field is divergence-free; all cases report the speed error.
 
 ## Sources
 

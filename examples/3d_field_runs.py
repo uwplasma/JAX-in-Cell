@@ -1,4 +1,8 @@
-"""Compare prescribed B(x) and B(x,y) on periodic tensor grids."""
+"""Compare prescribed B(x), B(x,y), B(x,z) and B(x,y,z); PIC remains 1D.
+
+Each component varies only transverse to itself, so the imposed field is
+divergence-free. Pure magnetic forces preserve speed; resolve the gyro period.
+"""
 from copy import deepcopy
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -6,8 +10,8 @@ import numpy as np
 from jaxincell import Simulation
 
 length, cells, steps = .01, 16, 256
-positions = np.tile([.001, .0003, 0.], (8, 1))
-velocities = np.tile([0., 1e6, 0.], (8, 1))
+positions = np.tile([.001, .0003, .0009], (8, 1))
+velocities = np.tile([0., 1e6, 2e5], (8, 1))
 species = {"number_pseudoparticles": 8, "weight": 1.,
            "initial_positions": positions, "initial_velocities": velocities,
            "vth_over_c_x": .01, "vth_over_c_y": 0., "vth_over_c_z": 0.}
@@ -20,7 +24,7 @@ parameters = {
     "solver_parameters": {"filter_passes": 0, "print_info": False},
 }
 fig, axes = plt.subplots(1, 2, figsize=(9, 3.5))
-for label, ny, nz in (("B(x)", 0, 0), ("B(x,y)", 8, 0), ("B(x,y,z)", 8, 4)):
+for label, ny, nz in (("B(x)", 0, 0), ("B(x,y)", 8, 0), ("B(x,z)", 0, 4), ("B(x,y,z)", 8, 4)):
     p = deepcopy(parameters)
     p["domain_parameters"].update(number_grid_points_y=ny, number_grid_points_z=nz,
                                   length_y=length, length_z=length)
@@ -30,6 +34,8 @@ for label, ny, nz in (("B(x)", 0, 0), ("B(x,y)", 8, 0), ("B(x,y,z)", 8, 4)):
     field = np.zeros(tuple(counts)+(3,))
     modulation = np.cos(2*np.pi*mesh[1]/length) if ny else 1.
     field[..., 2] = .2*(1+.1*np.sin(2*np.pi*mesh[0]/length)*modulation)
+    if nz:
+        field[..., 1] = .02*np.sin(2*np.pi*mesh[0]/length)*np.cos(2*np.pi*mesh[-1]/length)
     p["external_field_parameters"] = {"external_magnetic_field": {"B": field}}
     output = Simulation(p).run()
     orbit = np.asarray(output["positions"])[:, 0]
