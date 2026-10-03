@@ -28,12 +28,14 @@ keywords = ["Plasma",
      "JAX"]
  
 dependencies = [ "jax", "jax_tqdm", "matplotlib"]
- 
+
 requires-python = ">=3.9"
+
+[project.optional-dependencies]
+openpmd = ["openpmd-api"]
 
 [project.urls]
 Homepage = "https://github.com/uwplasma/JAX-in-Cell"
 
 [project.scripts]
 jaxincell = "jaxincell.__main__:main"
- 

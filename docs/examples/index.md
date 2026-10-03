@@ -30,6 +30,7 @@ scaling
 | `auto-differentiability.py` | gradient of a diagnostic with respect to the drift speed, against finite differences | a minute |
 | `optimize_two_stream_saturation.py` | minimise the saturated field energy over the ion temperature | minutes |
 | `inference_two_stream.py` | recover the drift speed from the growth rate with forward-mode derivatives | minutes |
+| `openpmd_export.py` | optional openPMD export of particles and staggered fields | seconds |
 | `scaling_energy_time.py` | run time and energy error against resolution | minutes |
 
 Run any of them from the repository root, for example
