@@ -20,6 +20,7 @@ Panels: (a) electric energy with the linear growth rates of the cold relativisti
 non-relativistic dispersion relations, (b) relative change of both total energies for both
 pushers, (c), (d) electron phase space at saturation.
 """
+import argparse
 import os
 import time
 from pathlib import Path
@@ -43,13 +44,17 @@ def panel_label(ax, text):
     ax.text(-0.16, 1.02, f"({text})", transform=ax.transAxes, fontsize=22, fontweight="bold", va="bottom")
 
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--quick", action="store_true", help="smaller demonstration; use the default for benchmark results")
+quick = parser.parse_args().quick
+
 V0_OVER_C = 0.8                 # beam drift speed
 VTH_OVER_C = 0.01               # beam thermal speed, v_th = sqrt(2 T / m)
 DENSITY = 1e18                  # total electron density, m^-3 (both beams)
-N_PER_SPECIES = 10000           # electrons (both beams) and protons
-CELLS = 128
+N_PER_SPECIES = 2048 if quick else 10000           # electrons (both beams) and protons
+CELLS = 64 if quick else 128
 C_DT_OVER_DX = 0.9
-T_END = 150.0                   # in units of 1 / omega_pe
+T_END = 100.0 if quick else 150.0                   # in units of 1 / omega_pe
 PERTURBATION = 1e-6             # initial displacement of the electrons, in units of L
 PARTICLE_FRAMES = 300           # stored particle snapshots; the fields are stored every step
 RUNS = (("relativistic", True, "relativistic Boris", COLORS["vermillion"]),

@@ -114,3 +114,8 @@ every electron below $c$ with Lorentz factors up to {{ relativistic_lorentz_max_
 The two runs took {{ relativistic_seconds_relativistic }} s and
 {{ relativistic_seconds_newtonian }} s, compilation included, on the shared CPU that built
 this documentation.
+
+
+For a smaller demonstration, run
+`python examples/2_intermediate/relativistic_two_stream.py --quick`.
+The default remains the documented benchmark; the quick preset is a smoke run.

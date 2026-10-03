@@ -55,9 +55,9 @@ simulation = Simulation(domain, [electrons, ions], solver,
                         collisions=Collisions(pairs=(("electrons", "ions"),)))
 ```
 
-Keep `dt_over_dx_c <= 1` when collisions are on: they scatter velocity into the transverse
-directions, which excites the light-wave branch that an electrostatic run was safely
-ignoring. See {doc}`../user_guide/collisions`.
+Use `dt_over_dx_c <= 1` for explicit electromagnetic runs, including collisions.
+The electrostatic model has no light-wave Courant limit; resolve its particle and
+collision timescales by timestep refinement. See {doc}`../user_guide/collisions`.
 
 ## How to run
 

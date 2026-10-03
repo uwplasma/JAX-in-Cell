@@ -20,7 +20,7 @@ html_theme.sidebar_secondary.remove: true
 
 <p class="lead" style="text-align:center; max-width: 46rem; margin: 1rem auto;">
 A one-dimensional, three-velocity (1D3V) electromagnetic particle-in-cell code written in JAX.
-It runs on CPUs, GPUs and TPUs, compiles the whole time loop with XLA, and is differentiable end to end.
+It runs on CPUs, GPUs and TPUs, compiles the whole time loop with XLA, and supports differentiation through resolved trajectories.
 </p>
 
 ::::{grid} 1 2 3 3
@@ -47,7 +47,7 @@ The equations, the Yee grid, the Boris and Crank-Nicolson schemes, deposition, f
 :::{grid-item-card} User guide
 :link: user_guide/index
 :link-type: doc
-Every input parameter, the output dictionary, plotting, gradients, performance.
+Input parameters, Output, plotting, gradients and performance.
 :::
 
 :::{grid-item-card} Examples
@@ -89,13 +89,15 @@ staggered grid with Maxwell's equations.
 | boundaries | periodic, reflective, absorbing or thermal, chosen separately for particles and fields |
 | species | any number of electron and ion populations, each with its own density, drift, temperature anisotropy and seed |
 
-* The implicit scheme conserves energy to round-off and has no light-wave time-step limit.
+* The direct implicit curl solve removes the vacuum light-wave stability limit;
+  particle accuracy and energy conservation still require nonlinear convergence.
 * An absorbing wall can return part of each particle by a law in its impact speed.
 * Because the entire simulation is a pure JAX function, `jax.grad` differentiates it with
   respect to drift speeds, temperatures, perturbation amplitudes, external field profiles
   or the full initial phase space. See {doc}`user_guide/differentiation`, and
   {doc}`examples/optimize_two_stream` for an inverse problem whose answer is known from
-  linear theory.
+  linear theory. Event topology changes and unresolved wall contacts require
+  separate refinement checks; see the differentiation guide.
 
 ## What it is checked against
 
@@ -123,7 +125,7 @@ electrons = Species.electrons(n=10000, density=4.37e17, vth=(0.05 * c, 0, 0),
                               perturbation_amplitude=5e-7, perturbation_mode=1)
 ions = Species.ions(n=10000, density=4.37e17, electrons=electrons)
 
-simulation = Simulation(Domain(length=0.01, cells=64, dt_over_dx_c=4.5),
+simulation = Simulation(Domain(length=0.01, cells=64, dt_over_dx_c=0.5),
                         [electrons, ions], Solver(filter_passes=2))
 
 output = simulation.run(1000, seed=0)   # compiled with XLA on the first call

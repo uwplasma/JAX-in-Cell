@@ -31,11 +31,11 @@ within {{ collisions_max_deviation_percent }} % of theory
 
 ## Two things to get right
 
-* **The Courant condition.** Collisions scatter velocity into $y$ and $z$, which excites
-  the transverse electromagnetic fields. An electrostatic run stepping above
-  $c\Delta t = \Delta x$ was safe only while those fields were exactly zero; switching
-  collisions on makes it diverge. Use `dt_over_dx_c <= 1` whenever collisions are active.
-  The constructor warns about this combination.
+* **The Courant condition.** Explicit electromagnetic runs require
+  `dt_over_dx_c <= 1`; collisions can excite transverse fields even when they start
+  at zero. The electrostatic model does not advance light waves and has no such
+  limit. Both models still require timestep refinement to resolve particle and
+  collision timescales.
 * **The timescales.** In a weakly coupled plasma the collision frequency is far below the
   plasma frequency, $\nu/\omega_{pe}\sim \ln\Lambda/(n\lambda_D^3)$, which is $10^{-5}$ or
   smaller in most laboratory conditions. Resolving both in one run is expensive. Either
