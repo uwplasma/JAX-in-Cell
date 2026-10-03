@@ -70,6 +70,9 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters=N
     assert domain_parameters["field_BC_left"] in [0, 1, 2], "Invalid field boundary condition for left boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
     assert domain_parameters["field_BC_right"] in [0, 1, 2], "Invalid field boundary condition for right boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
 
+    for kind in ("particle", "field"):
+        assert (domain_parameters[f"{kind}_BC_left"] == 0) == (domain_parameters[f"{kind}_BC_right"] == 0), f"Periodic {kind} boundaries must be paired."
+
     for key in ("mixed_BC_weight", "COR_left", "COR_right"):
         if not 0 <= domain_parameters[key] <= 1:
             raise ValueError(f"{key} must lie in [0, 1]")

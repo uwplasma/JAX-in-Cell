@@ -579,10 +579,6 @@ class Simulation:
             This should be called whenever parameters are updated after initialization to
             ensure that the simulation state is consistent with the new parameters.
         """
-        if (self._solver_parameters["time_evolution_algorithm"] == 1 or self._solver_parameters["relativistic"]) and (
-                any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right"))
-                or any(self._domain_parameters[f"COR_{side}"] != 1 for side in ("left", "right"))):
-            raise ValueError("mixed or inelastic walls currently require nonrelativistic Boris")
         if self._solver_parameters["time_evolution_algorithm"] == 1:
             if self._solver_parameters["relativistic"] or any(
                 self._domain_parameters[key] != 0
@@ -600,6 +596,10 @@ class Simulation:
         self.build_domain()
         self.resolve_snapshot_steps()
         self.initialize_particles()
+        if (self._solver_parameters["time_evolution_algorithm"] == 1 or self._solver_parameters["relativistic"]) and (
+                any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right"))
+                or any(self._domain_parameters[f"COR_{side}"] != 1 for side in ("left", "right"))):
+            raise ValueError("mixed or inelastic walls currently require nonrelativistic Boris")
         if any(self._domain_parameters[f"particle_BC_{side}"] >= 3 for side in ("left", "right")) and (
                 self._solver_parameters["field_solver"] != 2):
             raise ValueError("mixed walls require field_solver=2 to account for collected charge")

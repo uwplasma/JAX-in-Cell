@@ -95,10 +95,11 @@ def test_build_domain_hash_is_stable_and_sensitive_to_values():
     assert default_hash != total_steps_changed_hash
 
 
-@pytest.mark.parametrize("kind", ["particle", "field"])
-@pytest.mark.parametrize("left,right", [(0, 1), (0, 2), (1, 0), (2, 0)])
+@pytest.mark.parametrize("kind,left,right", [(kind, left, right)
+    for kind in ("particle", "field") for wall in range(1, 5 if kind == "particle" else 3)
+    for left, right in ((0, wall), (wall, 0))])
 def test_periodic_boundaries_require_a_partner(kind, left, right):
-    with pytest.raises(ValueError, match=f"periodic {kind} boundaries must be paired"):
+    with pytest.raises(AssertionError, match=f"Periodic {kind} boundaries must be paired"):
         clean_and_initialize_domain_parameters({f"{kind}_BC_left": left, f"{kind}_BC_right": right})
 
 
@@ -137,9 +138,3 @@ def test_velocity_dependent_return_requires_a_positive_scale(value):
     with pytest.raises(ValueError, match="mixed_BC_velocity_scale"):
         clean_and_initialize_domain_parameters({"mixed_BC_velocity_scale": value})
 
-
-@pytest.mark.parametrize("kind", ["particle", "field"])
-@pytest.mark.parametrize("side", ["left", "right"])
-def test_one_periodic_face_cannot_be_combined_with_a_wall(kind, side):
-    with pytest.raises(ValueError, match=f"periodic {kind} boundaries must be paired"):
-        clean_and_initialize_domain_parameters({f"{kind}_BC_{side}": 1})
