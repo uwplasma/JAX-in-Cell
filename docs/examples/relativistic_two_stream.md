@@ -14,7 +14,19 @@ for relativistic in (True, False):
     output = Simulation(parameters).run()
 ```
 
-The full input is in `docs/scripts/fig_relativistic.py`; its values are listed below.
+Run the compact example from the repository root:
+
+```bash
+python examples/relativistic_two_stream.py --output relativistic.png
+```
+
+It compares the first-mode growth with the cold relativistic dispersion relation,
+checks subluminal velocities and plots the relativistic total energy. Increase
+`--cells` and `--particles` to check resolution. The fixed linear fit window is
+25–45 inverse plasma frequencies; it precedes trapping for these inputs.
+
+The longer comparison and its full input are in `docs/scripts/fig_relativistic.py`;
+its values are listed below.
 
 ## Set-up
 
@@ -66,8 +78,9 @@ and two total energies, each with the field energy:
 
 with $m_p$ the pseudo-particle mass (the weight included). The relativistic equations
 conserve $\mathcal E_{rel}$, the non-relativistic ones $\mathcal E_{N}$. The
-`total_energy` returned by {func}`~jaxincell.diagnostics` is $\mathcal E_{N}$ (see
-{doc}`../numerics/diagnostics`).
+`total_energy` returned by {func}`~jaxincell.diagnostics` follows the selected
+pusher: $\mathcal E_{rel}$ for the relativistic run and $\mathcal E_N$ otherwise
+(see {doc}`../numerics/diagnostics`).
 
 ## Result
 
