@@ -66,12 +66,17 @@ Their default zero disables that direction; `length_y` and `length_z` default to
 locations, magnetic fields their x-centre locations; both use centres in y and z.
 These directions are periodic. Only prescribed fields gain transverse variation;
 the self-consistent Maxwell solve remains one dimensional.
+Prescribed samples use periodic continuation for interpolation, including their x
+ghost values; the self-consistent fields retain their selected wall conditions.
 
 The Boris pusher supports these fields. CN rejects nonzero prescribed fields
 because its current implementation does not include them. Prescribed fields can
 exchange energy and momentum with particles; `total_energy` includes their static
 energy for compatibility and is not a closed-system conservation test. Tensor-grid
 field energies average over the ignorable directions. See `examples/3d_field_runs.py`.
+Run it with `MPLBACKEND=Agg python examples/3d_field_runs.py` to compare x, x/y,
+x/z and x/y/z sampling. Its magnetic components vary transverse to themselves,
+so the prescribed field is divergence-free; all cases report the speed error.
 
 ## Sources
 

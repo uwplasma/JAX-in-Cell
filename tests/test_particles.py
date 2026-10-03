@@ -568,7 +568,7 @@ def test_external_tensor_gather_uses_centres_in_ignorable_directions():
     """Independent periodic quadratic tensor weights, including exact seams."""
     import itertools
     import numpy as np
-    from jax import vmap
+    from jax import jvp, vmap
     rng = np.random.default_rng(42)
     dimensions = ("x", "y", "z")
     counts, lengths = (8, 5, 3), (2., 3., 4.)
@@ -597,3 +597,11 @@ def test_external_tensor_gather_uses_centres_in_ignorable_directions():
         actual = vmap(lambda x: fields_to_particles_grid(x, jnp.zeros((counts[0], 3)), padded,
                                                         steps, grids, offset, dimensions, 0, 0)[1])(positions)
         np.testing.assert_allclose(actual, expected, rtol=2e-13, atol=2e-13)
+        # Position derivatives of a nonconstant tensor, away from stencil changes.
+        direction = rng.normal(size=positions[:8].shape)
+        gather = lambda x: vmap(lambda p: fields_to_particles_grid(
+            p, jnp.zeros((counts[0], 3)), padded, steps, grids, offset, dimensions, 0, 0)[1])(x)
+        tangent = jvp(gather, (jnp.asarray(positions[:8]),), (jnp.asarray(direction),))[1]
+        h = 1e-5
+        finite = (gather(positions[:8] + h * direction) - gather(positions[:8] - h * direction)) / (2 * h)
+        np.testing.assert_allclose(tangent, finite, rtol=2e-8, atol=2e-8)
