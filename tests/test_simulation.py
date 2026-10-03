@@ -18,7 +18,7 @@ from tests.helpers import scalar
 def small_simulation_parameters(total_steps=10, number_grid_points=8, number_pseudoparticles=20):
     base_species = {
         "number_pseudoparticles": number_pseudoparticles,
-        "grid_points_per_Debye_length": 1.0,
+        "dx_over_Debye_length": 1.0,
         "weight": 1.0,
         "perturbation_amplitude_x": 0.0,
         "perturbation_amplitude_y": 0.0,
@@ -144,6 +144,28 @@ def assert_simulation_output_contract(
     output["positions"].block_until_ready()
 
 
+@pytest.mark.parametrize("key", ["particle_BC_left", "particle_BC_right", "field_BC_left", "field_BC_right", "relativistic"])
+def test_cn_rejects_unsupported_boundary_and_relativistic_inputs(key):
+    p = small_simulation_parameters(total_steps=1)
+    p["solver_parameters"]["time_evolution_algorithm"] = 1
+    section = "solver_parameters" if key == "relativistic" else "domain_parameters"
+    p[section][key] = True if key == "relativistic" else 1
+    if key != "relativistic":
+        kind = key.split("_")[0]
+        p[section][f"{kind}_BC_left"] = p[section][f"{kind}_BC_right"] = 1
+    with pytest.raises(ValueError, match="Implicit CN supports"):
+        Simulation(p)
+
+
+@pytest.mark.parametrize("kind,component", [("electric", "E"), ("magnetic", "B")])
+def test_cn_rejects_ignored_prescribed_grid_fields(kind, component):
+    p = small_simulation_parameters(total_steps=1)
+    p["solver_parameters"]["time_evolution_algorithm"] = 1
+    p["external_field_parameters"] = {f"external_{kind}_field": {component: jnp.ones((8, 3))}}
+    with pytest.raises(ValueError, match="does not apply prescribed grid fields"):
+        Simulation(p)
+
+
 def test_simulation_shapes_and_basic_consistency():
     total_steps = 10
     number_grid_points = 8
@@ -187,7 +209,7 @@ def test_simulation_shapes_and_basic_consistency():
     diagnostics(output)
 
     for key in ["positions", "velocities", "masses", "charges"]:
-        assert key not in output
+        assert key in output
 
     for key in [
         "position_electrons",
@@ -290,7 +312,7 @@ def test_simulation_with_extra_species_and_external_fields():
     )
     parameters["species_parameters"]["ions"]["extra_ion"] = {
         "number_pseudoparticles": number_extra_particles,
-        "grid_points_per_Debye_length": 1.0,
+        "dx_over_Debye_length": 1.0,
         "weight": 1.0,
         "charge_over_elementary_charge": 2.0,
         "mass_over_proton_mass": 4.0,
@@ -385,7 +407,7 @@ print_info = false
 
 [species_parameters.electrons.electrons0]
 number_pseudoparticles = 20
-grid_points_per_Debye_length = 1.0
+dx_over_Debye_length = 1.0
 weight = 1.0
 charge_over_elementary_charge = -1.0
 vth_over_c_x = 0.01
@@ -394,7 +416,7 @@ vth_over_c_z = 0.01
 
 [species_parameters.ions.ions0]
 number_pseudoparticles = 20
-grid_points_per_Debye_length = 1.0
+dx_over_Debye_length = 1.0
 weight = 1.0
 charge_over_elementary_charge = 1.0
 mass_over_proton_mass = 1.0
@@ -466,7 +488,7 @@ print_info = false
 
 [species_parameters.electrons.electrons0]
 number_pseudoparticles = 4
-grid_points_per_Debye_length = 1.0
+dx_over_Debye_length = 1.0
 weight = 1.0
 charge_over_elementary_charge = -1.0
 vth_over_c_x = 0.01
@@ -475,7 +497,7 @@ vth_over_c_z = 0.01
 
 [species_parameters.ions.ions0]
 number_pseudoparticles = 4
-grid_points_per_Debye_length = 1.0
+dx_over_Debye_length = 1.0
 weight = 1.0
 charge_over_elementary_charge = 1.0
 mass_over_proton_mass = 1.0
@@ -958,15 +980,16 @@ def test_unsupported_wall_pushers_are_rejected_by_constructor_and_both_setters(s
     parameters["domain_parameters"].update(wall_change, field_BC_left=1, field_BC_right=1)
     unsupported = deepcopy(parameters)
     unsupported["solver_parameters"].update(solver_change)
-    with pytest.raises(ValueError, match="require nonrelativistic Boris"):
+    match = "periodic particle and field boundaries only" if solver_change.get("time_evolution_algorithm") else "require nonrelativistic Boris"
+    with pytest.raises(ValueError, match=match):
         Simulation(unsupported)
     sim = Simulation(parameters)
-    with pytest.raises(ValueError, match="require nonrelativistic Boris"):
+    with pytest.raises(ValueError, match=match):
         sim.solver_parameters = {**sim.solver_parameters, **solver_change}
     periodic = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
     periodic["solver_parameters"].update(solver_change, field_solver=2)
     sim = Simulation(periodic)
-    with pytest.raises(ValueError, match="require nonrelativistic Boris"):
+    with pytest.raises(ValueError, match=match):
         sim.domain_parameters = parameters["domain_parameters"]
 
 
@@ -1017,3 +1040,77 @@ def test_mixed_run_stores_the_ballistic_fractional_return_mass_and_charge_histor
     diagnostics(output)
     np.testing.assert_allclose(output["kinetic_energy"], expected_ke, rtol=1e-13)
     np.testing.assert_allclose(output["total_momentum"], expected_p, rtol=1e-13)
+
+
+def test_absorbed_marker_does_not_bias_retained_population_moments():
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    initial = Simulation(parameters)
+    velocity = np.array([[.02, 0., 0.], [-.01, 0., 0.]]) * speed_of_light
+    position = np.zeros((2, 3))
+    position[0, 0] = float(initial.box_size[0]) / 2 - float(initial.dt) * velocity[0, 0] / 4
+    for population in parameters["species_parameters"].values():
+        for species in population.values():
+            species.update(weight=1., initial_positions=position, initial_velocities=velocity)
+    parameters["domain_parameters"].update(particle_BC_left=2, particle_BC_right=2,
+                                             field_BC_left=1, field_BC_right=1)
+    parameters["solver_parameters"]["field_solver"] = 2
+    output = Simulation(parameters).run()
+    live_masses = np.asarray(output["masses"])[None, ...] * np.array([0., 1., 0., 1.])[None, :, None]
+    np.testing.assert_allclose(output["masses_over_time"], np.broadcast_to(live_masses, (2, 4, 1)), rtol=1e-14)
+    diagnostics(output)
+    for species in output["species"]:
+        np.testing.assert_allclose(species["weights"], [[0., 1.], [0., 1.]], rtol=2e-15)
+        np.testing.assert_allclose(species["temperature_components"], 0., atol=1e-20)
+    expected_momentum = np.sum(live_masses, axis=1) * velocity[1]
+    np.testing.assert_allclose(output["total_momentum"], np.broadcast_to(expected_momentum, (2, 3)), rtol=1e-14)
+    first_energy = np.asarray(output["kinetic_energy"])
+    diagnostics(output)
+    np.testing.assert_array_equal(output["kinetic_energy"], first_energy)
+    assert "positions" in output and "velocities" in output
+
+
+@pytest.mark.parametrize("steps", [1, 4])
+def test_stored_times_are_end_of_step_times(steps):
+    out = Simulation(small_simulation_parameters(total_steps=steps)).run()
+    np.testing.assert_allclose(out["time_array"], np.arange(1, steps + 1) * float(out["dt"]), rtol=1e-14, atol=0)
+
+
+def test_field_setter_recompiles_for_an_interior_array_change():
+    p = small_simulation_parameters(total_steps=1, number_grid_points=512, number_pseudoparticles=4)
+    for species in p["species_parameters"].values():
+        for values in species.values():
+            values.update(initial_positions=jnp.zeros((4, 3)), initial_velocities=jnp.zeros((4, 3)))
+    field = jnp.zeros((512, 3))
+    p["external_field_parameters"] = {"external_electric_field": {"E": field}}
+    sim = Simulation(p)
+    jax.block_until_ready(sim.run())
+    old_hash = sim.external_field_hash
+    changed = {"external_electric_field": {"E": field.at[256, 0].set(1e6)}}
+    sim.external_field_parameters = changed
+    actual = sim.run()["velocities"]
+    p["external_field_parameters"] = changed
+    expected = Simulation(p).run()["velocities"]
+    assert sim.external_field_hash != old_hash
+    assert float(jnp.max(jnp.abs(actual))) > 1000
+    np.testing.assert_array_equal(actual, expected)
+    exposed = sim.external_field_parameters
+    exposed["external_electric_field"]["E"] = field
+    np.testing.assert_array_equal(sim.external_field_parameters["external_electric_field"]["E"], changed["external_electric_field"]["E"])
+
+
+@pytest.mark.parametrize("section", list(PARAMETER_SECTIONS))
+def test_parameter_sections_return_defensive_copies(section):
+    sim = Simulation(small_simulation_parameters(total_steps=1))
+    exposed = getattr(sim, section)
+    exposed.clear()
+    assert getattr(sim, section)
+
+
+# Explicit initial position/velocity overrides are deferred until Simulation.run()
+# grows a public initial-state override API again.
+#
+# def test_simulation_rejects_mismatched_positions_shape():
+#     ...
+#
+# def test_simulation_rejects_mismatched_velocities_shape():
+#     ...

@@ -1,12 +1,11 @@
-from jax import lax
 import jax.numpy as jnp
 from jax.numpy.fft import fft, fftfreq
-from ._constants import epsilon_0, mu_0
+from ._constants import epsilon_0, mu_0, boltzmann_constant, speed_of_light
 
 __all__ = ['diagnostics']
 
 def diagnostics(output):
-    # --- Keep legacy split first (unchanged) ---
+    """Add diagnostics in place, preserving the raw arrays for repeated calls."""
     isel = (output["charges"] >= 0)[:, 0]  # cannot use masks in jitted functions
     esel = (output["charges"] <  0)[:, 0]
     segregated = {
@@ -20,23 +19,56 @@ def diagnostics(output):
         "charge_ions":        output["charges"]   [   isel],
     }
     output.update(**segregated)
+    initial_mass, velocity = output["masses"].reshape(-1), output["velocities"]
+    mass = jnp.asarray(output["masses_over_time"])[..., 0] if "masses_over_time" in output else initial_mass
+    v2 = jnp.sum(velocity ** 2, axis=-1)
+    if output.get("solver_parameters", {}).get("relativistic", output.get("relativistic", False)):
+        root = jnp.sqrt(1 - v2 / speed_of_light ** 2)
+        gamma, kinetic_p = 1 / root, mass * v2 / (root * (1 + root))
+    else:
+        gamma, kinetic_p = jnp.ones_like(v2), 0.5 * mass * v2
+    momentum_p = (mass * gamma)[..., None] * velocity
 
-    # --- NEW: multi-species view, fully additive/back-compat ---
-    # Group by (q, m) exact pairs
+    # Simulation populations have identities independent of their charge, mass or weight.
+    # Keep the old charge/mass grouping for dictionaries without population metadata.
     import numpy as np
     q = np.asarray(output["charges"]).reshape(-1)
     m = np.asarray(output["masses"]).reshape(-1)
-    qm = np.stack([q, m], axis=1)
-    unique_pairs, labels = np.unique(qm, axis=0, return_inverse=True)
+    if "species_integer_index" in output:
+        labels = np.asarray(output["species_integer_index"]).reshape(-1)
+    else:
+        _, labels = np.unique(np.stack([q, m], axis=1), axis=0, return_inverse=True)
+    names = [f"{kind}.{sp.get('user_label', label)}"
+             for kind in ("electrons", "ions")
+             for label, sp in output.get("species_parameters", {}).get(kind, {}).items()]
+    weights = jnp.asarray(output.get("weights", jnp.ones_like(output["masses"]))).reshape(-1)
+    initial_weights = weights
+    if "weights_over_time" in output:
+        weights = jnp.asarray(output["weights_over_time"])
+    elif "masses_over_time" in output:
+        weights = weights * mass / jnp.where(initial_mass > 0, initial_mass, 1.)
+    if "masses_over_time" in output:
+        output.update(weights_electrons=weights[..., esel], weights_ions=weights[..., isel])
 
     species_list = []
-    for si, (qv, mv) in enumerate(unique_pairs):
+    for si in np.unique(labels):
         mask = (labels == si)
         pos_s = output["positions"][:, mask, :]
         vel_s = output["velocities"][:, mask, :]
+        w_s, m_s = weights[..., mask], mass[..., mask]
+        norm = jnp.sum(jnp.broadcast_to(w_s, vel_s.shape[:-1]), axis=-1)
+        norm = jnp.where(norm > 0, norm, 1.)
+        initial_norm = jnp.sum(initial_weights[mask])
+        initial_norm = jnp.where(initial_norm > 0, initial_norm, 1.)
+        qv = float(output["charge_integer_lookup"][si]) if "charge_integer_lookup" in output else float(jnp.sum(q[mask]) / initial_norm)
+        mv = float(output["mass_integer_lookup"][si]) if "mass_integer_lookup" in output else float(jnp.sum(m[mask]) / initial_norm)
+        mean = jnp.sum(w_s[..., None] * vel_s, axis=1) / norm[:, None]
+        temperature = jnp.sum(m_s[..., None] * (vel_s - mean[:, None, :]) ** 2, axis=1) / (boltzmann_constant * norm[:, None])
 
-        # Names chosen to keep the first negative = "electrons", first positive = "ions"
-        if qv < 0 and not any(sp.get("name") == "electrons" for sp in species_list):
+        # Legacy names for dictionaries without configured population labels.
+        if "species_integer_index" in output and si < len(names):
+            name = names[si]
+        elif qv < 0 and not any(sp.get("name") == "electrons" for sp in species_list):
             name = "electrons"
         elif qv > 0 and not any(sp.get("name") == "ions" for sp in species_list):
             name = "ions"
@@ -49,52 +81,32 @@ def diagnostics(output):
             "mass": float(mv),
             "positions": pos_s,
             "velocities": vel_s,
+            "weights": w_s,
+            "temperature_components": temperature,
+            "temperature": jnp.mean(temperature, axis=-1),
+            "kinetic_energy": jnp.sum(kinetic_p[:, mask], axis=-1),
         })
 
     output["species"] = species_list
 
-    # --- Preserve legacy memory behavior exactly ---
-    del output["positions"]
-    del output["velocities"]
-    del output["masses"]
-    del output["charges"]
-
-    # CHANGED: Use reshape(-1) to flatten shape from (N, 1) to (N,)
-    # This allows broadcasting against velocity array of shape (Time, N)
-    mass_electrons_array = output["mass_electrons"].reshape(-1)
-    mass_ions_array      = output["mass_ions"].reshape(-1)
-
-    # --- All your existing energy/FFT/diagnostics code continues below unchanged ---
     E_field_over_time = output['electric_field']
     grid              = output['grid']
-
-    # Make sure these are plain Python scalars for indexing / fftfreq
-    total_steps_val = output['total_steps']
     dt_val          = output['dt']
+    total_steps = E_field_over_time.shape[0]
+    dt = float(output["time_array"][1] - output["time_array"][0]) if "time_array" in output and total_steps > 1 else float(dt_val)
 
-    # Coerce JAX scalars or numpy scalars to Python ints/floats
-    total_steps = int(total_steps_val)
-    dt          = float(dt_val)
-
-    # Now safe to use in len/indexing/XLA primitives on all Python versions
-    # (including 3.8)
-    # ------------------------------------------------------------------
     # FFT-based dominant frequency at the middle grid point
     array_to_do_fft_on = E_field_over_time[:, len(grid)//2, 0]
-    array_to_do_fft_on = (array_to_do_fft_on - jnp.mean(array_to_do_fft_on)) / jnp.max(array_to_do_fft_on)
+    array_to_do_fft_on = array_to_do_fft_on - jnp.mean(array_to_do_fft_on)
     plasma_frequency = output['plasma_frequency']
 
-    half = total_steps // 2
-    fft_full = fft(array_to_do_fft_on)
-    fft_values = lax.slice(fft_full, (0,), (half,))
+    half = total_steps // 2 + 1
+    fft_values = fft(array_to_do_fft_on)[:half]
     freqs = fftfreq(total_steps, d=dt)[:half] * 2 * jnp.pi
     magnitude = jnp.abs(fft_values)
     peak_index = jnp.argmax(magnitude)
     dominant_frequency = jnp.abs(freqs[peak_index])
 
-    # def integrate(y, dx):
-    #     return 0.5 * (jnp.asarray(dx) * (y[..., 1:] + y[..., :-1])).sum(-1)
-    
     def integrate(y, dx):
         return jnp.sum(y, axis=-1) * dx
 
@@ -108,23 +120,8 @@ def diagnostics(output):
     integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
     integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
 
-    # Calculate v^2 per particle (sum over spatial dims x,y,z only)
-    # Shape becomes (Time, N_particles)
-    v_sq_electrons_per_particle = jnp.sum(output['velocity_electrons']**2, axis=-1)
-    v_sq_ions_per_particle      = jnp.sum(output['velocity_ions']**2,      axis=-1)
-
-    # Calculate KE = sum(0.5 * m_i(t) * v_i^2)
-    # Use time-varying masses if available (needed for mixed BC where mass changes per bounce).
-    # masses_over_time has shape (Time, N, 1); squeeze to (Time, N) then select by species.
-    if "masses_over_time" in output:
-        masses_t = jnp.squeeze(output["masses_over_time"], axis=-1)  # (Time, N)
-        mass_electrons_t = masses_t[:, esel]  # (Time, N_e)
-        mass_ions_t      = masses_t[:, isel]  # (Time, N_i)
-        total_ke_electrons = 0.5 * jnp.sum(mass_electrons_t * v_sq_electrons_per_particle, axis=-1)
-        total_ke_ions      = 0.5 * jnp.sum(mass_ions_t      * v_sq_ions_per_particle,      axis=-1)
-    else:
-        total_ke_electrons = 0.5 * jnp.sum(mass_electrons_array * v_sq_electrons_per_particle, axis=-1)
-        total_ke_ions      = 0.5 * jnp.sum(mass_ions_array      * v_sq_ions_per_particle,      axis=-1)
+    total_ke_electrons = jnp.sum(kinetic_p[:, esel], axis=-1)
+    total_ke_ions = jnp.sum(kinetic_p[:, isel], axis=-1)
 
     output.update({ 
         'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
@@ -134,7 +131,6 @@ def diagnostics(output):
         'dominant_frequency': dominant_frequency,
         'plasma_frequency':   plasma_frequency,
         
-        # Updated kinetic energy keys to use the corrected totals
         'kinetic_energy':           total_ke_electrons + total_ke_ions,
         'kinetic_energy_electrons': total_ke_electrons,
         'kinetic_energy_ions':      total_ke_ions,
@@ -151,11 +147,8 @@ def diagnostics(output):
 
     output.update({'total_energy': total_energy})
 
-    # Total momentum sum(m v) and its change relative to sum(m |v|) at t = 0
-    total_momentum = (jnp.sum((mass_electrons_t if "masses_over_time" in output else mass_electrons_array)[..., None] * output['velocity_electrons'], axis=-2) +
-                      jnp.sum((mass_ions_t if "masses_over_time" in output else mass_ions_array)[..., None] * output['velocity_ions'],      axis=-2))
-    momentum_scale = (jnp.sum(mass_electrons_array * jnp.linalg.norm(output['velocity_electrons'][0], axis=-1)) +
-                      jnp.sum(mass_ions_array      * jnp.linalg.norm(output['velocity_ions'][0],      axis=-1)))
+    total_momentum = jnp.sum(momentum_p, axis=-2)
+    momentum_scale = jnp.sum(jnp.linalg.norm(momentum_p[0], axis=-1))
     output.update({
         'total_momentum': total_momentum,
         'momentum_error_rel': jnp.linalg.norm(total_momentum - total_momentum[0], axis=-1) / (momentum_scale + 1e-300),

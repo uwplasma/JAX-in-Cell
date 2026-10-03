@@ -198,7 +198,7 @@ def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
 
     # Grid Definitions (Staggered)
     E_grid_start = grid[0] + dx/2  # E at i + 1/2
-    B_grid_start = grid[0] - dx/2  # B at i (shifted by -1/2 relative to E-grid logic)
+    B_grid_start = grid[0]  # B at charge-grid centres
     grid_size = len(grid)
     
     # Initial Guess (Predictor)
@@ -273,14 +273,13 @@ def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
         )
 
         J_iter = jnp.sum(J_accs, axis=0) / dt
-        mean_J = jnp.mean(J_iter, axis=0)
         
         # ---------------------------------------------------------------------
         # 3. Ampere's Law: E^{n+1} = E^n + dt * c^2 * Curl(B^{n+1/2}) - ...
         # ---------------------------------------------------------------------
         # Use Periodic Forward Difference for B -> E
         curl_B = curlB(B_avg_for_Push, E_field, dx, dt, field_BC_left, field_BC_right)
-        E_next = E_field + dt * (c_sq * curl_B - (1/epsilon_0) * (J_iter - mean_J))
+        E_next = E_field + dt * (c_sq * curl_B - J_iter / epsilon_0)
 
         return (
             (E_guess, E_next, B_next, pos_fix, pos_final, vel_fix, vel_final, qs_final, ms_final, q_ms_final, pos_stag_arr_new),
@@ -307,7 +306,7 @@ def CN_step(carry, step_index, solver_parameters, dx, dt, grid, box_size,
         new_carry, J_iter = picard_step(carry, None)
         E_calculated = new_carry[1]
 
-        delta_E = jnp.abs(jnp.max(E_calculated - E_guess)) / (jnp.max(jnp.abs(E_calculated)) + 1e-12)
+        delta_E = jnp.max(jnp.abs(E_calculated - E_guess)) / (jnp.max(jnp.abs(E_calculated)) + 1e-12)
         
         return (new_carry, J_iter, delta_E, i + 1)
 
