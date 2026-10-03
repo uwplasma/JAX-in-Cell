@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jaxincell._diagnostics import diagnostics
-from jaxincell._constants import epsilon_0, mu_0
+from jaxincell._constants import epsilon_0, mu_0, boltzmann_constant, speed_of_light
 
 
 def _minimal_diagnostic_output(
@@ -60,7 +60,7 @@ def test_diagnostics_basic_energy_and_species():
       - splits electrons and ions correctly
       - builds a species list
       - computes energies with the same formulas as in _diagnostics.py
-      - removes positions/velocities/masses/charges from the top level
+      - preserves positions/velocities/masses/charges at the top level
     """
     # Small toy system: 2 time steps, 2 grid points, 2 particles (1 electron, 1 ion)
     T = 2
@@ -133,9 +133,9 @@ def test_diagnostics_basic_energy_and_species():
     ]:
         assert key in output, f"Missing key {key} in diagnostics output."
 
-    # Original heavy arrays should be dropped
+    # Raw arrays remain available for another diagnostic or analysis.
     for key in ["positions", "velocities", "masses", "charges"]:
-        assert key not in output
+        assert key in output
 
     # ---- Shapes ----
     assert output["electric_field_energy_density"].shape == (T, G)
@@ -186,8 +186,8 @@ def test_diagnostics_basic_energy_and_species():
     assert jnp.allclose(output["kinetic_energy_ions"], expected_ke_i)
     assert jnp.allclose(output["kinetic_energy"], expected_ke_e + expected_ke_i)
 
-    # ---- Dominant frequency: for this simple 2-step signal, it's zero ----
-    assert jnp.isclose(output["dominant_frequency"], 0.0)
+    # A two-row, nonconstant signal has its sole nonzero bin at Nyquist.
+    assert jnp.isclose(output["dominant_frequency"], jnp.pi / dt)
 
     # ---- Total energy consistency ----
     total_calc = (
@@ -352,3 +352,137 @@ def test_diagnostics_dominant_frequency_for_oscillatory_energy():
     diagnostics(constant_output)
 
     assert jnp.isclose(constant_output["dominant_frequency"], 0.0)
+
+
+def test_diagnostics_gauss_law_error_and_momentum():
+    T, G, dx = 3, 8, 0.5
+    rho = jnp.stack([jnp.sin(2 * jnp.pi * jnp.arange(G) / G) * (t + 1) for t in range(T)])
+    Ex = jnp.cumsum(rho, axis=1) * dx / epsilon_0          # backward-difference Gauss solution
+    electric_field = jnp.zeros((T, G, 3)).at[..., 0].set(Ex)
+    velocities = jnp.array([
+        [[1.0, 0.0, 0.0], [-0.5, 0.0, 0.0]],
+        [[1.0, 0.0, 0.0], [-0.5, 0.0, 0.0]],
+        [[2.0, 0.0, 0.0], [-0.5, 0.0, 0.0]],
+    ])
+    output = _minimal_diagnostic_output(electric_field=electric_field, velocities=velocities, dx=dx)
+    output["charge_density"] = rho
+    diagnostics(output)
+
+    # masses are 1 (electron) and 2 (ion): P_x = 0, 0, 1 and sum m|v| at t = 0 is 2
+    assert jnp.allclose(output["total_momentum"][:, 0], jnp.array([0.0, 0.0, 1.0]))
+    assert jnp.allclose(output["momentum_error_rel"], jnp.array([0.0, 0.0, 0.5]))
+    assert jnp.all(output["gauss_error_Linf_rel"] < 1e-12)
+
+    # breaking Gauss's law at one node shows up in the error
+    output = _minimal_diagnostic_output(electric_field=electric_field.at[1, 3, 0].add(1.0), dx=dx)
+    output["charge_density"] = rho
+    diagnostics(output)
+    assert output["gauss_error_Linf_rel"][1] > 1e-12
+    assert jnp.all(output["gauss_error_Linf_rel"][jnp.array([0, 2])] < 1e-12)
+
+
+def test_diagnostics_preserves_populations_and_weighted_temperatures_on_repeat():
+    """Distinct equal-q/m populations retain their names, physical moments and data."""
+    weights = jnp.array([1.0, 3.0, 2.0, 2.0, 4.0])
+    physical_mass = jnp.array([2.0, 2.0, 2.0, 2.0, 5.0])
+    charge = jnp.array([-1.0, -1.0, -1.0, -1.0, 1.0])
+    v = jnp.zeros((2, 5, 3)).at[0, :, 0].set(jnp.array([0.0, 2.0, 10.0, 12.0, 1.0]))
+    v = v.at[1].set(v[0] + jnp.array([4.0, 0.0, 0.0]))
+    output = _minimal_diagnostic_output(electric_field=jnp.zeros((2, 4, 3)), velocities=v,
+        masses=(physical_mass * weights)[:, None], charges=(charge * weights)[:, None])
+    output.update(weights=weights[:, None], species_integer_index=jnp.array([0, 0, 1, 1, 2]),
+        mass_integer_lookup=jnp.array([2.0, 2.0, 5.0]), charge_integer_lookup=jnp.array([-1.0, -1.0, 1.0]),
+        species_parameters={"electrons": {"_electrons0": {"user_label": "bulk"},
+                                          "_electrons1": {"user_label": "beam"}},
+                            "ions": {"_ions0": {"user_label": "heavy"}}},
+        time_array=jnp.array([0.1, 0.2]))
+    original = {key: np.asarray(value).copy() for key, value in output.items() if key != "species_parameters"}
+    for _ in range(2):
+        diagnostics(output)
+        for key, value in original.items():
+            np.testing.assert_array_equal(output[key], value)
+        bulk, beam, ion = output["species"]
+        assert [sp["name"] for sp in output["species"]] == ["electrons.bulk", "electrons.beam", "ions.heavy"]
+        assert bulk["mass"] == beam["mass"] == 2.0
+        np.testing.assert_allclose(bulk["temperature_components"] * boltzmann_constant, [[1.5, 0, 0]] * 2)
+        np.testing.assert_allclose(beam["temperature"] * boltzmann_constant, [2 / 3] * 2)
+        np.testing.assert_array_equal(ion["temperature"], 0.0)
+        expected_ke = 0.5 * np.sum(np.asarray(physical_mass * weights)[None, :] * np.sum(np.asarray(v) ** 2, axis=-1), axis=-1)
+        np.testing.assert_allclose(output["kinetic_energy"], expected_ke)
+        np.testing.assert_allclose(sum(sp["kinetic_energy"] for sp in output["species"]), expected_ke)
+
+
+@pytest.mark.parametrize("removed", [False, True])
+def test_diagnostics_one_stored_step_is_finite(removed):
+    output = _minimal_diagnostic_output(electric_field=jnp.zeros((1, 4, 3)))
+    if removed:
+        output.update(weights=jnp.zeros((2, 1)), masses=jnp.zeros((2, 1)),
+                      charges=jnp.zeros((2, 1)), species_integer_index=jnp.arange(2))
+    output["total_steps"] = 32
+    output["time_array"] = jnp.array([3.2])
+    diagnostics(output)
+    assert output["dominant_frequency"] == 0.0
+    assert np.all(np.isfinite(output["total_energy"]))
+    assert all(np.all(np.isfinite(sp["temperature"])) for sp in output["species"])
+    np.testing.assert_array_equal(output["time_array"], [3.2])
+
+
+def test_diagnostics_frequency_uses_the_stored_uniform_times():
+    t = jnp.arange(8)
+    field = jnp.zeros((8, 4, 3)).at[:, 2, 0].set(jnp.sin(2 * jnp.pi * t / 8))
+    output = _minimal_diagnostic_output(electric_field=field, dt=0.25)
+    output.update(total_steps=24, time_array=10.0 + 0.75 * t)
+    diagnostics(output)
+    assert output["dominant_frequency"] == pytest.approx(2 * np.pi / (8 * 0.75))
+    np.testing.assert_array_equal(output["time_array"], 10.0 + 0.75 * np.arange(8))
+
+
+def test_public_diagnostics_reuses_real_simulation_output():
+    from copy import deepcopy
+    from jaxincell import Simulation, diagnostics as public_diagnostics
+    from tests.helpers import base_simulation_parameters
+
+    params = base_simulation_parameters()
+    params["domain_parameters"]["total_steps"] = 2
+    params["species_parameters"]["electrons"]["beam"] = deepcopy(params["species_parameters"]["electrons"]["electrons0"])
+    params["species_parameters"]["electrons"]["beam"]["drift_speed_x"] = 10.0
+    output = Simulation(params).run()
+    keys = ("positions", "velocities", "charges", "masses", "weights", "species_integer_index", "time_array")
+    raw = {key: np.asarray(output[key]).copy() for key in keys}
+    expected_ke = 0.5 * np.sum(raw["masses"].reshape(-1) * np.sum(raw["velocities"] ** 2, axis=-1), axis=-1)
+    for _ in range(2):
+        public_diagnostics(output)
+        assert [sp["name"] for sp in output["species"]] == ["electrons.electrons0", "electrons.beam", "ions.ions0"]
+        np.testing.assert_allclose(output["kinetic_energy"], expected_ke, rtol=1e-12, atol=0.0)
+        for key, value in raw.items():
+            np.testing.assert_array_equal(output[key], value)
+
+
+@pytest.mark.parametrize("rows, mode", [(3, 1), (8, 4)])
+def test_diagnostics_keeps_the_last_positive_frequency_bin(rows, mode):
+    dt = 0.25
+    field = jnp.zeros((rows, 4, 3)).at[:, 2, 0].set(jnp.cos(2 * jnp.pi * mode * jnp.arange(rows) / rows))
+    output = _minimal_diagnostic_output(electric_field=field, dt=dt)
+    diagnostics(output)
+    assert output["dominant_frequency"] == pytest.approx(2 * np.pi * mode / (rows * dt))
+
+
+def test_diagnostics_relativistic_energy_and_momentum_at_point_six_c():
+    # gamma=5/4: K=(1/4) m c^2 and p=(5/4) m v, including macro weights.
+    mass = jnp.array([[2.0 * 2.0], [3.0 * 4.0]])
+    v = jnp.zeros((2, 2, 3)).at[:, 0, 0].set(0.6 * speed_of_light).at[:, 1, 0].set(-0.6 * speed_of_light)
+    output = _minimal_diagnostic_output(electric_field=jnp.zeros((2, 4, 3)), masses=mass, velocities=v)
+    output.update(weights=jnp.array([[2.0], [4.0]]), solver_parameters={"relativistic": True})
+    diagnostics(output)
+    np.testing.assert_allclose(output["kinetic_energy"], [4 * speed_of_light ** 2] * 2, rtol=1e-12)
+    np.testing.assert_allclose(output["total_momentum"], [[-6 * speed_of_light, 0.0, 0.0]] * 2, rtol=1e-12)
+    np.testing.assert_allclose(sum(sp["kinetic_energy"] for sp in output["species"]), output["kinetic_energy"], rtol=1e-12)
+    np.testing.assert_array_equal(output["momentum_error_rel"], 0.0)
+
+
+def test_relativistic_kinetic_energy_has_a_stable_low_speed_limit():
+    v = jnp.full((2, 2, 3), 1e-8 * speed_of_light)
+    output = _minimal_diagnostic_output(electric_field=jnp.zeros((2, 4, 3)), velocities=v)
+    output["solver_parameters"] = {"relativistic": True}
+    diagnostics(output)
+    np.testing.assert_allclose(output["kinetic_energy"], 4.5 * (1e-8 * speed_of_light) ** 2, rtol=1e-12)

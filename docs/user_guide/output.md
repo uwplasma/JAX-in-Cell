@@ -64,17 +64,23 @@ Species split
 : `position_electrons`, `velocity_electrons`, `mass_electrons`, `charge_electrons`
   (all particles with negative charge) and the same four keys with `_ions` (non-negative
   charge, which includes absorbed particles whose charge was set to zero). `species` is
-  a list of dictionaries, one per distinct (charge, mass) pair, with `name`, `charge`,
-  `mass`, `positions` and `velocities`. The combined `positions`, `velocities`, `masses`
-  and `charges` arrays are deleted afterwards; if you need them, copy them first or do
-  not call `diagnostics`.
+  a list of dictionaries, one per configured population, using `species_integer_index`
+  and the input labels even when populations have identical charge and mass. Its `name`
+  is `electrons.<label>` or `ions.<label>`; `charge` and `mass` are physical particle
+  values. It also carries `positions`, `velocities`, `weights`, `kinetic_energy`,
+  `temperature_components` (shape `(S, 3)`, K) and their mean `temperature` (shape
+  `(S,)`, K). These Newtonian velocity-variance moments subtract the weight-averaged
+  bulk velocity; they do not define a relativistic thermodynamic temperature. Dictionaries
+  without population IDs retain the legacy exact (charge, mass) grouping.
+  The original arrays remain available, and `diagnostics` can be called repeatedly.
 
 Energies, all as functions of time with shape `(S,)`
 : `electric_field_energy` $= \tfrac{\epsilon_0}{2}\sum_i |\mathbf E_i|^2 \Delta x$,
   `magnetic_field_energy` $= \tfrac{1}{2\mu_0}\sum_i |\mathbf B_i|^2 \Delta x$,
   the corresponding `external_*_energy` for the external arrays,
   `kinetic_energy_electrons`, `kinetic_energy_ions` and their sum `kinetic_energy`,
-  computed as $\sum_p \tfrac12 m_p |\mathbf v_p|^2$ (non-relativistic), and
+  computed as $\sum_p \tfrac12 m_p |\mathbf v_p|^2$ or
+  $\sum_p(\gamma_p-1)m_pc^2$ with the relativistic pusher, and
   `total_energy`, the sum of all of the above. The energy densities
   `electric_field_energy_density` and `magnetic_field_energy_density` have shape
   `(S, G)`. All energies are per unit area (J/m²) because the box is one-dimensional.
@@ -85,10 +91,25 @@ Dominant frequency
   resolution is $2\pi/(S\,\Delta t)$, which is coarse for short runs; for accurate
   frequencies fit the signal directly, as in the {doc}`../numerics/verification` page.
 
+Charge and momentum conservation
+: `gauss_error_Linf` is $\max_i|(E_{x,i} - E_{x,i-1})/\Delta x - \rho_i/\epsilon_0|$ at every
+  step, and `gauss_error_Linf_rel` the same divided by $\max_i|\rho_i/\epsilon_0|$ (added
+  when the output holds `charge_density`). `total_momentum`, shape `(S, 3)`, is
+  $\sum_p m_p\mathbf v_p$ or $\sum_p\gamma_p m_p\mathbf v_p$ for the relativistic
+  pusher. `momentum_error_rel` compares with the first stored row and divides by
+  that row's sum of particle momentum magnitudes. {func}`jaxincell.plot` draws both relative errors on
+  the energy panel, next to the relative energy error.
+
+Charges, masses and weights are supplied once rather than as time histories.
+They cannot recover past absorption or partial collection at walls; accurate
+historical wall energy and momentum balances need time-dependent weights and a ledger.
+
 The relative energy error $|\mathcal E(t) - \mathcal E(0)|/\mathcal E(0)$ built from
 `total_energy` is the standard check of a run. The explicit scheme is expected to
 drift by $10^{-3}$ to $10^{-2}$ over hundreds of plasma periods, the implicit scheme
-to stay at round-off.
+to stay at round-off. For the charge error it is the other way round: the explicit
+scheme keeps Gauss's law at round-off (with periodic boundaries), the implicit one
+does not, see {doc}`../numerics/implicit`.
 
 ## Memory
 

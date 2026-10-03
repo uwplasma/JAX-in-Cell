@@ -47,6 +47,8 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters=N
     domain_parameters["length_z"] = jnp.asarray(domain_parameters["length_z"], dtype=float)
 
     assert type(domain_parameters["total_steps"]) == int and domain_parameters["total_steps"] > 0, "Total number of time steps must be an integer."
+    assert type(domain_parameters["number_grid_points"]) == int and domain_parameters["number_grid_points"] >= 2, "Number of grid points must be an integer of at least two."
+    assert jnp.isfinite(domain_parameters["timestep_over_spatialstep_times_c"]) and domain_parameters["timestep_over_spatialstep_times_c"] > 0, "Time step ratio must be finite and positive."
     assert domain_parameters["length"] > 0, "Length of the simulation box must be positive."
     assert domain_parameters["length_y"] >= 0, "Length of the simulation box in y must be positive."
     assert domain_parameters["length_z"] >= 0, "Length of the simulation box in z must be positive."
@@ -54,6 +56,8 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters=N
     assert domain_parameters["particle_BC_right"] in [0, 1, 2], "Invalid particle boundary condition for right boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
     assert domain_parameters["field_BC_left"] in [0, 1, 2], "Invalid field boundary condition for left boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
     assert domain_parameters["field_BC_right"] in [0, 1, 2], "Invalid field boundary condition for right boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
+    for kind in ("particle", "field"):
+        assert (domain_parameters[f"{kind}_BC_left"] == 0) == (domain_parameters[f"{kind}_BC_right"] == 0), f"Periodic {kind} boundaries must be paired."
 
     return domain_parameters
 

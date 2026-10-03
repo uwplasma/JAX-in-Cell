@@ -15,12 +15,12 @@ Plasma oscillations
 
 Cell crossing
 : The charge-conserving current deposit sweeps six cells around each particle and
-  assumes that the particle moves by less than one cell per step,
-  $|v_x|\Delta t < \Delta x$. Faster particles deposit a truncated current and Gauss's
+  assumes that the particle moves by less than one cell per half step,
+  $|v_x|\Delta t < 2\Delta x$. Faster particles deposit a truncated current and Gauss's
   law is no longer preserved. Check the thermal tails: with $v_{th}/c = 0.05$ and
   $c\,\Delta t/\Delta x = 4.5$ the bulk moves $0.2$ cells per step but a drift of $0.2c$
-  brings it to $0.9$ cells, which is why the examples with drifts of this size are at
-  the limit.
+  brings it to $0.9$ cells, about half the limit, so the tails of the examples with
+  drifts of this size are the particles to watch.
 
 Light waves
 : The explicit field update is stable for $c\,\Delta t/\Delta x \le 1$. The constraint
@@ -42,7 +42,7 @@ Debye length
   $\Delta x \gtrsim 3\lambda_D$ with linear weighting {cite}`langdon1970`. The
   quadratic spline and the filter push the limit to larger cells, and the
   implicit scheme is not subject to it, but a resolved Debye length,
-  `grid_points_per_Debye_length` $\gtrsim 0.5$, is the safe choice. Coarser grids
+  `dx_over_Debye_length` $\gtrsim 0.5$, is the safe choice. Coarser grids
   heat the plasma until $\lambda_D$ grows to the cell size.
 
 Wavelength

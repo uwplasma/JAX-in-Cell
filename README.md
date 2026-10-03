@@ -1,6 +1,6 @@
 <p align="center">
-    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/JAX-in-Cell_logo.png#gh-light-mode-only" width="460" alt="JAX-in-Cell">
-    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/JAX-in-Cell_logo_dark.png#gh-dark-mode-only" width="460" alt="JAX-in-Cell">
+    <img src="docs/_static/JAX-in-Cell_logo.png#gh-light-mode-only" width="460" alt="JAX-in-Cell">
+    <img src="docs/_static/JAX-in-Cell_logo_dark.png#gh-dark-mode-only" width="460" alt="JAX-in-Cell">
 </p>
 
 <p align="center">
@@ -103,7 +103,7 @@ timing study. Each is described in the
 [documentation](https://jax-in-cell.readthedocs.io/en/latest/examples/index.html).
 
 <p align="center">
-    <img src="https://raw.githubusercontent.com/uwplasma/JAX-in-Cell/main/docs/_static/figures/two_stream.png" width="90%" alt="Two-stream instability: field energy, growth rate against drift speed, and phase space">
+    <img src="docs/_static/figures/two_stream.png" width="90%" alt="Two-stream instability: field energy, growth rate against drift speed, and phase space">
 </p>
 
 Bump-on-tail instability with periodic (left) and reflective (right) walls:
@@ -112,6 +112,55 @@ Bump-on-tail instability with periodic (left) and reflective (right) walls:
 <td><video src="https://github.com/user-attachments/assets/5f085f92-cb65-4765-b586-19e727bd2aab" controls width="100%"></video></td>
 <td><video src="https://github.com/user-attachments/assets/9f33bac8-319e-4aba-91fb-befc64bca70e" controls width="100%"></video></td>
 </tr></table>
+
+## Benchmarks
+
+Every figure below is drawn by a script in [`docs/scripts/`](docs/scripts) from the code on
+`main` (`python docs/scripts/make_all.py`); the numbers are in
+[`measurements.json`](docs/_static/figures/measurements.json). Theory is the kinetic
+dispersion relation of the same drifting Maxwellians
+([`dispersion.py`](docs/scripts/dispersion.py)); the
+[verification page](https://jax-in-cell.readthedocs.io/en/latest/numerics/verification.html)
+explains how each rate is fitted.
+
+### 1D1V: electrostatic
+
+<p align="center">
+    <img src="docs/_static/figures/explicit_implicit.png" width="90%" alt="Explicit and implicit schemes on Landau damping and the two-stream instability: field energy against linear theory, and relative energy error">
+</p>
+
+<p align="center">
+    <img src="docs/_static/figures/two_stream_scan.png" width="90%" alt="Two-stream drift scan: run time against particle number on CPU and GPU, and growth rate against drift speed against kinetic theory">
+</p>
+
+<p align="center">
+    <img src="docs/_static/figures/relativistic_two_stream.png" width="90%" alt="Relativistic two-stream instability with the relativistic and non-relativistic Boris pushers: field energy against the cold dispersion relations, relative change of the relativistic and Newtonian energies, and phase space">
+</p>
+
+<p align="center">
+    <img src="docs/_static/figures/bump_on_tail.png" width="70%" alt="Bump-on-tail instability: distribution function, growth of mode 7 against theory, and phase space">
+</p>
+
+| case | theory | simulation | script |
+|---|---|---|---|
+| Landau damping, $k\lambda_D = 0.50$, 300 000 quiet-start electrons | $\gamma = -0.154\,\omega_{pe}$, $\omega_r = 1.417\,\omega_{pe}$ | $\gamma = -0.144$ (explicit and implicit), $\omega_r = 1.404$ | [`fig_landau_damping.py`](docs/scripts/fig_landau_damping.py) |
+| Two-stream, `examples/input.toml`, 14 000 particles per species | $\gamma = 0.106\,\omega_{pe}$ | $\gamma = 0.112$; over a scan of 10 drifts, 7 % mean deviation at $N = 32\,000$ | [`fig_two_stream.py`](docs/scripts/fig_two_stream.py), [`fig_two_stream_scan.py`](docs/scripts/fig_two_stream_scan.py) |
+| Bump-on-tail, 3 % beam, mode 7 | $\gamma = 0.081$, $\omega_r = 0.990\,\omega_{pe}$ | $\gamma = 0.071$, $\omega_r = 0.986$ | [`fig_bump_on_tail.py`](docs/scripts/fig_bump_on_tail.py) |
+| Relativistic two-stream, $v_0 = \pm0.8c$ ($\gamma_0 = 1.67$), relativistic and non-relativistic Boris | cold $\gamma = 0.164\,\omega_{pe}$ (relativistic, mode 1), $0.352\,\omega_{pe}$ (non-relativistic, mode 2) | $\gamma = 0.165$ and $0.348$; $\sum(\gamma-1)mc^2$ + field conserved to $1\times10^{-2}$ by the relativistic pusher, off by 33 % with the non-relativistic one, which pushes 29 % of electrons past $c$ | [`fig_relativistic.py`](docs/scripts/fig_relativistic.py) |
+| Energy conservation, two-stream above | exact for Crank-Nicolson | relative error $6\times10^{-14}$ (implicit), $3\times10^{-3}$ (explicit) | [`fig_explicit_implicit.py`](docs/scripts/fig_explicit_implicit.py) |
+
+### 1D2V: electromagnetic
+
+<p align="center">
+    <img src="docs/_static/figures/weibel.png" width="70%" alt="Weibel instability: magnetic field, mode amplitudes and growth rate against the transverse dispersion relation">
+</p>
+
+| case | theory | simulation | script |
+|---|---|---|---|
+| Weibel, $T_z/T_x = 100$, one run per mode | transverse kinetic dispersion relation, $\gamma_{max} = 0.059\,\omega_{pe}$ | 5 of 10 modes fitted, 6 % mean and 9 % largest deviation | [`fig_weibel.py`](docs/scripts/fig_weibel.py) |
+
+The pusher always advances all three velocity components; no 1D3V case on `main` is
+yet compared with a reference.
 
 ## Documentation
 

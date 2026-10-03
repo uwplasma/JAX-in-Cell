@@ -4,10 +4,9 @@ with one-sided finite differences. Mirrors examples/auto-differentiability.py.""
 import time
 import numpy as np
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 from jax import block_until_ready, grad
 
-from common import (C_ELECTRONS, C_THEORY, C_IONS, EXAMPLES_DIR, WIDE, panel_label,
+from common import (C_ELECTRONS, C_THEORY, C_IONS, EXAMPLES_DIR, figure, panel_label,
                     quiet_parameters, record, savefig, silence_progress_bars)
 from jaxincell import Simulation, load_parameters
 
@@ -50,21 +49,21 @@ record(autodiff_gradient_jax=dfdv_jax, autodiff_best_finite_difference=float(fd[
 scan_v = np.linspace(0.8e8, 1.2e8, 9)
 scan_f = np.array([float(mean_electric_field(v)) for v in scan_v])
 
-fig, axes = plt.subplots(1, 2, figsize=WIDE, gridspec_kw={"wspace": 0.38})
+fig, axes = figure(2, 1, gridspec_kw={"wspace": 0.38})
 ax = axes[0]
-ax.plot(scan_v / 1e8, scan_f, "o-", ms=4, color=C_ELECTRONS, label=r"$\langle E_x\rangle(v_d)$")
+ax.plot(scan_v / 1e8, scan_f, "o-", color=C_ELECTRONS, label=r"$\langle E_x\rangle(v_d)$")
 tangent = float(f0) + dfdv_jax * (scan_v - v0)
 ax.plot(scan_v / 1e8, tangent, ls="--", color=C_THEORY, label="tangent from JAX gradient")
-ax.set_xlabel(r"electron drift speed $v_d$ (10$^8$ m/s)")
+ax.set_xlabel(r"drift speed $v_d$ (10$^8$ m/s)")
 ax.set_ylabel(r"$\langle E_x \rangle$ (V/m)")
-ax.legend(loc="best")
+ax.legend(loc="upper left")
 panel_label(ax, "(a)")
 
 ax = axes[1]
-ax.semilogx(epsilons, fd, "o-", ms=4, color=C_IONS, label="one-sided finite difference")
-ax.axhline(dfdv_jax, ls="--", color=C_THEORY, label="JAX reverse-mode gradient")
+ax.semilogx(epsilons, 1e5 * fd, "o-", color=C_IONS, label="finite difference")
+ax.axhline(1e5 * dfdv_jax, ls="--", color=C_THEORY, label="JAX gradient")
 ax.set_xlabel(r"finite-difference step $\epsilon$ (m/s)")
-ax.set_ylabel(r"$d\langle E_x\rangle / d v_d$  (V s / m$^2$)")
-ax.legend(loc="best")
+ax.set_ylabel(r"$d\langle E_x\rangle / d v_d$  (10$^{-5}$ V s / m$^2$)")
+ax.legend(loc="lower left")
 panel_label(ax, "(b)")
 savefig(fig, "autodiff")

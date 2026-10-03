@@ -9,7 +9,10 @@
 
 # tests/test_algorithms.py
 
+from functools import partial
+
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 import jaxincell._algorithms as algorithms
@@ -20,6 +23,57 @@ from jaxincell._parameters._external_field_parameters import clean_and_initializ
 from jaxincell._parameters._solver_parameters import clean_and_initialize_solver_parameters
 from jaxincell._parameters._species_parameters import clean_and_initialize_species_parameters
 from jaxincell._state_initialization import build_domain_state, initialize_field_state, initialize_particle_state
+from jaxincell._constants import epsilon_0, speed_of_light
+from jaxincell._particles import boris_step
+
+
+@pytest.mark.parametrize("axis", [0, 1, 2])
+def test_cn_uniform_current_matches_midpoint_plasma_response(axis):
+    g, dx, dt = 16, 1 / 16, 0.01
+    grid = jnp.arange(g) * dx - 0.5 + dx / 2
+    x = jnp.stack([grid, jnp.zeros(g), jnp.zeros(g)], axis=1)
+    x = jnp.concatenate([x, x])
+    q = jnp.concatenate([jnp.ones((g, 1)), -jnp.ones((g, 1))]) * epsilon_0
+    m = jnp.ones_like(q) * epsilon_0
+    E = jnp.zeros((g, 3)).at[:, axis].set(1.)
+    solver = {"tolerance_Picard_iterations_implicit_CN": 1e-12, "max_number_of_Picard_iterations_implicit_CN": 100}
+    state, _ = CN_step((E, jnp.zeros_like(E), x, jnp.zeros_like(x), q, m, q / m),
+                       0, solver, dx, dt, grid, (1., 1., 1.), 0, 0, 0, 0, 2)
+    factor = (1 - 2 * g * dt**2 / 4) / (1 + 2 * g * dt**2 / 4)
+    np.testing.assert_allclose(state[0][:, axis], factor, rtol=1e-12)
+    energy = epsilon_0 / 2 * dx * jnp.sum(state[0]**2) + 0.5 * jnp.sum(m * jnp.sum(state[3]**2, axis=1, keepdims=True))
+    assert float(energy / (epsilon_0 / 2)) == pytest.approx(1., rel=1e-12)
+
+
+def test_cn_negative_update_does_not_terminate_at_a_zero_signed_maximum():
+    g, dx = 16, 1 / 16
+    grid = jnp.arange(g) * dx - 0.5 + dx / 2
+    E = jnp.zeros((g, 3))
+    B = E.at[:, 2].set(jnp.arange(g) * 1e-9)
+    x = jnp.zeros((1, 3)); q = jnp.zeros((1, 1))
+    carry = (E, B, x, x, q, jnp.ones_like(q), q)
+    solver = {"tolerance_Picard_iterations_implicit_CN": 1e-10, "max_number_of_Picard_iterations_implicit_CN": 1}
+    first, _ = CN_step(carry, 0, solver, dx, 0.5 * dx / speed_of_light, grid, (1., 1., 1.), 0, 0, 1, 1, 2)
+    solver["max_number_of_Picard_iterations_implicit_CN"] = 100
+    converged, _ = CN_step(carry, 0, solver, dx, 0.5 * dx / speed_of_light, grid, (1., 1., 1.), 0, 0, 1, 1, 2)
+    assert float(jnp.max(jnp.abs(first[0] - converged[0])) / jnp.max(jnp.abs(converged[0]))) > 0.05
+
+
+def test_cn_magnetic_gather_uses_charge_grid_centres(monkeypatch):
+    monkeypatch.setattr(algorithms, "curlE", lambda E, B, *args: jnp.zeros_like(B))
+    monkeypatch.setattr(algorithms, "curlB", lambda B, E, *args: jnp.zeros_like(E))
+    g, dx, dt = 16, 1 / 16, 0.1
+    grid = jnp.arange(g) * dx - 0.5 + dx / 2
+    E = jnp.zeros((g, 3)); B = E.at[:, 2].set(jnp.sin(2 * jnp.pi * grid))
+    x = jnp.array([[0.1, 0., 0.]]); v = jnp.array([[1., 0., 0.]])
+    q = jnp.zeros((1, 1)); qm = jnp.ones_like(q)
+    solver = {"tolerance_Picard_iterations_implicit_CN": 1e-12, "max_number_of_Picard_iterations_implicit_CN": 1}
+    state, _ = CN_step((E, B, x, v, q, qm, qm), 0, solver, dx, dt, grid, (1., 1., 1.), 0, 0, 0, 0, 1)
+    # Independent quadratic interpolation at x=.1 on the charge-centred sine grid.
+    d = (0.1 - float(grid[9])) / dx
+    gathered = 0.5 * (0.5 - d)**2 * B[8] + (0.75 - d**2) * B[9] + 0.5 * (0.5 + d)**2 * B[10]
+    _, expected = boris_step(dt, x, v, qm, jnp.zeros_like(x), gathered[None, :])
+    np.testing.assert_allclose(state[3], expected, rtol=1e-13, atol=1e-15)
 
 
 def _small_parameters_for_algorithms():
@@ -33,7 +87,7 @@ def _small_parameters_for_algorithms():
 
     base_species = {
         "number_pseudoparticles": number_pseudoparticles,
-        "grid_points_per_Debye_length": 1.0,
+        "dx_over_Debye_length": 1.0,
         "weight": 1.0,
         "perturbation_amplitude_x": 0.0,
         "perturbation_amplitude_y": 0.0,
@@ -591,7 +645,8 @@ def test_boris_step_field_solver_switcher_variants():
         )
         solver_function = {
             1: algorithms.E_from_Gauss_1D_FFT,
-            2: algorithms.E_from_Gauss_1D_Cartesian,
+            2: partial(algorithms.E_from_Gauss_1D_Cartesian,
+                       periodic=params["field_BC_left"] == 0 and params["field_BC_right"] == 0),
             3: algorithms.E_from_Poisson_1D_FFT,
         }[field_solver]
         assert jnp.allclose(carry1[0][:, 0], solver_function(charge_density, params["dx"]))
