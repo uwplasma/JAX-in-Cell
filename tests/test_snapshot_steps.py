@@ -150,7 +150,7 @@ def test_snapshot_steps_preserves_gradients():
     np.testing.assert_allclose(snapshot_gradient, full_gradient, rtol=1e-10, atol=0)
 
 
-@pytest.mark.parametrize("feature", ["collisions", "tensor", "mixed"])
+@pytest.mark.parametrize("feature", ["collisions", "tensor", "mixed", "absorbing"])
 @pytest.mark.parametrize("schedule", [[0], []])
 def test_sparse_histories_preserve_new_features_and_final_state(feature, schedule):
     parameters = small_simulation_parameters(total_steps=3, number_grid_points=6, number_pseudoparticles=4)
@@ -168,15 +168,19 @@ def test_sparse_histories_preserve_new_features_and_final_state(feature, schedul
             for species in population.values():
                 species.update(initial_positions=jnp.zeros((4, 3)).at[:, 0].set(length/2-dt*speed/4),
                                initial_velocities=jnp.zeros((4, 3)).at[:, 0].set(speed))
-        parameters["domain_parameters"].update(particle_BC_left=3, particle_BC_right=3,
+        parameters["domain_parameters"].update(particle_BC_left=2 if feature == "absorbing" else 3,
+                                                 particle_BC_right=2 if feature == "absorbing" else 3,
                                                  field_BC_left=1, field_BC_right=1,
                                                  mixed_BC_weight=.3, COR_left=.5, COR_right=.5)
         parameters["solver_parameters"]["field_solver"] = 2
     full = Simulation(deepcopy(parameters)).run()
+    if feature == "absorbing":
+        np.testing.assert_array_equal(full["masses_over_time"], 0.)
+        np.testing.assert_array_equal(full["final_state"]["masses"], 0.)
     parameters["solver_parameters"]["snapshot_steps"] = schedule
     sparse = Simulation(parameters).run()
     for key in ("positions", "velocities", "electric_field", "magnetic_field", "mus",
-                *(("masses_over_time", "charges_over_time") if feature == "mixed" else ())):
+                *(("masses_over_time", "charges_over_time") if feature in ("mixed", "absorbing") else ())):
         np.testing.assert_array_equal(sparse[key], np.asarray(full[key])[schedule])
     for key in full["final_state"]:
         np.testing.assert_array_equal(sparse["final_state"][key], full["final_state"][key])
