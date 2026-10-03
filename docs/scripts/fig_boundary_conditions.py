@@ -17,12 +17,12 @@ def parameters_for(bc):
                               "field_BC_left": bc, "field_BC_right": bc},
         "species_parameters": {
             "electrons": {"electrons0": {
-                "number_pseudoparticles": 20000, "grid_points_per_Debye_length": 1.0,
+                "number_pseudoparticles": 20000, "dx_over_Debye_length": 1.0,
                 "perturbation_amplitude_x": 0.0, "perturbation_wavenumber_x": 0,
                 "random_positions_x": True, "vth_over_c_x": 0.005, "drift_speed_x": 0.05 * speed_of_light,
                 "velocity_plus_minus_x": False}},
             "ions": {"ions0": {
-                "number_pseudoparticles": 20000, "grid_points_per_Debye_length": 1.0,
+                "number_pseudoparticles": 20000, "dx_over_Debye_length": 1.0,
                 "random_positions_x": True, "mass_over_proton_mass": 1.0,
                 "vth_over_c_x": "_electrons0", "vth_over_c_y": "_electrons0", "vth_over_c_z": "_electrons0",
                 "ion_temperature_over_electron_temperature_x": 1.0,

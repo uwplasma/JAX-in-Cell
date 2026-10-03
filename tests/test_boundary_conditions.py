@@ -6,6 +6,30 @@ from jaxincell._boundary_conditions import (
 from jaxincell._constants import speed_of_light
 import jax.numpy as jnp
 
+
+@pytest.mark.parametrize("vx", [-4.3, -2.6, -1.6, -.6, .6, 1.6, 2.6, 4.3, -2.5, 2.5])
+def test_elastic_walls_match_independent_free_flight_impacts(vx):
+    # Follow actual impact times, without using a folding/parity formula.
+    position, velocity, remaining = 0., vx, 1.
+    while remaining > 0:
+        wall = .5 if velocity > 0 else -.5
+        travel_time = (wall - position) / velocity
+        if travel_time >= remaining:
+            position += velocity * remaining
+            break
+        position, velocity, remaining = wall, -velocity, remaining - travel_time
+
+    x, v = jnp.array([vx, 0., 0.]), jnp.array([vx, .2, -.3])
+    grid = jnp.linspace(-.45, .45, 10)
+    mapped, reflected, charge, qm = set_BC_single_particle(x, v, 1., 2., .1, grid, 1., 1., 1., 1, 1)
+    positions_only = set_BC_single_particle_positions(x, .1, grid, 1., 1., 1., 1, 1)
+    assert float(mapped[0]) == pytest.approx(position, abs=2e-15)
+    assert float(positions_only[0]) == pytest.approx(position, abs=2e-15)
+    assert float(reflected[0]) == velocity
+    assert jnp.array_equal(reflected[1:], v[1:])
+    assert jnp.sum(reflected**2) == jnp.sum(v**2)
+    assert charge == 1. and qm == 2.
+
 def test_set_BC_single_particle_periodic():
     x_n = jnp.array([0.1, 0.5, 0.8])
     v_n = jnp.array([1.0, 1.0, 1.0])

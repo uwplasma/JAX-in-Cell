@@ -26,7 +26,7 @@ densities and fields:
 | input | definition |
 |---|---|
 | `vth_over_c_*` | $v_{th}/c$ with $v_{th} = \sqrt{2 k_B T/m}$ |
-| `grid_points_per_Debye_length` | $\Delta x/\lambda_D$ |
+| `dx_over_Debye_length` | $\Delta x/\lambda_D$ |
 | `timestep_over_spatialstep_times_c` | $c\,\Delta t/\Delta x$ |
 | `perturbation_wavenumber_*` | mode number $m$, $k = 2\pi m/L$ |
 | `charge_over_elementary_charge`, `mass_over_proton_mass` | $q/e$, $m/m_p$ |
@@ -61,7 +61,7 @@ To simulate a plasma with density $n$ and temperature $T$:
 
 1. compute $v_{th} = \sqrt{2 k_B T/m_e}$ and set `vth_over_c_x = v_th / c`;
 2. compute $\lambda_D$ and choose the cell size, for example $\Delta x = \lambda_D/2$,
-   which gives `grid_points_per_Debye_length = 2`;
+   which gives `dx_over_Debye_length = 0.5`;
 3. choose the box in Debye lengths and set `length = L` in metres and
    `number_grid_points = L / dx`;
 4. choose the time step from $\omega_{pe}\Delta t$ and set

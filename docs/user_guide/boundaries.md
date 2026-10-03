@@ -23,6 +23,10 @@ Reflective (`1`)
 : The position is mirrored back into the box, $x \to -L - x$ at the left wall and
   $x \to L - x$ at the right wall, and $v_x$ changes sign. The other velocity components
   are unchanged. Charge deposited beyond the wall is folded back onto the boundary cell.
+  With two reflective walls, the position and velocity map accounts for repeated
+  elastic reflections. This does not relax the current-deposition displacement limit.
+  With different wall types, choose a step short enough that one push cannot reach
+  the opposite wall after reflecting.
 
 Absorbing (`2`)
 : The particle is removed from the dynamics: its charge and charge-to-mass ratio are set
@@ -62,7 +66,8 @@ The ghost-cell formulas are written out in {doc}`../numerics/boundaries`.
   animation of the bump-on-tail instability with walls uses.
 * Absorbing particles with absorbing fields lets a plasma leave the box.
 
-Mixed choices run but are rarely physical. Two limitations to keep in mind:
+Periodic boundaries must be paired on both sides for each kind. Different
+nonperiodic choices run but are rarely physical. Two limitations to keep in mind:
 
 * The implicit scheme deposits current and interpolates fields with periodic wrapping
   regardless of the `field_BC_*` values; particle conditions are still applied. Use it

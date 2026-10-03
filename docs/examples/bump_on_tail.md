@@ -22,7 +22,7 @@ $\gamma = $ {{ bump_on_tail_gamma_theory }} $\,\omega_{pe}$, close to the values
 header of the input file. As the waves grow they flatten the bump into a plateau,
 which is the quasilinear saturation of the instability.
 
-Density ratios between populations are set through `grid_points_per_Debye_length`,
+Density ratios between populations are set through `dx_over_Debye_length`,
 as explained in {doc}`../user_guide/species`: the beam uses
 $\sqrt{0.03}$ times the value of the bulk. The beam and its neutralising ions share a
 position seed so that they start charge neutral cell by cell. The filter is switched
