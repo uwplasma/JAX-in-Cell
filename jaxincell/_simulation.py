@@ -434,11 +434,21 @@ class Simulation:
             This should be called whenever parameters are updated after initialization to
             ensure that the simulation state is consistent with the new parameters.
         """
+        if self._solver_parameters["time_evolution_algorithm"] == 1:
+            if self._solver_parameters["relativistic"] or any(
+                self._domain_parameters[key] != 0
+                for key in ("particle_BC_left", "particle_BC_right", "field_BC_left", "field_BC_right")
+            ):
+                raise ValueError("Implicit CN supports Newtonian particles with periodic particle and field boundaries only.")
         self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
         self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
         self.build_domain()
         self.initialize_particles()
         self.initialize_fields()
+        if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
+            bool(jnp.any(field != 0)) for field in (self.external_electric_field, self.external_magnetic_field)
+        ):
+            raise ValueError("Implicit CN does not apply prescribed grid fields; use the explicit solver.")
         self.build_hash_values()
 
     def clean_runtime_input_parameters(self, input_parameters=None):
