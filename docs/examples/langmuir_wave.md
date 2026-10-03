@@ -1,7 +1,7 @@
 # Langmuir wave
 
 `examples/Langmuir_wave.py` sets up a cold electron oscillation: $k\lambda_D$ is small
-(`grid_points_per_Debye_length = 3` with 33 cells gives $k\lambda_D \approx 0.06$),
+(`dx_over_Debye_length = 3` with 33 cells gives $k\lambda_D \approx 0.06$),
 so Landau damping is negligible and the wave oscillates at very nearly the plasma
 frequency, $\omega^2 = \omega_{pe}^2(1 + 3k^2\lambda_D^2)$.
 

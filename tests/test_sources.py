@@ -8,10 +8,12 @@
 """
 
 import pytest
+import numpy as np
 import jax.numpy as jnp
 from numpy.testing import assert_allclose
 
 from jaxincell._filters import filter_scalar_field, filter_vector_field
+from jaxincell._boundary_conditions import set_BC_single_particle_positions
 from jaxincell._sources import (
     calculate_charge_density,
     charge_density_BCs,
@@ -369,3 +371,47 @@ def test_current_density_periodic_CN_accumulates_wrapped_particles():
     expected = expected.at[0].add(0.75 * (first + second))
     expected = expected.at[1].add(0.125 * (first + second))
     assert_allclose(wrapped_particles, expected)
+
+
+@pytest.mark.parametrize("grid_size", [9, 20, 35, 70, 100])
+@pytest.mark.parametrize("boundary", [0, 1])
+def test_exact_wall_charge_is_conserved_with_endpoint_rounding(grid_size, boundary):
+    dx = 1. / grid_size
+    grid = jnp.linspace(-.5 + dx / 2, .5 - dx / 2, grid_size)
+    for x in [-.5, np.nextafter(-.5, np.inf), np.nextafter(.5, -np.inf), .5]:
+        rho = calculate_charge_density(jnp.array([[x]]), jnp.array([[1.]]), dx, grid,
+                                       boundary, boundary, filter_passes=0)
+        assert_allclose(jnp.sum(rho) * dx, 1., rtol=0, atol=2e-14)
+        if x in [-.5, .5]:
+            expected = jnp.zeros(grid_size)
+            if boundary == 0:
+                expected = expected.at[0].set(.5).at[-1].set(.5)
+            else:
+                expected = expected.at[0 if x < 0 else -1].set(1.)
+            assert_allclose(rho * dx, expected, rtol=0, atol=2e-14)
+
+
+@pytest.mark.parametrize("grid_size", [9, 20, 35, 100])
+def test_periodic_current_preserves_continuity_at_exact_wall(grid_size):
+    dx = 1. / grid_size
+    grid = jnp.linspace(-.5 + dx / 2, .5 - dx / 2, grid_size)
+    dt = .1
+    start, end = jnp.array([[-.5 + .1 * dx]]), jnp.array([[-.5]])
+    q = jnp.array([[1.]])
+    current = current_density(start, start, end, jnp.array([[-.1 * dx / dt, 0., 0.]]),
+                              q, dx, dt, grid, grid[0] - dx / 2, 0, 0, filter_passes=0)
+    rho_start = calculate_charge_density(start, q, dx, grid, 0, 0, filter_passes=0)
+    rho_end = calculate_charge_density(end, q, dx, grid, 0, 0, filter_passes=0)
+    residual = rho_end - rho_start + dt * (current[:, 0] - jnp.roll(current[:, 0], 1)) / dx
+    assert_allclose(residual * dx, 0., rtol=0, atol=2e-14)
+
+
+@pytest.mark.parametrize("grid_size", [9, 20, 35, 100])
+def test_periodic_one_ulp_outside_is_wrapped_before_charge_deposit(grid_size):
+    dx = 1. / grid_size
+    grid = jnp.linspace(-.5 + dx / 2, .5 - dx / 2, grid_size)
+    for x in [np.nextafter(-.5, -np.inf), np.nextafter(.5, np.inf)]:
+        mapped = set_BC_single_particle_positions(jnp.array([x, 0., 0.]), dx, grid, 1., 1., 1., 0, 0)
+        rho = calculate_charge_density(mapped[None, :], jnp.array([[1.]]), dx, grid, 0, 0, filter_passes=0)
+        assert -.5 <= mapped[0] <= .5
+        assert_allclose(jnp.sum(rho) * dx, 1., rtol=0, atol=2e-14)

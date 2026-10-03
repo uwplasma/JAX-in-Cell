@@ -15,16 +15,18 @@ def fields_to_particles_grid(x_n, internal_field, external_field, dxyz, gridxyz,
     particle's position in the grid.
 
     Args:
-        x_n (array): The position of particles at time step n, shape (N,).
-        field (array): The field values at each grid point, shape (G,).
-        dx (float): The spatial grid spacing.
-        grid (array): The grid positions where the field is defined, shape (G,).
-        grid_start (float): The starting position of the grid (usually the left boundary).
-        field_BC_left  (int): Boundary condition for the left side of the particle grid.
-        field_BC_right (int): Boundary condition for the right side of the particle grid.
+        x_n (array): One particle position, shape (3,).
+        internal_field (array): Self-consistent 1D samples, shape (Nx, 3).
+        external_field (array): Prescribed tensor samples with two left and one
+            right periodic ghost per enabled axis.
+        dxyz (dict): Spacing for each enabled axis.
+        gridxyz (dict): Cell-centre coordinates for each enabled axis.
+        grid_offset (float): X staggering in cells: 0.5 for E, 0 for B.
+        dimensions (tuple): Enabled axis names, starting with x.
+        field_BC_left, field_BC_right (int): X conditions for the internal field.
 
     Returns:
-        array: The interpolated field values at the particle positions, shape (N,).
+        tuple: Total and prescribed contributions, each a three-component vector.
     """
     position = {'x': x_n[0], 'y': x_n[1], 'z': x_n[2]}
     ijk = {}
@@ -41,7 +43,7 @@ def fields_to_particles_grid(x_n, internal_field, external_field, dxyz, gridxyz,
         grid_dim = jnp.insert(grid_dim, 0, grid_dim[0]-d_dim, axis=0)
         interpolation_gridxyz[dim] = grid_dim
 
-        i = ((position_dim-grid_start_dim+d_dim)//d_dim).astype(int)
+        i = jnp.floor((position_dim-grid_start_dim+d_dim)/d_dim).astype(int)
         ijk[dim] = i
 
     # Add ghost cells for the boundaries using provided boundary conditions

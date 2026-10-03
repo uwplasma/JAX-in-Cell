@@ -99,3 +99,27 @@ def test_optional_transverse_cells_none_selects_one_dimensional_geometry():
     parameters = clean_and_initialize_domain_parameters({"number_grid_points_y": None,
                                                          "number_grid_points_z": None})
     assert parameters["number_grid_points_y"] == parameters["number_grid_points_z"] == 0
+
+
+@pytest.mark.parametrize("kind", ["particle", "field"])
+@pytest.mark.parametrize("left,right", [(0, 1), (0, 2), (1, 0), (2, 0)])
+def test_periodic_boundaries_require_a_partner(kind, left, right):
+    with pytest.raises(AssertionError, match=f"Periodic {kind} boundaries must be paired"):
+        clean_and_initialize_domain_parameters({f"{kind}_BC_left": left, f"{kind}_BC_right": right})
+
+
+def test_nonperiodic_wall_types_can_differ_between_sides():
+    clean_and_initialize_domain_parameters({"particle_BC_left": 1, "particle_BC_right": 2,
+                                          "field_BC_left": 2, "field_BC_right": 1})
+
+
+@pytest.mark.parametrize("grid_points", [0, 1, -2, 2.5, True])
+def test_grid_requires_two_integer_cells(grid_points):
+    with pytest.raises(AssertionError, match="grid points must be an integer of at least two"):
+        clean_and_initialize_domain_parameters({"number_grid_points": grid_points})
+
+
+@pytest.mark.parametrize("ratio", [0., -1., float("nan"), float("inf")])
+def test_time_step_ratio_must_be_finite_and_positive(ratio):
+    with pytest.raises(AssertionError, match="Time step ratio must be finite and positive"):
+        clean_and_initialize_domain_parameters({"timestep_over_spatialstep_times_c": ratio})

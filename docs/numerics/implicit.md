@@ -11,7 +11,8 @@ conserved to round-off once the iteration has converged, independently of the ti
 step.
 
 The implemented CN path supports Newtonian particles and periodic particle/field
-boundaries. Other combinations are rejected; use the explicit path for wall studies.
+boundaries without prescribed grid fields. Unsupported combinations are rejected;
+use the explicit path for wall and external-field studies.
 Its orbit current does not satisfy discrete charge continuity. Energy conservation
 does not establish Gauss's law or orbit accuracy.
 

@@ -72,6 +72,7 @@ sim.domain_parameters = {**sim.domain_parameters, "total_steps": 2000}
 The assignment takes the complete new section (missing keys revert to defaults), so
 copy the existing one when only one key should change. Assigning to
 `sim.input_parameters` re-routes a new set of differentiable inputs.
+Section getters return copies; assign the edited dictionary back to apply a change.
 
 ## When does JAX recompile?
 

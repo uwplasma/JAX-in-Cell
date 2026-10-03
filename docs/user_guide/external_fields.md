@@ -64,6 +64,8 @@ Their default zero disables that direction; `length_y` and `length_z` default to
 locations, magnetic fields their x-centre locations; both use centres in y and z.
 These directions are periodic. Only prescribed fields gain transverse variation;
 the self-consistent Maxwell solve remains one dimensional.
+Prescribed samples use periodic continuation for interpolation, including their x
+ghost values; the self-consistent fields retain their selected wall conditions.
 
 The Boris pusher supports these fields. CN rejects nonzero prescribed fields
 because its current implementation does not include them. Prescribed fields can

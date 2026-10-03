@@ -50,7 +50,8 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters=N
             domain_parameters[grid_points_key] = 0
 
     assert type(domain_parameters["total_steps"]) == int and domain_parameters["total_steps"] > 0, "Total number of time steps must be an integer."
-    assert type(domain_parameters["number_grid_points"]) == int and domain_parameters["number_grid_points"] > 0, "Number of grid points must be a positive integer."
+    assert type(domain_parameters["number_grid_points"]) == int and domain_parameters["number_grid_points"] >= 2, "Number of grid points must be an integer of at least two."
+    assert jnp.isfinite(domain_parameters["timestep_over_spatialstep_times_c"]) and domain_parameters["timestep_over_spatialstep_times_c"] > 0, "Time step ratio must be finite and positive."
     assert type(domain_parameters["number_grid_points_y"]) == int and domain_parameters["number_grid_points_y"] >= 0, "Number of grid points in y must be a nonnegative integer."
     assert type(domain_parameters["number_grid_points_z"]) == int and domain_parameters["number_grid_points_z"] >= 0, "Number of grid points in z must be a nonnegative integer."
     assert domain_parameters["length"] > 0, "Length of the simulation box must be positive."
@@ -60,6 +61,8 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters=N
     assert domain_parameters["particle_BC_right"] in [0, 1, 2], "Invalid particle boundary condition for right boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
     assert domain_parameters["field_BC_left"] in [0, 1, 2], "Invalid field boundary condition for left boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
     assert domain_parameters["field_BC_right"] in [0, 1, 2], "Invalid field boundary condition for right boundary. Must be 0 (periodic), 1 (reflecting), or 2 (absorbing)."
+    for kind in ("particle", "field"):
+        assert (domain_parameters[f"{kind}_BC_left"] == 0) == (domain_parameters[f"{kind}_BC_right"] == 0), f"Periodic {kind} boundaries must be paired."
 
     return domain_parameters
 
