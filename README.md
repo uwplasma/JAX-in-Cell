@@ -193,6 +193,8 @@ temperature-difference decay rate is `gamma = 4 nu_inter / 3`; a fitted exponent
 is descriptive and requires time-step, sampling and Maxwellian checks before it can
 validate a rate. Temperature component diagnostics are in kelvin with physical
 weights; no manual division by pseudo-particle weight is needed.
+The [collision tutorial](docs/examples/collisions.md) explains both controls and their
+conservation, sampling and timestep limits.
 
 ## Documentation
 
