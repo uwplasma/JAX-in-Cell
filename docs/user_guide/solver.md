@@ -26,12 +26,13 @@ per step. Its total energy drifts slowly, typically by $10^{-3}$ relative over a
 hundred plasma periods in the examples.
 
 The implicit scheme (`1`) solves the field and particle equations together with a
-time-centred discretisation and conserves total energy to round-off. It has no
-light-wave Courant limit, so it is the natural choice for large time steps in
-electromagnetic problems. Each step costs up to
+time-centred discretisation. Energy accuracy depends on convergence of both
+particle and field iterations. Its finite field iteration is not an exact curl
+solve, so a large light-wave Courant number still requires convergence checks. Each step costs up to
 `max_number_of_Picard_iterations_implicit_CN` particle pushes times the number of
 sub-steps. Its deposition and interpolation are written for periodic boundaries only,
-and it ignores the digital filter and the `relativistic` switch. Details in
+and it rejects nonperiodic particle/field boundaries and the relativistic pusher.
+The digital filter is not used. Details in
 {doc}`../numerics/implicit`.
 
 ## Choosing the field solver
@@ -77,7 +78,8 @@ values (reflective) or zeros outside the box (absorbing).
 The Picard iteration stops when
 $\max|\mathbf E^{(k+1)} - \mathbf E^{(k)}| / \max|\mathbf E^{(k+1)}|$ falls below the
 tolerance or when the iteration cap is reached; there is no warning in the second
-case. With the default tolerance the examples converge in a handful of iterations.
+case. Check convergence by increasing the cap and tightening the tolerance; small
+changes in E alone do not prove convergence of every particle variable.
 Particle sub-stepping divides each field step into `number_of_particle_substeps_implicit_CN`
 pushes with the time-centred fields, which keeps the particle orbits accurate when the
 field time step is large.
