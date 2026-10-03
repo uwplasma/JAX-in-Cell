@@ -77,12 +77,13 @@ momentum components; and source field work. This remains available with no snaps
 
 | key | meaning |
 |---|---|
-| `grid` | cell centres, shape `(G,)` |
+| `grid` | self-consistent x-grid cell centres, shape `(G,)` |
+| `grid_xyz`, `dxyz`, `dimensions` | prescribed-field grids, spacings and enabled axes; the self-consistent solve remains 1D |
 | `dx`, `dt`, `length`, `box_size` | cell size, time step, $L$, $(L, L_y, L_z)$ |
 | `plasma_frequency` | $\omega_{pe} = \sqrt{n_e e^2/(\epsilon_0 m_e)}$ of the first electron population, rad/s |
 | `max_initial_vth_electrons`, `vth_electrons_over_c` | largest thermal speed of the first electron population, in m/s and in units of $c$ |
 | `charge_electrons` | charge of one physical electron of the first population, C |
-| `external_electric_field`, `external_magnetic_field` | the arrays that were added to the fields, `(G, 3)` |
+| `external_electric_field`, `external_magnetic_field` | prescribed arrays, `(*grid_shape, 3)`, with axes ordered by `dimensions` |
 | `number_grid_points`, `total_steps` | copies of the inputs |
 
 Every key of every parameter section is also copied to the top level (for example
