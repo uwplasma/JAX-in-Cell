@@ -69,3 +69,14 @@ Mixed choices run but are rarely physical. Two limitations to keep in mind:
   with periodic boundaries.
 * With `field_solver = 1` the FFT solution of Gauss's law assumes periodicity in $x$
   even when the walls are reflective or absorbing.
+
+
+Both particle boundary APIs use the same endpoint map. The full-state API also
+reflects normal velocity or clears charge and velocity on absorption; the
+position-only API changes positions. Charge does not determine whether a marker
+hits a wall. Two elastic walls support repeated crossings; exact endpoints retain
+the incoming velocity until a subsequent drift crosses the wall.
+
+The field codes describe the implemented ghost arrays. Reflective ghosts are
+not a general PEC/PMC model, and radiation ghosts require a resolution check
+for the wave and incidence being studied.

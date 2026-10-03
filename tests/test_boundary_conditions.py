@@ -460,3 +460,36 @@ def test_field_2_ghost_cells():
 
 if __name__ == "__main__":
     pytest.main()
+
+@pytest.mark.parametrize("left,right", [(0, 0), (1, 1), (2, 2), (1, 2), (2, 1)])
+@pytest.mark.parametrize("x", [-25.1, -15., -5.1, -5., 0., 5., 5.1, 15., 25.1])
+def test_shared_endpoint_map(left, right, x):
+    """Both APIs agree at walls and after multiple elastic flights."""
+    point, velocity = jnp.array([x, 6., -6.]), jnp.array([2., 3., 4.])
+    grid = jnp.linspace(-4.95, 4.95, 100)
+    full = set_BC_single_particle(point, velocity, 0., 0., .1, grid, 10., 10., 10., left, right)
+    position = set_BC_single_particle_positions(point, .1, grid, 10., 10., 10., left, right)
+    assert jnp.array_equal(full[0], position)
+    assert jnp.array_equal(position[1:], jnp.array([-4., 4.]))
+    if left == right == 1:
+        # Advance an independent billiard trajectory from the centre by |x|.
+        distance, expected_x, expected_v = abs(x), 0., 2.
+        direction = 1 if x >= 0 else -1
+        while distance > (5.-direction*expected_x):
+            distance -= 5.-direction*expected_x
+            expected_x = direction*5.
+            direction *= -1
+            expected_v *= -1
+        expected_x += direction*distance
+        assert jnp.allclose(position[0], expected_x)
+        assert jnp.allclose(full[1][0], expected_v)
+
+
+def test_neutral_particle_collection_and_repeated_map():
+    grid = jnp.linspace(-4.95, 4.95, 100)
+    result = set_BC_particles(jnp.array([[6., 0., 0.]]), jnp.ones((1, 3)),
+                             jnp.zeros((1, 1)), jnp.ones((1, 1)), jnp.zeros((1, 1)),
+                             .1, grid, 10., 10., 10., 2, 2)
+    assert jnp.array_equal(result[1], jnp.zeros((1, 3)))
+    again = set_BC_particles(*result, .1, grid, 10., 10., 10., 2, 2)
+    assert all(jnp.array_equal(a, b) for a, b in zip(result, again))
