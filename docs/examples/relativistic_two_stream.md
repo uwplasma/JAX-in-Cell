@@ -23,7 +23,7 @@ The full input is in `docs/scripts/fig_relativistic.py`; its values are listed b
 | beam drift $v_0/c$ | $\pm$ {{ relativistic_v0_over_c }}, Lorentz factor $\gamma_0 = $ {{ relativistic_gamma0 }} |
 | beam thermal speed $v_{th}/c$ | {{ relativistic_vth_over_c }} |
 | electron density (both beams) | {{ relativistic_density }} m$^{-3}$, protons at the same density, cold |
-| Debye length | $\lambda_D = v_{th}/(\sqrt2\,\omega_{pe})$ = {{ relativistic_debye_c_over_wpe }} $c/\omega_{pe}$, with $v_{th} = \sqrt{2T/m}$ the beam thermal speed (the convention of `grid_points_per_Debye_length` and of the kinetic dispersion relation) |
+| Debye length | $\lambda_D = v_{th}/(\sqrt2\,\omega_{pe})$ = {{ relativistic_debye_c_over_wpe }} $c/\omega_{pe}$, with $v_{th} = \sqrt{2T/m}$ the beam thermal speed (the convention of `dx_over_Debye_length` and of the kinetic dispersion relation) |
 | box length | {{ relativistic_length_c_over_wpe }} $c/\omega_{pe}$ = {{ relativistic_length_over_debye }} $\lambda_D$, one wavelength, $k v_0/\omega_{pe} = $ {{ relativistic_k_v0_over_wpe }} |
 | grid | {{ relativistic_grid_points }} cells, $\Delta x = $ {{ relativistic_dx_wpe_over_c }} $c/\omega_{pe}$ = {{ relativistic_dx_over_debye }} $\lambda_D$ |
 | time step | $c\,\Delta t/\Delta x = $ {{ relativistic_c_dt_over_dx }}, $\omega_{pe}\Delta t = $ {{ relativistic_omega_pe_dt }}, {{ relativistic_steps }} steps |

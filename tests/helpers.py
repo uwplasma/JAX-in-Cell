@@ -8,7 +8,7 @@ def scalar(value):
 def base_simulation_parameters():
     base_species = {
         "number_pseudoparticles": 2,
-        "grid_points_per_Debye_length": 1.0,
+        "dx_over_Debye_length": 1.0,
         "weight": 1.0,
         "perturbation_amplitude_x": 0.0,
         "perturbation_amplitude_y": 0.0,

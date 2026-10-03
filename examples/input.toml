@@ -24,7 +24,7 @@ external_electric_field_wavenumber = 0
 
 [species_parameters.electrons.electrons0]
 number_pseudoparticles = 3500
-grid_points_per_Debye_length = 0.50265482457
+dx_over_Debye_length = 0.50265482457
 weight = 0
 charge_over_elementary_charge = -1
 perturbation_amplitude_x = 0.0000005
@@ -35,7 +35,7 @@ velocity_plus_minus_x = true
 
 [species_parameters.ions.ions0]
 number_pseudoparticles = 3500
-grid_points_per_Debye_length = 0.50265482457
+dx_over_Debye_length = 0.50265482457
 weight = 0
 charge_over_elementary_charge = 1
 mass_over_proton_mass = 1
