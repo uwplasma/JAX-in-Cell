@@ -137,4 +137,3 @@ def test_wall_return_and_restitution_fractions_reject_invalid_values(parameter, 
 def test_velocity_dependent_return_requires_a_positive_scale(value):
     with pytest.raises(ValueError, match="mixed_BC_velocity_scale"):
         clean_and_initialize_domain_parameters({"mixed_BC_velocity_scale": value})
-
