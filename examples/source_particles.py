@@ -19,8 +19,8 @@ def run_case():
         "source_parameters": {"source_term_active": 1, "source_species": (0, 1),
                               "how_often_source_should_produce_quasiparticles": 4,
                               "source_particles_per_second": 1e12,
-                              "location_of_source": 0, "width_of_source": 1,
-                              "injection_speed_x": .4 * speed_of_light,
+                              "location_of_source": 2, "width_of_source": 1,
+                              "injection_speed_x": .05 * speed_of_light,
                               "injection_speed_y": 0., "injection_speed_z": 0.},
     }
     output = Simulation(parameters).run()
