@@ -1227,15 +1227,16 @@ def test_unsupported_wall_pushers_are_rejected_by_constructor_and_both_setters(s
     parameters["domain_parameters"].update(wall_change, field_BC_left=1, field_BC_right=1)
     unsupported = deepcopy(parameters)
     unsupported["solver_parameters"].update(solver_change)
-    with pytest.raises(ValueError, match="require nonrelativistic Boris"):
+    match = "periodic particle and field boundaries only" if solver_change.get("time_evolution_algorithm") else "require nonrelativistic Boris"
+    with pytest.raises(ValueError, match=match):
         Simulation(unsupported)
     sim = Simulation(parameters)
-    with pytest.raises(ValueError, match="require nonrelativistic Boris"):
+    with pytest.raises(ValueError, match=match):
         sim.solver_parameters = {**sim.solver_parameters, **solver_change}
     periodic = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
     periodic["solver_parameters"].update(solver_change, field_solver=2)
     sim = Simulation(periodic)
-    with pytest.raises(ValueError, match="require nonrelativistic Boris"):
+    with pytest.raises(ValueError, match=match):
         sim.domain_parameters = parameters["domain_parameters"]
 
 
@@ -1286,3 +1287,32 @@ def test_mixed_run_stores_the_ballistic_fractional_return_mass_and_charge_histor
     diagnostics(output)
     np.testing.assert_allclose(output["kinetic_energy"], expected_ke, rtol=1e-13)
     np.testing.assert_allclose(output["total_momentum"], expected_p, rtol=1e-13)
+
+
+def test_absorbed_marker_does_not_bias_retained_population_moments():
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    initial = Simulation(parameters)
+    velocity = np.array([[.02, 0., 0.], [-.01, 0., 0.]]) * speed_of_light
+    position = np.zeros((2, 3))
+    position[0, 0] = float(initial.box_size[0]) / 2 - float(initial.dt) * velocity[0, 0] / 4
+    for population in parameters["species_parameters"].values():
+        for species in population.values():
+            species.update(weight=1., initial_positions=position, initial_velocities=velocity)
+    parameters["domain_parameters"].update(particle_BC_left=2, particle_BC_right=2,
+                                             field_BC_left=1, field_BC_right=1)
+    parameters["solver_parameters"]["field_solver"] = 2
+    output = Simulation(parameters).run()
+    live_masses = np.asarray(output["masses"])[None, ...] * np.array([0., 1., 0., 1.])[None, :, None]
+    np.testing.assert_allclose(output["masses_over_time"], np.broadcast_to(live_masses, (2, 4, 1)), rtol=1e-14)
+    diagnostics(output)
+    for species in output["species"]:
+        np.testing.assert_allclose(species["weights"], [[0., 1.], [0., 1.]], rtol=2e-15)
+        np.testing.assert_allclose(species["temperature_components"], 0., atol=1e-20)
+    expected_momentum = np.sum(live_masses, axis=1) * velocity[1]
+    np.testing.assert_allclose(output["total_momentum"], np.broadcast_to(expected_momentum, (2, 3)), rtol=1e-14)
+    first_energy = np.asarray(output["kinetic_energy"])
+    diagnostics(output)
+    np.testing.assert_array_equal(output["kinetic_energy"], first_energy)
+    assert "positions" in output and "velocities" in output
+
+

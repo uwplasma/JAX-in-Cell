@@ -33,6 +33,7 @@ scaling
 | `inference_two_stream.py` | recover the drift speed from the growth rate with forward-mode derivatives | minutes |
 | `openpmd_export.py` | optional openPMD export of particles and staggered fields | seconds |
 | `scaling_energy_time.py` | run time and energy error against resolution | minutes |
+| `mixed_bc.py`, `bc_parameter_comparison.py` | collection, fractional marker return and normal restitution; see {doc}`../user_guide/boundaries` | seconds |
 
 Run any of them from the repository root, for example
 

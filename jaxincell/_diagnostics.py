@@ -50,6 +50,8 @@ def diagnostics(output):
         weights = jnp.asarray(output["weights_over_time"])
     elif "masses_over_time" in output:
         weights = weights * mass / jnp.where(initial_mass > 0, initial_mass, 1.)
+    if "masses_over_time" in output:
+        output.update(weights_electrons=weights[..., esel], weights_ions=weights[..., isel])
 
     species_list = []
     for si in np.unique(labels):

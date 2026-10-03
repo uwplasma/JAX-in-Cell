@@ -2,7 +2,8 @@
 
 Boundary conditions are set in `domain_parameters` with one integer per side and per
 kind: `particle_BC_left`, `particle_BC_right`, `field_BC_left`, `field_BC_right`. The
-codes are `0` periodic, `1` reflective, `2` absorbing. They apply to the $x$ boundaries;
+field codes are `0` periodic, `1` reflective, `2` absorbing. Particles also support
+`3` fractional return and `4` speed-dependent return, described below. They apply to the $x$ boundaries;
 $y$ and $z$ are always periodic.
 
 ```{figure} ../_static/figures/boundary_conditions.png
@@ -29,12 +30,11 @@ Reflective (`1`)
   the opposite wall after reflecting.
 
 Absorbing (`2`)
-: The particle is removed from the dynamics: its charge and charge-to-mass ratio are set
+: The particle is removed from the dynamics: its charge, live mass and charge-to-mass ratio are set
   to zero, its velocity to zero, and it is parked outside the grid ($1.5\,\Delta x$
   beyond the left edge or $3\,\Delta x$ beyond the right edge). It stays in the arrays,
   so the particle count is fixed, but it no longer contributes to $\rho$, $\mathbf J$ or
-  the kinetic energy. The mass entry is kept, which is why the kinetic energy of absorbed
-  particles is zero rather than undefined.
+  the kinetic energy. Its nominal population metadata remains available in the output.
 
 The conditions are applied after every push, and also to the half-step positions used
 by the current deposit, so a particle cannot deposit charge outside the box.
@@ -94,5 +94,21 @@ The longitudinal field is reconstructed after collection; this is an imposed wal
 model, without a self-consistent wall circuit or a closed electromagnetic energy
 ledger. `masses_over_time` and `charges_over_time` retain returned marker weights
 for kinetic energy and momentum diagnostics. Periodic runs retain their usual
-output and memory cost. See `examples/mixed_bc.py` and
-`examples/bc_parameter_comparison.py` for near-ballistic controls.
+output and memory cost.
+
+Run the small controls from the repository root:
+
+```bash
+MPLBACKEND=Agg python examples/mixed_bc.py
+MPLBACKEND=Agg python examples/bc_parameter_comparison.py
+```
+
+They write `mixed_bc.png` and `bc_parameter_comparison.png`. The comparison includes
+periodic and elastic reference curves, complete collection, fractional return and
+restitution. The periodic and elastic curves coincide at unit energy. The very small
+marker weights make the self-fields negligible, so the
+energy changes isolate the wall law. At one code-3 impact the returned normal kinetic
+energy fraction is `mixed_BC_weight * COR**2`; tangential kinetic energy retains only
+the marker-weight factor. Code 4 evaluates its returned fraction from the impacting
+marker's speed, not the fastest particle in the simulation. These are prescribed-wall
+controls, not a self-consistent sheath benchmark.

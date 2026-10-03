@@ -148,8 +148,12 @@ Charge and momentum conservation
   that row's sum of particle momentum magnitudes. {func}`jaxincell.plot` draws both relative errors on
   the energy panel, next to the relative energy error.
 
-Absorbing and mixed walls also supply actual mass and charge histories. Diagnostics
-use these live weights; source budgets separately record absorption and wall transfers.
+The raw `charges`, `masses` and `weights` describe nominal markers. Runs with absorbing
+or fractional particle walls also supply live `masses_over_time` and
+`charges_over_time`, each `(S, N, 1)`. Diagnostics recover live weights from these
+masses, excluding collected markers from temperature and momentum moments. A separate
+wall-transfer ledger is still required for a complete open-system energy budget.
+Source budgets separately record absorption and wall transfers.
 
 The relative energy error $|\mathcal E(t) - \mathcal E(0)|/\mathcal E(0)$ built from
 `total_energy` is the standard check of a run. The explicit scheme is expected to

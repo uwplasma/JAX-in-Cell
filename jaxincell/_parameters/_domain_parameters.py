@@ -75,10 +75,6 @@ def clean_and_initialize_domain_parameters(domain_parameters, input_parameters=N
             raise ValueError(f"{key} must lie in [0, 1]")
     if not domain_parameters["mixed_BC_velocity_scale"] > 0:
         raise ValueError("mixed_BC_velocity_scale must be positive")
-    for kind in ("particle", "field"):
-        if (domain_parameters[f"{kind}_BC_left"] == 0) != (domain_parameters[f"{kind}_BC_right"] == 0):
-            raise ValueError(f"periodic {kind} boundaries must be paired")
-
     return domain_parameters
 
 def build_domain_hash(domain_parameters):

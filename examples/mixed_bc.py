@@ -16,7 +16,8 @@ def run_case(return_fraction=.5, restitution=1., code=3):
         "domain_parameters": {"length": .01, "number_grid_points": 16, "total_steps": 160,
                               "timestep_over_spatialstep_times_c": .5,
                               "particle_BC_left": code, "particle_BC_right": code,
-                              "field_BC_left": 1, "field_BC_right": 1,
+                              "field_BC_left": 0 if code == 0 else 1,
+                              "field_BC_right": 0 if code == 0 else 1,
                               "mixed_BC_weight": return_fraction,
                               "mixed_BC_velocity_scale": 1.2e8,
                               "COR_left": restitution, "COR_right": restitution},
@@ -25,7 +26,7 @@ def run_case(return_fraction=.5, restitution=1., code=3):
         "solver_parameters": {"field_solver": 2, "filter_passes": 0, "print_info": False},
     }
     output = Simulation(parameters).run()
-    mass = np.asarray(output["masses_over_time"])[:, :count, 0]
+    mass = np.asarray(output.get("masses_over_time", output["masses"][None, ...]))[:, :count, 0]
     speed2 = np.sum(np.asarray(output["velocities"])[:, :count]**2, axis=-1)
     return np.asarray(output["time_array"]), np.sum(mass*speed2/2, axis=1)
 
