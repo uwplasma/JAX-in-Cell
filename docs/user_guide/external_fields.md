@@ -140,3 +140,20 @@ parameters["source_parameters"] = dict(
 )
 output = Simulation(parameters).run()
 ```
+
+A standalone small control is available from the repository root:
+
+```bash
+MPLBACKEND=Agg python examples/source_particles.py
+```
+
+It injects co-moving electron/ion batches at `0.05c` near the right wall, returns half
+of each marker at the right wall with normal restitution `0.8`, and writes
+`source_particles.png`. The matched positions, rates and velocities keep the
+charge density and self-fields zero. The script checks live plus collected weight
+against injected weight, and live kinetic energy/momentum plus wall transfer against
+the injected totals. The plotted wall energy includes both collection and restitution
+loss; `lost_energy` alone excludes dissipation of the returned fraction. This is a
+near-ballistic reservoir control rather than a plasma sheath model. Increasing the
+cadence changes batch sizes as well as injection times; reduce cadence and time step
+together when approximating a continuous source.

@@ -34,6 +34,7 @@ collisions
 | `inference_two_stream.py` | recover the drift speed from the growth rate with forward-mode derivatives | minutes |
 | `openpmd_export.py` | optional openPMD export of particles and staggered fields | seconds |
 | `scaling_energy_time.py` | run time and energy error against resolution | minutes |
+| `source_particles.py` | matched particle injection, fractional collection and reservoir budgets; see {doc}`../user_guide/external_fields` | seconds |
 | `mixed_bc.py`, `bc_parameter_comparison.py` | collection, fractional marker return and normal restitution; see {doc}`../user_guide/boundaries` | seconds |
 | `twospecies_tempdiff.py` (repository root) | Coulomb relaxation and a collision-only energy control | depends on steps and particles |
 
