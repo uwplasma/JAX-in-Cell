@@ -11,7 +11,7 @@ parser.add_argument("--particles", type=int, default=4096, help="markers per spe
 parser.add_argument("--output", help="save the figure instead of opening a window")
 args = parser.parse_args()
 if args.cells < 32 or args.particles < 128 or args.particles % 2:
-    parser.error("use at least32 cells and an even number of particles >=128")
+    parser.error("use at least 32 cells and an even number of particles >= 128")
 c, density, drift = speed_of_light, 1e18, .8
 wpe = np.sqrt(density*elementary_charge**2/(epsilon_0*mass_electron))
 gamma0 = 1/np.sqrt(1-drift**2)
@@ -33,14 +33,14 @@ output = block_until_ready(Simulation(parameters).run())
 diagnostics(output)
 t = np.asarray(output["time_array"])*wpe
 mode = abs(np.fft.rfft(np.asarray(output["electric_field"])[..., 0], axis=1)[:, 1])**2
-window = (t >=25) & (t <=45)
+window = (t >=20) & (t <=35)
 fit = np.polyfit(t[window], np.log(mode[window]), 1)
 measured = fit[0]/2
 energy = np.asarray(output["total_energy"])
 error = energy/energy[0]-1
 speed = np.linalg.norm(np.asarray(output["velocities"]), axis=-1)/c
 assert np.isfinite(energy).all() and speed.max() <1
-assert abs(measured/growth-1) <.1, "growth disagrees with cold-beam theory; refine the resolution"
+assert abs(measured/growth-1) <.05, "growth disagrees with cold theory; refine resolution"
 print(f"growth/omega_pe: measured={measured:.5f}, theory={growth:.5f}")
 print(f"max speed/c={speed.max():.5f}; max relative energy change={abs(error).max():.3e}")
 fig, axes = plt.subplots(1, 3, figsize=(12, 3.4), constrained_layout=True)

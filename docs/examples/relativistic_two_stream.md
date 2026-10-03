@@ -23,7 +23,7 @@ python examples/relativistic_two_stream.py --output relativistic.png
 It compares the first-mode growth with the cold relativistic dispersion relation,
 checks subluminal velocities and plots the relativistic total energy. Increase
 `--cells` and `--particles` to check resolution. The fixed linear fit window is
-25–45 inverse plasma frequencies; it precedes trapping for these inputs.
+20–35 inverse plasma frequencies; it precedes trapping for these inputs.
 
 The longer comparison and its full input are in `docs/scripts/fig_relativistic.py`;
 its values are listed below.
@@ -122,8 +122,8 @@ phase and by at most {{ relativistic_error_rel_max_relativistic }} at saturation
 worse than $\mathcal E_{N}$ with the non-relativistic pusher
 ({{ relativistic_error_newton_max_newtonian }}). Neither is exact: this is the usual
 energy error of the explicit leapfrog, discussed in {doc}`energy_conservation`.
-Measured in the other energy, each run is wrong by tens of per cent; in particular
-the `total_energy` of a relativistic run is not a conservation check. The
+Measured using the other kinetic-energy definition, each run differs by tens of
+per cent. Use the selected pusher’s `total_energy` to monitor conservation. The
 non-relativistic pusher also accelerates trapped electrons past the speed of light,
 as panel (d) shows, while the relativistic pusher keeps every electron below $c$ with
 Lorentz factors up to {{ relativistic_lorentz_max_relativistic }}.
