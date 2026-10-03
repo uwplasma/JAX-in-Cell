@@ -2,7 +2,8 @@
 
 Boundary conditions are set in `domain_parameters` with one integer per side and per
 kind: `particle_BC_left`, `particle_BC_right`, `field_BC_left`, `field_BC_right`. The
-codes are `0` periodic, `1` reflective, `2` absorbing. They apply to the $x$ boundaries;
+field codes are `0` periodic, `1` reflective, `2` absorbing. Particles also support
+`3` fractional return and `4` speed-dependent return, described below. They apply to the $x$ boundaries;
 $y$ and $z$ are always periodic.
 
 ```{figure} ../_static/figures/boundary_conditions.png
@@ -29,12 +30,11 @@ Reflective (`1`)
   the opposite wall after reflecting.
 
 Absorbing (`2`)
-: The particle is removed from the dynamics: its charge and charge-to-mass ratio are set
+: The particle is removed from the dynamics: its charge, live mass and charge-to-mass ratio are set
   to zero, its velocity to zero, and it is parked outside the grid ($1.5\,\Delta x$
   beyond the left edge or $3\,\Delta x$ beyond the right edge). It stays in the arrays,
   so the particle count is fixed, but it no longer contributes to $\rho$, $\mathbf J$ or
-  the kinetic energy. The mass entry is kept, which is why the kinetic energy of absorbed
-  particles is zero rather than undefined.
+  the kinetic energy. Its nominal population metadata remains available in the output.
 
 The conditions are applied after every push, and also to the half-step positions used
 by the current deposit, so a particle cannot deposit charge outside the box.
@@ -74,3 +74,41 @@ nonperiodic choices run but are rarely physical. Two limitations to keep in mind
   with periodic boundaries.
 * With `field_solver = 1` the FFT solution of Gauss's law assumes periodicity in $x$
   even when the walls are reflective or absorbing.
+
+## Fractional return and restitution
+
+Particle code `3` returns `mixed_BC_weight` of each impacting marker; code `4`
+returns `clip(1 - abs(v_x)/mixed_BC_velocity_scale, 0, 1)`. The velocity scale is a
+positive prescribed wall property, independent of other particles. The returned
+fraction multiplies charge and mass equally, preserving charge-to-mass ratio;
+fully collected markers have zero charge, mass and velocity.
+
+`COR_left` and `COR_right` are normal restitution coefficients in `[0, 1]`.
+The reflected endpoint is `wall - COR*(endpoint-wall)`, with normal velocity
+`-COR*v_x`. Both half drifts resolve impacts at their physical time; the output
+reports the end of the full step. Resolve at most one wall impact per half drift.
+An unresolved second crossing produces a nonfinite position: reduce the time step.
+
+Fractional walls require Newtonian Boris and `field_solver=2` (Cartesian Gauss).
+The longitudinal field is reconstructed after collection; this is an imposed wall
+model, without a self-consistent wall circuit or a closed electromagnetic energy
+ledger. `masses_over_time` and `charges_over_time` retain returned marker weights
+for kinetic energy and momentum diagnostics. Periodic runs retain their usual
+output and memory cost.
+
+Run the small controls from the repository root:
+
+```bash
+MPLBACKEND=Agg python examples/mixed_bc.py
+MPLBACKEND=Agg python examples/bc_parameter_comparison.py
+```
+
+They write `mixed_bc.png` and `bc_parameter_comparison.png`. The comparison includes
+periodic and elastic reference curves, complete collection, fractional return and
+restitution. The periodic and elastic curves coincide at unit energy. The very small
+marker weights make the self-fields negligible, so the
+energy changes isolate the wall law. At one code-3 impact the returned normal kinetic
+energy fraction is `mixed_BC_weight * COR**2`; tangential kinetic energy retains only
+the marker-weight factor. Code 4 evaluates its returned fraction from the impacting
+marker's speed, not the fastest particle in the simulation. These are prescribed-wall
+controls, not a self-consistent sheath benchmark.

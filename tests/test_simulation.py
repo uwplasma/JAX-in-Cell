@@ -574,7 +574,7 @@ def test_simulation_property_setters_reinitialize_state_and_hashes():
     assert sim.external_magnetic_field.shape == (5, 3)
 
     sim.source_parameters = {
-        "source_term_active": 1,
+        "source_term_active": 0,
         "source_species": 0,
         "how_often_source_should_produce_quasiparticles": 2,
         "source_particles_per_second": 1e16,
@@ -596,6 +596,164 @@ def test_simulation_property_setters_reinitialize_state_and_hashes():
     assert sim.solver_hash != original_solver_hash
     assert sim.domain_parameters["number_grid_points"] == 5
     assert sim.positions.shape == (5, 3)
+
+
+def source_simulation_parameters(T=5, G=8):
+    parameters = small_simulation_parameters(T, G, 1)
+    parameters["domain_parameters"]["timestep_over_spatialstep_times_c"] = 0.8
+    parameters["solver_parameters"]["field_solver"] = 2
+    for group in parameters["species_parameters"].values():
+        for population in group.values():
+            population.update(initial_positions=[[0., 0., 0.]], initial_velocities=[[0., 0., 0.]])
+    parameters["source_parameters"] = dict(
+        source_term_active=1, source_species=(0, 1),
+        how_often_source_should_produce_quasiparticles=2,
+        source_particles_per_second=1e12, location_of_source=2, width_of_source=1,
+        injection_speed_x=0.4 * speed_of_light, injection_speed_y=0.1 * speed_of_light,
+        injection_speed_z=-0.2 * speed_of_light,
+    )
+    return parameters
+
+
+@pytest.mark.parametrize("G,width,location,nodes,strength", [(5, 2, 0, 3, 2), (8, 1, 0, 2, 1),
+                                                           (5, 3, 0, 3, 3), (8, 2, 1, 2, 2),
+                                                           (8, 2, 2, 2, 2), (5, 99, 3, 5, 5)])
+def test_source_reservations_include_last_batch_and_centered_weights(G, width, location, nodes, strength):
+    parameters = source_simulation_parameters(G=G)
+    parameters["source_parameters"].update(source_species=1, width_of_source=width, location_of_source=location,
+                                           how_often_source_should_produce_quasiparticles=3)
+    sim = Simulation(parameters)
+    assert sim.positions.shape == (2 + 2 * nodes, 3)
+    np.testing.assert_array_equal(sim.source_birth_steps[2:], np.repeat([0, 3], nodes))
+    np.testing.assert_allclose(np.asarray(sim.weights[2:]).sum(), 2 * strength * 1e12 * 3 * sim.dt)
+    np.testing.assert_array_equal(sim.charges[2:], 0)
+    np.testing.assert_array_equal(sim.masses[2:], 0)
+    if location == 0:
+        np.testing.assert_allclose(sim.source_birth_positions[2:2 + nodes, 0].sum(), 0, atol=1e-17)
+
+
+@pytest.mark.parametrize("wall,fraction,restitution", [(0, 1., 1.), (2, 0., 1.), (3, 0.4, 0.5)])
+def test_source_ballistic_birth_loss_energy_and_momentum_budgets(wall, fraction, restitution):
+    parameters = source_simulation_parameters()
+    if wall:
+        parameters["domain_parameters"].update(particle_BC_left=1, particle_BC_right=wall,
+                                               field_BC_left=1, field_BC_right=1,
+                                               mixed_BC_weight=fraction, COR_right=restitution)
+    sim = Simulation(parameters)
+    output = sim.run()
+    weights = np.asarray(output["weights_over_time"])
+    times = np.arange(5) + 1
+    births = (times + 1) // 2
+    per_batch = 2e12 * 2 * float(output["dt"])
+    from jaxincell._constants import mass_electron
+    velocity = speed_of_light * np.array([0.4, 0.1, -0.2])
+    batch_mass = (mass_electron + mass_proton) * per_batch / 2
+    np.testing.assert_allclose(output["injected_weight"], births * per_batch, rtol=2e-14)
+    np.testing.assert_allclose(output["injected_energy"], births * batch_mass * np.dot(velocity, velocity) / 2, rtol=2e-14)
+    np.testing.assert_allclose(output["injected_momentum"], births[:, None] * batch_mass * velocity, rtol=2e-14)
+    np.testing.assert_allclose(weights.sum(axis=1), 2 + output["injected_weight"] - output["lost_weight"], rtol=2e-14)
+    np.testing.assert_array_equal(output["alive_particles"], weights > 0)
+    np.testing.assert_array_equal(output["charges_over_time"][:, ~output["alive_particles"][-1], :][-1], 0)
+    live_ke = 0.5 * np.sum(np.asarray(output["masses_over_time"]) * np.asarray(output["velocities"])**2, axis=(1, 2))
+    live_p = np.sum(np.asarray(output["masses_over_time"]) * np.asarray(output["velocities"]), axis=1)
+    np.testing.assert_allclose(live_ke + output["wall_energy_transfer"], output["injected_energy"], rtol=2e-12, atol=1e-22)
+    np.testing.assert_allclose(live_p + output["wall_momentum_transfer"], output["injected_momentum"], rtol=2e-12, atol=1e-29)
+    if wall == 2:
+        np.testing.assert_allclose(output["lost_weight"], [0, per_batch, per_batch, 2 * per_batch, 2 * per_batch])
+        np.testing.assert_allclose(output["lost_energy"], output["wall_energy_transfer"], rtol=2e-14, atol=1e-25)
+        np.testing.assert_allclose(output["lost_momentum"], output["wall_momentum_transfer"], rtol=2e-14, atol=1e-32)
+    if wall == 0:
+        np.testing.assert_array_equal(output["lost_weight"], 0)
+        age = (times[:, None] - np.asarray(output["source_birth_steps"])[None, 2:]) * float(output["dt"])
+        expected = np.asarray(sim.source_birth_positions)[None, 2:] + age[..., None] * velocity
+        expected = (expected + np.asarray(output["box_size"]) / 2) % np.asarray(output["box_size"]) - np.asarray(output["box_size"]) / 2
+        live = np.asarray(output["alive_particles"])[:, 2:]
+        np.testing.assert_allclose(np.asarray(output["positions"])[..., 2:, :][live], expected[live], atol=1e-16)
+    diagnostics(output)
+    np.testing.assert_allclose(output["kinetic_energy"], live_ke, rtol=2e-14)
+    assert "weights_electrons" in output and "weights_ions" in output
+
+
+def test_sources_apply_each_prescribed_velocity_and_recompute_gauss():
+    parameters = source_simulation_parameters()
+    parameters["source_parameters"].update(
+        source_species=(1, 0, 1), how_often_source_should_produce_quasiparticles=(2, 3, 7),
+        injection_speed_x=(0., 1e6, -2e6), injection_speed_y=(3e6, 4e6, 5e6),
+        injection_speed_z=(6e6, 7e6, 8e6), source_particles_per_second=(1e12, 2e12, 3e12))
+    output = Simulation(parameters).run()
+    np.testing.assert_array_equal(output["species_integer_index"][2:], [1, 1, 1, 0, 0, 1])
+    np.testing.assert_allclose(output["velocities"][0, [2, 5, 7]],
+                               [[0., 3e6, 6e6], [1e6, 4e6, 7e6], [-2e6, 5e6, 8e6]], rtol=1e-10, atol=1e-5)
+    np.testing.assert_array_equal(output["masses_over_time"][0, [3, 4, 6]], 0)
+    E, rho = np.asarray(output["electric_field"])[..., 0], np.asarray(output["charge_density"])
+    from jaxincell._constants import epsilon_0
+    residual = (E - np.roll(E, 1, axis=1)) / float(output["dx"]) - (rho - rho.mean(axis=1, keepdims=True)) / epsilon_0
+    assert np.max(np.abs(residual)) < 1e-12 * np.max(np.abs(rho / epsilon_0))
+    assert np.isfinite(output["source_field_work"]).all()
+
+
+def test_source_wall_impact_energy_refines_for_constant_electric_force():
+    from jaxincell._constants import elementary_charge
+    errors = []
+    for courant in (0.8, 0.4, 0.2, 0.1):
+        T = round(4 / courant)
+        parameters = source_simulation_parameters(T=T)
+        L = parameters["domain_parameters"]["length"]
+        dt = courant * L / (8 * speed_of_light)
+        acceleration = 0.2 * speed_of_light**2 / L
+        parameters["domain_parameters"].update(timestep_over_spatialstep_times_c=courant,
+                                               particle_BC_left=1, particle_BC_right=2,
+                                               field_BC_left=1, field_BC_right=1)
+        parameters["species_parameters"]["electrons"]["electrons0"]["charge_over_elementary_charge"] = -1e-20
+        parameters["source_parameters"].update(source_species=1, injection_speed_x=0.2 * speed_of_light,
+                                               injection_speed_y=0., injection_speed_z=0.,
+                                               how_often_source_should_produce_quasiparticles=T + 1,
+                                               source_particles_per_second=1 / (dt * (T + 1)))
+        E = np.zeros((8, 3))
+        E[:, 0] = acceleration * mass_proton / elementary_charge
+        parameters["external_field_parameters"] = {"external_electric_field": {"E": E}}
+        output = Simulation(parameters).run()
+        np.testing.assert_allclose(output["lost_weight"][-1], 1, rtol=2e-14)
+        incoming_speed = np.sqrt(2 * float(output["lost_energy"][-1]) / mass_proton)
+        exact_speed = np.sqrt((0.2 * speed_of_light)**2 + 2 * acceleration * L / 16)
+        errors.append(abs(incoming_speed - exact_speed))
+        assert errors[-1] < 0.55 * acceleration * dt
+    assert errors[-1] < 0.05 * errors[0]
+
+
+def test_source_birth_weight_gradient_matches_prescribed_rate():
+    sim = Simulation(source_simulation_parameters())
+    derivative = jax.grad(lambda courant: sim.run({"timestep_over_spatialstep_times_c": courant})["injected_weight"][-1])(0.8)
+    np.testing.assert_allclose(derivative, 12e12 * float(sim.dx) / speed_of_light, rtol=2e-14)
+
+
+def test_source_reservation_keeps_existing_particle_rng_streams():
+    parameters = source_simulation_parameters(T=3)
+    for group in parameters["species_parameters"].values():
+        for population in group.values():
+            population.update(number_pseudoparticles=11, initial_positions=None, initial_velocities=None,
+                              random_positions_x=True)
+    sourced = Simulation(parameters)
+    parameters["source_parameters"]["source_term_active"] = 0
+    baseline = Simulation(parameters)
+    np.testing.assert_array_equal(sourced.positions[:22], baseline.positions)
+    np.testing.assert_array_equal(sourced.velocities[:22], baseline.velocities)
+    sourced.source_parameters = {"source_term_active": 0}
+    assert sourced.positions.shape == baseline.positions.shape
+    assert not hasattr(sourced, "source_birth_steps")
+
+
+@pytest.mark.parametrize("section,key,value,match", [("solver_parameters", "field_solver", 0, "Cartesian Gauss"),
+                                                     ("solver_parameters", "time_evolution_algorithm", 1, "Boris"),
+                                                     ("solver_parameters", "relativistic", True, "nonrelativistic"),
+                                                     ("source_parameters", "source_species", 99, "ordered"),
+                                                     ("source_parameters", "width_of_source", 9, "width"),
+                                                     ("source_parameters", "injection_speed_x", speed_of_light, "below c")])
+def test_source_unsupported_configuration_is_rejected(section, key, value, match):
+    parameters = source_simulation_parameters()
+    parameters[section][key] = value
+    with pytest.raises(ValueError, match=match):
+        Simulation(parameters)
 
 
 def test_simulation_input_parameters_setter_reclassifies_and_reinitializes():
@@ -949,6 +1107,124 @@ def test_simulation_run_delegates_to_simulation(monkeypatch):
     runtime_input_parameters = {"length": 0.02}
     assert sim.run(runtime_input_parameters) is expected_output
     assert calls[-1] is runtime_input_parameters
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+def test_relativistic_absorbed_slots_remain_finite_in_following_pushes(side):
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=6, number_pseudoparticles=2)
+    initial = Simulation(parameters)
+    speed, dt, length = .02*299792458., float(initial.dt), float(initial.box_size[0])
+    for population in parameters["species_parameters"].values():
+        for species in population.values():
+            species.update(initial_positions=jnp.zeros((2, 3)).at[:, 0].set(side*(length/2-dt*speed/4)),
+                           initial_velocities=jnp.zeros((2, 3)).at[:, 0].set(side*speed))
+    parameters["domain_parameters"].update(particle_BC_left=2, particle_BC_right=2,
+                                             field_BC_left=1, field_BC_right=1)
+    parameters["solver_parameters"].update(relativistic=True, field_solver=2)
+    output = Simulation(parameters).run()
+    for key in ("positions", "velocities", "electric_field", "magnetic_field"):
+        assert np.isfinite(output[key]).all()
+    np.testing.assert_array_equal(output["velocities"], 0.)
+    assert np.all(side*np.asarray(output["positions"])[..., 0] > length/2)
+
+
+@pytest.mark.parametrize("solver_change", [{"relativistic": True}, {"time_evolution_algorithm": 1}])
+@pytest.mark.parametrize("wall_change", [{"particle_BC_left": 3, "particle_BC_right": 3},
+                                        {"particle_BC_left": 4, "particle_BC_right": 4},
+                                        {"particle_BC_left": 1, "particle_BC_right": 1, "COR_right": .5}])
+def test_unsupported_wall_pushers_are_rejected_by_constructor_and_both_setters(solver_change, wall_change):
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    parameters["solver_parameters"]["field_solver"] = 2
+    parameters["domain_parameters"].update(wall_change, field_BC_left=1, field_BC_right=1)
+    unsupported = deepcopy(parameters)
+    unsupported["solver_parameters"].update(solver_change)
+    match = "periodic particle and field boundaries only" if solver_change.get("time_evolution_algorithm") else "require nonrelativistic Boris"
+    with pytest.raises(ValueError, match=match):
+        Simulation(unsupported)
+    sim = Simulation(parameters)
+    with pytest.raises(ValueError, match=match):
+        sim.solver_parameters = {**sim.solver_parameters, **solver_change}
+    periodic = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    periodic["solver_parameters"].update(solver_change, field_solver=2)
+    sim = Simulation(periodic)
+    with pytest.raises(ValueError, match=match):
+        sim.domain_parameters = parameters["domain_parameters"]
+
+
+@pytest.mark.parametrize("field_solver", [0, 1, 3])
+def test_mixed_walls_require_cartesian_gauss_through_constructor_and_setters(field_solver):
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    parameters["domain_parameters"].update(particle_BC_left=3, particle_BC_right=3,
+                                             field_BC_left=1, field_BC_right=1)
+    parameters["solver_parameters"]["field_solver"] = field_solver
+    with pytest.raises(ValueError, match="require field_solver=2"):
+        Simulation(parameters)
+    parameters["solver_parameters"]["field_solver"] = 2
+    sim = Simulation(parameters)
+    with pytest.raises(ValueError, match="require field_solver=2"):
+        sim.solver_parameters = {**sim.solver_parameters, "field_solver": field_solver}
+    periodic = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    periodic["solver_parameters"]["field_solver"] = field_solver
+    sim = Simulation(periodic)
+    with pytest.raises(ValueError, match="require field_solver=2"):
+        sim.domain_parameters = parameters["domain_parameters"]
+
+
+def test_mixed_run_stores_the_ballistic_fractional_return_mass_and_charge_history():
+    """A neutral co-moving electron/ion pulse hits the wall at t=1.75 dt.
+    Half returns with half its normal speed; transverse velocities stay fixed."""
+    parameters = small_simulation_parameters(total_steps=3, number_grid_points=4, number_pseudoparticles=2)
+    initial = Simulation(parameters)
+    dt, length = float(initial.dt), float(initial.box_size[0])
+    velocity = np.array([.02, .003, -.004]) * speed_of_light
+    for population in parameters["species_parameters"].values():
+        for species in population.values():
+            species.update(initial_positions=jnp.zeros((2, 3)).at[:, 0].set(length/2 - 1.75*dt*velocity[0]),
+                           initial_velocities=jnp.broadcast_to(velocity, (2, 3)))
+    parameters["domain_parameters"].update(particle_BC_left=3, particle_BC_right=3,
+                                             field_BC_left=1, field_BC_right=1, mixed_BC_weight=.5,
+                                             COR_left=.5, COR_right=.5)
+    parameters["solver_parameters"]["field_solver"] = 2
+    output = Simulation(parameters).run()
+    fractions = np.array([1., .5, .5])[:, None, None]
+    np.testing.assert_allclose(output["masses_over_time"], fractions * np.asarray(output["masses"]), rtol=1e-13)
+    np.testing.assert_allclose(output["charges_over_time"], fractions * np.asarray(output["charges"]), rtol=1e-13)
+    expected_v = np.broadcast_to(velocity, (3, 4, 3)).copy()
+    expected_v[1:, :, 0] *= -.5
+    np.testing.assert_allclose(output["velocities"], expected_v, rtol=1e-13)
+    masses = fractions * np.asarray(output["masses"])
+    expected_ke = np.sum(masses[..., 0] * np.sum(expected_v ** 2, axis=-1) / 2, axis=-1)
+    expected_p = np.sum(masses * expected_v, axis=1)
+    diagnostics(output)
+    np.testing.assert_allclose(output["kinetic_energy"], expected_ke, rtol=1e-13)
+    np.testing.assert_allclose(output["total_momentum"], expected_p, rtol=1e-13)
+
+
+def test_absorbed_marker_does_not_bias_retained_population_moments():
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    initial = Simulation(parameters)
+    velocity = np.array([[.02, 0., 0.], [-.01, 0., 0.]]) * speed_of_light
+    position = np.zeros((2, 3))
+    position[0, 0] = float(initial.box_size[0]) / 2 - float(initial.dt) * velocity[0, 0] / 4
+    for population in parameters["species_parameters"].values():
+        for species in population.values():
+            species.update(weight=1., initial_positions=position, initial_velocities=velocity)
+    parameters["domain_parameters"].update(particle_BC_left=2, particle_BC_right=2,
+                                             field_BC_left=1, field_BC_right=1)
+    parameters["solver_parameters"]["field_solver"] = 2
+    output = Simulation(parameters).run()
+    live_masses = np.asarray(output["masses"])[None, ...] * np.array([0., 1., 0., 1.])[None, :, None]
+    np.testing.assert_allclose(output["masses_over_time"], np.broadcast_to(live_masses, (2, 4, 1)), rtol=1e-14)
+    diagnostics(output)
+    for species in output["species"]:
+        np.testing.assert_allclose(species["weights"], [[0., 1.], [0., 1.]], rtol=2e-15)
+        np.testing.assert_allclose(species["temperature_components"], 0., atol=1e-20)
+    expected_momentum = np.sum(live_masses, axis=1) * velocity[1]
+    np.testing.assert_allclose(output["total_momentum"], np.broadcast_to(expected_momentum, (2, 3)), rtol=1e-14)
+    first_energy = np.asarray(output["kinetic_energy"])
+    diagnostics(output)
+    np.testing.assert_array_equal(output["kinetic_energy"], first_energy)
+    assert "positions" in output and "velocities" in output
 
 
 @pytest.mark.parametrize("steps", [1, 4])
