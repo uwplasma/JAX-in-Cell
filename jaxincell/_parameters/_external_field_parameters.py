@@ -14,6 +14,8 @@ DEFAULT_EXTERNAL_FIELD_PARAMETERS = {
         "external_magnetic_field_wavenumber": 0.,   # Wavenumber of sinusoidal (cos) perturbation in x (factor of 2pi/length)
         "external_electric_field_function": None,   # Function of (x, y, z, t) that returns the external electric field vector at a given position and time.
         "external_magnetic_field_function": None,   # Function of (x, y, z, t) that returns the external magnetic field vector at a given position and time.
+        "external_electric_field": None,             # User-provided external electric field array or {"E": array}.
+        "external_magnetic_field": None,             # User-provided external magnetic field array or {"B": array}.
     }
 
 DIFFERENTIABLE_EXTERNAL_FIELD_PARAMETERS = []
