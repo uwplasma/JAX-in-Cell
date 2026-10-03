@@ -31,6 +31,7 @@ scaling
 | `optimize_two_stream_saturation.py` | minimise the saturated field energy over the ion temperature | minutes |
 | `inference_two_stream.py` | recover the drift speed from the growth rate with forward-mode derivatives | minutes |
 | `scaling_energy_time.py` | run time and energy error against resolution | minutes |
+| `source_particles.py` | matched particle injection, fractional collection and reservoir budgets; see {doc}`../user_guide/external_fields` | seconds |
 
 Run any of them from the repository root, for example
 
