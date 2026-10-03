@@ -108,3 +108,22 @@ Runs are deterministic for a given seed, parameter set, JAX version and device.
 Results on a GPU differ from those on a CPU at the level of floating-point rounding,
 which is amplified by the instabilities being simulated; growth rates and energies agree,
 individual particle trajectories do not after many e-foldings.
+
+
+## A sparse-output run
+
+This complete example stores three post-step rows while retaining the final state:
+
+```python
+from jax import block_until_ready
+from jaxincell import Simulation
+
+sim = Simulation({"domain_parameters": {"total_steps": 10},
+                  "solver_parameters": {"snapshot_steps": [0, 4, 9], "print_info": False}})
+out = block_until_ready(sim.run())
+print(out["time_array"] / out["dt"])  # [1, 5, 10]
+print(out["final_state"]["time"] / out["dt"])  # 10
+```
+
+An empty schedule still completes the run and returns `final_state`. Its history
+arrays contain no rows, so skip time-series diagnostics and plots.
