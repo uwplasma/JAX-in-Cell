@@ -53,6 +53,9 @@ fields. A periodic net charge is balanced by a uniform background. Fourier
 solvers (`1`, `3`) require periodic fields and use the spectral derivative.
 Volumetric particle sources require `2`. See {doc}`../numerics/field_solvers`.
 
+The field-solver selector applies to the explicit Boris scheme. CN uses its
+coupled Maxwell/Ampere update and does not overwrite E_x with a Gauss solve.
+
 ## The digital filter
 
 The charge and current densities can be smoothed before they enter the field
