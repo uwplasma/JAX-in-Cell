@@ -15,6 +15,7 @@ of all populations and `G` for `number_grid_points`.
 | `magnetic_field` | `(S, G, 3)` | T | cell centres $x_i$ |
 | `current_density` | `(S, G, 3)` | A/m² | $J_x$ at cell faces, $J_y$, $J_z$ at cell centres |
 | `charge_density` | `(S, G)` | C/m³ | cell centres |
+| `mus` | `(S, N, 1)` | J/(T m²) | Newtonian magnetic-moment diagnostic; see below |
 | `time_array` | `(S,)` | s | `(snapshot_steps + 1) * dt` |
 
 Entry `n` is the state after the zero-based step `snapshot_steps[n]`, at
@@ -27,6 +28,11 @@ defined at integer times and the stored positions are the integer-time positions
 reconstructed from the half-step ones, so the two are synchronous. The particle axis is
 ordered by population in input order; `species_integer_index` tells which population
 each particle belongs to.
+
+`mus` uses the Boris midpoint velocity and imposed magnetic field before the
+collision kick and final wall transfer; CN uses the endpoint velocity and self-field.
+It is zero where the sampled field vanishes. It is not a relativistic invariant or
+a conservation test across collisions, collection or partial marker return.
 
 ## Particle bookkeeping
 
