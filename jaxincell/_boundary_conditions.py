@@ -4,6 +4,11 @@ from ._constants import speed_of_light
 
 __all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
 
+def _reflect_position(x, length):
+    """Fold a free-flight endpoint between two elastic walls."""
+    phase = (x + length / 2) % (2 * length)
+    return length / 2 - jnp.abs(phase - length)
+
 def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
     """
     Applies boundary conditions (BCs) to a single particle's position and velocity.
@@ -54,6 +59,11 @@ def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, b
             x_n[0],
         ),
     )
+    multiple_reflections = (BC_left == 1) & (BC_right == 1) & (jnp.abs(x_n[0]) > box_size_x / 2)
+    x_n0 = jnp.where(multiple_reflections, _reflect_position(x_n[0], box_size_x), x_n0)
+    # A hit exactly at the end remains incoming, matching the strict wall tests.
+    reflections = jnp.ceil((jnp.abs(x_n[0]) - box_size_x / 2) / box_size_x)
+    reflected_vx = v_n[0] * jnp.where(reflections % 2 == 0, 1, -1)
 
     # Update velocities for reflective or absorbing boundaries
     v_n = jnp.where(
@@ -73,6 +83,7 @@ def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, b
             v_n,
         ),
     )
+    v_n = v_n.at[0].set(jnp.where(multiple_reflections, reflected_vx, v_n[0]))
 
     # Nullify charges and charge-to-mass ratio for absorbing BCs
     q   = jnp.where(((x_n[0] < -box_size_x / 2) & (BC_left == 2)) | ((x_n[0] > box_size_x / 2) & (BC_right == 2)), 0, q)
@@ -126,6 +137,8 @@ def set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_
             x_n[0],
         ),
     )
+    multiple_reflections = (BC_left == 1) & (BC_right == 1) & (jnp.abs(x_n[0]) > box_size_x / 2)
+    x_n0 = jnp.where(multiple_reflections, _reflect_position(x_n[0], box_size_x), x_n0)
     return jnp.array([x_n0, x_n1, x_n2])
 
 @jit

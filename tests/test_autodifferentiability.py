@@ -33,7 +33,7 @@ PARAMETER_VALUES = {
     "drift_speed_y": 1.0,
     "drift_speed_z": 1.0,
     "filter_alpha": 0.5,
-    "grid_points_per_Debye_length": 1.0,
+    "dx_over_Debye_length": 1.0,
     "ion_temperature_over_electron_temperature_x": 1.0,
     "ion_temperature_over_electron_temperature_y": 1.0,
     "ion_temperature_over_electron_temperature_z": 1.0,

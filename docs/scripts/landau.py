@@ -32,10 +32,10 @@ def base_parameters(steps, electrons):
         "domain_parameters": {"length": LENGTH, "timestep_over_spatialstep_times_c": 1.0,
                               "number_grid_points": GRID, "total_steps": steps},
         "species_parameters": {
-            "electrons": {"electrons0": {"grid_points_per_Debye_length": GRID_POINTS_PER_DEBYE,
+            "electrons": {"electrons0": {"dx_over_Debye_length": GRID_POINTS_PER_DEBYE,
                                          "vth_over_c_x": VTH_OVER_C, **electrons}},
             "ions": {"ions0": {"number_pseudoparticles": 40000,
-                               "grid_points_per_Debye_length": GRID_POINTS_PER_DEBYE,
+                               "dx_over_Debye_length": GRID_POINTS_PER_DEBYE,
                                "mass_over_proton_mass": 1e9, "vth_over_c_x": "_electrons0",
                                "vth_over_c_y": "_electrons0", "vth_over_c_z": "_electrons0",
                                "ion_temperature_over_electron_temperature_x": 1e-9}}},
