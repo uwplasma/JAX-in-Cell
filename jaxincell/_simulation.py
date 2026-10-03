@@ -1,574 +1,1724 @@
-import jax.numpy as jnp
-from copy import deepcopy
+"""The simulation: initial state, the time loop, and the output."""
+from __future__ import annotations
+
+import dataclasses
+import os
+import warnings
 from functools import partial
-from jax_tqdm import scan_tqdm
-from jax import lax, jit, config
 
-from ._boundary_conditions import set_BC_positions, set_BC_particles
-from ._algorithms import Boris_step, CN_step
-from ._parameters._sections import (
-    DIFFERENTIABLE_INPUT_PARAMETERS,
-    PARAMETER_SECTIONS,
-)
-from ._parameters._species_parameters import resolve_species_references
-from ._routing import (
-    build_runtime_flat_parameter_routes,
-    build_runtime_parameter_sections,
-    build_runtime_species_label_routes,
-    clean_runtime_input_parameters,
-    route_flat_initial_parameters,
-    route_nested_initial_species_parameters,
-)
-from ._state_initialization import (
-    build_domain_state,
-    initialize_field_state,
-    initialize_particle_state,
-    print_simulation_information,
-)
+import jax
+import jax.numpy as jnp
+import numpy as np
+from jax import lax, random
+from jax.scipy.special import erfinv
 
-try: import tomllib
-except ModuleNotFoundError: import pip._vendor.tomli as tomllib
+from ._collisions import collide, coulomb_logarithm
+from ._config import Collisions, Domain, Impacts, Solver, Source, Species, pytree_dataclass
+from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
+from ._progress import reporter
+from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, s2_weights,
+                    current_from_continuity, curl_B, curl_E, deposit, gather, gather_xyz, half_step_fields, smooth,
+                    orbit_field_average, to_centres, to_faces, wall_faces_E, with_ghosts, wrap_positions)
+from ._sources import check_sources, crossing_flux, inject, volume_inject
 
-config.update("jax_enable_x64", True)
 
-__all__ = ["Simulation", "load_parameters"]
+def _enable_double_precision(environ):
+    """Double precision unless the environment asks otherwise through JAX's own switch,
+    ``JAX_ENABLE_X64=0``."""
+    if "JAX_ENABLE_X64" not in environ:
+        jax.config.update("jax_enable_x64", True)
 
-def load_parameters(input_file):
+
+_enable_double_precision(os.environ)
+
+_BETA2_MAX = 1 - 1e-5     # largest v^2/c^2 of a velocity entering a relativistic run; see Simulation._momentum
+
+__all__ = ["Simulation", "Output", "State", "Wall", "load_toml", "quiet_start", "RUN_KEYS"]
+
+
+def _bracketed_newton(function, times, lower, upper, orientation):
+    """Eight differentiable, safeguarded Newton updates of independent scalar roots."""
+    def step(_, state):
+        t, lo, hi = state
+        value, derivative = jax.jvp(function, (t,), (jnp.ones_like(t),))
+        lo = jnp.where(value * orientation < 0, t, lo)
+        hi = jnp.where(value * orientation >= 0, t, hi)
+        trial = t - value / jnp.where(derivative != 0, derivative, 1.0)
+        return jnp.where((trial >= lo) & (trial <= hi), trial, (lo + hi) / 2), lo, hi
+
+    return lax.fori_loop(0, 8, step, (times, lower, upper))[0]
+
+
+def _implicit_fields(E, B, J, dt, dx, bc):
+    """Solve the linear midpoint Maxwell equations for a prescribed current.
+
+    Eliminating B gives a transverse Helmholtz equation: a Fourier diagonal in
+    a periodic box, or a tridiagonal system with the existing wall ghosts.
+    The radiating left ghost depends on midpoint B, so its first row is implicit too.
     """
-        Load parameters from a given .toml input file given the path to the file.
+    courant = c * dt / dx
+    a2 = (courant / 2) ** 2
+    B_rhs = B.at[0, 1:].divide(1 + courant) if bc[0] in (2, 4) else B
+    rhs = E + (dt / 2) * (c ** 2 * curl_B(B_rhs, jnp.zeros_like(E), dx, bc) - J / epsilon_0)
+    if bc[0] == 0:
+        symbol = 1 + courant ** 2 * jnp.sin(jnp.pi * jnp.fft.rfftfreq(E.shape[0]).astype(rhs.dtype)) ** 2
+        E_half = jnp.fft.irfft(jnp.fft.rfft(rhs[:, 1:], axis=0) / symbol[:, None],
+                               n=E.shape[0], axis=0)
+    else:
+        diagonal = jnp.full(E.shape[0], 1 + 2 * a2, dtype=rhs.dtype)
+        diagonal = diagonal.at[0].set(1 + a2 + (2 * a2 / (1 + courant) if bc[0] in (2, 4) else 0))
+        diagonal = diagonal.at[-1].set(1 if bc[1] == 1 else 1 + courant + 2 * a2)
+        lower = jnp.full(E.shape[0], -a2, dtype=rhs.dtype).at[0].set(0).at[-1].set(0 if bc[1] == 1 else -2 * a2)
+        upper = jnp.full(E.shape[0], -a2, dtype=rhs.dtype).at[-1].set(0)
+        # Implicit differentiation also supports JAX versions without a native banded AD rule.
+        E_half = lax.custom_linear_solve(
+            lambda y: diagonal[:, None] * y + lower[:, None] * jnp.roll(y, 1, axis=0)
+            + upper[:, None] * jnp.roll(y, -1, axis=0), rhs[:, 1:],
+            solve=lambda _, b: lax.linalg.tridiagonal_solve(lower, diagonal, upper, b),
+            transpose_solve=lambda _, b: lax.linalg.tridiagonal_solve(
+                jnp.roll(upper, 1).at[0].set(0), diagonal, jnp.roll(lower, -1).at[-1].set(0), b))
+    E_new = E.at[:, 0].add(-dt * J[:, 0] / epsilon_0).at[:, 1:].set(2 * E_half - E[:, 1:])
+    E_mean = 0.5 * (E + E_new)
+    B_half = B - (dt / 2) * curl_E(E_mean, jnp.zeros_like(B), dx, bc)
+    if bc[0] in (2, 4):
+        B_half = B_half.at[0, 1:].divide(1 + courant)
+    return E_new, B.at[:, 1:].set(2 * B_half[:, 1:] - B[:, 1:])
+
+
+@pytree_dataclass(static=())
+class Wall:
+    """What the two walls have exchanged with each species since the run began.
+
+    Every field has shape ``(species, side)``, side 0 the left wall and side 1 the
+    right, in the units of a planar run: a weight is physical particles per unit area,
+    :math:`\\mathrm{m^{-2}}`, and an energy is :math:`\\mathrm{J/m^2}`. Multiply a weight
+    by the species' charge for a collected charge, or divide by the elapsed time for a flux.
+
+    Every exchange is recorded **after** the wall's law has acted, so a thermal wall's
+    ``energy_out`` is the energy of the particle it re-emitted and not of the bounce that
+    preceded the redraw. Kinetic energy is :math:`m|\\mathbf u|^2/(\\gamma+1)`, which is
+    :math:`m v^2/2` in a Newtonian run and the relativistic energy from the carried momentum
+    otherwise, so the ledger does not silently change meaning with ``Solver(relativistic=)``.
+
+    Attributes:
+        arrived: Weight that reached the wall, counting every impact of a particle that
+            bounces more than once.
+        collected: The part of it the wall kept. ``arrived - collected`` went back.
+        injected: Weight a :class:`~jaxincell.Source` emitted through the wall.
+        energy_in: Kinetic energy carried to the wall, at the velocity of the numerical
+            drift segment on which the particle crossed.
+        energy_out: Kinetic energy carried back out by what the wall returned. The
+            difference is what the wall absorbed, including the loss to a coefficient of
+            restitution below one and the heat a thermal wall gives or takes.
+        energy_injected: Kinetic energy a :class:`~jaxincell.Source` carried in.
+        truncated: Weight a wall kept only because ``Source.min_weight`` stopped the orbit,
+            which its reflection law would otherwise have sent back. It is the cost of the
+            cutoff, in the units the rest of the ledger is in, so a run can say what it was
+            rather than assume it was nothing.
+        momentum: Momentum delivered to the wall, ``(species, side, 3)``, in
+            :math:`\\mathrm{kg\\,m^{-1}s^{-1}}`: what arrived less what went back out. Its
+            sign is the direction the wall is pushed, so the left wall's x component is
+            negative for a plasma pressing outwards on both sides.
+        momentum_injected: Momentum a :class:`~jaxincell.Source` carried in, the same shape.
+        spectrum: Weight that arrived in each energy and incidence bin,
+            ``(species, side, energy_bins + 1, angle_bins)``, when
+            :class:`~jaxincell.Simulation` was given :class:`~jaxincell.Impacts`, and
+            ``None`` otherwise. The last energy bin is the overflow. Summing over the two
+            bin axes gives ``arrived`` exactly: every crossing is entered once, at the
+            velocity that carried it there.
+        overflow: Largest live weight a source has overwritten, zero while the pool of
+            dead slots holds. A positive value means the capacity ``Species.n`` is too
+            small and particles were destroyed to make room.
+        birth_budget: Optional ``(species, 6)`` cumulative volume-birth budget:
+            weight, kinetic energy, three momentum components, and the self-field
+            energy change from Gauss reprojection. Wall columns remain two-sided.
     """
-    parameters = tomllib.load(open(input_file, "rb"))
-    return parameters
+    arrived: object
+    collected: object
+    injected: object
+    energy_in: object
+    energy_out: object
+    energy_injected: object
+    momentum: object
+    momentum_injected: object
+    truncated: object
+    spectrum: object
+    overflow: object
+    birth_budget: object = None
 
-class Simulation:
-    """A particle-in-cell simulation: parameters, initial state and the time loop.
+    def charge(self, charge_per_particle):
+        """Charge on each wall, C/m^2, from ``charge_per_particle`` per species."""
+        return jnp.sum(jnp.asarray(charge_per_particle)[:, None] * self.collected, axis=0)
 
-    The constructor takes a nested dictionary of parameters, or a path to a TOML
-    file containing one. Each section is validated, the defaults are filled in,
-    and the grid, the pseudo-particles and the initial fields are built. Nothing
-    is compiled until :meth:`run` is called.
 
-    Parameters that are floating-point physical inputs can be changed at run time
-    without recompiling, and differentiated with respect to. They are exposed as
-    ``Simulation.input_parameters`` and accepted as the argument of :meth:`run`.
+@pytree_dataclass(static=("x_phase",))
+class State:
+    """Everything the time loop carries from one step to the next, and all that a
+    restart needs. ``run(..., state=out.state)`` continues from it: the absolute time
+    and step count, the fields, the particles with their weights, the charge density the
+    step begins with, the random key and the wall ledger all go on unbroken.
+
+    ``time`` and ``steps`` are both absolute and both counted from the start of the first
+    run, not of this one. A cumulative diagnostic divides by a difference of them, never by
+    the length of an array.
+
+    ``x`` is the half-step position for periodic explicit runs and the integer-time
+    position for explicit wall and implicit runs. ``x_phase`` records that convention.
+    ``u`` is the momentum per unit mass of a relativistic run, or the velocity otherwise.
+    ``sigma`` is the charge on the collector at the time
+    ``rho`` is for, collected and overlapping together, which is what makes the boundary
+    current a difference rather than a guess. ``moments`` is the running sum of
+    :meth:`Simulation.moments`, or ``None`` when ``run(moments=False)``.
+    """
+    E: object
+    B: object
+    x: object
+    u: object
+    w: object
+    qm: object
+    rho: object
+    sigma: object
+    key: object
+    time: object
+    steps: object
+    wall: object
+    moments: object
+    x_phase: str = "legacy"
+
+
+@pytree_dataclass(static=("names", "counts", "relativistic", "field_bc"))
+class Output:
+    """Result of :meth:`Simulation.run`. Histories have the stored step as their
+    first axis; ``t`` is the time of each stored state. ``charge`` and ``mass``
+    are those of one physical particle, and ``weight`` is the history of the
+    pseudo-particle weights, which fall as absorbing walls collect the particles.
+    ``wall`` is the history of the :class:`Wall` ledger, running totals of what the two
+    walls and any sources have exchanged. ``state`` is the final :class:`State` and can be
+    passed back to :meth:`Simulation.run` to continue; in a relativistic run it carries the
+    momentum per unit mass :math:`\\gamma\\mathbf v` where ``v`` has the velocity.
+
+    ``t`` and ``steps`` are absolute: a continued run goes on from the time and the step
+    count its state had reached, so the histories of a run split into chunks join without a
+    shift, and the window between two stored states is a difference of them rather than a
+    count of array entries. ``moments`` is the history of the running sums of
+    :meth:`Simulation.moments` when ``run(moments=True)`` asked for them, and ``None``
+    otherwise.
+
+    ``sigma`` is the charge on each wall, ``(stored, 2)``: what it has collected plus the part
+    of the live clouds that reaches past it. With the charge on the grid it is everything the box
+    holds, which is what :func:`~jaxincell.charge_balance` checks against what went in and out.
+
+    ``grid``, ``faces`` and ``walls`` are the three coordinate arrays of the staggered grid.
+    Densities and deposited moments are on ``grid``; :math:`E_x` and the potential are on
+    ``faces``."""
+    t: object
+    steps: object
+    sigma: object
+    x: object
+    v: object
+    E: object
+    B: object
+    J: object
+    rho: object
+    grid: object
+    dx: object
+    dt: object
+    length: object
+    charge: object
+    mass: object
+    weight: object
+    wall: object
+    moments: object
+    species: object
+    state: object
+    names: tuple
+    counts: tuple
+    relativistic: bool
+    field_bc: tuple
+
+    @property
+    def overflow(self):
+        """Largest live weight a source has had to overwrite, at each stored step: zero while
+        the pool of dead slots holds, and a running maximum once it has not, so it never falls
+        back to zero and a run cannot look valid because it recovered later."""
+        return self.wall.overflow
+
+    @property
+    def problems(self):
+        """What makes this run unusable, as a tuple of sentences, empty when nothing does.
+
+        It reads values, so it belongs on the host: inside ``jit`` or ``grad`` there is nothing
+        to read. A differentiated objective takes :attr:`overflow` out with its result instead
+        and rejects the trial itself; :meth:`validate` is the host-side shortcut."""
+        leaves = jax.tree.leaves(self.state.replace(key=random.key_data(self.state.key)))
+        if not all(np.all(np.isfinite(np.asarray(a))) for a in leaves):
+            return ("non-finite final state: check finite source parameters; resolve at most one wall crossing "
+                    "per particle segment "
+                    "and converge the implicit iteration (including picard_tolerance); reduce dt or increase "
+                    "substeps or picard_iterations.",)
+        spilt = float(jnp.max(jnp.asarray(self.state.wall.overflow)))
+        if spilt <= 0:
+            return ()
+        return (f"a source overwrote live particles: the largest weight destroyed was {spilt:.3g}, "
+                f"against {float(jnp.sum(jnp.asarray(self.state.w))):.3g} "
+                "left alive. Species.n is a capacity and has to hold every particle alive at once, so it "
+                "grows with the emission rate and with how long a particle lives -- a smaller time step and "
+                "a longer box both lengthen that. Nothing this run reports is trustworthy.",)
+
+    def validate(self):
+        """Raise :class:`RuntimeError` if :attr:`problems` is not empty, and return the output
+        otherwise, so that a script can write ``out = simulation.run(...).validate()``."""
+        if self.problems:
+            raise RuntimeError(" ".join(self.problems))
+        return self
+
+    @property
+    def faces(self):
+        """The cell faces the staggered grid stores, :math:`x_{i+1/2} = -L/2 + (i+1)\\Delta x`:
+        the right face of each cell. The left wall face :math:`-L/2` is not among them, which is
+        why :func:`~jaxincell.potential` and the field solver take it separately."""
+        return self.grid + self.dx / 2
+
+    @property
+    def walls(self):
+        """The two wall faces, :math:`-L/2` and :math:`+L/2`."""
+        return jnp.stack([-self.length / 2, self.length / 2])
+
+    def particles(self, name):
+        """Positions and velocities ``(S, n, 3)`` of the species called ``name``."""
+        start = sum(self.counts[: self.names.index(name)])
+        stop = start + self.counts[self.names.index(name)]
+        return self.x[:, start:stop], self.v[:, start:stop]
+
+
+def _van_der_corput(n, base):
+    q, denominator, i = np.zeros(n), 1.0, np.arange(1, n + 1)
+    while i.any():
+        denominator *= base
+        q += (i % base) / denominator
+        i //= base
+    return q
+
+
+def quiet_start(n, length, vth=(0.0, 0.0, 0.0), drift=(0.0, 0.0, 0.0)):
+    """Positions and velocities of a quiet start, as JAX arrays.
+
+    Equally spaced positions and velocities at the quantiles of a bit-reversed
+    (van der Corput) sequence, which is what ``Species(sampling="low_noise")`` uses. It is
+    exposed because custom initial conditions are often a quiet start plus a
+    coherent seed -- a transverse current for the Weibel instability, say -- and
+    building that by hand otherwise means reproducing the sampling.
+
+    The sequence itself is built on the host, since it is a fixed set of quadrature
+    nodes and nothing differentiates with respect to it; the length, the thermal speed
+    and the drift that scale and shift it are ordinary JAX values, so a gradient with
+    respect to any of them passes through the advertised way of building an initial
+    state, and the whole function works inside ``jit``. That makes the arrays JAX arrays,
+    which are immutable, so a coherent seed is added with ``.at[]`` rather than in place::
+
+        x, v = quiet_start(n, length, vth=vth)
+        v = v.at[:, 2].add(0.01 * vth[2] * jnp.sin(2 * jnp.pi * x[:, 0] / length))
+        electrons = Species.electrons(n=n, density=n_e, vth=vth).replace(x=x, v=v)
 
     Args:
-        parameters (dict or str or pathlib.Path, optional): The parameter tree, or
-            a path to a TOML file. Defaults to the built-in configuration, which
-            runs a two-stream instability.
+        n: Number of pseudo-particles.
+        length: Box length; positions fill ``[-L/2, L/2]``.
+        vth: Thermal speed per component, ``sqrt(2 k_B T / m)``.
+        drift: Drift velocity per component.
 
-    Example:
-        Run with the parameters given at construction:
-
-        .. code-block:: python
-
-            sim = Simulation(parameters)
-            output = sim.run()
-
-        Re-run with a different drift speed, reusing the compiled program:
-
-        .. code-block:: python
-
-            output = sim.run({"electrons": {"electrons0": {"drift_speed_x": 7e7}}})
-
-        Differentiate a scalar diagnostic with respect to that drift speed:
-
-        .. code-block:: python
-
-            import jax.numpy as jnp
-            from jax import grad
-
-            def mean_field(drift_speed):
-                out = sim.run({"electrons": {"electrons0": {"drift_speed_x": drift_speed}}})
-                return jnp.mean(out["electric_field"][:, :, 0])
-
-            derivative = grad(mean_field)(6e7)
-
-    Note:
-        Reverse-mode differentiation works with the explicit integrator only; the
-        implicit one uses a while loop, for which forward mode (``jax.jvp``,
-        ``jax.jacfwd``) must be used instead.
+    Returns:
+        tuple: ``x`` and ``v``, both ``(n, 3)``, ready for
+        ``species.replace(x=x, v=v)``.
     """
-    def __init__(self, parameters=None):
-        if parameters is None:
-            parameters = {}
-        if type(parameters) != dict:
-            parameters = load_parameters(parameters)
-        self.clean_and_initialize_parameters(parameters)
-        self.reinitialize_simulation_state()
+    lattice = jnp.asarray((np.arange(n) + 0.5) / n - 0.5)                 # host: the fixed nodes
+    nodes = jnp.asarray(np.stack([_van_der_corput(n, base) for base in (2, 3, 5)], axis=1))
+    x = jnp.zeros((n, 3)).at[:, 0].set(length * lattice)
+    return x, erfinv(2 * nodes - 1) * jnp.asarray(vth) + jnp.asarray(drift)
 
-    def simulation(self, input_parameters=None):
-        """
-            Exposed simulation call which doesn't expose the hash values for each section to prevent
-            unintentionally forcing recompiles or not recompiling when necessary.
-            
-            input_parameters is a dictionary of differentiable parameters
-            If simulation is called without input parameters, it will use
-            the user input parameters or default parameters previously provided.
-            input_parameters will overwrite any differentiable parameters 
-            previously provided. This is meant to make it simple to expose grads
-            derivatives with respect to the input parameters.
-        """
-        if input_parameters is None:
-            input_parameters = {}
-        input_parameters = self.clean_runtime_input_parameters(input_parameters)
-        simulation_output = self._simulation(
-            input_parameters,
-            domain_hash=self.domain_hash,
-            species_hash=self.species_hash,
-            external_field_hash=self.external_field_hash,
-            source_hash=self.source_hash,
-            solver_hash=self.solver_hash,
-        )
-        return self.assemble_output(simulation_output, input_parameters)
-     
-    # See simulation(...) for details on the purpose of input_parameters.
-    def run(self, input_parameters=None):
-        return self.simulation(input_parameters)
-    
+
+@pytree_dataclass(static=())
+class Simulation:
+    """A one-dimensional, three-velocity particle-in-cell simulation.
+
+    Args:
+        domain: The box, grid, time step and boundaries.
+        species: The particle populations.
+        solver: Integrator, field solver and filter.
+        collisions: Binary-collision model, or ``None``.
+        external_E, external_B: Static external fields, or ``None``. Either an array of
+            shape ``(cells, 3)``, on the faces (E) and centres (B) of the grid, or an array of
+            shape ``(cells, ny, nz, 3)``, on the centres of an ``(x, y, z)`` grid whose ``x``
+            cells are the domain's and whose ``ny`` and ``nz`` cells span the periods
+            ``length_y`` and ``length_z`` of the domain, gathered at each particle's ``x``,
+            ``y`` and ``z``.
+        impacts: :class:`~jaxincell.Impacts` bins for the energy and incidence of what
+            reaches each wall, or ``None`` for no spectrum. It costs one scatter per
+            species per wall per step.
+
+    The object is a JAX pytree: every physical parameter is a leaf, so
+    ``jax.grad`` and ``jax.vmap`` apply to functions of it directly, and changing
+    a physical parameter never recompiles the program.
     """
-        domain_hash, species_hash, external_field_hash, source_hash, solver_hash
-        are included as arguments here to ensure that changes to any of these hashes will trigger a recompilation of the
-        simulation function with the new parameters. This is necessary because the simulation function is jitted and we
-        want to make sure that it uses the most up-to-date parameters whenever it is called.
-    """
-    @partial(jit, static_argnames=['self', 'domain_hash', 'species_hash', 'external_field_hash', 'source_hash', 'solver_hash'])
-    def _simulation(self, input_parameters=None, domain_hash='', species_hash='', external_field_hash='', source_hash='', solver_hash=''):
+    domain: Domain
+    species: tuple
+    solver: Solver = Solver()
+    collisions: object = None
+    external_E: object = None
+    external_B: object = None
+    impacts: object = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "species", tuple(self.species))
+        if not self.species:
+            raise ValueError("a Simulation needs at least one species")
+        names = [s.name for s in self.species]
+        if len(set(names)) != len(names):
+            raise ValueError(f"species names must be distinct, got {names}")
+        if self.solver.shape_order == 5 and (self.domain.particle_bc != (0, 0)
+                                             or self.domain.field_bc != (0, 0)):
+            raise ValueError("shape_order=5 requires periodic particle and field boundaries")
+        self._check_implicit()
+        self._check_external()
+        self._check_collisions()
+        self._check_courant()
+        check_sources(self.species, self.solver, self.domain)
+
+    def _check_implicit(self):
+        """Refuse the solver switches the Crank-Nicolson scheme would otherwise ignore.
+
+        A filter keeps its energy conservation only if the same filter acts on the current
+        and on the field gathered at the particles, as a transpose pair that respects the
+        parity of each component at the walls; that pair is not implemented. The Gauss
+        solve would overwrite E_x after the update that conserves energy, which is the
+        property the scheme is there for; the electrostatic model keeps that update.
+        Silently skipping a switch, as the scheme once did, makes a run look filtered
+        when it is not."""
+        s = self.solver
+        if s.orbit_force == "integral" and (self.domain.particle_bc != (0, 0) or self.domain.field_bc != (0, 0)):
+            raise ValueError("orbit_force='integral' requires periodic particle and field boundaries")
+        if s.algorithm != "implicit":
+            return
+        if s.filter_passes:
+            raise ValueError("the implicit scheme has no filter: conserving energy needs the same filter on the "
+                             "current and on the gathered field, which is not implemented. Use filter_passes=0, "
+                             "or algorithm='explicit'.")
+        if self.domain.field_bc == (4, 2):
+            raise ValueError("field_bc=('open', 'absorbing') is the source plane of a box closed by a "
+                             "collector, and the implicit scheme carries no surface charge to close it "
+                             "with: its continuity current would be anchored at nothing. A Source needs "
+                             "algorithm='explicit' in any case.")
+        if s.field_solver == "gauss":
+            raise ValueError("field_solver='gauss' would take E_x from the charge density and so replace the "
+                             "update that makes the implicit scheme conserve energy, which is the property it "
+                             "is there for; it is available with algorithm='explicit' only. "
+                             "model='electrostatic' keeps that update and is available with both.")
+
+    def _check_external(self):
+        for name in ("external_E", "external_B"):
+            field = getattr(self, name)
+            if field is None:
+                continue
+            shape = jnp.shape(field)
+            if len(shape) not in (2, 4) or shape[0] != self.domain.cells or shape[-1] != 3:
+                raise ValueError(f"{name} has shape {shape}; it must be (cells, 3) or (cells, ny, nz, 3) "
+                                 f"with cells = {self.domain.cells}")
+
+    def _check_collisions(self):
+        """The default Coulomb logarithm is taken from the lightest negatively charged species,
+        so collisions without a given ``coulomb_log`` need one. Traced charges are skipped, as
+        in :meth:`_check_courant`, since their sign is not known until the program runs.
+
+        A relativistic pusher is refused outright: Takizuka and Abe pair particles by their
+        lab-frame relative velocity and rotate it through an angle whose variance is the
+        nonrelativistic Coulomb one, so the operator is not the relativistic binary collision
+        and combining the two would report a rate that belongs to neither."""
+        if self.collisions is None:
+            return
+        if self.solver.relativistic:
+            raise ValueError("Collisions() is the nonrelativistic Takizuka-Abe operator and "
+                             "Solver(relativistic=True) is the relativistic pusher; the combination is not "
+                             "implemented. Use one or the other.")
+        if self.collisions.coulomb_log is not None:
+            return
+        charges = [s.charge for s in self.species]
+        if any(isinstance(q, jax.core.Tracer) for q in charges):
+            return
+        if not any(q < 0 for q in charges):
+            raise ValueError("Collisions() takes its default Coulomb logarithm from the negatively charged species, "
+                             "and there is none: give Collisions(coulomb_log=...).")
+
+    def _check_courant(self):
+        """The explicit field update is unstable for ``c dt > dx``. The electrostatic
+        model has no light wave to be unstable, and an electromagnetic run whose
+        particles carry no transverse velocity never seeds one, so warn only when a
+        run could. Traced values are skipped, so the check happens when the object is
+        first built and not on every rebuild."""
+        def plain(v):
+            return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+        courant = self.domain.courant
+        if (self.solver.algorithm != "explicit" or self.solver.electrostatic
+                or not plain(courant) or courant <= 1):
+            return
+
+        def transverse(s):
+            if s.v is not None:                      # given as an array: look at it
+                v = np.asarray(s.v) if not isinstance(s.v, jax.core.Tracer) else None
+                return v is None or bool(np.any(v[:, 1:]))
+            return any(plain(u) and u != 0 for u in tuple(s.vth[1:]) + tuple(s.drift[1:]))
+
+        # collisions scatter velocity into y and z, so they seed the light wave from a beam that had none
+        if self.collisions is not None or any(transverse(s) for s in self.species):
+            warnings.warn(f"c dt / dx = {courant:g} exceeds one while the particles carry, or collisions give "
+                          "them, transverse velocity: the explicit field solver is unstable for electromagnetic waves. "
+                          "Use dt_over_dx_c <= 1, or algorithm='implicit'.", stacklevel=3)
+
+    # -- derived quantities -------------------------------------------------------
+    @property
+    def per_particle(self):
+        """The mass and the charge of every slot, which every step needs and which do not depend
+        on the state. Continuing from one therefore does not have to build a whole initial state
+        and throw it away, which at a hundred thousand slots is not free."""
+        return (jnp.concatenate([jnp.full((s.n,), s.mass) for s in self.species]),
+                jnp.concatenate([jnp.full((s.n,), s.charge_si) for s in self.species]))
+
+    @property
+    def blocks(self):
+        starts = np.cumsum([0] + [s.n for s in self.species])
+        return tuple((int(a), int(s.n)) for a, s in zip(starts, self.species))
+
+    def plasma_frequency(self, name=None):
+        """Plasma frequency of a species (the first by default), rad/s."""
+        s = self.species[0] if name is None else self.species[[t.name for t in self.species].index(name)]
+        return jnp.sqrt(s.density * s.charge_si / epsilon_0 * (s.charge_si / s.mass))   # no product below 1e-38
+
+    def debye_length(self, name=None):
+        s = self.species[0] if name is None else self.species[[t.name for t in self.species].index(name)]
+        return jnp.max(jnp.asarray(s.vth)) / (jnp.sqrt(2.0) * self.plasma_frequency(name))
+
+    def _reflection(self, v):
+        """Fraction of each particle's weight that the left and the right wall send
+        back, from the law of its species at its normal speed."""
+        speed = jnp.abs(v[:, 0])
+
+        def law(r, start, n):
+            return jnp.broadcast_to(r(speed[start:start + n]) if callable(r) else r, (n,))
+
+        return tuple(jnp.clip(jnp.concatenate([law(s.reflection[side], *block)
+                                               for s, block in zip(self.species, self.blocks)]), 0.0, 1.0)
+                     for side in (0, 1))
+
+    def _thermalise(self, key, u, hits):
+        """Redraw the velocity of every particle that crossed a thermal wall from the
+        half-Maxwellian flux of its species: the normal speed from the Rayleigh
+        distribution :math:`\\sigma\\sqrt{-2\\ln U}`, pointing into the box, and the
+        tangential components from the Maxwellian, with :math:`\\sigma = v_{th}/\\sqrt2`.
+        Takes and returns the carried ``u`` (:meth:`_momentum`)."""
+        d = self.domain
+        if 3 not in d.particle_bc:
+            return u
+        sigma = jnp.concatenate([jnp.broadcast_to(jnp.asarray(s.vth) / jnp.sqrt(2.0), (s.n, 3))
+                                 for s in self.species])
+        k_normal, k_tangential = random.split(key)
+        uniform = random.uniform(k_normal, (u.shape[0],), minval=jnp.finfo(u.dtype).tiny)
+        left = hits[0][0] > 0
+        new = (sigma * random.normal(k_tangential, u.shape)).at[:, 0].set(
+            jnp.where(left, 1.0, -1.0) * sigma[:, 0] * jnp.sqrt(-2 * jnp.log(uniform)))
+        hit = (left & (d.particle_bc[0] == 3)) | ((hits[0][1] > 0) & (d.particle_bc[1] == 3))
+        return jnp.where(hit[:, None], self._momentum(new), u)
+
+    @staticmethod
+    def _split_step_key(key):
+        """The keys of one step: the key carried to the next step, the collisions', the
+        thermal wall's and the sources'. Every key is split once and then either split
+        again or drawn from, never both, and there is no ``fold_in``: in JAX's threefry keys
+        ``fold_in(k, 1)`` is ``split(k)[1]``, and ``split(k, 2)[i]`` is ``split(k, 5)[i]``,
+        so keys derived from one parent in two ways coincide and two consumers draw
+        the same numbers. That same identity makes the first three keys here independent
+        of whether the fourth is asked for, so adding sources left every other stream
+        where it was."""
+        return random.split(key, 4)
+
+    def _gamma(self, u):
+        """The Lorentz factor of the carried ``u``, ``(N, 1)``, and one in a Newtonian run."""
+        if not self.solver.relativistic:
+            return 1.0
+        return jnp.sqrt(1 + jnp.sum(u * u, axis=1, keepdims=True) / c ** 2)
+
+    def _velocity(self, u):
+        """The velocity of the carried ``u``, which is :math:`\\gamma\\mathbf v` in a
+        relativistic run and the velocity itself otherwise."""
+        return u / self._gamma(u)
+
+    def _mean_velocity(self, u, u_new):
+        """The velocity that carries a particle through a push from ``u`` to ``u_new``,
+        :math:`(\\mathbf u + \\mathbf u')/(\\gamma + \\gamma')`, along which the Boris step changes the
+        kinetic energy by exactly the work of E, Newtonian (the mean velocity) or relativistic."""
+        return (u + u_new) / (self._gamma(u) + self._gamma(u_new))
+
+    def _momentum(self, v):
+        """The carried ``u`` of a velocity: :math:`\\gamma\\mathbf v` in a relativistic run,
+        the velocity itself otherwise.
+
+        A drawn velocity can reach or pass :math:`c` -- the tail of a Maxwellian sampled as
+        if Newtonian, or a drift given too close to it -- and is then not a velocity. In a
+        relativistic run a speed with :math:`v^2/c^2 > 1 - 10^{-5}` is brought back to that
+        speed along its own direction, which caps :math:`\\gamma` at 316. The margin
+        :math:`10^{-5}` is about a hundred times the resolution of single precision, where
+        :math:`\\gamma` is then still known to 1 %. A Newtonian run has no speed limit and
+        leaves velocities, and their derivatives, alone."""
+        if not self.solver.relativistic:
+            return v
+        beta2 = jnp.sum(v * v, axis=1, keepdims=True) / c ** 2
+        v = v * jnp.sqrt(_BETA2_MAX / jnp.maximum(beta2, _BETA2_MAX))
+        return v / jnp.sqrt(1 - jnp.sum(v * v, axis=1, keepdims=True) / c ** 2)
+
+    def _collide_momenta(self, key, x, u, w, qm, m, dt):
+        """The collision operator acts on velocities; a relativistic run converts to it and back."""
+        if self.collisions is None:
+            return u
+        return self._momentum(self._collide(key, x, self._velocity(u), w, qm, m, dt))
+
+    # -- sources, walls and the field model ---------------------------------------------
+
+    @property
+    def sources(self):
+        """The species that a :class:`~jaxincell.Source` maintains, with their blocks."""
+        return tuple((sp, block) for sp, block in zip(self.species, self.blocks) if sp.source is not None)
+
+    def _weight_floor(self):
+        """Per particle, the weight at or below which a wall keeps the remainder instead of
+        reflecting it again (:func:`~jaxincell._core.apply_particle_bc`). It is a fraction of
+        what the species' source emits, and zero without one, which leaves every run that has
+        no source exactly as it was."""
+        if not self.sources:
+            return 0.0
+        floors = [jnp.broadcast_to(sp.source.min_weight *
+                                   (sp.source.rate * self.domain.length if sp.source.model == "volume"
+                                    else crossing_flux(sp.source)) * self.domain.dt
+                                   * sp.source.every / sp.source.emit
+                                   if sp.source is not None else 0.0, (sp.n,)) for sp in self.species]
+        return jnp.concatenate(floors)
+
+    def _empty_wall(self):
+        zeros = jnp.zeros((len(self.species), 2))
+        vectors = jnp.zeros((len(self.species), 2, 3))
+        bins = self.impacts
+        spectrum = None if bins is None else jnp.zeros((len(self.species), 2,
+                                                        bins.energy_bins + 1, bins.angle_bins))
+        return Wall(zeros, zeros, zeros, zeros, zeros, zeros, vectors, vectors, zeros, spectrum,
+                    jnp.zeros(()), jnp.zeros((len(self.species), 6))
+                    if any(sp.source.model == "volume" for sp, _ in self.sources) else None)
+
+    def _spectrum(self, wall, arrived, m, u_in):
+        """Add this step's crossings to the energy-incidence accumulator.
+
+        The energy is the kinetic energy of the segment on which the particle crossed and the
+        incidence is :math:`\\theta = \\arctan(|v_t|/v_n)` from the normal, both taken from the
+        velocity **before** the wall acted. Energies above ``Impacts.energy_max`` go to the
+        overflow bin rather than into the last resolved one, so a range that was too small
+        shows up instead of piling on the end."""
+        bins = self.impacts
+        if bins is None:
+            return wall.spectrum
+        energy = self._kinetic(m, u_in)
+        width = bins.energy_max / bins.energy_bins
+        level = jnp.clip(jnp.floor(energy / width).astype(jnp.int32), 0, bins.energy_bins)
+        rows = []
+        for i, ((start, n), sp) in enumerate(zip(self.blocks, self.species)):
+            block, block_level = slice(start, start + n), level[start:start + n]
+            sides = []
+            for side, inward in ((0, 1.0), (1, -1.0)):
+                normal = inward * -u_in[block, 0]          # towards that wall, positive on a crossing
+                tangential = jnp.sqrt(jnp.sum(u_in[block, 1:] ** 2, axis=1))
+                theta = jnp.arctan2(tangential, jnp.maximum(normal, 0.0))
+                index = jnp.clip((theta / (jnp.pi / 2 / bins.angle_bins)).astype(jnp.int32),
+                                 0, bins.angle_bins - 1)
+                sides.append(jnp.zeros((bins.energy_bins + 1, bins.angle_bins))
+                             .at[block_level, index].add(arrived[side, block]))
+            rows.append(jnp.stack(sides))
+        return wall.spectrum + jnp.stack(rows)
+
+    def _kinetic(self, m, u):
+        """Kinetic energy per unit weight of the carried ``u``, :math:`m|u|^2/(\\gamma+1)`.
+
+        In a Newtonian run :math:`\\gamma` is one and this is :math:`mv^2/2`. In a relativistic
+        one it is :math:`(\\gamma-1)mc^2` written so that it does not subtract two large numbers,
+        which at :math:`v \\ll c` would leave nothing but round-off."""
+        gamma = self._gamma(u)                 # 1.0, a scalar, in a Newtonian run
+        return m * jnp.sum(u * u, axis=1) / (jnp.reshape(gamma, (-1,)) + 1 if jnp.ndim(gamma) else gamma + 1)
+
+    def _at_impact(self, u, hits, fields, qm, dt, time_fraction=0.5):
+        """The carried momentum of each particle at the moment it met a wall.
+
+        A particle is pushed once over the whole step and then drifts, so one that meets a wall
+        part-way through the drift is recorded, without this, in the state it reached by the end
+        of it: it has taken the whole step's push where only part of it belongs before the
+        impact. The value is wrong by :math:`O(\\Delta t)`, which is why it looks harmless, but
+        the **derivative** is wrong by a fixed fraction that does not fall with the time step,
+        because it is taken at a fixed step index instead of at the crossing -- the
+        :math:`d\\tau/d\\theta` term of an event observable, missing. Running the same pusher
+        backwards over the part of the step that follows the impact puts it back, and the
+        control in ``test_gradients`` then converges: the error falls as the time step, from
+        1.1e-3 to 1.3e-4 over a factor of eight, where before it sat at 6.2e-2 whatever the step.
+        ``time_fraction`` locates the carried momentum on the drift: one half for the
+        explicit leapfrog and one for an implicit sub-step's end momentum.
         """
-        Run a plasma physics simulation using a Particle-In-Cell (PIC) method in JAX.
+        fraction = hits[3]
+        # A particle meets at most one wall on this drift segment.
+        interval = (jnp.where(hits[0][0] > 0, fraction[0], fraction[1]) - time_fraction) * dt
+        return self._accelerate(u, fields, qm, interval[:, None])
 
-        This function simulates the evolution of a plasma system by solving for particle motion
-        (electrons and ions) and self-consistent electromagnetic fields on a grid. It uses the
-        Boris algorithm for particle updates and a leapfrog scheme for field updates.
+    def _record(self, wall, hits, m, u_in, u_out):
+        """Add one step's impacts to the ledger. ``hits`` is what
+        :func:`~jaxincell._core.apply_particle_bc` returned, and ``u_in`` and ``u_out`` are the
+        carried momenta of the particles before the wall acted and after it has finished acting
+        -- after a thermal wall's redraw, not before it -- so that the energy and momentum each
+        wall received and returned follow without a second pass over the walls."""
+        if self.domain.particle_bc == (0, 0):
+            # nothing can reach a wall, so there is nothing to record; returning the ledger as it
+            # was lets XLA drop the push back to the impact and the spectrum as dead code, which
+            # were a third of the cost of a periodic step
+            return wall
 
-        Parameters:
-        ----------
-        user_parameters : dict
-            User-defined parameters for the simulation. These can include:
-            - Physical parameters: box size, number of particles, thermal velocities.
-            - Numerical parameters: grid resolution, time step size.
-            - Boundary conditions for particles and fields.
-            - Random seed for reproducibility.
+        def per_species(per_particle):
+            return jnp.stack([jnp.sum(per_particle[:, a:a + n], axis=1) for a, n in self.blocks])
 
-        Returns:
-        -------
-        output : dict
+        arrived, kept, truncated, _ = hits
+        returned = arrived - kept
+        return wall.replace(spectrum=self._spectrum(wall, arrived, m, u_in),
+                            arrived=wall.arrived + per_species(arrived),
+                            collected=wall.collected + per_species(kept),
+                            truncated=wall.truncated + per_species(truncated),
+                            energy_in=wall.energy_in + per_species(arrived * self._kinetic(m, u_in)),
+                            energy_out=wall.energy_out + per_species(returned * self._kinetic(m, u_out)),
+                            momentum=wall.momentum + jnp.stack(
+                                [per_species(arrived * (m * u_in[:, k]) - returned * (m * u_out[:, k]))
+                                 for k in range(3)], axis=-1))
+
+    def _inject(self, key, x, u, w, qm, wall, E, B, rho, step):
+        """Emit what every source owes into the dead slots of its species.
+
+        The particles enter at a quiet quadrature of times across the interval that ends at
+        the position the leapfrog carries, and each is given the partial trajectory of
+        :func:`~jaxincell._sources.inject` in the field at its entry plane, so that the
+        deposit at the end of this step already sees it and the one full-step push the loop
+        applies afterwards is the push it should have had.
+
+        A source with ``every = k`` emits on the steps ``step`` (absolute, counted from the
+        start of the first run) with ``(step + 1) % k == 0``, the window of the ``k`` steps
+        that end there, and does nothing on the others: the arrays and the ledger pass through
+        unchanged, and neither the draw nor the partial sort of the pool is done."""
+        if not any(sp.source.model != "volume" for sp, _ in self.sources):
+            return x, u, w, qm, wall
+        d = self.domain
+
+        def push(velocity, fields, charge_over_mass, interval):
+            """A partial Boris step on a velocity, whichever pusher the run uses."""
+            return self._velocity(self._accelerate(self._momentum(velocity), fields,
+                                                   charge_over_mass, interval))
+        injected, energy, momentum = wall.injected, wall.energy_injected, wall.momentum_injected
+        overflow = wall.overflow
+        for i, (sp, block) in enumerate(zip(self.species, self.blocks)):
+            if sp.source is None or sp.source.model == "volume":
+                continue
+            key, k = random.split(key)
+            plane = jnp.full((1, 3), (-1.0 if sp.source.side == "left" else 1.0) * d.length / 2)
+
+            def emit(arrays, k=k, sp=sp, block=block, plane=plane):
+                x, u, w, qm = arrays
+                x, v, w, qm, weight, entering, spill = inject(k, sp.source, block, x, self._velocity(u), w, qm,
+                                                              sp.charge_si / sp.mass, d.dt, d.length,
+                                                              self._fields_at(plane, E, B, rho)[0], push)
+                carried = self._momentum(entering)      # the velocities as the pusher will carry them
+                return ((x, self._momentum(v), w, qm), weight * sp.source.emit,
+                        weight * jnp.sum(self._kinetic(sp.mass, carried)),
+                        weight * sp.mass * jnp.sum(carried, axis=0), spill)
+
+            def idle(arrays):
+                zero = jnp.zeros((), w.dtype)
+                return arrays, zero, zero, jnp.zeros(3, w.dtype), zero
+
+            if sp.source.every == 1:
+                arrays, charge, work, push_in, spill = emit((x, u, w, qm))
+            else:
+                arrays, charge, work, push_in, spill = lax.cond((step + 1) % sp.source.every == 0,
+                                                                emit, idle, (x, u, w, qm))
+            x, u, w, qm = arrays
+            side = 0 if sp.source.side == "left" else 1
+            injected = injected.at[i, side].add(charge)
+            energy = energy.at[i, side].add(work)
+            momentum = momentum.at[i, side].add(push_in)
+            overflow = jnp.maximum(overflow, spill)
+        return x, u, w, qm, wall.replace(injected=injected, energy_injected=energy,
+                                         momentum_injected=momentum, overflow=overflow)
+
+    def _volume_births(self, st):
+        """Prescribed pulses at the integer step start, with their Gauss projection work."""
+        d, (_, q) = self.domain, self.per_particle
+        box = (d.length, d.length_y, d.length_z)
+        for i, (sp, block) in enumerate(zip(self.species, self.blocks)):
+            if sp.source is None or sp.source.model != "volume":
+                continue
+
+            def emit(st, i=i, sp=sp, block=block):
+                x = (wrap_positions(st.x - .5 * d.dt * st.u, st.w, box, d.particle_bc, d.dx)
+                     if st.x_phase == "half" else st.x)
+                x, u, w, qm, weight, spill = volume_inject(sp.source, block, x, st.u, st.w, st.qm,
+                                                           sp.charge_si / sp.mass, d.dt, d.length, d.dx)
+                sigma = self._surface_charge(st.wall, x, w)
+                rho = self._smooth(deposit(x[:, 0], q * w, d.grid[0], d.dx, d.cells, d.particle_bc,
+                                           self.solver.shape_order))
+                Ex = E_x_from_rho(rho, d.dx, d.field_bc,
+                                  self._electrode_field(st.wall, self._electrode_overlap(sigma, st.wall)))
+                work = .5 * epsilon_0 * d.dx * jnp.sum((Ex - st.E[:, 0]) * (Ex + st.E[:, 0]))
+                total = weight * sp.source.emit
+                velocity = jnp.asarray(sp.source.drift)
+                budget = jnp.r_[total, total * .5 * sp.mass * jnp.sum(velocity ** 2),
+                                total * sp.mass * velocity, work]
+                wall = st.wall.replace(birth_budget=st.wall.birth_budget.at[i].add(budget),
+                                       overflow=jnp.maximum(st.wall.overflow, spill))
+                if st.x_phase == "half":
+                    x = wrap_positions(x + .5 * d.dt * u, w, box, d.particle_bc, d.dx)
+                return st.replace(x=x, u=u, w=w, qm=qm, rho=rho, sigma=sigma,
+                                  E=st.E.at[:, 0].set(Ex), wall=wall)
+
+            st = lax.cond((st.steps % sp.source.every == 0) & (sp.source.rate > 0), emit, lambda st: st, st)
+            valid = (jnp.isfinite(sp.source.rate) & (sp.source.rate >= 0)
+                     & jnp.all(jnp.isfinite(jnp.asarray(sp.source.drift)))
+                     & jnp.all(jnp.asarray(sp.source.vth) == 0))
+            st = st.replace(E=jnp.where(valid, st.E, jnp.nan))
+        return st
+
+    #: What each row of :meth:`Simulation.moments` holds, in order.
+    MOMENTS = ("n", "nvx", "nvy", "nvz", "nvxvx", "nvyvy", "nvzvz", "nvxvy", "nvxvz", "nvyvz")
+    #: How many of them each setting of ``run(moments=...)`` accumulates.
+    MOMENT_LEVELS = {"density": 1, "flux": 4, "full": 10}
+
+    def moments(self, x, v, w, rows=10):
+        """The ten velocity moments of each species on the grid, ``(species, 10, cells)``: the
+        density, the three fluxes and the six independent second moments, named in
+        :data:`MOMENTS`. The units are :math:`\\mathrm{m^{-3}}`, :math:`\\mathrm{m^{-2}s^{-1}}`
+        and :math:`\\mathrm{m^{-1}s^{-2}}`.
+
+        Ten is what a pressure or a temperature **tensor** needs, and having them here is what
+        makes those available without a particle history: :func:`~jaxincell.moment_profiles`
+        turns a window of the running sums into the density, the mean velocity and both tensors.
+        The first two rows are the density and the flux along the grid, which is why a profile
+        written before there were ten still reads the same.
+
+        They use the deposit's own shape function, so a profile lines up with the charge density
+        the field solver saw. ``run(moments=...)`` sums them over every step and stores the
+        running sum, which is how a mean over a long window is had without a particle history:
+        divide the difference of two stored sums by the difference of the step counts beside them.
+
+        How many rows is worth choosing, because the second moments are not free. Measured over
+        200 steps at 120000 slots on 256 cells, each in its own process: no moments 0.983 s, the
+        first four 1.176 s and all ten 1.550 s, so a density profile costs 20 % of a step and a
+        temperature tensor 58 %. What the extra rows spend is memory traffic, not deposits --
+        ten deposits are 0.71 ms against three at 0.42, while the six products
+        :math:`v_iv_j` are six more arrays the length of the particle list at every step.
         """
-        if input_parameters is None:
-            input_parameters = {}
+        d = self.domain
+        pairs = ((0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2))
+        out = []
+        for (start, n) in self.blocks:
+            xs, vs, ws = x[start:start + n, 0], v[start:start + n], w[start:start + n]
 
-        base_parameter_sections = {
-            section_name: getattr(self, section_metadata["attribute"])
-            for section_name, section_metadata in PARAMETER_SECTIONS.items()
-        }
-        runtime_parameter_sections = build_runtime_parameter_sections(
-            base_parameter_sections,
-            input_parameters,
-        )
-        domain_parameters = runtime_parameter_sections["domain_parameters"]
-        species_parameters = runtime_parameter_sections["species_parameters"]
-        resolve_species_references(species_parameters)
-        external_field_parameters = runtime_parameter_sections["external_field_parameters"]
-        source_parameters = runtime_parameter_sections["source_parameters"]
-        solver_parameters = runtime_parameter_sections["solver_parameters"]
+            def density_of(amount, xs=xs):
+                return deposit(xs, amount, d.grid[0], d.dx, d.cells, d.particle_bc, self.solver.shape_order)
 
-        domain_state = build_domain_state(domain_parameters)
-        particle_state = initialize_particle_state(
-            species_parameters,
-            domain_parameters,
-            solver_parameters,
-            domain_state,
-        )
-        print_simulation_information(
-            domain_parameters,
-            species_parameters,
-            external_field_parameters,
-            solver_parameters,
-            domain_state,
-            particle_state,
-        )
-        field_state = initialize_field_state(
-            domain_parameters,
-            solver_parameters,
-            external_field_parameters,
-            domain_state,
-            particle_state,
-        )
-        runtime_external_field_parameters = {
-            **external_field_parameters,
-            "external_electric_field": field_state["external_electric_field"],
-            "external_magnetic_field": field_state["external_magnetic_field"],
-        }
+            amounts = [ws] + [ws * vs[:, k] for k in range(3)] + [ws * vs[:, i] * vs[:, j] for i, j in pairs]
+            out.append(jnp.stack([density_of(a) for a in amounts[:rows]]))
+        return jnp.stack(out)
 
-        total_steps = domain_parameters["total_steps"]
+    def _accumulate(self, totals, x, v, w):
+        return None if totals is None else totals + self.moments(x, v, w, totals.shape[1])
 
-        # Extract parameters for convenience
-        dx = domain_state["dx"]
-        dt = domain_state["dt"]
-        grid = domain_state["grid"]
-        box_size = domain_state["box_size"]
-        E_field, B_field = field_state["fields"]
-        charges = particle_state["charges"]
-        masses = particle_state["masses"]
-        charge_to_mass_ratios = particle_state["charge_to_mass_ratios"]
-        field_BC_left = domain_parameters["field_BC_left"]
-        field_BC_right = domain_parameters["field_BC_right"]
-        particle_BC_left = domain_parameters["particle_BC_left"]
-        particle_BC_right = domain_parameters["particle_BC_right"]
+    def _current_closure(self, current_per_particle):
+        """The constant of the continuity current for a closure that does not take a
+        boundary value: the mean current the particles carry, which a periodic box has no
+        wall to replace (:func:`~jaxincell._core.current_from_continuity`)."""
+        return jnp.sum(current_per_particle) / self.domain.length
 
-        positions = particle_state["positions"]
-        velocities = particle_state["velocities"]
+    def _collector_current(self, sigma_old, sigma_new, interval):
+        """Conduction current at the collector face, :math:`\\mathrm{A/m^2}`, which closes the
+        continuity current of a box whose other wall is an open plane.
 
-        # Leapfrog integration: positions at half-step before the start
-        positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
-            positions + (dt / 2) * velocities, velocities,
-            charges, masses, charge_to_mass_ratios,
-            dx, grid, *box_size, particle_BC_left, particle_BC_right)
+        Ampere's law makes the total current uniform across a one-dimensional box, so
+        :math:`J_{\\rm cond} + \\epsilon_0\\partial_t E_x` is the current in the external
+        circuit. A floating collector is connected to nothing, so that total is zero and the
+        conduction current at its face is :math:`-\\epsilon_0\\partial_t E_x = \\dot\\sigma_w`,
+        the rate at which the electrode's charge changes -- collected and overlapping alike,
+        since both are on the surface. Taken as a difference over the same interval the density
+        change spans, that is exact for the discrete continuity relation rather than an
+        approximation to it. Anchoring it at zero instead, as this did, leaves an internal
+        transport measured from the source plane and not an absolute current.
+        """
+        return (sigma_new - sigma_old) / interval
 
-        positions_minus1_2 = set_BC_positions(
-            positions - (dt / 2) * velocities,
-            charges, dx, grid, *box_size,
-            particle_BC_left, particle_BC_right)
+    def _surface_charge(self, wall, x, w):
+        """Charge on each wall, ``(left, right)``: what it has taken plus the clouds reaching
+        past it. The two together with the charge on the grid are everything the box holds, which
+        is what :func:`~jaxincell.charge_balance` checks against what went in and out."""
+        return wall.charge([sp.charge_si for sp in self.species]) + self._overlap_charge(x, w)
 
-        if solver_parameters["time_evolution_algorithm"] == 0:
-            initial_carry = (
-                E_field, B_field, positions_minus1_2, positions,
-                positions_plus1_2, velocities, qs, ms, q_ms,
-            )
-            step_func = lambda carry, step_index: Boris_step(
-                carry, step_index, solver_parameters, runtime_external_field_parameters, dx, dt, grid, box_size,
-                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
-            )
+    def _overlap_charge(self, x, w):
+        """Charge of the parts of the live particle clouds that reach past each wall,
+        ``(left, right)`` in :math:`\\mathrm{C/m^2}`.
+
+        A cloud is one and a half cells wide, so it crosses the wall before its centre does,
+        and :func:`~jaxincell._core.deposit` drops the part outside the grid. That part is not
+        gone: it is charge the wall already sees, and it is reversible, because the particle
+        may still turn round. Left out of both the volume and the surface, it makes the total
+        charge of a particle crossing the wall swing between a half and one and a half of
+        itself, and the field inside jump by half a particle at the crossing. It is taken from
+        the same shape function and the same positions the deposit used, so the two partition
+        each particle exactly.
+
+        Only a wall the deposit actually drops charge at has any: a periodic wall wraps it to
+        the far end and a reflective one clamps it into the boundary cell, and in both it is
+        already on the grid. Counting it twice there would make the charge balance drift by a
+        part in ten thousand with nothing wrong.
+        """
+        d = self.domain
+        index, weights = s2_weights(x[:, 0], d.grid[0], d.dx)
+        charges = jnp.concatenate([jnp.full((sp.n,), sp.charge_si) for sp in self.species])
+        outside = (index < 0, index >= d.cells)
+        return jnp.stack([jnp.sum(charges * w * jnp.sum(jnp.where(side, weights, 0.0), axis=1))
+                          if code in (2, 4) else jnp.zeros(())
+                          for side, code in zip(outside, d.particle_bc)])
+
+    def _electrode_field(self, wall, overlap=0.0):
+        """:math:`E_x` at the collector face, :math:`-\\sigma_w/\\epsilon_0`, from the charge it
+        has collected and the part of the live clouds that reaches past it. It closes the Gauss
+        solve of a box whose other wall is an open source plane; with a symmetry plane opposite
+        and nothing crossing it, the same number comes out of global charge conservation instead.
+
+        Only this closure takes the overlap. The other absorbing closures fix their constant from
+        a potential difference rather than from a surface charge, and still lose the truncated
+        part; in a ten-Debye-length sheath that is 0.4 % of the electron charge and 0.6 % of the
+        ion charge, and 0.29 % of what the collector holds.
+        """
+        if self.domain.field_bc != (4, 2):
+            return 0.0
+        return -(wall.charge([sp.charge_si for sp in self.species])[1] + overlap) / epsilon_0
+
+    def _electrode_overlap(self, sigma, wall):
+        """The collector's share of ``sigma`` that is not collected charge."""
+        return sigma[1] - wall.charge([sp.charge_si for sp in self.species])[1]
+
+    def _advance_fields(self, E, B, J, dt_half, rho, wall, electric_first, overlap=0.0):
+        """Half a step of the field equations.
+
+        An electrostatic run solves :math:`\\partial_x E_x = \\rho/\\epsilon_0` for the field at
+        the time of the density it is given, and leaves the transverse components and the
+        plasma's own magnetic field alone: with :math:`\\mathbf E = -\\nabla\\phi` in one
+        dimension there is nothing else to solve, and the light-wave time-step limit goes with
+        it. An electromagnetic run takes the symmetric half step of Maxwell's equations.
+
+        With ``field_solver="gauss"`` in a periodic box the mean of :math:`J_x` is left out of
+        the Ampere half steps. The Gauss solve gives :math:`\\langle E_x\\rangle = 0` at the end
+        of every step, but the push uses :math:`E_x` after the first half step, and the mean
+        current there would give it a uniform part: a beam carrying a net current through heavy
+        ions then slowed by about :math:`(\\omega_{pe}\\Delta t)^2/2` per step, 6 % in 50 steps at
+        :math:`\\omega_{pe}\\Delta t = 0.05`. The continuity current fixes the rest of
+        :math:`E_x`, so the half-step field is then exactly the Gauss field of the half-step
+        density."""
+        d, bc = self.domain, self.domain.field_bc
+        if self.solver.electrostatic:
+            return E.at[:, 0].set(E_x_from_rho(rho, d.dx, bc, self._electrode_field(wall, overlap))), B
+        if self.solver.field_solver == "gauss" and bc[0] == 0:
+            J = J.at[:, 0].add(-jnp.mean(J[:, 0]))
+        E, B = half_step_fields(E, B, J, dt_half, d.dx, bc, electric_first)
+        if self.solver.field_solver == "gauss" and not electric_first:
+            E = E.at[:, 0].set(E_x_from_rho(rho, d.dx, bc))
+        return E, B
+
+    # -- initial state ------------------------------------------------------------------
+    def initial_state(self, key):
+        d = self.domain
+        L, dx, dt = d.length, d.dx, d.dt
+        xs, vs, ws = [], [], []
+        for s in self.species:
+            key, k_x, k_y, k_v = random.split(key, 4)
+            if s.x is not None:
+                x = jnp.asarray(s.x)
+            else:
+                if s.sampling == "random":
+                    x1 = random.uniform(k_x, (s.n,), minval=-L / 2, maxval=L / 2)
+                else:
+                    # `active` is static, so `spread` is a Python int: at active = 0 every
+                    # slot is dead and its position is overwritten by the parking below, but
+                    # the expression is still traced and a division by zero would put an
+                    # infinity in the untaken branch of the weight's `where`, whose cotangent
+                    # is NaN. An empty start is a source-driven run's natural beginning.
+                    spread = max(s.active, 1)
+                    x1 = -L / 2 + (jnp.arange(s.n) % spread + 0.5) * (L / spread)
+                k = 2 * jnp.pi * s.perturbation_mode / L
+                x1 = x1 + s.perturbation_amplitude * jnp.sin(k * x1)
+                yz = (jnp.zeros((s.n, 2)) if s.sampling == "low_noise" else
+                      random.uniform(k_y, (s.n, 2), minval=-0.5, maxval=0.5) * jnp.array([d.length_y, d.length_z]))
+                x = jnp.concatenate([x1[:, None], yz], axis=1)
+            if s.v is not None:
+                v = jnp.asarray(s.v)
+            else:
+                if s.sampling == "low_noise":
+                    # With plus_minus the two beams are alternate particles, and the base-2
+                    # van der Corput value is below one half exactly when the index is even,
+                    # which would hand each beam one half of the Maxwellian. Drawing n/2
+                    # quantiles and giving each to both beams makes them mirror images, each
+                    # sampling the whole distribution.
+                    m = (s.n + 1) // 2 if s.plus_minus else s.n
+                    u = jnp.stack([jnp.asarray(_van_der_corput(m, b)) for b in (2, 3, 5)], axis=1)
+                    u = jnp.repeat(u, 2, axis=0)[: s.n] if s.plus_minus else u
+                    v = jnp.asarray(s.vth) * erfinv(2 * u - 1)
+                else:
+                    v = jnp.asarray(s.vth) / jnp.sqrt(2.0) * random.normal(k_v, (s.n, 3))
+                v = v + jnp.asarray(s.drift)
+                if s.plus_minus:
+                    v = v.at[:, 0].multiply(jnp.where(jnp.arange(s.n) % 2 == 0, 1.0, -1.0))
+            xs.append(x)
+            vs.append(v)
+            ws.append(jnp.where(jnp.arange(s.n) < s.active, s.density * L / max(s.active, 1), 0.0))
+        x, v = jnp.concatenate(xs), jnp.concatenate(vs)
+        w, (m, q) = jnp.concatenate(ws), self.per_particle
+        u = self._momentum(v)
+        v = self._velocity(u)
+        qm = q / m
+        box = (L, d.length_y, d.length_z)
+        if self.sources or any(sp.active < sp.n for sp in self.species):
+            # A species a source maintains gives `n` as a capacity, and a slot of no weight
+            # is a dead one: park it beyond the wall with no charge-to-mass ratio, exactly
+            # where a wall leaves a particle it has collected, so that the source finds it
+            # free. `density=0` is then a physically empty start that fills from the source.
+            dead = w <= 0
+            x = x.at[:, 0].set(jnp.where(dead, -L / 2 - PARK * dx, x[:, 0]))
+            qm = jnp.where(dead, 0.0, qm)
+            u = jnp.where(dead[:, None], 0.0, u)
+            v = self._velocity(u)
+        wall = self._empty_wall()
+        if self.solver.algorithm == "explicit" and d.particle_bc == (0, 0):
+            # Only the periodic leapfrog precomputes a future half position.
+            # A wall run starts at its supplied physical position, before any impact.
+            x_free = x + 0.5 * dt * v
+            x, u, w, qm, _ = apply_particle_bc(
+                x_free, u, w, qm, box, d.particle_bc, d.restitution, self._reflection(v), dx,
+                self._weight_floor())
+            x_integer = wrap_positions(x - 0.5 * dt * self._velocity(u), w, box, d.particle_bc, dx)
         else:
-            initial_carry = (
-                E_field, B_field, positions,
-                velocities, qs, ms, q_ms,
-            )
-            step_func = lambda carry, step_index: CN_step(
-                carry, step_index, solver_parameters, dx, dt, grid, box_size,
-                particle_BC_left, particle_BC_right, field_BC_left, field_BC_right,
-                solver_parameters["number_of_particle_substeps_implicit_CN"]
-            )
+            x_integer = x
+        rho = self._smooth(deposit(x_integer[:, 0], q * w, d.grid[0], dx, d.cells,
+                                   d.particle_bc, self.solver.shape_order))
+        E = jnp.zeros((d.cells, 3)).at[:, 0].set(
+            E_x_from_rho(rho, dx, d.field_bc, self._electrode_field(wall, self._overlap_charge(x_integer, w)[1])))
+        B = jnp.zeros((d.cells, 3))
+        return (State(E, B, x, u, w, qm, rho, self._surface_charge(wall, x_integer, w), key, jnp.zeros(()),
+                      jnp.zeros((), jnp.int32), wall, None, self._x_phase()), (m, q))
 
-        @scan_tqdm(total_steps)
-        def simulation_step(carry, step_index):
-            return step_func(carry, step_index)
+    def _x_phase(self):
+        return ("integer" if self.solver.algorithm == "implicit" else
+                "half" if self.domain.particle_bc == (0, 0) else "wall")
 
+    def _smooth(self, f):
+        s = self.solver
+        return smooth(f, s.filter_passes, s.filter_alpha, s.filter_strides, self.domain.field_bc)
 
-        # Run simulation
-        _, results = lax.scan(simulation_step, initial_carry, jnp.arange(total_steps))
+    # -- one step ------------------------------------------------------------------------------
+    def _sources(self, x, v, q, dt_half, wall_current, rho_old):
+        """Charge density and current over a half step from the motion into positions ``x``
+        with velocities ``v``. An electrostatic run has no use for the transverse currents
+        and does not deposit them, which is two passes over the particles saved per half step;
+        the longitudinal current is kept, since it is a diagnostic in its own right."""
+        d, order = self.domain, self.solver.shape_order
+        rho_new = self._smooth(deposit(x[:, 0], q, d.grid[0], d.dx, d.cells, d.particle_bc, order))
+        J_x = current_from_continuity(rho_old, rho_new, dt_half, d.dx, wall_current, d.field_bc)
+        if self.solver.electrostatic:
+            return rho_new, jnp.stack([J_x, jnp.zeros_like(J_x), jnp.zeros_like(J_x)], axis=1)
+        J_y = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 1], d.grid[0], d.dx, d.cells,
+                                            d.particle_bc, order)), d.field_bc)
+        J_z = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 2], d.grid[0], d.dx, d.cells,
+                                            d.particle_bc, order)), d.field_bc)
+        return rho_new, jnp.stack([J_x, J_y, J_z], axis=1)
 
-        # Unpack results
-        positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+    def _fields_at(self, x, E, B, rho):
+        """E and B at the particles, as ``(N, 6)``.
 
-        # **Output results**
-        from ._constants import epsilon_0, mass_electron
-        electron_species = next(iter(species_parameters["electrons"].values()))
-        electron_weight = particle_state["weights"][0, 0]
-        plasma_frequency = (
-            jnp.sqrt(electron_species["number_pseudoparticles"] * electron_weight * particle_state["charge_electrons"]**2)
-            / jnp.sqrt(mass_electron)
-            / jnp.sqrt(epsilon_0)
-            / jnp.sqrt(domain_parameters["length"])
-        )
-        temporary_output = {
-            ## segregate ions/electrons in non-jitted method outside simulation(...)
-            ## so we can make use of dynamically constructed arrays
-            #"position_electrons": positions_over_time[ :, :number_pseudoelectrons, :],
-            #"velocity_electrons": velocities_over_time[:, :number_pseudoelectrons, :],
-            #"mass_electrons":     parameters["masses"][   :number_pseudoelectrons],
-            #"charge_electrons":   parameters["charges"][  :number_pseudoelectrons],
-            #"position_ions":      positions_over_time[ :, number_pseudoelectrons:, :],
-            #"velocity_ions":      velocities_over_time[:, number_pseudoelectrons:, :],
-            #"mass_ions":          parameters["masses"][   number_pseudoelectrons:],
-            #"charge_ions":        parameters["charges"][  number_pseudoelectrons:],
-            "positions": positions_over_time,
-            "velocities": velocities_over_time,
-            "masses": masses,
-            "charges": charges,
-            "charge_to_mass_ratios": charge_to_mass_ratios,
-            "initial_positions": positions,
-            "initial_velocities": velocities,
-            "weights": particle_state["weights"],
-            "species_integer_index": particle_state["species_integer_index"],
-            "charge_integer_lookup": particle_state["charge_integer_lookup"],
-            "mass_integer_lookup": particle_state["mass_integer_lookup"],
-            "charge_mass_integer_lookup": particle_state["charge_mass_integer_lookup"],
-            "electric_field":  electric_field_over_time,
-            "magnetic_field":  magnetic_field_over_time,
-            "current_density": current_density_over_time,
-            "charge_density":  charge_density_over_time,
-            "number_grid_points":     domain_parameters["number_grid_points"],
-            "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
-            "total_steps": total_steps,
-            "time_array":  (jnp.arange(total_steps) + 1) * dt,
-            "grid": grid,
-            "dt": dt,
-            "plasma_frequency": plasma_frequency,
-            "max_initial_vth_electrons": particle_state["vth_electrons"],
-            "vth_electrons_over_c": particle_state["vth_electrons_over_c"],
-            "charge_electrons": particle_state["charge_electrons"],
-            'dx': dx,
-            'length': box_size[0],
-            "box_size": box_size,
-            "fields": field_state["fields"],
-            "external_electric_field": field_state["external_electric_field"],
-            "external_magnetic_field": field_state["external_magnetic_field"],
-        }
+        E is averaged from the faces to the centres, where B and the charge live, and both
+        are gathered from there with the deposit's own spline, which makes the gather the
+        transpose of the deposit: a particle exerts no force on itself, two exert equal and
+        opposite forces on each other, and near a wall a particle feels the image the wall
+        implies (:func:`~jaxincell._core.with_ghosts`). Gathering E straight from the faces
+        does neither; in a periodic box a lone particle pushed itself with up to 8 % of its
+        own field. ``rho`` gives the field at an absorbing left wall. External fields are
+        added as given, continued unchanged beyond a wall; one given on an ``(x, y, z)`` grid
+        is gathered at the particle's ``y`` and ``z`` too (:meth:`external_fields_at`)."""
+        d, bc, order = self.domain, self.domain.field_bc, self.solver.shape_order
+        F = with_ghosts(jnp.concatenate([to_centres(E, *wall_faces_E(E, B, rho, d.dx, bc)), B], axis=1), bc,
+                        jnp.asarray(PARITY), order)
+        flat = [f is not None and jnp.ndim(f) == 2 for f in (self.external_E, self.external_B)]
+        if any(flat):
+            E_ext = jnp.asarray(self.external_E) if flat[0] else jnp.zeros_like(E)
+            B_ext = jnp.asarray(self.external_B) if flat[1] else jnp.zeros_like(B)
+            left = E_ext[-1] if order == 5 else E_ext[0]
+            F = F + with_ghosts(jnp.concatenate([to_centres(E_ext, left, E_ext[-1]), B_ext], axis=1), bc,
+                                shape_order=order)
+        fields = gather(F, x[:, 0], d.grid[0], d.dx, order)
+        if any(f is not None and jnp.ndim(f) == 4 for f in (self.external_E, self.external_B)):
+            fields = fields + self._external_xyz(x)
+        return fields
 
-        return temporary_output
+    def _external_xyz(self, x):
+        """The external fields given on an ``(x, y, z)`` grid, at positions ``x``, ``(N, 6)``."""
+        d, order = self.domain, self.solver.shape_order
+        parts = [gather_xyz(with_ghosts(jnp.asarray(f), d.field_bc, shape_order=order), x, d.grid[0], d.dx,
+                            (d.length_y, d.length_z), order)
+                 if f is not None and jnp.ndim(f) == 4 else jnp.zeros((x.shape[0], 3), x.dtype)
+                 for f in (self.external_E, self.external_B)]
+        return jnp.concatenate(parts, axis=1)
 
-    def assemble_output(self, simulation_output, input_parameters):
-        base_parameter_sections = {
-            section_name: getattr(self, section_metadata["attribute"])
-            for section_name, section_metadata in PARAMETER_SECTIONS.items()
-        }
-        parameter_sections = build_runtime_parameter_sections(
-            base_parameter_sections,
-            input_parameters,
-        )
-        resolve_species_references(parameter_sections["species_parameters"])
+    def external_fields_at(self, x):
+        """The external E and B at positions ``x`` ``(N, 3)``, as ``(N, 6)``, gathered as the
+        push gathers them: with the spline of the deposit along ``x`` and, for a field given on
+        an ``(x, y, z)`` grid, along ``y`` and ``z`` as well. Zero where no field is given."""
+        d, order = self.domain, self.solver.shape_order
+        zero = jnp.zeros((d.cells, 3))
+        flat = [jnp.asarray(f) if f is not None and jnp.ndim(f) == 2 else zero
+                for f in (self.external_E, self.external_B)]
+        left = flat[0][-1] if order == 5 else flat[0][0]
+        F = with_ghosts(jnp.concatenate([to_centres(flat[0], left, flat[0][-1]), flat[1]], axis=1),
+                        d.field_bc, shape_order=order)
+        return gather(F, x[:, 0], d.grid[0], d.dx, order) + self._external_xyz(x)
 
-        domain_parameters = parameter_sections["domain_parameters"]
-        external_field_parameters = parameter_sections["external_field_parameters"]
-        source_parameters = parameter_sections["source_parameters"]
-        solver_parameters = parameter_sections["solver_parameters"]
+    def _accelerate(self, v, fields, qm, dt):
+        """The Boris step in the fields ``(N, 6)`` gathered at the particles."""
+        push = boris_relativistic if self.solver.relativistic else boris
+        return push(v, fields[:, :3], fields[:, 3:], qm[:, None], dt)
 
-        return {
-            **domain_parameters,
-            **external_field_parameters,
-            **source_parameters,
-            **solver_parameters,
-            **simulation_output,
-            "domain_parameters": domain_parameters,
-            "species_parameters": parameter_sections["species_parameters"],
-            "external_field_parameters": external_field_parameters,
-            "source_parameters": source_parameters,
-            "solver_parameters": solver_parameters,
-            "parameter_sections": parameter_sections,
-        }
-    
-    def clean_and_initialize_parameters(self, parameters):
-        # Sort parameters to intended locations in parameters
-        input_parameters, parameters = self.classify_and_sort_input_parameters(parameters)
+    def _collide(self, key, x, v, w, qm, m, dt):
+        d = self.domain
+        names = [s.name for s in self.species]
+        pairs = (self.collisions.pairs if self.collisions.pairs is not None
+                 else tuple((a, b) for a in names for b in names if names.index(a) <= names.index(b)))
+        pairs = tuple((names.index(a), names.index(b)) for a, b in pairs)
+        ln_lambda = self.collisions.coulomb_log
+        if ln_lambda is None:
+            # The NRL logarithm is the electrons': the lightest negatively charged species, at its
+            # density and at the temperature m v_th^2 / 2 of its largest thermal-speed component.
+            # construction has checked that a negatively charged species exists; inside the run the
+            # charges are traced, so the choice is made with array operations
+            charges = [s.charge for s in self.species]
+            charge = jnp.stack([jnp.asarray(q, float) for q in charges])
+            mass = jnp.stack([jnp.asarray(s.mass, float) for s in self.species])
+            e = jnp.argmin(jnp.where(charge < 0, mass, jnp.inf))
+            density = jnp.stack([jnp.asarray(s.density, float) for s in self.species])[e]
+            vth = jnp.stack([jnp.max(jnp.asarray(s.vth, float)) for s in self.species])[e]
+            kT_ev = mass[e] * vth ** 2 / 2 / elementary_charge
+            ln_lambda = jnp.where(jnp.any(charge < 0), coulomb_logarithm(density, kT_ev), jnp.nan)
+        return collide(key, x, v, w, m, qm * m, self.blocks, pairs, ln_lambda, dt, d.dx, d.length, d.cells)
 
-        # Build initial structure of parameters with canonical section names
-        parameter_sections = {
-            section_name: parameters.pop(section_name, {})
-            for section_name in PARAMETER_SECTIONS
-        }
+    def _wall_contact(self, x, start, fields, qm, dt):
+        """First contact of a held-field flight; the quadratic is exact for Newtonian E.
 
-        input_parameters = {**parameters, **input_parameters}
-        self._base_parameter_sections = deepcopy(parameter_sections)
-
-        # Set the self. parameter sections of the Simulation object
-        for section_name, section_metadata in PARAMETER_SECTIONS.items():
-            setattr(
-                self,
-                section_metadata["attribute"],
-                section_metadata["cleaner"](
-                    parameter_sections[section_name],
-                    input_parameters=input_parameters,
-                ),
-            )
-    
-    def classify_and_sort_input_parameters(self, parameters):
+        Magnetic/relativistic roots follow the same partial-Boris mean-velocity
+        trajectory as the position, with a bounded stationary-point/Newton solve.
+        Unresolved roots invalidate the step instead of fabricating an impact.
         """
-        Sort through input parameters to move parameters into their respective dictionaries to overwrite defaults and
-        move differentiable parameters into a separate input_parameters dictionary. This input_parameters dictionary
-        can then be accessed to use them as inputs to the simulation function without having to write multiple
-        toml files for the differentiable inputs and the non-differentiable parameters.
+        duration = jnp.broadcast_to(jnp.asarray(dt), x.shape[:1])
+        end = self._accelerate(start, fields, qm, duration[:, None])
+        signs = jnp.array([-1.0, 1.0])[:, None]
+        velocity = self._velocity(start)[:, 0]
+        acceleration = (self._velocity(end)[:, 0] - velocity) / jnp.where(duration > 0, duration, 1.0)
+        speed, force = signs * velocity, signs * acceleration
+        distance = self.domain.length / 2 - signs * x[:, 0]
+        discriminant = speed ** 2 + 2 * force * distance
+        root = jnp.sqrt(jnp.maximum(discriminant, jnp.finfo(start.dtype).tiny))
+        denominator = speed + root
+        times = jnp.where(speed >= 0, 2 * distance / jnp.where(denominator != 0, denominator, 1.0),
+                          (root - speed) / jnp.where(force != 0, force, 1.0))
+        contact = ((distance >= 0) & (discriminant >= 0) & (times >= 0) & (times <= duration)
+                   & (duration > 0) & ((speed > 0) | (force > 0)))
+        unresolved = jnp.zeros(x.shape[0], bool)
+        if self.solver.relativistic or not self.solver.electrostatic or self.external_B is not None:
+            velocity_scale = (jnp.linalg.norm(self._velocity(start), axis=1)
+                              + jnp.linalg.norm(self._velocity(end), axis=1))
+            reach = duration * (c if self.solver.relativistic else
+                                jnp.linalg.norm(start, axis=1) + duration * jnp.abs(qm)
+                                * jnp.linalg.norm(fields[:, :3], axis=1))
+            near = ((duration > 0) & (jnp.abs(x[:, 0]) <= self.domain.length / 2)
+                    & (self.domain.length / 2 - jnp.abs(x[:, 0]) <= reach))
+
+            def refine(_):
+                times, contact = initial_times, initial_contact
+                if self.solver.relativistic:
+                    def position(t):
+                        pushed = self._accelerate(start, fields, qm, t[:, None])
+                        return x[:, 0] + t * self._mean_velocity(start, pushed)[:, 0]
+                else:
+                    # Rational x displacement of the held-field Boris mean velocity.
+                    a, b = qm[:, None] * fields[:, :3], qm[:, None] * fields[:, 3:] / 2
+                    b2 = jnp.sum(b * b, axis=1)
+                    k1 = a[:, 0] / 2 + jnp.cross(start, b)[:, 0]
+                    k2 = jnp.cross(a, b)[:, 0] / 2 + b[:, 0] * jnp.sum(start * b, axis=1)
+                    k3 = b[:, 0] * jnp.sum(a * b, axis=1) / 2
+
+                    def position(t):
+                        return x[:, 0] + t * (velocity + t * (k1 + t * (k2 + t * k3))) / (1 + b2 * t ** 2)
+
+                def slope(t):
+                    return jax.jvp(position, (t,), (jnp.ones_like(t),))[1]
+
+                turn = jnp.clip(-velocity / jnp.where(acceleration != 0, acceleration, 1.0), 0, duration)
+                initial_slope = slope(jnp.zeros_like(duration))
+                turning = initial_slope * slope(duration) < 0
+                turn = _bracketed_newton(slope, turn, jnp.zeros_like(duration), duration, -initial_slope)
+                turn = jnp.where(turning, turn, 0.0)
+                unresolved = turning & near & (jnp.abs(slope(turn)) > 64 * jnp.finfo(x.dtype).eps * velocity_scale)
+                upper = jnp.where(signs * position(turn) > self.domain.length / 2, turn, duration)
+                endpoint = signs * jax.vmap(position)(upper)
+                outward = signs * jax.vmap(slope)(upper)
+                contact = ((endpoint > self.domain.length / 2)
+                           | ((endpoint == self.domain.length / 2) & (outward > 0))) & near
+                lower = jnp.zeros_like(upper)
+                times = jnp.clip(times, lower, upper)
+
+                def residual(t):
+                    return signs * jax.vmap(position)(t) - self.domain.length / 2
+
+                times = _bracketed_newton(residual, times, lower, upper, 1.0)
+                error = jnp.abs(residual(times))
+                tolerance = 64 * jnp.finfo(x.dtype).eps * self.domain.length
+                unresolved = unresolved | jnp.any(contact & (error > tolerance), axis=0)
+                return contact, times, unresolved
+
+            initial_times, initial_contact = times, contact
+            contact, times, unresolved = lax.cond(jnp.any(near), refine,
+                                                  lambda _: (contact, times, unresolved), None)
+        selected = jnp.where(contact, times, jnp.inf)
+        side = jnp.argmin(selected, axis=0)
+        hit = jnp.any(contact, axis=0)
+        time = jnp.where(hit, jnp.min(selected, axis=0), 0.0)
+        return end, hit, time, side, unresolved
+
+    def _wall_drift(self, key, x, u, w, qm, wall, fields, m, dt, time_fraction):
+        """Physical half flight with wall momenta at the contact time.
+
+        Transport the returned momentum back to its carried time for the full Boris
+        kick between halves. Newtonian uniform-E and ballistic flights are exact;
+        varying fields, magnetic/relativistic flights and event derivatives need
+        timestep refinement. Resolve at most one impact per particle per segment.
         """
-        parameters = deepcopy(parameters)
-        input_parameters = parameters.pop("input_parameters", {})
-        differentiable_parameters = {}
-        cleaner_input_parameters = {}
-        unrouted_input_parameters = {}
+        d = self.domain
+        box = (d.length, d.length_y, d.length_z)
+        start = self._accelerate(u, fields, qm, -time_fraction * dt)
+        end, hit, time, side, unresolved = self._wall_contact(x, start, fields, qm, dt)
+        hit = hit & (w > 0)
+        interval = jnp.where(hit, time - time_fraction * dt, 0.0)[:, None]
+        incoming = jnp.where(hit[:, None], self._accelerate(start, fields, qm, time[:, None]), u)
+        impact = x + time[:, None] * self._mean_velocity(start, incoming)
+        impact = impact.at[:, 0].set(jnp.where(side == 0, -d.length / 2, d.length / 2))
+        # A particle resting on the face accelerates out at time zero. The wall law
+        # uses strict velocity at equality, so nudge only its evaluation point outward.
+        normal = lax.stop_gradient(impact[:, 0])
+        contact = impact.at[:, 0].set(impact[:, 0] + (jnp.nextafter(
+            normal, jnp.where(side == 0, -jnp.inf, jnp.inf)) - normal))
+        free = x + dt * self._mean_velocity(start, end)
+        mapped, returned, w, qm, hits = apply_particle_bc(
+            jnp.where(hit[:, None], contact, free), incoming, w, qm, box, d.particle_bc, d.restitution,
+            self._reflection(self._velocity(incoming)), d.dx, self._weight_floor())
+        returned = self._thermalise(key, returned, hits)
+        wall = self._record(wall, hits, m, incoming, returned)
+        u = self._accelerate(returned, fields, qm, -interval)
+        remaining = jnp.where(hit & (w > 0), dt - time, 0.0)
+        outgoing, second, _, _, failed = self._wall_contact(impact, returned, fields, qm, remaining)
+        bounced = impact + remaining[:, None] * self._mean_velocity(returned, outgoing)
+        x = jnp.where((hit & (w > 0))[:, None], bounced, mapped)
+        invalid = unresolved | failed | (hit & second) | (jnp.abs(x[:, 0]) > d.length / 2)
+        x = x.at[:, 0].set(jnp.where((w > 0) & invalid, jnp.nan, x[:, 0]))
+        periods = jnp.asarray(box[1:])
+        x = x.at[:, 1:].set((x[:, 1:] + periods / 2) % periods - periods / 2)
+        return x, u, w, qm, wall
 
-        # Route species parameters to correct place in parameters dictionary
-        route_nested_initial_species_parameters(
-            input_parameters,
-            parameters,
-            differentiable_parameters,
-            cleaner_input_parameters,
-        )
-        # Route non-species parameters to correct place in parameters dictionary
-        unrouted_input_parameters = route_flat_initial_parameters(
-            input_parameters,
-            parameters,
-            differentiable_parameters,
-            cleaner_input_parameters,
-        )
+    def _explicit_step(self, st, extra):
+        d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
+        box = (L, d.length_y, d.length_z)
+        m, q = extra
+        key, k_collide, k_wall, k_source = self._split_step_key(st.key)
+        if st.wall.birth_budget is not None:
+            st = self._volume_births(st)
+        walls = d.particle_bc != (0, 0)
+        if walls:
+            k_first, k_wall = random.split(k_wall)
+            initial_fields = self._fields_at(st.x, st.E, st.B, st.rho)
+            x_half, u, w, qm, wall = self._wall_drift(k_first, st.x, st.u, st.w, st.qm, st.wall,
+                                                      initial_fields, m, dt / 2, 0.0)
+        else:
+            x_half, u, w, qm, wall = st.x, st.u, st.w, st.qm, st.wall
+        # What the sources supplied over the interval ending at the position the leapfrog
+        # carries. They enter first, so the deposit below already counts them and no charge
+        # appears between the two halves of the step.
+        x_half, u, w, qm, wall = self._inject(k_source, x_half, u, w, qm, wall, st.E, st.B, st.rho,
+                                              st.steps)
+        v = self._velocity(u)
+        # First half step: sources from the motion x^n -> x^{n+1/2}. The density at x^n
+        # is the one the previous step ended on (or the initial one), carried in the
+        # state rather than deposited again from wrap(x^{n+1/2} - dt v/2), which is
+        # the same positions, velocities and weights and so the same density.
+        sigma_half = self._surface_charge(wall, x_half, w)
+        closure = (self._collector_current(st.sigma[1], sigma_half[1], dt / 2) if d.field_bc == (4, 2)
+                   else self._current_closure(q * w * v[:, 0]))
+        rho_half, J1 = self._sources(x_half, v, q * w, dt / 2, closure, st.rho)
+        E, B = self._advance_fields(st.E, st.B, J1, dt / 2, rho_half, wall, electric_first=True,
+                                    overlap=self._electrode_overlap(sigma_half, wall))
+        # push with the fields at t^{n+1/2}
+        fields = self._fields_at(x_half, E, B, rho_half)
+        u = self._accelerate(u, fields, qm, dt)
+        if walls:
+            x_next, u, w, qm, wall = self._wall_drift(k_wall, x_half, u, w, qm, wall, fields, m,
+                                                      dt / 2, 1.0)
+            u = self._collide_momenta(k_collide, x_next, u, w, qm, m, dt)
+            v = self._velocity(u)
+            x_next_half = x_next
+        else:
+            # The periodic leapfrog retains its half-position carry and integer-time collisions.
+            v_kicked = self._velocity(u)
+            x_integer = wrap_positions(x_half + 0.5 * dt * v_kicked, w, box, d.particle_bc, dx)
+            u = self._collide_momenta(k_collide, x_integer, u, w, qm, m, dt)
+            v = self._velocity(u)
+            displacement = 0.5 * dt * (v_kicked + v)
+            x_free = x_half + displacement
+            x_next_half, u, w, qm, _ = apply_particle_bc(
+                x_free, u, w, qm, box, d.particle_bc, d.restitution, self._reflection(v), dx,
+                self._weight_floor(), displacement=displacement[:, 0])
+            v = self._velocity(u)
+            x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
+        # Second half step, x^{n+1/2} -> x^{n+1}, starting from the charge density the
+        # first half already ended on. Depositing it again here would use the weights
+        # that apply_particle_bc has just reduced, so the density at x^{n+1/2} would jump
+        # by the charge collected at the wall with no current to account for it, and the
+        # discrete Gauss law would drift by that much every step.
+        sigma_next = self._surface_charge(wall, x_next, w)
+        closure = (self._collector_current(sigma_half[1], sigma_next[1], dt / 2) if d.field_bc == (4, 2)
+                   else self._current_closure(q * w * v[:, 0]))
+        rho_next, J2 = self._sources(x_next, v, q * w, dt / 2, closure, rho_half)
+        E, B = self._advance_fields(E, B, J2, dt / 2, rho_next, wall, electric_first=False,
+                                    overlap=self._electrode_overlap(sigma_next, wall))
+        totals = self._accumulate(st.moments, x_next, v, w)
+        state = State(E, B, x_next_half, u, w, qm, rho_next, sigma_next, key, st.time + dt, st.steps + 1,
+                      wall, totals, st.x_phase)
+        return state, (x_next, v, w, E, B, 0.5 * (J1 + J2), rho_next)
 
-        # Separate differentiable parameters inserted into input_parameters in provided parameters
-        # and expose them via Simulation_object.input_parameters for ease of use when passing to simulation(...) or run(...)
-        self._input_parameters = differentiable_parameters
-        self.differentiable_input_parameters = DIFFERENTIABLE_INPUT_PARAMETERS
+    def _check_picard(self, picard, state, initial, q):
+        if self.solver.picard_tolerance is None:
+            return state
+        # A complete replay at the accepted fields/orbits is F(z)-z; successive
+        # accepted updates alone are not the residual of the returned solution.
+        replay, _ = picard(state, None)
+        tolerance = self.solver.picard_tolerance
+        E_a, B_a, (x_a, v_a), ((_, u_a, w_a, _, rho_a, _), J_a) = state
+        E_b, B_b, (x_b, v_b), ((_, u_b, w_b, _, rho_b, _), J_b) = replay
+        tiny = jnp.finfo(initial.x.dtype).tiny
 
-        # Flag any unrecognized user provided parameters
-        if unrouted_input_parameters:
-            unrouted_keys = ", ".join(unrouted_input_parameters.keys())
-            raise ValueError(
-                "Initial input_parameters included parameter(s) that could not be routed. "
-                f"Unrouted parameter(s): {unrouted_keys}"
-            )
+        def maximum(a):
+            return jnp.max(jnp.abs(a))
 
-        return cleaner_input_parameters, parameters
-    
-    def build_hash_values(self):
+        def relative(a, b, old):
+            scale = jnp.maximum(jnp.maximum(maximum(a), maximum(old)), tiny)
+            return maximum(b - a) / scale
+
+        # Fields keep their own SI scales, positions use one cell, and each species
+        # has its own velocity/momentum-per-mass scale.
+        valid = jnp.isfinite(tolerance) & (tolerance > 0)
+        valid &= jnp.maximum(relative(E_a, E_b, initial.E), relative(B_a, B_b, initial.B)) <= tolerance
+        d = self.domain
+        periods = jnp.asarray((d.length, d.length_y, d.length_z))
+        periodic = jnp.asarray((d.particle_bc == (0, 0), True, True)) & (periods > 0)
+        difference = x_b - x_a
+        difference -= jnp.where(periodic, periods * jnp.round(difference / jnp.where(periodic, periods, 1.0)), 0.0)
+        valid &= maximum(difference) / d.dx <= tolerance
+        v = self._velocity(initial.u)
+        for start, count in self.blocks:
+            section = slice(start, start + count)
+            residual = jnp.maximum(relative(v_a[:, section], v_b[:, section], v[section]),
+                                   relative(u_a[section], u_b[section], initial.u[section]))
+            valid &= residual <= tolerance
+        valid &= relative(w_a, w_b, initial.w) <= tolerance
+        charge_scale = jnp.maximum(jnp.sum(jnp.abs(q) * initial.w) / d.length, tiny)
+        current_scale = jnp.maximum(charge_scale * jnp.maximum(maximum(v_a), maximum(v)), tiny)
+        valid &= maximum(rho_b - rho_a) / charge_scale <= tolerance
+        valid &= maximum(J_b - J_a) / current_scale <= tolerance
+        # Reuse the invalid-state/validate contract, with no new state or archive field.
+        # The accepted particles, ledger and RNG stream are untouched.
+        return (jnp.where(valid, E_a, jnp.nan), B_a, state[2], state[3])
+
+    def _implicit_step(self, st, extra):
+        """Crank-Nicolson with a direct Maxwell solve and fixed particle Picard scan (docs/numerics/implicit.md).
+
+        Each sub-step moves a particle on a straight line at :meth:`_mean_velocity`. Its current is the
+        continuity current of the deposits at the two ends, which keeps the discrete Gauss law, and E_x at
+        the particle is the discrete gradient of the potential the transposes of that current and of the
+        deposit make of E_x, so the work equals the energy the current takes from the field (Kormann and
+        Sonnendruecker 2021). E_y, E_z and B are gathered at the mid-point, with the transpose of that
+        gather as their current (Chen, Chacon and Barnes 2011). The end and velocity of each sub-step are
+        carried from one Picard iteration to the next; the step returns the last iteration's state."""
+        d, dt, dx, L = self.domain, self.domain.dt, self.domain.dx, self.domain.length
+        box, bc = (L, d.length_y, d.length_z), d.field_bc
+        m, q = extra
+        E, B, x, u, w, qm, rho, key = st.E, st.B, st.x, st.u, st.w, st.qm, st.rho, st.key
+        n_sub = self.solver.substeps
+        dtau = dt / n_sub
+        # below this shift E_x is the potential's slope at the mid-point, off the quotient by (shift/dx)^2 = eps
+        tiny = jnp.sqrt(jnp.finfo(x.dtype).eps) * dx
+
+        # one thermal-wall key per sub-step, the same in every Picard iteration, so that
+        # the wall re-emits a particle identically each time the orbit is recomputed
+        key, k_collide, k_wall, _ = self._split_step_key(key)
+        keys = random.split(k_wall, n_sub)
+
+        def deposit_x(positions, amounts):
+            return deposit(positions, amounts, d.grid[0], dx, d.cells, d.particle_bc, self.solver.shape_order)
+
+        def substeps(E_half, B_half, orbits):
+            # E_x as a potential at the particles: the transpose of the continuity current, then of the deposit
+            to_current = partial(current_from_continuity, jnp.zeros_like(rho), dt=1.0, dx=dx, wall_current=0.0, bc=bc)
+            phi = jax.linear_transpose(to_current, rho)(E_half[:, 0])[0]
+            E_mean = jnp.mean(E_half[:, 0]) if bc[0] == 0 else 0.0     # the work of the periodic mean current
+
+            def potential(positions):
+                return dx * jax.linear_transpose(partial(deposit_x, positions), w)(phi)[0]
+
+            def one(state, inputs):
+                (x_end, v_bar), k_sub = inputs
+                xs, us, ws, qms, rho_s, wall, x_start, phi_start, J_acc = state
+                shift = dtau * v_bar[:, 0]
+                x_mid = wrap_positions(x_start + 0.5 * dtau * v_bar, ws, box, d.particle_bc, dx)
+                # the gather without the self-consistent E_x, which the discrete gradient below replaces
+                gather = partial(self._fields_at, x_mid, B=B_half, rho=jnp.zeros_like(rho))
+                fields, transpose = jax.vjp(gather, E_half.at[:, 0].set(0.0))
+                phi_end = potential(x_end[:, 0])
+                slope = jax.jvp(potential, (x_mid[:, 0],), (jnp.ones_like(shift),))[1]
+                small = jnp.abs(shift) < tiny
+                E_x = jnp.where(small, slope, (phi_end - phi_start) / jnp.where(small, tiny, shift)) + E_mean
+                if self.solver.orbit_force == "integral":
+                    short = jnp.abs(shift) <= dx
+                    integral = orbit_field_average(E_half[:, 0], x_start[:, 0], jnp.where(short, shift, 0.),
+                                                   d.faces[0], dx, self.solver.shape_order)
+                    E_x = jnp.where(short, integral, E_x)
+                fields = fields.at[:, 0].add(E_x)
+                u_new = self._accelerate(us, fields, qms, dtau)
+                v_new = self._mean_velocity(us, u_new)
+                x_free = xs + dtau * v_new
+                incident, reflection = qms, self._reflection(v_new)
+                x_new, u_bounced, w_new, qms, hits = apply_particle_bc(x_free, u_new, ws, qms, box, d.particle_bc,
+                                                                       d.restitution, reflection, dx,
+                                                                       self._weight_floor(),
+                                                                       displacement=dtau * v_new[:, 0])
+                u_impact = self._at_impact(u_new, hits, fields, incident, dtau, time_fraction=1.0)
+                # Both sides of the ledger refer to the crossing; correcting only arrival
+                # would make an elastic wall appear to exchange energy.
+                _, u_returned, _, _, _ = apply_particle_bc(x_free, u_impact, ws, incident, box, d.particle_bc,
+                                                           d.restitution, reflection, dx, self._weight_floor())
+                u_bounced = self._thermalise(k_sub, u_bounced, hits)
+                if 3 in d.particle_bc:
+                    thermal_hit = ((hits[0][0] > 0) & (d.particle_bc[0] == 3)
+                                   | (hits[0][1] > 0) & (d.particle_bc[1] == 3))
+                    u_returned = jnp.where(thermal_hit[:, None], u_bounced, u_returned)
+                wall = self._record(wall, hits, m, u_impact, u_returned)
+                u_new = u_bounced
+                rho_new = deposit_x(x_new[:, 0], q * w_new)
+                J = transpose(jnp.concatenate([(q * ws)[:, None] * v_new, jnp.zeros_like(v_new)], axis=1))[0] / dx
+                mean_current = jnp.sum(q * ws * v_new[:, 0]) / L
+                J = J.at[:, 0].set(current_from_continuity(rho_s, rho_new, dtau, dx, mean_current, bc))
+                return (x_new, u_new, w_new, qms, rho_new, wall, x_end, phi_end, J_acc + J / n_sub), (x_new, v_new)
+
+            # the ledger starts from the state's, so that only the Picard iteration the step
+            # accepts, the last one, adds its impacts to it
+            init = (x, u, w, qm, rho, st.wall, x, potential(x[:, 0]), jnp.zeros((d.cells, 3)))
+            state, orbits = lax.scan(one, init, (orbits, keys))
+            return state[:6], state[-1], orbits
+
+        def advance(J):
+            """E after the step. An electrostatic run keeps Ampere's law for E_x alone, with the mean
+            current of a periodic box left out so that <E_x> stays zero, and evolves neither the
+            transverse E nor B (docs/numerics/implicit.md)."""
+            if self.solver.electrostatic:
+                J_x = J[:, 0] - (jnp.mean(J[:, 0]) if bc[0] == 0 else 0.0)
+                return E.at[:, 0].add(-dt * J_x / epsilon_0), B
+            return _implicit_fields(E, B, J, dt, dx, bc)
+
+        def picard(state, _):
+            E_new, B_new, orbits, _ = state
+            E_half = 0.5 * (E + E_new)
+            B_half = 0.5 * (B + B_new)
+            particles, J, orbits = substeps(E_half, B_half, orbits)
+            return (*advance(J), orbits, (particles, J)), None
+
+        v = self._velocity(u)      # the first guess: every particle streams freely at its present velocity
+        free = jax.vmap(lambda s: wrap_positions(x + s * dtau * v, w, box, d.particle_bc, dx))
+        orbits = (free(jnp.arange(1.0, n_sub + 1)), jnp.broadcast_to(v, (n_sub,) + v.shape))
+        state, _ = lax.scan(picard, (E, B, orbits, ((x, u, w, qm, rho, st.wall), jnp.zeros_like(E))), None,
+                            length=self.solver.picard_iterations)
+        state = self._check_picard(picard, state, st, q)
+        E_new, B_new, _, ((x, u, w, qm, rho_next, wall), J) = state
+        u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
+        v = self._velocity(u)
+        return (State(E_new, B_new, x, u, w, qm, rho_next, st.sigma, key, st.time + dt, st.steps + 1, wall,
+                      self._accumulate(st.moments, x, v, w), st.x_phase),
+                (x, v, w, E_new, B_new, J, rho_next))
+
+    # -- the run ---------------------------------------------------------------------------------
+    def run(self, steps, seed=0, store_every=1, store_particles=True, moments=False, state=None,
+            verbose=False, snapshot_steps=None):
+        """Advance ``steps`` time steps and return an :class:`Output`.
+
+        Args:
+            steps: Number of time steps; a multiple of ``store_every``.
+            seed: Integer seed of the random numbers (traced, so ``jax.vmap``
+                over seeds gives an ensemble with one compilation).
+            store_every: Keep every ``store_every``-th state in the output.
+            snapshot_steps: Instead keep these zero-based post-step indices, sorted and deduplicated.
+                Integers must lie in ``[0, steps)``; an empty sequence keeps no history. Requires
+                ``store_every=1``. Every step still advances, and ``Output.state`` is always the final state.
+            store_particles: Keep the particle histories (the bulk of the memory).
+            moments: Which velocity moments to sum over every step and store the running sums
+                of, so that a mean profile over a long window needs no particle history:
+                ``False``, ``"density"``, ``"flux"`` (the density and the three fluxes) or
+                ``"full"``, which is what ``True`` means and is the ten a pressure or
+                temperature tensor needs. They cost 20 % of a step for the first four and 58 %
+                for all ten, measured at 120000 slots on 256 cells.
+            state: A previous :class:`State`, normally ``Output.state``, to continue
+                from. It carries the absolute time, the particles, the fields, the
+                random key, the source remainders and the wall ledger, so a run split
+                into chunks is the run taken whole. The simulation it is passed to must
+                have the same grid, species layout and integrator; physical parameters
+                may differ, which is how an experiment changes a control part-way through.
+            verbose: Report progress to stderr while the run goes on: ``True`` for the
+                built-in meter, or anything to call with the number of steps finished and
+                the number there are (:func:`~jaxincell._progress.reporter`). The run is
+                then split into about twenty groups on the host and blocks once per group,
+                which costs about 1.5 % and leaves the arrays bit-for-bit what a silent run
+                gives. It turns itself off when anything is traced, so ``jax.jit``,
+                ``jax.grad`` and ``jax.vmap`` of a run are silent whatever is asked for.
         """
-            Build the hashes for each of the parameter sections to help with determining when Jax
-            needs to recompile the _simulation() function due to new parameters being passed.
-        """
-        for section_metadata in PARAMETER_SECTIONS.values():
-            setattr(
-                self,
-                section_metadata["hash_attribute"],
-                section_metadata["hasher"](getattr(self, section_metadata["attribute"])),
-            )
+        if isinstance(steps, (bool, np.bool_)) or not isinstance(steps, (int, np.integer)) or steps < 0:
+            raise ValueError("steps must be a nonnegative integer")
+        if (isinstance(store_every, (bool, np.bool_)) or not isinstance(store_every, (int, np.integer))
+                or store_every < 1 or steps % store_every):
+            raise ValueError(f"steps ({steps}) must be a multiple of store_every ({store_every}), "
+                             "which must be at least one")
+        if snapshot_steps is not None:
+            if store_every != 1:
+                raise ValueError("snapshot_steps requires store_every=1")
+            try:
+                schedule = tuple(snapshot_steps)
+            except TypeError as exc:
+                raise ValueError("snapshot_steps must be a sequence of integer indices") from exc
+            if any(isinstance(s, (bool, np.bool_)) or not isinstance(s, (int, np.integer)) for s in schedule):
+                raise ValueError("snapshot_steps must contain integer indices")
+            if any(s < 0 or s >= steps for s in schedule):
+                raise ValueError("snapshot_steps indices must lie in [0, steps)")
+            snapshot_steps = tuple(sorted(set(map(int, schedule))))
+        level = "full" if moments is True else moments
+        if level not in (False, None, *self.MOMENT_LEVELS):
+            raise ValueError(f"moments is False, True, or one of {', '.join(map(repr, self.MOMENT_LEVELS))}, "
+                             f"not {moments!r}")
+        # a meter has nothing to report from inside a trace, and would put a side effect in the
+        # differentiated path; under jit, grad or vmap it turns itself off without being asked
+        traced = any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves((self, state, seed)))
+        meter = None if traced else reporter(verbose, steps)
+        return _run(self, steps, seed, store_every, store_particles, level or None, state, meter, snapshot_steps)
 
-    def reinitialize_simulation_state(self):
-        """
-            Reinitialize the simulation state based on the current parameter sections.
-            This should be called whenever parameters are updated after initialization to
-            ensure that the simulation state is consistent with the new parameters.
-        """
-        if self._solver_parameters["time_evolution_algorithm"] == 1:
-            if self._solver_parameters["relativistic"] or any(
-                self._domain_parameters[key] != 0
-                for key in ("particle_BC_left", "particle_BC_right", "field_BC_left", "field_BC_right")
-            ):
-                raise ValueError("Implicit CN supports Newtonian particles with periodic particle and field boundaries only.")
-        self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
-        self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
-        self.build_domain()
-        self.initialize_particles()
-        self.initialize_fields()
-        if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
-            bool(jnp.any(field != 0)) for field in (self.external_electric_field, self.external_magnetic_field)
-        ):
-            raise ValueError("Implicit CN does not apply prescribed grid fields; use the explicit solver.")
-        self.build_hash_values()
 
-    def clean_runtime_input_parameters(self, input_parameters=None):
-        """
-            Clean the input_parameters provided to the simulation(...) or run(...) functions at runtime.
-        """
-        return clean_runtime_input_parameters(
-            input_parameters,
-            self._runtime_flat_parameter_routes,
-            self._runtime_species_label_routes,
-            self._species_parameters,
-        )
+@partial(jax.jit, static_argnames=("chunks", "store_every", "store_particles", "snapshot_steps"))
+def _advance(sim, carry, extra, chunks, store_every, store_particles, snapshot_steps=None):
+    """``chunks * store_every`` steps from ``carry``, keeping the state at the end of each chunk.
 
-    def current_domain_state(self):
-        return {
-            "box_size": self.box_size,
-            "dx": self.dx,
-            "dt": self.dt,
-            "grid": self.grid,
-        }
+    This is the whole loop, and it is the only compiled thing here. A run of one group is the
+    fused scan the code has always run; a run of several is the same program called several
+    times, which the state makes identical -- the guarantee a restart already rests on."""
+    step = partial(sim._explicit_step if sim.solver.algorithm == "explicit" else sim._implicit_step,
+                   extra=extra)
+    # an output, overwritten before it is read
+    placeholder = (carry.x, carry.u, carry.w, carry.E, carry.B, jnp.zeros_like(carry.E), carry.rho)
 
-    def build_domain(self):
-        domain_state = build_domain_state(self._domain_parameters)
-        self.box_size = domain_state["box_size"]
-        self.dx = domain_state["dx"]
-        self.dt = domain_state["dt"]
-        self.grid = domain_state["grid"]
+    def advance(pair, _):
+        return step(pair[0]), None
 
-    def initialize_particles(self):
-        domain_state = self.current_domain_state()
-        particle_state = initialize_particle_state(
-            self._species_parameters,
-            self._domain_parameters,
-            self._solver_parameters,
-            domain_state,
-        )
-        for key, value in particle_state.items():
-            setattr(self, key, value)
+    def stored(carry, values):
+        x, v, w, E, B, J, rho = values
+        if not store_particles:
+            x = v = w = None
+        return (x, v, w, E, B, J, rho, carry.wall, carry.time, carry.steps, carry.sigma, carry.moments)
 
-    def initialize_fields(self):
-        domain_state = self.current_domain_state()
-        particle_state = {
-            "positions": self.positions,
-            "charges": self.charges,
-        }
-        field_state = initialize_field_state(
-            self._domain_parameters,
-            self._solver_parameters,
-            self._external_field_parameters,
-            domain_state,
-            particle_state,
-        )
-        self.fields = field_state["fields"]
-        self.external_magnetic_field = field_state["external_magnetic_field"]
-        self.external_electric_field = field_state["external_electric_field"]
+    if snapshot_steps is not None:
+        history = jax.tree.map(lambda a: jnp.zeros((len(snapshot_steps),) + a.shape, a.dtype),
+                               stored(carry, placeholder))
+        if not snapshot_steps:
+            (carry, _), _ = lax.scan(advance, (carry, placeholder), None, length=chunks)
+            return carry, history
+        schedule = jnp.asarray((*snapshot_steps, chunks))  # sentinel after the last requested step
 
-    def set_parameter_section(self, section_name, new_parameters):
-        """
-            Helper which is used by setters for the parameter sections to automatically
-            clean parameters and reinitialize the state of the simulation including creating
-            new hashes.
-        """
-        section_metadata = PARAMETER_SECTIONS[section_name]
-        new_parameters = deepcopy(new_parameters)
-        self._base_parameter_sections[section_name] = deepcopy(new_parameters)
-        setattr(
-            self,
-            section_metadata["attribute"],
-            section_metadata["cleaner"](new_parameters),
-        )
-        self.reinitialize_simulation_state()
-    
-    # Getters and setters from here on
-    @property
-    def domain_parameters(self):
-        return deepcopy(self._domain_parameters)
-    
-    @domain_parameters.setter
-    def domain_parameters(self, new_domain_parameters):
-        self.set_parameter_section("domain_parameters", new_domain_parameters)
+        def snapshot(pair, index):
+            carry, cursor, history = pair
+            carry, values = step(carry)
 
-    @property
-    def species_parameters(self):
-        return deepcopy(self._species_parameters)
-    
-    @species_parameters.setter
-    def species_parameters(self, new_species_parameters):
-        self.set_parameter_section("species_parameters", new_species_parameters)
-    
-    @property
-    def external_field_parameters(self):
-        return deepcopy(self._external_field_parameters)
-    
-    @external_field_parameters.setter
-    def external_field_parameters(self, new_external_field_parameters):
-        self.set_parameter_section("external_field_parameters", new_external_field_parameters)
+            def save(history):
+                return jax.tree.map(lambda a, b: a.at[cursor].set(b), history, stored(carry, values))
 
-    @property
-    def source_parameters(self):
-        return deepcopy(self._source_parameters)
-    
-    @source_parameters.setter
-    def source_parameters(self, new_source_parameters):
-        self.set_parameter_section("source_parameters", new_source_parameters)
-    
-    @property
-    def solver_parameters(self):
-        return deepcopy(self._solver_parameters)
-    
-    @solver_parameters.setter
-    def solver_parameters(self, new_solver_parameters):
-        self.set_parameter_section("solver_parameters", new_solver_parameters)
-    
-    @property
-    def input_parameters(self):
-        return deepcopy(self._input_parameters)
-    
-    @input_parameters.setter
-    def input_parameters(self, new_input_parameters):
-        parameters = deepcopy(self._base_parameter_sections)
-        parameters["input_parameters"] = new_input_parameters
-        self.clean_and_initialize_parameters(parameters)
-        self.reinitialize_simulation_state()
+            keep = index == schedule[cursor]
+            history = lax.cond(keep, save, lambda h: h, history)
+            return (carry, cursor + keep, history), None
+
+        (carry, _, history), _ = lax.scan(snapshot, (carry, jnp.int32(0), history), jnp.arange(chunks))
+        return carry, history
+
+    def chunk(carry, _):
+        # Carry the last step's output so the physics step is traced only once.
+        (carry, values), _ = lax.scan(advance, (carry, placeholder), None, length=store_every)
+        return carry, stored(carry, values)
+
+    return lax.scan(chunk, carry, None, length=chunks)
+
+
+def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose, snapshot_steps):
+    """Drive :func:`_advance`, in one group or in several with a meter between them."""
+    carry, extra = sim.initial_state(random.PRNGKey(seed)) if state is None else (state, sim.per_particle)
+    if any(sp.source.model == "volume" for sp, _ in sim.sources) and carry.wall.birth_budget is None:
+        raise ValueError("a volume Source restart needs its birth_budget; this state has none")
+    phase = sim._x_phase()
+    if carry.x_phase == "legacy" and phase != "wall":
+        carry = carry.replace(x_phase=phase)
+    if carry.x_phase != phase:
+        raise ValueError("state position convention does not match this simulation; old explicit wall states "
+                         "processed future impacts and cannot be continued with the physical-time wall scheme")
+    if moments:
+        carry = carry.replace(moments=jnp.zeros((len(sim.species), sim.MOMENT_LEVELS[moments],
+                                                 sim.domain.cells))
+                              if carry.moments is None else carry.moments)
+    chunks = steps // store_every
+    histories, done = [], 0
+    try:
+        for count in _groups(chunks, verbose):
+            schedule = None if snapshot_steps is None else tuple(s - done for s in snapshot_steps
+                                                                 if done <= s < done + count)
+            carry, history = _advance(sim, carry, extra, count, store_every, store_particles, schedule)
+            histories.append(history)
+            done += count * store_every
+            if verbose is not None:
+                jax.block_until_ready(carry.E)             # the meter reports finished work
+                verbose(done, steps)
+    finally:
+        getattr(verbose, "close", lambda: None)()          # an interrupt leaves a usable terminal
+    x, v, w, E, B, J, rho, wall, t, n, sigma, totals = _join(histories)
+    d, (m, q) = sim.domain, extra
+    return Output(t=t, steps=n, sigma=sigma, x=x, v=v, E=E, B=B, J=J, rho=rho, grid=d.grid, dx=d.dx, dt=d.dt,
+                  length=d.length, charge=q, mass=m, weight=w, wall=wall, moments=totals,
+                  species=jnp.concatenate([jnp.full((s.n,), i) for i, s in enumerate(sim.species)]),
+                  state=carry, names=tuple(s.name for s in sim.species), counts=tuple(s.n for s in sim.species),
+                  relativistic=sim.solver.relativistic, field_bc=d.field_bc)
+
+
+def _groups(chunks, verbose):
+    """How to split the chunks: one group when nothing is watching, and otherwise as few as give
+    about twenty updates -- a number of its own, not the snapshot schedule's, so that how often
+    progress is reported and how often a state is kept are independent choices."""
+    if verbose is None or chunks < 2:
+        return (chunks,)
+    count = min(20, chunks)
+    edges = [round(i * chunks / count) for i in range(count + 1)]
+    return tuple(b - a for a, b in zip(edges, edges[1:]) if b > a)
+
+
+def _join(histories):
+    """The groups' histories end to end, which for one group is that group's."""
+    if len(histories) == 1:
+        return histories[0]
+    return tuple(None if parts[0] is None else jax.tree.map(lambda *a: jnp.concatenate(a), *parts)
+                 for parts in zip(*histories))
+
+
+#: Keys ``[run]`` may hold: the arguments of :meth:`Simulation.run` that a file can give,
+#: and ``plot``, which the command line reads.
+RUN_KEYS = ("steps", "seed", "store_every", "store_particles", "moments", "verbose", "snapshot_steps", "plot")
+
+
+def _only(where, given, allowed):
+    """Refuse a key nothing reads. A configuration that ignores what it does not recognise is
+    a configuration that runs something other than what it says, and a misspelling is then a
+    silent change of physics rather than an error."""
+    unknown = [key for key in given if key not in allowed]
+    if unknown:
+        raise ValueError(f"{where} has no {', '.join(map(repr, sorted(unknown)))}; it takes "
+                         f"{', '.join(sorted(allowed))}")
+    return given
+
+
+def _fields_of(cls):
+    return tuple(f.name for f in dataclasses.fields(cls))
+
+
+def load_toml(path):
+    """Build a :class:`Simulation` and the run settings from a TOML file.
+
+    Every table is a constructor: ``[domain]`` is :class:`~jaxincell.Domain`, ``[solver]``
+    :class:`~jaxincell.Solver`, each ``[[species]]`` a :class:`~jaxincell.Species`, its optional
+    ``[species.source]`` a :class:`~jaxincell.Source`, ``[collisions]``
+    :class:`~jaxincell.Collisions` and ``[impacts]`` :class:`~jaxincell.Impacts`. A ``[run]``
+    table holds the arguments of :meth:`Simulation.run` and ``plot``. A ``[external]`` table
+    gives uniform external fields, ``E`` and ``B`` as three components, broadcast over the grid.
+
+    Every species gives ``mass``, as a number in kilograms or as ``"electron"`` or ``"proton"``,
+    optionally multiplied by ``mass_ratio``, and ``charge`` in units of e.
+
+    **Nothing is ignored.** A table or a key that nothing reads is an error, not a line that
+    quietly does not apply: a misspelled ``vth`` in a species is a different plasma, and finding
+    that out from the answer is worse than finding it out from the file.
+
+    Scans, optimisation and movie scripting are deliberately not here. Those are programs -- a
+    loop, an objective, a schedule -- and a configuration file that grows a control flow is a
+    worse programming language than the one it is written in. Build the `Simulation` from a file
+    and write the loop around it in Python.
+
+    Raises:
+        ValueError: If a species has no ``mass`` or names an unknown one, or if any table or key
+            is one nothing reads.
+    """
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
+    with open(path, "rb") as f:
+        raw = tomllib.load(f)
+    # every key first, before anything is built: a misspelling should be reported as a
+    # misspelling and not as whatever the half-built object goes on to complain about
+    _only(f"{path}", raw, ("domain", "solver", "species", "collisions", "impacts", "external", "run"))
+    _only("[domain]", raw.get("domain", {}), _fields_of(Domain))
+    _only("[solver]", raw.get("solver", {}), _fields_of(Solver))
+    _only("[collisions]", raw.get("collisions", {}), _fields_of(Collisions))
+    _only("[impacts]", raw.get("impacts", {}), _fields_of(Impacts))
+    _only("[external]", raw.get("external", {}), ("E", "B"))
+    _only("[run]", raw.get("run", {}), RUN_KEYS)
+    for entry in raw.get("species", []):
+        _only("a [[species]] table", entry, _fields_of(Species) + ("mass_ratio", "source"))
+        _only("a [species.source] table", entry.get("source", {}), _fields_of(Source))
+
+    species, named = [], {"electron": mass_electron, "proton": mass_proton}
+    for entry in raw.get("species", []):
+        entry = dict(entry)
+        mass = entry.pop("mass", None)
+        if mass is None or (isinstance(mass, str) and mass not in named):
+            raise ValueError(f"species {entry.get('name')!r} needs a mass: a number in kilograms, "
+                             f"or \"electron\" or \"proton\", not {mass!r}")
+        source = entry.pop("source", None)
+        if source is not None:
+            source = Source(**dict(source))
+        species.append(Species(mass=named.get(mass, mass) * entry.pop("mass_ratio", 1.0),
+                               source=source, **entry))
+    domain = Domain(**raw.get("domain", {}))
+    solver = Solver(**raw.get("solver", {}))
+    collisions = Collisions(**raw["collisions"]) if "collisions" in raw else None
+    impacts = Impacts(**raw["impacts"]) if "impacts" in raw else None
+    uniform = {f"external_{k}": jnp.broadcast_to(jnp.asarray(v, float), (domain.cells, 3))
+               for k, v in raw.get("external", {}).items()}
+    sim = Simulation(domain, species, solver, collisions, impacts=impacts, **uniform)
+    return sim, raw.get("run", {})

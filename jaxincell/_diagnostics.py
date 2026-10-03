@@ -1,161 +1,307 @@
+"""Post-processing of an :class:`Output`: energies, momentum, Gauss-law residual,
+temperatures and the dominant frequency. Everything is a plain function of the
+stored arrays and can be recomputed at will."""
+import jax
 import jax.numpy as jnp
-from jax.numpy.fft import fft, fftfreq
-from ._constants import epsilon_0, mu_0, boltzmann_constant, speed_of_light
 
-__all__ = ['diagnostics']
+from ._config import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
-def diagnostics(output):
-    """Add diagnostics in place, preserving the raw arrays for repeated calls."""
-    isel = (output["charges"] >= 0)[:, 0]  # cannot use masks in jitted functions
-    esel = (output["charges"] <  0)[:, 0]
-    segregated = {
-        "position_electrons": output["positions"] [:, esel, :],
-        "velocity_electrons": output["velocities"][:, esel, :],
-        "mass_electrons":     output["masses"]    [   esel],
-        "charge_electrons":   output["charges"]   [   esel],
-        "position_ions":      output["positions"] [:, isel, :],
-        "velocity_ions":      output["velocities"][:, isel, :],
-        "mass_ions":          output["masses"]    [   isel],
-        "charge_ions":        output["charges"]   [   isel],
-    }
-    output.update(**segregated)
-    mass, velocity = output["masses"].reshape(-1), output["velocities"]
-    v2 = jnp.sum(velocity ** 2, axis=-1)
-    if output.get("solver_parameters", {}).get("relativistic", output.get("relativistic", False)):
-        root = jnp.sqrt(1 - v2 / speed_of_light ** 2)
-        gamma, kinetic_p = 1 / root, mass * v2 / (root * (1 + root))
+__all__ = ["bohm_edge", "charge_balance", "diagnostics", "dominant_frequency", "energies",
+           "gauss_residual", "magnetic_moment", "moment_profiles", "potential", "temperatures"]
+
+
+def _blocks(out):
+    """Name and index slice of each species; the particles of a species are one
+    contiguous block, in the order of ``out.names``."""
+    start = 0
+    for name, count in zip(out.names, out.counts):
+        yield name, slice(start, start + count)
+        start += count
+
+
+def energies(out):
+    """Field and kinetic energies per unit area (J/m^2) at every stored step, the momentum, and
+    the relative errors of the two: ``energy_error``, :math:`|W(t) - W(0)|/W(0)`, and
+    ``momentum_error``, :math:`|\\mathbf P(t) - \\mathbf P(0)|/\\sum_p |\\mathbf p_p(0)|`, with ``0``
+    the first stored step. The total momentum can vanish, as it does for two counter-streaming
+    beams, while the sum of the magnitudes of the particle momenta does not."""
+    field_E = 0.5 * epsilon_0 * jnp.sum(out.E ** 2, axis=(1, 2)) * out.dx
+    field_B = 0.5 / mu_0 * jnp.sum(out.B ** 2, axis=(1, 2)) * out.dx
+    result = {"electric": field_E, "magnetic": field_B}
+    if out.v is not None:
+        v2 = jnp.sum(out.v ** 2, axis=-1)
+        mass = out.mass[None, :] * out.weight          # of each pseudo-particle, at each stored step
+        if out.relativistic:                       # the quantity the relativistic pusher conserves,
+            root = jnp.sqrt(1 - v2 / c ** 2)       # (gamma - 1) m c^2, written to keep its digits at low speed
+            gamma, kinetic_p = 1 / root, v2 / (root * (1 + root)) * mass
+        else:                                      # and the one the Boris pusher conserves
+            gamma = jnp.ones_like(v2)
+            kinetic_p = 0.5 * mass * v2
+        result["kinetic"] = jnp.sum(kinetic_p, axis=1)
+        for name, block in _blocks(out):
+            result[f"kinetic_{name}"] = jnp.sum(kinetic_p[:, block], axis=1)
+        result["total"] = field_E + field_B + result["kinetic"]
+        p = (gamma * mass)[..., None] * out.v              # the momentum the pusher conserves, gamma m v
+        result["momentum"] = jnp.sum(p, axis=1)
+        result["energy_error"] = jnp.abs(result["total"] - result["total"][0]) / _nonzero(result["total"][0])
+        result["momentum_error"] = (jnp.linalg.norm(result["momentum"] - result["momentum"][0], axis=1)
+                                    / _nonzero(jnp.sum(jnp.linalg.norm(p[0], axis=1))))
+    return result
+
+
+def _nonzero(scale):
+    return jnp.maximum(scale, jnp.finfo(scale.dtype).tiny)
+
+
+def magnetic_moment(out, simulation):
+    """Magnetic moment of every stored particle relative to the external field,
+    :math:`\\mu = p_\\perp^2/(2 m |\\mathbf B|)` with :math:`\\mathbf p = \\gamma m \\mathbf v`
+    (:math:`m v_\\perp^2/2B` at low speed), ``(stored, N)`` in J/T. ``B`` is
+    ``simulation.external_B`` gathered at each particle as the push gathers it
+    (:meth:`~jaxincell.Simulation.external_fields_at`), so the moment is the adiabatic
+    invariant of motion in that field alone: it is conserved when the field changes little
+    over a gyro-radius and a gyro-period, which is what it is for checking. Zero where the
+    field vanishes. Needs ``run(store_particles=True)``."""
+    B = jax.vmap(simulation.external_fields_at)(out.x)[..., 3:]
+    strength = jnp.linalg.norm(B, axis=-1)
+    field = strength > 0
+    b = B / jnp.where(field, strength, 1.0)[..., None]
+    v_perp = out.v - jnp.sum(out.v * b, axis=-1, keepdims=True) * b
+    gamma2 = 1 / (1 - jnp.sum(out.v ** 2, axis=-1) / c ** 2) if out.relativistic else 1.0
+    mu = 0.5 * out.mass * gamma2 * jnp.sum(v_perp ** 2, axis=-1) / jnp.where(field, strength, 1.0)
+    return jnp.where(field, mu, 0.0)
+
+
+def gauss_residual(out):
+    """Relative violation of the discrete Gauss law at every stored step, the error in the
+    conservation of charge: :math:`\\max_i |(E_{i+1/2} - E_{i-1/2})/\\Delta x - \\rho_i/\\epsilon_0|`
+    over :math:`e n/\\epsilon_0`, where :math:`e n` is the mean density of the charge of one sign,
+    the larger of the positive and the negative, from the weights of that step (of the final
+    state when the particles were not stored). The net density :math:`\\rho` is no scale: in a
+    neutral plasma it is the particle noise, which a quiet start makes as small as it likes.
+
+    In a periodic box the field beyond the left wall is the field at the far end,
+    and the law is checked in every cell. At a wall it is not: :math:`E_{-1/2}` is
+    the field at the electrode, set by the charge that has collected on it, and the
+    output does not carry it. The equation for the first cell then *defines* that
+    field rather than testing anything, so the residual is taken over the
+    remaining cells, which are still one independent check short of the number of
+    stored values. :func:`charge_balance` is the independent check this is not: it compares the
+    deposit with the wall ledger, covers every cell and both walls, and passes or fails on its
+    own."""
+    E = out.E[:, :, 0]
+    rho = out.rho
+    if out.field_bc in ((0, 0), (1, 1)):
+        rho = rho - jnp.mean(rho, axis=1, keepdims=True)
+    if out.field_bc[0] == 0:
+        div = (E - jnp.roll(E, 1, axis=1)) / out.dx
+        rhs = rho / epsilon_0
     else:
-        gamma, kinetic_p = jnp.ones_like(v2), 0.5 * mass * v2
-    momentum_p = (mass * gamma)[..., None] * velocity
+        div = (E[:, 1:] - E[:, :-1]) / out.dx
+        rhs = rho[:, 1:] / epsilon_0
+    charge = out.charge * (out.state.w if out.weight is None else out.weight)
+    one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
+    return jnp.max(jnp.abs(div - rhs), axis=1) / _nonzero(one_sign / (out.length * epsilon_0))
 
-    # Simulation populations have identities independent of their charge, mass or weight.
-    # Keep the old charge/mass grouping for dictionaries without population metadata.
-    import numpy as np
-    q = np.asarray(output["charges"]).reshape(-1)
-    m = np.asarray(output["masses"]).reshape(-1)
-    if "species_integer_index" in output:
-        labels = np.asarray(output["species_integer_index"]).reshape(-1)
+
+def charge_balance(out):
+    """Charge the box has gained that nothing accounts for, at every stored step, as a fraction
+    of the charge of one sign it holds.
+
+    Everything the box holds is the charge on the grid plus the charge on the two walls, and
+    everything that has entered or left it is what the sources injected:
+
+    .. math::
+
+        \\Delta\\Big[\\Delta x\\sum_i \\rho_i + \\sigma_L + \\sigma_R\\Big]
+        = \\sum_s q_s W_{s,\\rm injected},
+
+    with the difference taken from the first stored step. A wall's own charge is on the ledger,
+    so a particle it takes moves from the first term to the second and the total does not
+    notice; one that a cloud has reached past is on the wall too, which is the only way the
+    two can balance while it is half in and half out.
+
+    This is **not** what :func:`gauss_residual` measures. That one asks whether the field solve
+    inverted the charge density it was given, and it cannot ask it of the first cell, whose
+    equation defines the wall field the output does not store. This one asks whether the charge
+    density and the wall ledger -- two different passes over the particles, one a deposit and
+    one a boundary law -- agree about how much charge exists, and it covers every cell and both
+    walls. A run can pass either and fail the other.
+
+    A periodic box has no walls to hold charge and no sources, so the sum is constant and this
+    is the drift of the deposit alone.
+    """
+    held = out.dx * jnp.sum(out.rho, axis=1) + jnp.sum(out.sigma, axis=1)
+    per_species = jnp.stack([out.charge[block][0] for _, block in _blocks(out)])   # one particle's
+    put_in = jnp.sum(per_species[None, :, None] * out.wall.injected, axis=(1, 2))
+    if out.wall.birth_budget is not None:
+        put_in = put_in + jnp.sum(per_species * out.wall.birth_budget[:, :, 0], axis=1)
+    charge = out.charge * (out.state.w if out.weight is None else out.weight)
+    one_sign = jnp.maximum(jnp.sum(jnp.maximum(charge, 0), axis=-1), jnp.sum(jnp.maximum(-charge, 0), axis=-1))
+    return jnp.abs((held - held[0]) - (put_in - put_in[0])) / _nonzero(one_sign)
+
+
+def moment_profiles(out, start=0, stop=-1):
+    """Density, mean velocity, pressure tensor and temperature tensor of each species, averaged
+    over the window that ends at stored step ``stop`` and begins at ``start``.
+
+    The window is half-open, :math:`(t_a, t_b]`: a running sum is stored after the chunk it
+    ends, so what separates two of them is ``Output.steps[stop] - Output.steps[start]`` and not
+    the number of stored entries between. Counting entries is off by one and reads a constant
+    profile back low.
+
+    What comes back depends on how many moments the run kept. ``run(moments="density")`` gives
+    the density; ``"flux"`` adds the mean velocity; ``"full"`` adds both tensors,
+
+    .. math::
+
+        P_{ij} = m\\,[\\langle n v_iv_j\\rangle - n u_iu_j], \\qquad T_{ij} = P_{ij}/n,
+
+    with the temperature in joules -- divide by the elementary charge for electronvolts. Both
+    are ``(species, 3, 3, cells)`` and symmetric by construction, because the six independent
+    second moments are what was deposited.
+
+    Empty cells have no velocity and no temperature; they come back as zero rather than as the
+    division that made them.
+    """
+    if out.moments is None:
+        raise ValueError("this run kept no moments: pass moments='density', 'flux' or 'full' to run()")
+    span = int(out.steps[stop]) - int(out.steps[start])
+    if span <= 0:
+        raise ValueError(f"a window has to span at least one step: stored steps {start} and {stop} are "
+                         f"{int(out.steps[start])} and {int(out.steps[stop])}, which is {span}")
+    window = (out.moments[stop] - out.moments[start]) / span
+    density = window[:, 0]
+    live = density > 0
+    result = {"density": density}
+    if window.shape[1] < 4:
+        return result
+    safe = jnp.where(live, density, 1.0)
+    velocity = jnp.where(live[:, None], window[:, 1:4] / safe[:, None], 0.0)
+    result["velocity"] = velocity
+    if window.shape[1] < 10:
+        return result
+    mass = jnp.stack([out.mass[block][0] for _, block in _blocks(out)])
+    order = {(0, 0): 4, (1, 1): 5, (2, 2): 6, (0, 1): 7, (0, 2): 8, (1, 2): 9}
+    second = jnp.stack([jnp.stack([window[:, order[min(i, j), max(i, j)]] for j in range(3)])
+                        for i in range(3)])                       # (3, 3, species, cells)
+    second = jnp.moveaxis(second, 2, 0)                           # (species, 3, 3, cells)
+    drift = velocity[:, :, None, :] * velocity[:, None, :, :]
+    pressure = mass[:, None, None, None] * (second - density[:, None, None, :] * drift)
+    result["pressure"] = jnp.where(live[:, None, None, :], pressure, 0.0)
+    result["temperature"] = jnp.where(live[:, None, None, :], pressure / safe[:, None, None, :], 0.0)
+    return result
+
+
+def bohm_edge(position, flow, speed):
+    """Where a flow profile crosses a given speed, and whether that is a sheath edge.
+
+    The edge of a sheath is where the ions reach the Bohm speed, so it is read off a
+    measured flow profile rather than computed. Returns the interpolated position of the
+    first upward crossing of ``speed`` and the number of crossings there are.
+
+    A bin centre is not good enough: the potential still falls by about a tenth of
+    :math:`T_e/e` per Debye length at the Bohm point, so a crossing placed half a bin out
+    moves the sheath drop by several per cent. This interpolates linearly between the two
+    samples that bracket the crossing.
+
+    **No crossing is an answer.** Then the position is NaN and the count is zero, which
+    says the run has no sheath edge by this measure -- too short, too noisy, or a flow
+    already supersonic at the source. Returning the first sample instead would invent an
+    edge and a potential drop to go with it. More than one crossing means the profile is
+    not monotonic and the first one may not be the edge; look at the profile.
+
+    Args:
+        position: Sample positions, increasing.
+        flow: Mean flow speed at each, along the same axis.
+        speed: The speed to cross, such as :math:`c_s=\\sqrt{T_e/m_i}`.
+
+    Returns:
+        tuple: the crossing position (NaN if there is none) and the number of crossings.
+    """
+    position, flow = jnp.asarray(position), jnp.asarray(flow)
+    below, above = flow[:-1] < speed, flow[1:] >= speed
+    crossing = below & above
+    count = jnp.sum(crossing)
+    i = jnp.argmax(crossing)
+    gap = flow[i + 1] - flow[i]
+    fraction = jnp.where(gap == 0, 0.0, (speed - flow[i]) / jnp.where(gap == 0, 1.0, gap))
+    return jnp.where(count > 0, position[i] + fraction * (position[i + 1] - position[i]), jnp.nan), count
+
+
+def potential(out, centres=False):
+    """Electrostatic potential at the cell faces, the trapezoidal integral of the
+    longitudinal field from the left wall,
+    :math:`\\phi_{i+1/2} = -\\Delta x\\sum_{j\\le i} (E_{x,j-1/2} + E_{x,j+1/2})/2`.
+
+    The integral needs the field at the left wall face, which the output does not store:
+    in a periodic box it is the field at the far end; at a reflective wall, a symmetry
+    plane, it is zero; at an absorbing wall it is the field of the charge the conductor
+    has collected, which the Gauss law of the first cell gives,
+    :math:`E_{x,1/2} - \\Delta x\\,\\rho_0/\\epsilon_0`. The field solver closes two
+    absorbing walls with the same rule, so between them the last entry, the potential of
+    the right wall, is zero to round-off and the bulk floats above both. A periodic box
+    has no wall, so the mean is set to zero instead.
+
+    ``centres=True`` gives it on ``Output.grid`` instead, the mean of the two faces bounding
+    each cell, which is where a density or a deposited moment lives. The face to the left of
+    the first cell is the far end of a periodic box, and at a wall it is the wall face itself,
+    where the integral starts and which is therefore the zero of the gauge: that cell's value
+    is then half the first stored face and not the face itself -- half a cell out and a factor
+    of two in the one place a sheath profile is steepest."""
+    E = out.E[:, :, 0]
+    if out.field_bc[0] == 0:
+        left = E[:, -1]
+    elif out.field_bc[0] == 1:
+        left = jnp.zeros_like(E[:, 0])
     else:
-        _, labels = np.unique(np.stack([q, m], axis=1), axis=0, return_inverse=True)
-    names = [f"{kind}.{sp.get('user_label', label)}"
-             for kind in ("electrons", "ions")
-             for label, sp in output.get("species_parameters", {}).get(kind, {}).items()]
-    weights = jnp.asarray(output.get("weights", jnp.ones_like(output["masses"]))).reshape(-1)
+        left = E[:, 0] - out.dx * out.rho[:, 0] / epsilon_0
+    faces = jnp.concatenate([left[:, None], E], axis=1)
+    phi = -out.dx * jnp.cumsum(0.5 * (faces[:, :-1] + faces[:, 1:]), axis=1)
+    if out.field_bc[0] == 0:
+        phi = phi - jnp.mean(phi, axis=1, keepdims=True)         # the gauge, fixed on the faces
+    if not centres:
+        return phi
+    # the face to the left of the first cell: the far end of a periodic box, and otherwise the
+    # wall face, which is where the integral above started and so is the zero of the gauge
+    before = phi[:, -1:] if out.field_bc[0] == 0 else jnp.zeros_like(phi[:, :1])
+    return 0.5 * (jnp.concatenate([before, phi[:, :-1]], axis=1) + phi)
 
-    species_list = []
-    for si in np.unique(labels):
-        mask = (labels == si)
-        pos_s = output["positions"][:, mask, :]
-        vel_s = output["velocities"][:, mask, :]
-        w_s, m_s = weights[mask], jnp.asarray(m[mask])
-        norm = jnp.sum(w_s)
-        norm = jnp.where(norm > 0, norm, 1.0)
-        qv = float(output["charge_integer_lookup"][si]) if "charge_integer_lookup" in output else float(jnp.sum(q[mask]) / norm)
-        mv = float(output["mass_integer_lookup"][si]) if "mass_integer_lookup" in output else float(jnp.sum(m_s) / norm)
-        mean = jnp.sum(w_s[None, :, None] * vel_s, axis=1) / norm
-        temperature = jnp.sum(m_s[None, :, None] * (vel_s - mean[:, None, :]) ** 2, axis=1) / (boltzmann_constant * norm)
 
-        # Legacy names for dictionaries without configured population labels.
-        if "species_integer_index" in output and si < len(names):
-            name = names[si]
-        elif qv < 0 and not any(sp.get("name") == "electrons" for sp in species_list):
-            name = "electrons"
-        elif qv > 0 and not any(sp.get("name") == "ions" for sp in species_list):
-            name = "ions"
-        else:
-            name = f"species_{si}"
+def temperatures(out):
+    """Temperature per species and component in eV, from the velocity variance
+    about the mean velocity, :math:`k_B T = m\\,\\mathrm{var}(v)`. Both are
+    weighted by the pseudo-particle weights, so what the walls have collected
+    no longer counts."""
+    result = {}
+    for name, block in _blocks(out):
+        v, w = out.v[:, block], out.weight[:, block, None]
+        total = jnp.maximum(jnp.sum(w, axis=1), jnp.finfo(v.dtype).tiny)
+        mean = jnp.sum(w * v, axis=1) / total
+        var = jnp.sum(w * (v - mean[:, None]) ** 2, axis=1) / total
+        result[name] = out.mass[block.start] * var / elementary_charge
+    return result
 
-        species_list.append({
-            "name": name,
-            "charge": float(qv),
-            "mass": float(mv),
-            "positions": pos_s,
-            "velocities": vel_s,
-            "weights": w_s,
-            "temperature_components": temperature,
-            "temperature": jnp.mean(temperature, axis=-1),
-            "kinetic_energy": jnp.sum(kinetic_p[:, mask], axis=-1),
-        })
 
-    output["species"] = species_list
+def dominant_frequency(out):
+    """Angular frequency of the strongest peak of :math:`E_x` at the box centre,
+    other than the mean, sampled at the stored steps. NaN when fewer than two
+    steps were stored, since one sample has no frequency."""
+    if out.t.shape[0] < 2:
+        return jnp.asarray(jnp.nan)
+    signal = out.E[:, out.E.shape[1] // 2, 0]
+    spectrum = jnp.abs(jnp.fft.rfft(signal - jnp.mean(signal)))
+    freqs = 2 * jnp.pi * jnp.fft.rfftfreq(signal.shape[0], d=out.t[1] - out.t[0])
+    return freqs[jnp.argmax(spectrum[1:]) + 1]
 
-    E_field_over_time = output['electric_field']
-    grid              = output['grid']
-    dt_val          = output['dt']
-    total_steps = E_field_over_time.shape[0]
-    dt = float(output["time_array"][1] - output["time_array"][0]) if "time_array" in output and total_steps > 1 else float(dt_val)
 
-    # FFT-based dominant frequency at the middle grid point
-    array_to_do_fft_on = E_field_over_time[:, len(grid)//2, 0]
-    array_to_do_fft_on = array_to_do_fft_on - jnp.mean(array_to_do_fft_on)
-    plasma_frequency = output['plasma_frequency']
-
-    half = total_steps // 2 + 1
-    fft_values = fft(array_to_do_fft_on)[:half]
-    freqs = fftfreq(total_steps, d=dt)[:half] * 2 * jnp.pi
-    magnitude = jnp.abs(fft_values)
-    peak_index = jnp.argmax(magnitude)
-    dominant_frequency = jnp.abs(freqs[peak_index])
-
-    def integrate(y, dx):
-        return jnp.sum(y, axis=-1) * dx
-
-    abs_E_squared              = jnp.sum(output['electric_field']**2, axis=-1)
-    abs_externalE_squared      = jnp.sum(output['external_electric_field']**2, axis=-1)
-    integral_E_squared         = integrate(abs_E_squared, dx=output['dx'])
-    integral_externalE_squared = integrate(abs_externalE_squared, dx=output['dx'])
-
-    abs_B_squared              = jnp.sum(output['magnetic_field']**2, axis=-1)
-    abs_externalB_squared      = jnp.sum(output['external_magnetic_field']**2, axis=-1)
-    integral_B_squared         = integrate(abs_B_squared, dx=output['dx'])
-    integral_externalB_squared = integrate(abs_externalB_squared, dx=output['dx'])
-
-    total_ke_electrons = jnp.sum(kinetic_p[:, esel], axis=-1)
-    total_ke_ions = jnp.sum(kinetic_p[:, isel], axis=-1)
-
-    output.update({ 
-        'electric_field_energy_density': (epsilon_0/2) * abs_E_squared,
-        'electric_field_energy':         (epsilon_0/2) * integral_E_squared,
-        'magnetic_field_energy_density': 1/(2*mu_0)    * abs_B_squared,
-        'magnetic_field_energy':         1/(2*mu_0)    * integral_B_squared,
-        'dominant_frequency': dominant_frequency,
-        'plasma_frequency':   plasma_frequency,
-        
-        'kinetic_energy':           total_ke_electrons + total_ke_ions,
-        'kinetic_energy_electrons': total_ke_electrons,
-        'kinetic_energy_ions':      total_ke_ions,
-        
-        'external_electric_field_energy_density': (epsilon_0/2) * abs_externalE_squared,
-        'external_electric_field_energy':         (epsilon_0/2) * integral_externalE_squared,
-        'external_magnetic_field_energy_density': 1/(2*mu_0)    * abs_externalB_squared,
-        'external_magnetic_field_energy':         1/(2*mu_0)    * integral_externalB_squared
-    })
-
-    total_energy = (output["electric_field_energy"] + output["external_electric_field_energy"] +
-                    output["magnetic_field_energy"] + output["external_magnetic_field_energy"] +
-                    output["kinetic_energy"])
-
-    output.update({'total_energy': total_energy})
-
-    total_momentum = jnp.sum(momentum_p, axis=-2)
-    momentum_scale = jnp.sum(jnp.linalg.norm(momentum_p[0], axis=-1))
-    output.update({
-        'total_momentum': total_momentum,
-        'momentum_error_rel': jnp.linalg.norm(total_momentum - total_momentum[0], axis=-1) / (momentum_scale + 1e-300),
-    })
-
-    # Gauss's law residual dE_x/dx - rho/epsilon_0 (backward difference, the stencil the
-    # field solve uses), as max over x relative to max |rho/epsilon_0|; measures charge conservation
-    if 'charge_density' in output:
-        Ex  = E_field_over_time[..., 0]
-        rhs = output['charge_density'] / epsilon_0
-        periodic = int(output.get('field_BC_left', 0)) == 0 and int(output.get('field_BC_right', 0)) == 0
-        Ex_left = jnp.roll(Ex, 1, axis=-1) if periodic else jnp.pad(Ex[:, :-1], ((0, 0), (1, 0)))
-        gauss_residual = (Ex - Ex_left) / output['dx'] - rhs
-        if periodic:  # a periodic E can only match rho up to its mean
-            gauss_residual = gauss_residual - jnp.mean(gauss_residual, axis=-1, keepdims=True)
-        gauss_error_Linf = jnp.max(jnp.abs(gauss_residual), axis=-1)
-        output.update({
-            'gauss_error_Linf': gauss_error_Linf,
-            'gauss_error_Linf_rel': gauss_error_Linf / (jnp.max(jnp.abs(rhs), axis=-1) + 1e-300),
-        })
+def diagnostics(out):
+    """All of the above in one dictionary."""
+    result = energies(out)
+    result["gauss_residual"] = gauss_residual(out)
+    result["charge_balance"] = charge_balance(out)
+    result["potential"] = potential(out)
+    result["dominant_frequency"] = dominant_frequency(out)
+    if out.v is not None:
+        result["temperatures"] = temperatures(out)
+    return result

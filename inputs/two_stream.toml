@@ -1,0 +1,44 @@
+# Two counter-streaming electron beams go unstable.
+#
+#   jaxincell inputs/two_stream.toml
+#
+# The cold-beam growth rate is Im(omega) = omega_pe / sqrt(8) at the fastest mode
+# (Buneman 1959); examples/1_basic/two_stream.py measures it and draws the phase-space
+# vortex the instability saturates into.
+
+[domain]
+length = 0.01
+cells = 64
+dt_over_dx_c = 4.5       # electrostatic in practice: nothing here excites a light wave
+particle_bc = "periodic"
+field_bc = "periodic"
+
+[solver]
+algorithm = "explicit"
+field_solver = "ampere"
+filter_passes = 2
+
+[[species]]
+name = "electrons"
+n = 20000
+charge = -1
+mass = "electron"
+density = 4.37e17
+vth = [1.5e7, 0.0, 0.0]
+drift = [6e7, 0.0, 0.0]
+plus_minus = true        # flip v_x on every second particle: two beams
+perturbation_amplitude = 5e-7
+perturbation_mode = 1
+
+[[species]]
+name = "ions"
+n = 20000
+charge = 1
+mass = "proton"
+density = 4.37e17
+vth = [3.5e5, 0.0, 0.0]
+
+[run]
+steps = 1200
+seed = 0
+store_every = 1
