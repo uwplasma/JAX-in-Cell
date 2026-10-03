@@ -1384,7 +1384,7 @@ class Simulation:
         """Crank-Nicolson with a direct Maxwell solve and fixed particle Picard scan (docs/numerics/implicit.md).
 
         Optional pure ``midpoint_fields(E_half, B_half, J_guess)`` returns the
-        two effective grid fields seen by the particles. Charge, mass, current
+        two effective grid fields seen by the particles. Charge, mass, current deposition
         and the physical Maxwell update stay unchanged. The enabled return adds
         LAST USED ``(E_half, B_half, E_force, B_force, J_guess)`` to the usual pair;
         the caller owns additional sector/work and coupled-force closure checks.
