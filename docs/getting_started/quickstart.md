@@ -56,7 +56,7 @@ parameters = {
         "electrons": {
             "electrons0": {
                 "number_pseudoparticles": 3500,
-                "grid_points_per_Debye_length": 0.5,
+                "dx_over_Debye_length": 0.5,
                 "vth_over_c_x": 0.05,
                 "drift_speed_x": 6e7,
                 "velocity_plus_minus_x": True,
@@ -67,7 +67,7 @@ parameters = {
         "ions": {
             "ions0": {
                 "number_pseudoparticles": 3500,
-                "grid_points_per_Debye_length": 0.5,
+                "dx_over_Debye_length": 0.5,
                 "vth_over_c_x": "_electrons0",
             },
         },

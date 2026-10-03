@@ -32,7 +32,7 @@ output arrays have one value per cell for every quantity and the
 The grid spacing should resolve the electron Debye length. With the quadratic spline
 shape function and the digital filter switched on, $\Delta x \lesssim 2\lambda_D$ is
 safe; the finite-grid instability appears for coarser grids. The spacing is not set
-directly: `grid_points_per_Debye_length` in the species section fixes
+directly: `dx_over_Debye_length` in the species section fixes
 $\lambda_D/\Delta x$, and the density follows from it (see {doc}`species`).
 
 The time step has three constraints, discussed in {doc}`../numerics/stability`:
