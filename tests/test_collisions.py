@@ -363,10 +363,16 @@ def test_automatic_coulomb_log_uses_physical_electron_density_and_temperature(th
     np.testing.assert_allclose(automatic["positions"], prescribed["positions"], rtol=2e-14, atol=1e-18)
 
 
-def test_boris_collisions_use_integer_positions_and_explicit_species_blocks():
+@pytest.mark.parametrize("supplied_phase_space", [False, True])
+def test_boris_collisions_use_integer_positions_and_explicit_species_blocks(supplied_phase_space):
     from tests.test_simulation import small_simulation_parameters
     p = small_simulation_parameters(total_steps=1, number_pseudoparticles=21)
     p["solver_parameters"].update(collisions=True, coulomb_logarithm=1e19)
+    if supplied_phase_space:
+        for kind in p["species_parameters"].values():
+            for population in kind.values():
+                population.update(initial_positions=jnp.zeros((21, 3)),
+                                  initial_velocities=1e3*jnp.arange(63).reshape(21, 3))
     sim = Simulation(p)
     colliding = sim.run()
     p["solver_parameters"]["collisions"] = False
@@ -380,6 +386,10 @@ def test_boris_collisions_use_integer_positions_and_explicit_species_blocks():
     np.testing.assert_allclose(colliding["positions"][0], x, rtol=0, atol=1e-17)
     np.testing.assert_allclose(colliding["velocities"][0], expected, rtol=2e-14, atol=1e-8)
     assert not np.allclose(expected, v)
+    m = np.asarray(reference["masses"])
+    np.testing.assert_allclose(np.sum(m * np.asarray(expected)**2), np.sum(m * np.asarray(v)**2), rtol=2e-14)
+    change = np.sum(m * (np.asarray(expected)-np.asarray(v)), axis=0)
+    assert np.linalg.norm(change) < 2e-14*np.sum(m*np.linalg.norm(v, axis=1, keepdims=True))
 
 
 def test_temperature_components_use_physical_weights_and_remove_drift():
@@ -402,7 +412,8 @@ def test_parameter_updates_cannot_enable_unvalidated_wall_collisions(section):
     from tests.test_simulation import small_simulation_parameters
     p = small_simulation_parameters(total_steps=2)
     p["solver_parameters"]["collisions"] = section == "domain"
-    p["domain_parameters"].update(particle_BC_left=int(section == "solver"), particle_BC_right=int(section == "solver"))
+    p["domain_parameters"].update(particle_BC_left=0 if section == "domain" else 1,
+                                  particle_BC_right=0 if section == "domain" else 1)
     sim = Simulation(p)
     with pytest.raises(AssertionError, match="periodic particle boundaries"):
         if section == "domain":

@@ -1314,5 +1314,3 @@ def test_absorbed_marker_does_not_bias_retained_population_moments():
     diagnostics(output)
     np.testing.assert_array_equal(output["kinetic_energy"], first_energy)
     assert "positions" in output and "velocities" in output
-
-

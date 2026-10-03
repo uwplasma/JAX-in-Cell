@@ -1,8 +1,8 @@
 # Examples
 
-The `examples/` directory of the repository contains runnable scripts and input files.
-Each page below shows the script, explains the physics it sets up and shows the result
-as produced by the documentation build scripts under `docs/scripts/`.
+The `examples/` directory contains runnable scripts and input files; the collision
+example lives in the repository root. The pages below explain their physics and
+how to run them, with reference figures produced under `docs/scripts/` where available.
 
 ```{toctree}
 :maxdepth: 1
@@ -18,6 +18,7 @@ autodiff
 optimisation
 inference
 scaling
+collisions
 ```
 
 | script | what it shows | run time on a laptop CPU |
@@ -34,6 +35,7 @@ scaling
 | `openpmd_export.py` | optional openPMD export of particles and staggered fields | seconds |
 | `scaling_energy_time.py` | run time and energy error against resolution | minutes |
 | `mixed_bc.py`, `bc_parameter_comparison.py` | collection, fractional marker return and normal restitution; see {doc}`../user_guide/boundaries` | seconds |
+| `twospecies_tempdiff.py` (repository root) | Coulomb relaxation and a collision-only energy control | depends on steps and particles |
 
 Run any of them from the repository root, for example
 
