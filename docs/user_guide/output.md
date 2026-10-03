@@ -148,3 +148,8 @@ loaded = dict(np.load("run.npz", allow_pickle=True))
 
 The nested parameter dictionaries become zero-dimensional object arrays; access them
 with `loaded["domain_parameters"].item()`.
+
+
+For an interoperable output file, install `jaxincell[openpmd]` and run
+`python examples/openpmd_export.py`. The writer is optional postprocessing through
+`jaxincell.openpmd.write_openpmd`; simulation runs need no openPMD dependency.
