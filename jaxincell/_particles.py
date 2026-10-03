@@ -37,7 +37,7 @@ def fields_to_particles_grid(x_n, field, dx, grid, grid_start, field_BC_left, fi
     grid = jnp.insert(grid,0,grid[0]-dx,axis=0) 
     
     # Calculate the index of the field grid corresponding to the particle position
-    i = ((x-grid_start+dx)//dx).astype(int) #new grid_start = grid_start-dx due to extra cell
+    i = jnp.floor((x-grid_start+dx)/dx).astype(int) #new grid_start = grid_start-dx due to extra cell
     
     # Interpolate the field at the particle position using a quadratic interpolation
     fields_n = 0.5*field[i]*(0.5+(grid[i]-x)/dx)**2 + field[i+1]*(0.75-(grid[i]-x)**2/dx**2) + 0.5*field[i+2]*(0.5-(grid[i]-x)/dx)**2

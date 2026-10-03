@@ -55,14 +55,15 @@ def charge_density_BCs(particle_BC_left, particle_BC_right, position, dx, grid, 
     Returns:
         tuple: Charge contributions to the left and right boundaries.
     """
-    # Compute charges outside the grid boundaries
+    # Compare interval endpoints: subtracting a wall position from its cell centre
+    # can round the distance above dx/2 and discard an entire half-cloud.
     extra_charge_left = (charge / dx) * jnp.where(
-        jnp.abs(position - grid[0]) <= dx / 2,
+        (grid[0] - dx / 2 <= position) & (position <= grid[0] + dx / 2),
         0.5 * (0.5 + (grid[0] - position) / dx) ** 2,
         0
     )
     extra_charge_right = (charge / dx) * jnp.where(
-        jnp.abs(position - grid[-1]) <= dx / 2,
+        (grid[-1] - dx / 2 <= position) & (position <= grid[-1] + dx / 2),
         0.5 * (0.5 + (position - grid[-1]) / dx) ** 2,
         0
     )
@@ -155,7 +156,7 @@ def calculate_charge_density(xs_n, qs, dx, grid, particle_BC_left, particle_BC_r
         array: Total charge density on the grid.
     """
     # Each particle's shape on the six nodes around its nearest node, summed on the grid
-    cell_no = ((xs_n[:, 0] - (grid[0] - dx / 2)) // dx).astype(int)
+    cell_no = jnp.floor((xs_n[:, 0] - (grid[0] - dx / 2)) / dx).astype(int)
     idx, chargedens = vmap(_charge_density_on_window, in_axes=(0, 0, None, None, 0, None, None))(
         xs_n[:, 0], qs[:, 0], dx, grid, cell_no, particle_BC_left, particle_BC_right)
     total_chargedens = jnp.zeros(grid.shape[0], dtype=chargedens.dtype).at[idx.ravel()].add(chargedens.ravel())
@@ -206,7 +207,7 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf,
         x_nminushalf = xs_nminushalf[i, 0]
         x_nplushalf = xs_nplushalf[i, 0]
         q = qs[i, 0]
-        cell_no = ((x_nminushalf - grid_start) // dx).astype(int)
+        cell_no = jnp.floor((x_nminushalf - grid_start) / dx).astype(int)
 
         # Compute the charge density difference over time on cells -3 to 2
         # relative to the particle's initial position.
@@ -217,7 +218,7 @@ def current_density(xs_nminushalf, xs_n, xs_nplushalf,
 
         # Compute y- and z-components of the current density
         x_n = xs_n[i, 0]
-        idx_yz, chargedens = _charge_density_on_window(x_n, q, dx, grid, ((x_n - grid_start) // dx).astype(int),
+        idx_yz, chargedens = _charge_density_on_window(x_n, q, dx, grid, jnp.floor((x_n - grid_start) / dx).astype(int),
                                                        particle_BC_left, particle_BC_right)
 
         return idx_x, j_x, idx_yz, chargedens * vs_n[i, 1], chargedens * vs_n[i, 2]
