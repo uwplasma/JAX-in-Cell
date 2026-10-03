@@ -10,7 +10,7 @@ def _particle_boundary_map(x, dx, grid, box, BC_left, BC_right):
     left, right = x[0] < -length/2, x[0] > length/2
     hit = left | right
     code = jnp.where(left, BC_left, BC_right)
-    periods = jnp.asarray(box)
+    periods = jnp.asarray(box, dtype=x.dtype)
     wrapped = (x + periods/2) % periods - periods/2
     normal = jnp.where(code == 0, wrapped[0], jnp.where(left, -length-x[0], length-x[0]))
     normal = jnp.where(code == 2, jnp.where(left, grid[0]-1.5*dx, grid[-1]+3*dx), normal)

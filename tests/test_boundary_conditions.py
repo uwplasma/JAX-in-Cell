@@ -518,3 +518,13 @@ def test_neutral_particle_collection_and_repeated_map():
     assert jnp.array_equal(result[1], jnp.zeros((1, 3)))
     again = set_BC_particles(*result, .1, grid, 10., 10., 10., 2, 2)
     assert all(jnp.array_equal(a, b) for a, b in zip(result, again))
+
+
+@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+@pytest.mark.parametrize("code", [0, 1, 2])
+def test_boundary_map_preserves_phase_space_precision(dtype, code):
+    x, v = jnp.array([6., 0., 0.], dtype=dtype), jnp.ones(3, dtype=dtype)
+    grid = jnp.linspace(-4.95, 4.95, 100, dtype=dtype)
+    result = set_BC_single_particle(x, v, 1., 1., .1, grid, 10., 10., 10., code, code)
+    position = set_BC_single_particle_positions(x, .1, grid, 10., 10., 10., code, code)
+    assert result[0].dtype == result[1].dtype == position.dtype == dtype
