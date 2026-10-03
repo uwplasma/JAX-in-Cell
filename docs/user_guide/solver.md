@@ -46,6 +46,9 @@ is exact for periodic boundaries, removes any accumulated error in $\nabla\cdot\
 and costs one FFT per step. The transverse components $E_y$, $E_z$ and the magnetic
 field are advanced in the same way in both modes. See {doc}`../numerics/field_solvers`.
 
+The field-solver selector applies to the explicit Boris scheme. CN uses its
+coupled Maxwell/Ampere update and does not overwrite E_x with a Gauss solve.
+
 ## The digital filter
 
 The charge and current densities can be smoothed before they enter the field
