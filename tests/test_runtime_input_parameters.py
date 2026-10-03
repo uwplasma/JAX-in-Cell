@@ -383,8 +383,9 @@ def test_runtime_input_parameters_duplicate_user_labels_route_to_all_matches():
         "mass_over_proton_mass": 2.0,
     }
     sim = Simulation(parameters)
-    sim.species_parameters["ions"]["_ions0"]["user_label"] = "shared"
-    sim.species_parameters["ions"]["_ions1"]["user_label"] = "shared"
+    # Construct the duplicate-label routing fixture without mutating a public copy.
+    sim._species_parameters["ions"]["_ions0"]["user_label"] = "shared"
+    sim._species_parameters["ions"]["_ions1"]["user_label"] = "shared"
     sim.reinitialize_simulation_state()
 
     cleaned_input_parameters = sim.clean_runtime_input_parameters(

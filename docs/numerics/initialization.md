@@ -23,8 +23,10 @@ $v_{th}/\sqrt2$, where $v_{th}$ = `vth_over_c_*` times $c$, and the drift is add
 The result is a Maxwellian with $k_B T = m v_{th}^2/2$ in that component. If
 `velocity_plus_minus_*` is set, the component of every second particle is negated,
 which creates two counter-propagating beams from one population without changing its
-density. Finally every component is clipped to $\pm0.99c$ so that the Lorentz factor
-of the relativistic pusher is finite.
+density. Finally the total speed is capped at $0.99c$ while preserving direction in
+both solver modes. Slower velocities are unchanged, and the cap does not make the
+Newtonian pusher relativistic. Its squared norm is bounded before taking the square
+root, keeping the derivative finite at zero velocity.
 
 Random numbers come from `jax.random` with keys derived from `solver_parameters.seed`
 as described in {doc}`../user_guide/species`; two runs with the same inputs give the

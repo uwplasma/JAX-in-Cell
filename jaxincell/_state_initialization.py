@@ -80,7 +80,11 @@ def initialize_species_phase_space(species, seed_position, seed_velocity, number
         )
 
         if species[f"quiet_velocities_{axis}"]:  # quiet start: Gaussian quantiles in van der Corput order
-            unit_normal = jnp.sqrt(2) * erfinv(2 * van_der_corput(number_particles, (2, 3, 5)[axis_index]) - 1)
+            quantiles = van_der_corput((number_particles + 1) // 2 if species[f"velocity_plus_minus_{axis}"] else number_particles,
+                                      (2, 3, 5)[axis_index])
+            if species[f"velocity_plus_minus_{axis}"]:
+                quantiles = jnp.repeat(quantiles, 2)[:number_particles]
+            unit_normal = jnp.sqrt(2) * erfinv(2 * quantiles - 1)
         else:
             unit_normal = normal(PRNGKey(seed_velocity + axis_index + 4), shape=(number_particles,))
         axis_velocities = species[f"vth_over_c_{axis}"] * speed_of_light / jnp.sqrt(2) * unit_normal
@@ -270,7 +274,8 @@ def initialize_particle_state(species_parameters, domain_parameters, solver_para
     charge_to_mass_ratios = charge_mass_integer_lookup[species_integer_index].reshape((-1,1))
 
     speed_limit = 0.99 * speed_of_light
-    velocities = jnp.where(jnp.abs(velocities) >= speed_limit, jnp.sign(velocities) * speed_limit, velocities)
+    speed = jnp.sqrt(jnp.maximum(jnp.sum(velocities**2, axis=1, keepdims=True), speed_limit**2))
+    velocities *= speed_limit / speed
 
     return {
         "positions": positions,

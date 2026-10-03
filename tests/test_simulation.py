@@ -929,6 +929,43 @@ def test_simulation_run_delegates_to_simulation(monkeypatch):
     assert calls[-1] is runtime_input_parameters
 
 
+@pytest.mark.parametrize("steps", [1, 4])
+def test_stored_times_are_end_of_step_times(steps):
+    out = Simulation(small_simulation_parameters(total_steps=steps)).run()
+    np.testing.assert_allclose(out["time_array"], np.arange(1, steps + 1) * float(out["dt"]), rtol=1e-14, atol=0)
+
+
+def test_field_setter_recompiles_for_an_interior_array_change():
+    p = small_simulation_parameters(total_steps=1, number_grid_points=512, number_pseudoparticles=4)
+    for species in p["species_parameters"].values():
+        for values in species.values():
+            values.update(initial_positions=jnp.zeros((4, 3)), initial_velocities=jnp.zeros((4, 3)))
+    field = jnp.zeros((512, 3))
+    p["external_field_parameters"] = {"external_electric_field": {"E": field}}
+    sim = Simulation(p)
+    jax.block_until_ready(sim.run())
+    old_hash = sim.external_field_hash
+    changed = {"external_electric_field": {"E": field.at[256, 0].set(1e6)}}
+    sim.external_field_parameters = changed
+    actual = sim.run()["velocities"]
+    p["external_field_parameters"] = changed
+    expected = Simulation(p).run()["velocities"]
+    assert sim.external_field_hash != old_hash
+    assert float(jnp.max(jnp.abs(actual))) > 1000
+    np.testing.assert_array_equal(actual, expected)
+    exposed = sim.external_field_parameters
+    exposed["external_electric_field"]["E"] = field
+    np.testing.assert_array_equal(sim.external_field_parameters["external_electric_field"]["E"], changed["external_electric_field"]["E"])
+
+
+@pytest.mark.parametrize("section", list(PARAMETER_SECTIONS))
+def test_parameter_sections_return_defensive_copies(section):
+    sim = Simulation(small_simulation_parameters(total_steps=1))
+    exposed = getattr(sim, section)
+    exposed.clear()
+    assert getattr(sim, section)
+
+
 # Explicit initial position/velocity overrides are deferred until Simulation.run()
 # grows a public initial-state override API again.
 #
