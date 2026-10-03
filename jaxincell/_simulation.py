@@ -468,12 +468,22 @@ class Simulation:
             This should be called whenever parameters are updated after initialization to
             ensure that the simulation state is consistent with the new parameters.
         """
+        if self._solver_parameters["time_evolution_algorithm"] == 1:
+            if self._solver_parameters["relativistic"] or any(
+                self._domain_parameters[key] != 0
+                for key in ("particle_BC_left", "particle_BC_right", "field_BC_left", "field_BC_right")
+            ):
+                raise ValueError("Implicit CN supports Newtonian particles with periodic particle and field boundaries only.")
         self._runtime_flat_parameter_routes = build_runtime_flat_parameter_routes()
         self._runtime_species_label_routes = build_runtime_species_label_routes(self._species_parameters)
         self.build_domain()
         self.resolve_snapshot_steps()
         self.initialize_particles()
         self.initialize_fields()
+        if self._solver_parameters["time_evolution_algorithm"] == 1 and any(
+            bool(jnp.any(field != 0)) for field in (self.external_electric_field, self.external_magnetic_field)
+        ):
+            raise ValueError("Implicit CN does not apply prescribed grid fields; use the explicit solver.")
         self.build_hash_values()
 
     def clean_runtime_input_parameters(self, input_parameters=None):
@@ -557,7 +567,7 @@ class Simulation:
     # Getters and setters from here on
     @property
     def domain_parameters(self):
-        return self._domain_parameters
+        return deepcopy(self._domain_parameters)
     
     @domain_parameters.setter
     def domain_parameters(self, new_domain_parameters):
@@ -565,7 +575,7 @@ class Simulation:
 
     @property
     def species_parameters(self):
-        return self._species_parameters
+        return deepcopy(self._species_parameters)
     
     @species_parameters.setter
     def species_parameters(self, new_species_parameters):
@@ -573,7 +583,7 @@ class Simulation:
     
     @property
     def external_field_parameters(self):
-        return self._external_field_parameters
+        return deepcopy(self._external_field_parameters)
     
     @external_field_parameters.setter
     def external_field_parameters(self, new_external_field_parameters):
@@ -581,7 +591,7 @@ class Simulation:
 
     @property
     def source_parameters(self):
-        return self._source_parameters
+        return deepcopy(self._source_parameters)
     
     @source_parameters.setter
     def source_parameters(self, new_source_parameters):
@@ -589,7 +599,7 @@ class Simulation:
     
     @property
     def solver_parameters(self):
-        return self._solver_parameters
+        return deepcopy(self._solver_parameters)
     
     @solver_parameters.setter
     def solver_parameters(self, new_solver_parameters):

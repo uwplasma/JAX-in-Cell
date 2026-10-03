@@ -42,7 +42,7 @@ Debye length
   $\Delta x \gtrsim 3\lambda_D$ with linear weighting {cite}`langdon1970`. The
   quadratic spline and the filter push the limit to larger cells, and the
   implicit scheme is not subject to it, but a resolved Debye length,
-  `grid_points_per_Debye_length` $\gtrsim 0.5$, is the safe choice. Coarser grids
+  `dx_over_Debye_length` $\gtrsim 0.5$, is the safe choice. Coarser grids
   heat the plasma until $\lambda_D$ grows to the cell size.
 
 Wavelength
