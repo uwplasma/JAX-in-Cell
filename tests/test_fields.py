@@ -8,6 +8,8 @@
 """
 
 import pytest
+import math
+import numpy as np
 import jax.numpy as jnp
 from jax import grad
 from numpy.testing import assert_allclose
@@ -161,6 +163,53 @@ def test_E_from_Gauss_1D_Cartesian_solves_discrete_divergence():
     periodic_field = E_from_Gauss_1D_Cartesian(charge_density, dx, periodic=True)
     assert_allclose(periodic_field, electric_field - jnp.mean(electric_field), atol=1e-12)
     assert abs(float(jnp.mean(periodic_field))) < 1e-12
+
+
+@pytest.mark.parametrize("grid_size", [1, 2, 3, 9, 70, 257])
+@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+def test_cartesian_gauss_keeps_nonneutral_charge_and_the_zero_left_field(grid_size, dtype):
+    dx = .37
+    density = jnp.asarray(epsilon_0 * np.random.default_rng(grid_size).uniform(.2, 1.5, grid_size), dtype=dtype)
+    source = np.asarray(density, dtype=float) / epsilon_0
+    field = E_from_Gauss_1D_Cartesian(density, dx)
+    assert field.dtype == jnp.dtype(float)
+    divergence = np.diff(np.r_[0., np.asarray(field)]) / dx
+    assert_allclose(divergence, source, rtol=0, atol=2e-13)
+    assert_allclose(field[0], dx * source[0], rtol=2e-14, atol=0)
+    assert_allclose(field[-1], dx * math.fsum(source), rtol=2e-14, atol=0)
+
+
+@pytest.mark.parametrize("grid_size", [1, 2, 3, 9, 70, 257])
+def test_cartesian_gauss_periodic_arbitrary_neutral_charges_have_zero_mean(grid_size):
+    dx = .19
+    source = np.random.default_rng(grid_size + 11).normal(size=grid_size)
+    source[-1] = -math.fsum(source[:-1])
+    density = epsilon_0 * jnp.asarray(source)
+    field = np.asarray(E_from_Gauss_1D_Cartesian(density, dx, periodic=True))
+    assert_allclose((field - np.roll(field, 1)) / dx, source, rtol=0, atol=2e-13)
+    assert_allclose(field.mean(), 0., rtol=0, atol=2e-14)
+
+
+@pytest.mark.parametrize("grid_size", [1, 2, 3, 9, 70, 257])
+@pytest.mark.parametrize("periodic", [False, True])
+def test_cartesian_gauss_gradients_match_the_discrete_charge_response(grid_size, periodic):
+    source = jnp.asarray(np.random.default_rng(grid_size + 37).normal(size=grid_size))
+    weights = np.linspace(-.7, 1.3, grid_size)
+    dx = .23
+
+    def sensor(rho_in_epsilon0, spacing):
+        return jnp.dot(weights, E_from_Gauss_1D_Cartesian(epsilon_0 * rho_in_epsilon0, spacing, periodic))
+
+    # A unit charge in cell j raises each downstream face by dx. A periodic
+    # zero-mean field subtracts dx (N-j)/N from every face's response.
+    # Its neutralizing background also projects charge perturbations to zero mean.
+    mean_weight = math.fsum(weights) / grid_size if periodic else 0.
+    response = np.array([math.fsum(weights[j:]) - (grid_size - j) * mean_weight for j in range(grid_size)])
+    if periodic:
+        response -= math.fsum(response) / grid_size
+    density_gradient, spacing_gradient = grad(sensor, argnums=(0, 1))(source, dx)
+    assert_allclose(density_gradient, dx * response, rtol=2e-13, atol=2e-13)
+    assert_allclose(spacing_gradient, math.fsum(np.asarray(source) * response), rtol=2e-13, atol=2e-12)
 
 
 def test_curlE_boundary_condition_cases():

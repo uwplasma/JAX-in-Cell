@@ -26,7 +26,7 @@ total_steps = 1100
 
 [species_parameters.electrons.electrons0]
 number_pseudoparticles = 3500
-grid_points_per_Debye_length = 0.50265482457   # sets the density through lambda_D
+dx_over_Debye_length = 0.50265482457   # sets the density through lambda_D
 vth_over_c_x = 0.05
 drift_speed_x = 6e7
 velocity_plus_minus_x = true           # half the particles get -drift_speed_x
@@ -35,7 +35,7 @@ perturbation_wavenumber_x = 1
 
 [species_parameters.ions.ions0]
 number_pseudoparticles = 3500
-grid_points_per_Debye_length = 0.50265482457
+dx_over_Debye_length = 0.50265482457
 mass_over_proton_mass = 1
 vth_over_c_x = "_electrons0"           # thermal speed from the electron temperature
 ion_temperature_over_electron_temperature_x = 1
@@ -45,7 +45,7 @@ Three conventions are worth knowing from the start:
 
 * **Density is set through the Debye length.** There is no density parameter. The
   pseudo-particle weight of each population is chosen so that the electron Debye
-  length equals `1 / grid_points_per_Debye_length` cells; see
+  length equals `1 / dx_over_Debye_length` cells; see
   {doc}`../user_guide/species` for the formula. With $\lambda_D \approx 2\,\Delta x$
   the box holds $L/\lambda_D \approx 35$ Debye lengths.
 * **Thermal speed** $v_{th}$ is defined by $f(v) \propto \exp(-v^2/v_{th}^2)$, that is
