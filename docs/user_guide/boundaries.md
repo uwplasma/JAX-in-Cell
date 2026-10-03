@@ -112,3 +112,15 @@ energy fraction is `mixed_BC_weight * COR**2`; tangential kinetic energy retains
 the marker-weight factor. Code 4 evaluates its returned fraction from the impacting
 marker's speed, not the fastest particle in the simulation. These are prescribed-wall
 controls, not a self-consistent sheath benchmark.
+
+Both particle APIs use a shared endpoint map. The full-state API additionally
+updates velocity and live charge/mass; it resolves exact wall contact when velocity
+points outward. Position-only calls cannot infer restitution or returned weight
+and use unit return/restitution. Use the full-state API for those wall laws.
+Already collected slots remain parked when both live charge and mass are zero;
+a neutral marker with positive mass still moves. Two elastic walls support
+repeated flights; mixed or inelastic unresolved second crossings remain nonfinite.
+
+The field codes describe the implemented ghost arrays. Reflective ghosts are
+not a general PEC/PMC model, and radiation ghosts require a resolution check
+for the wave and incidence being studied.
