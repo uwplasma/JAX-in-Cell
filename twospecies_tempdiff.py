@@ -72,7 +72,7 @@ def main():
     else:
         output = simulation.run()
         velocity = np.asarray(output["velocities"])
-        stored_steps = np.arange(1, len(velocity) + 1)
+        stored_steps = np.asarray(output["time_array"]) / float(output["dt"])
     w, mass, q = (np.asarray(output[k]).reshape(-1) for k in ("weights", "masses", "charges"))
     initial = np.asarray(output["initial_velocities"])
     all_velocity = np.concatenate([initial[None], velocity])
@@ -107,6 +107,9 @@ def main():
                        np.asarray(output["total_energy"])]
     print(f"Initial 3D energy equilibrium: {equilibrium:.8g} K; late temperatures: {temperatures[0][-1]:.8g}, {temperatures[1][-1]:.8g} K")
     print(f"Maximum total-energy change: {np.max(np.abs(energy / energy[0] - 1)):.6g}")
+    momentum = np.sum(mass[None, :, None] * all_velocity, axis=1)
+    scale = np.sum(mass * np.linalg.norm(initial, axis=1))
+    print(f"Maximum particle momentum change / initial absolute momentum: {np.max(np.linalg.norm(momentum-momentum[0], axis=1)) / max(scale, np.finfo(float).tiny):.6g}")
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     axes[0].plot(time, temperatures[0], label="Electrons")
     axes[0].plot(time, temperatures[1], label="Positrons")
@@ -115,7 +118,7 @@ def main():
     axes[0].legend(fontsize=8)
     axes[1].semilogy(time, np.abs(difference), label="Absolute temperature difference")
     if fit is not None:
-        axes[1].semilogy(time, model(time, *fit), "--", label="Early-time exponential fit")
+        axes[1].semilogy(time, model(time, *fit), "--", label="Exponential fit")
     axes[1].set_ylabel("Temperature difference (K)")
     axes[1].legend(fontsize=8)
     axes[2].plot(time, energy / energy[0] - 1)

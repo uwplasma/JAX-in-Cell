@@ -4,7 +4,7 @@
 author's hot-electron/cold-positron example. The densities and masses are equal;
 all three velocity components are thermal. Enable the optional collision operator
 with `solver_parameters.collisions = true`. It supports Newtonian periodic Boris
-runs; implicit, relativistic, wall and particle-source coupling are rejected.
+runs; implicit, relativistic, particle-wall and particle-source coupling are rejected.
 
 Run the collision-only control first, from the repository root:
 
@@ -20,7 +20,8 @@ come from the same configuration as full PIC. Omitting `coulomb_logarithm` uses 
 initial electron-ion NRL estimate, floored at 2. The floor prevents numerical NaNs;
 weak coupling and sufficiently small scattering steps are still required.
 
-The figure shows temperatures, their difference and relative total-energy change.
+The figure shows temperatures, their difference and relative total-energy change;
+the terminal also reports particle momentum, which fields can exchange in full PIC.
 Temperatures are physical, marker-weighted velocity variances in kelvin, with each
 population's bulk velocity removed. The equilibrium reference comes from the
 initial three-dimensional kinetic energy in the common centre-of-mass frame:
