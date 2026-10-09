@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from jaxincell._diagnostics import diagnostics
+from jaxincell import diagnostics
 from jaxincell._constants import epsilon_0, mu_0, boltzmann_constant, speed_of_light
 
 
@@ -52,6 +52,32 @@ def _minimal_diagnostic_output(
         "dx": dx,
         "plasma_frequency": 1.0,
     }
+
+
+@pytest.mark.parametrize("weights_history", [False, True])
+def test_diagnostics_use_changing_macroparticle_masses_for_energy_and_momentum(weights_history):
+    """Independent two-particle ledger: fractional inelastic returns followed by
+    complete ion collection. Lost weight must leave both energy and momentum."""
+    velocity = jnp.array([[[2., 1., 0.], [-1., 0., 2.]],
+                          [[-1., 1., 0.], [.5, 0., 2.]],
+                          [[.5, 1., 0.], [0., 0., 0.]]])
+    output = _minimal_diagnostic_output(electric_field=jnp.ones((3, 4, 3)).at[..., 1:].set(0.),
+                                        velocities=velocity, masses=jnp.array([[2.], [6.]]), dx=.25)
+    output["masses_over_time"] = jnp.array([[[2.], [6.]], [[1.], [3.]], [[.5], [0.]]])
+    output["weights"] = jnp.array([[4.], [3.]])
+    if weights_history:
+        output["weights_over_time"] = jnp.array([[4., 3.], [2., 1.5], [1., 0.]])
+    diagnostics(output)
+    np.testing.assert_array_equal(output["weights_electrons"], [[4.], [2.], [1.]])
+    np.testing.assert_array_equal(output["weights_ions"], [[3.], [1.5], [0.]])
+    np.testing.assert_allclose(output["kinetic_energy_electrons"], [5., 1., .3125], rtol=1e-14)
+    np.testing.assert_allclose(output["kinetic_energy_ions"], [15., 6.375, 0.], rtol=1e-14)
+    np.testing.assert_allclose(output["kinetic_energy"], [20., 7.375, .3125], rtol=1e-14)
+    momentum = np.array([[-2., 2., 12.], [.5, 1., 6.], [.25, .5, 0.]])
+    np.testing.assert_allclose(output["total_momentum"], momentum, rtol=1e-14)
+    expected_change = np.linalg.norm(momentum - momentum[0], axis=1) / (8 * np.sqrt(5))
+    np.testing.assert_allclose(output["momentum_error_rel"], expected_change, rtol=1e-14)
+    np.testing.assert_allclose(output["total_energy"], np.array([20., 7.375, .3125]) + epsilon_0 / 2, rtol=1e-14)
 
 
 def test_diagnostics_basic_energy_and_species():
