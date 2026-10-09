@@ -98,11 +98,11 @@ $2\pi \times 1 \times 2.84\times10^{-4}/0.01 = 0.179$.
 
 ```{note}
 `timestep_over_spatialstep_times_c = 4.5` exceeds the light-wave Courant limit
-$c\,\Delta t/\Delta x \le 1$ of the explicit field solver. The run is stable only because
+$c\,\Delta t/\Delta x < 1$ of the explicit field solver. The run is stable only because
 no transverse field is ever excited: all velocities are along $x$, so $J_y = J_z = 0$ and
 the transverse Maxwell equations stay identically zero. If you give the particles a
-$y$ or $z$ thermal spread, or an external magnetic field, reduce this parameter to one
-or below. The {doc}`../numerics/stability` page lists all the constraints.
+$y$ or $z$ thermal spread, or an external magnetic field, reduce this parameter below
+one with a margin. The {doc}`../numerics/stability` page lists all the constraints.
 ```
 
 ## Reading the diagnostics
