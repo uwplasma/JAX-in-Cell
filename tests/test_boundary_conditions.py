@@ -1,3 +1,7 @@
+from fractions import Fraction
+
+import jax
+import numpy as np
 import pytest
 from jaxincell._boundary_conditions import (
     set_BC_single_particle, set_BC_particles,
@@ -625,11 +629,11 @@ def test_exact_wall_impact_is_applied_once(side):
     assert (again_q, again_m) == (1., 2.)
 
 
-@pytest.mark.parametrize("vx", [-4.3, -2.6, -1.6, -.6, .6, 1.6, 2.6, 4.3, -2.5, 2.5])
+@pytest.mark.parametrize("vx", [-1024.25, -4.3, -2.6, -1.6, -.6, .6, 1.6, 2.6, 4.3, -2.5, 2.5, 1024.25])
 def test_elastic_walls_match_independent_free_flight_impacts(vx):
-    position, velocity, remaining = 0., vx, 1.
+    position, velocity, remaining = Fraction(0), Fraction(str(vx)), Fraction(1)
     while remaining > 0:
-        wall = .5 if velocity > 0 else -.5
+        wall = Fraction(1, 2) if velocity > 0 else Fraction(-1, 2)
         travel_time = (wall-position)/velocity
         if travel_time > remaining:
             position += velocity*remaining
@@ -640,9 +644,153 @@ def test_elastic_walls_match_independent_free_flight_impacts(vx):
     mapped, reflected, charge, ratio, mass = set_BC_single_particle(
         jnp.array([vx, 0., 0.]), original, 1., 2., .5, .1, grid, 1., 1., 1., 1, 1)
     positions_only = set_BC_single_particle_positions(jnp.array([vx, 0., 0.]), .1, grid, 1., 1., 1., 1, 1)
-    assert float(mapped[0]) == pytest.approx(position, abs=2e-15)
-    assert float(positions_only[0]) == pytest.approx(position, abs=2e-15)
-    assert float(reflected[0]) == velocity
+    assert float(mapped[0]) == pytest.approx(float(position), abs=2e-15)
+    assert float(positions_only[0]) == pytest.approx(float(position), abs=2e-15)
+    assert float(reflected[0]) == float(velocity)
     assert jnp.array_equal(reflected[1:], original[1:])
     assert jnp.sum(reflected**2) == jnp.sum(original**2)
     assert (charge, ratio, mass) == (1., 2., .5)
+
+
+@pytest.mark.parametrize("left,right", [(0, 0), (1, 1), (2, 2), (1, 2), (2, 1)])
+@pytest.mark.parametrize("x", [-25.1, -15., -5.1, -5., 0., 5., 5.1, 15., 25.1])
+def test_shared_endpoint_map(left, right, x):
+    """Compare endpoint geometry and directional collection at exact contact."""
+    point, velocity = jnp.array([x, 6., -6.]), jnp.array([2.*(-1 if x < 0 else 1), 3., 4.])
+    grid = jnp.linspace(-4.95, 4.95, 100)
+    full = set_BC_single_particle(point, velocity, 0., 0., 1., .1, grid, 10., 10., 10., left, right)
+    position = set_BC_single_particle_positions(point, .1, grid, 10., 10., 10., left, right)
+    if abs(x) == 5. and (left if x < 0 else right) == 2:
+        assert full[2:] == (0., 0., 0.) and jnp.all(full[1] == 0)
+        assert abs(full[0][0]) > 5. and position[0] == x
+    else:
+        assert jnp.allclose(full[0], position, equal_nan=True)
+    assert jnp.array_equal(position[1:], jnp.array([-4., 4.]))
+    if left == right == 1:
+        # Advance an independent billiard trajectory from the centre by |x|.
+        distance, expected_x = abs(x), 0.
+        direction = 1 if x >= 0 else -1
+        while distance >= (5.-direction*expected_x):
+            distance -= 5.-direction*expected_x
+            expected_x = direction*5.
+            direction *= -1
+        expected_x += direction*distance
+        assert jnp.allclose(position[0], expected_x)
+        assert full[1][0] == 2.*direction
+
+
+def test_neutral_particle_collection_and_repeated_map():
+    grid = jnp.linspace(-4.95, 4.95, 100)
+    result = set_BC_particles(jnp.array([[6., 0., 0.]]), jnp.ones((1, 3)),
+                             jnp.zeros((1, 1)), jnp.ones((1, 1)), jnp.zeros((1, 1)),
+                             .1, grid, 10., 10., 10., 2, 2)
+    assert jnp.array_equal(result[1], jnp.zeros((1, 3)))
+    again = set_BC_particles(*result, .1, grid, 10., 10., 10., 2, 2)
+    assert all(jnp.array_equal(a, b) for a, b in zip(result, again))
+
+
+@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+@pytest.mark.parametrize("code", [0, 1, 2, 3, 4])
+def test_boundary_map_preserves_phase_space_precision(dtype, code):
+    x, v = jnp.array([6., 0., 0.], dtype=dtype), jnp.ones(3, dtype=dtype)
+    grid = jnp.linspace(-4.95, 4.95, 100, dtype=dtype)
+    result = set_BC_single_particle(x, v, 1., 1., 1., .1, grid, 10., 10., 10., code, code)
+    position = set_BC_single_particle_positions(x, .1, grid, 10., 10., 10., code, code)
+    assert result[0].dtype == result[1].dtype == position.dtype == dtype
+
+
+@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+def test_periodic_maps_agree_with_the_independent_floor_wrap_including_neutral_markers(dtype):
+    box = (1., 2., 3.)
+    x = jnp.array([[-10.5, 12.25, -5.25], [.5, -1., 1.5], [-.5, 1., -1.5], [.125, .25, .75]], dtype=dtype)
+    lengths = np.asarray(box, dtype=np.asarray(x).dtype)
+    expected = np.asarray(x) - lengths * np.floor((np.asarray(x) + lengths/2) / lengths)
+    grid = jnp.linspace(-.45, .45, 10, dtype=dtype)
+    charge = jnp.zeros((4, 1), dtype=dtype)
+    positions = set_BC_positions(x, charge, .1, grid, *box, 0, 0)
+    v = jnp.ones_like(x)
+    full = set_BC_particles(x, v, charge, jnp.ones((4, 1), dtype=dtype), charge,
+                            .1, grid, *box, 0, 0)
+    np.testing.assert_array_equal(positions, expected)
+    np.testing.assert_array_equal(full[0], expected)
+    np.testing.assert_array_equal(full[1], v)
+    assert positions.dtype == x.dtype and all(value.dtype == x.dtype for value in full)
+    assert np.all(expected >= -lengths/2) and np.all(expected < lengths/2)
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+@pytest.mark.parametrize("direction", [-1, 0, 1])
+@pytest.mark.parametrize("code", [1, 2, 3, 4])
+def test_exact_wall_changes_only_outgoing_markers(side, direction, code):
+    grid = jnp.linspace(-.45, .45, 10)
+    x, v = jnp.array([side*.5, .125, -.25]), jnp.array([side*direction*.2, .1, -.3])
+    position, returned, q, qm, m = set_BC_single_particle(x, v, 2., .5, 4., .1, grid, 1., 1., 1.,
+                                                         code, code, .3, .5, .5, 1.)
+    fraction = {1: 1., 2: 0., 3: .3, 4: .8}[code] if direction == 1 else 1.
+    assert float(q) == pytest.approx(2*fraction) and float(m) == pytest.approx(4*fraction)
+    expected_v = np.asarray(v).copy()
+    if direction == 1:
+        expected_v[0] *= -.5
+    if fraction == 0:
+        expected_v[:] = 0
+        assert float(qm) == 0
+    else:
+        assert float(position[0]) == side*.5 and float(qm) == .5
+    np.testing.assert_allclose(returned, expected_v, rtol=1e-14)
+    # Without a velocity, a position at a wall does not assert a directional impact.
+    np.testing.assert_array_equal(set_BC_single_particle_positions(x, .1, grid, 1., 1., 1., code, code), x)
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+@pytest.mark.parametrize("codes", [(1, 2), (3, 3), (4, 4)])
+def test_unresolved_nonelastic_or_mixed_wall_flights_are_invalid_in_both_maps(side, codes):
+    x, v = jnp.array([side*2.6, .1, -.2]), jnp.array([side*.2, .1, -.3])
+    grid = jnp.linspace(-.45, .45, 10)
+    mapped = set_BC_single_particle(x, v, 2., .5, 4., .1, grid, 1., 1., 1., *codes, .3)
+    if codes == (1, 2) and side == 1:  # collection completes the flight at the first impact
+        assert np.isfinite(mapped[0]).all() and float(mapped[2]) == 0
+    else:
+        assert np.isnan(mapped[0][0])
+    position = set_BC_single_particle_positions(x, .1, grid, 1., 1., 1., *codes)
+    assert np.isfinite(position[0]) if codes == (1, 2) and side == 1 else np.isnan(position[0])
+    inelastic = set_BC_single_particle(x, v, 2., .5, 4., .1, grid, 1., 1., 1., 1, 1, 1., .5, .5)
+    assert np.isnan(inelastic[0][0])
+
+
+@pytest.mark.parametrize("code", [1, 2, 3, 4])
+@pytest.mark.parametrize("side", [-1, 1])
+def test_full_state_preserves_collected_parking_but_moves_massive_neutral_markers(code, side):
+    grid = jnp.linspace(-.45, .45, 10)
+    parked = grid[0]-1.5*.1 if side < 0 else grid[-1]+3*.1
+    x = jnp.array([parked, 1.25, -2.25])
+    out = set_BC_single_particle(x, jnp.zeros(3), 0., 0., 0., .1, grid, 1., 1., 1., code, code, .3)
+    np.testing.assert_allclose(out[0], [parked, .25, -.25], rtol=1e-14)
+    np.testing.assert_array_equal(out[1], 0.)
+    assert out[2:] == (0., 0., 0.)
+    neutral = set_BC_single_particle(jnp.array([side*.6, 0., 0.]), jnp.array([side*.2, 0., 0.]),
+                                      0., 0., 1., .1, grid, 1., 1., 1., 1, 1)
+    assert float(neutral[0][0]) == pytest.approx(side*.4)
+    assert float(neutral[1][0]) == pytest.approx(-side*.2) and float(neutral[4]) == 1.
+    # Charges alone cannot label this neutral marker inactive in the position-only API.
+    generic = set_BC_positions(jnp.array([[side*.6, 0., 0.]]), jnp.zeros((1, 1)),
+                               .1, grid, 1., 1., 1., 1, 1)
+    assert float(generic[0, 0]) == pytest.approx(side*.4)
+
+
+def test_shared_fractional_wall_map_jvp_matches_ballistic_variations():
+    grid = jnp.linspace(-.45, .45, 10)
+
+    def mapped(values):
+        x, v, fraction, restitution = values[:3], values[3:6], values[6], values[7]
+        out = set_BC_single_particle(x, v, 2., .5, 4., .1, grid, 1., 1., 1.,
+                                      3, 3, fraction, restitution, restitution)
+        return jnp.concatenate((out[0], out[1], jnp.array([out[2], out[4], out[3]])))
+
+    values = jnp.array([.7, .13, .27, .2, .1, -.3, .3, .5])
+    tangent = jnp.array([.03, .02, -.01, .01, .03, -.02, .02, .04])
+    expected = [-.5*.03-.2*.04, .02, -.01, -.5*.01-.2*.04, .03, -.02, .04, .08, 0.]
+    _, derivative = jax.jvp(mapped, (values,), (tangent,))
+    np.testing.assert_allclose(derivative, expected, rtol=1e-13, atol=1e-15)
+    h = 1e-5
+    finite = (mapped(values+h*tangent)-mapped(values-h*tangent))/(2*h)
+    np.testing.assert_allclose(derivative, finite, rtol=1e-9, atol=1e-10)
