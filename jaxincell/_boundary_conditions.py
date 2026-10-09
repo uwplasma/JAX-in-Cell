@@ -4,20 +4,25 @@ from ._constants import speed_of_light
 
 __all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
 
-def _particle_boundary_map(x, dx, grid, box, BC_left, BC_right):
+def _particle_boundary_map(x, dx, grid, lengths, BC_left, BC_right):
     """Map a free-flight endpoint and return reflection and collection flags."""
-    length = box[0]
+    length = lengths[0]
+    # Select the crossed wall's code; endpoints exactly on a wall stay inside.
     left, right = x[0] < -length/2, x[0] > length/2
     hit = left | right
     code = jnp.where(left, BC_left, BC_right)
-    periods = jnp.asarray(box, dtype=x.dtype)
+    # Transverse coordinates always wrap; x wraps only for a periodic wall.
+    periods = jnp.asarray(lengths, dtype=x.dtype)
     wrapped = (x + periods/2) % periods - periods/2
     normal = jnp.where(code == 0, wrapped[0], jnp.where(left, -length-x[0], length-x[0]))
+    # Park collected particles beyond the deposition stencil.
     normal = jnp.where(code == 2, jnp.where(left, grid[0]-1.5*dx, grid[-1]+3*dx), normal)
+    # Two elastic walls fold arbitrarily long flights back into the domain.
     elastic = (BC_left == 1) & (BC_right == 1) & hit
     phase = (x[0]+length/2) % (2*length)
     normal = jnp.where(elastic, length/2-jnp.abs(phase-length), normal)
     normal = jnp.where(hit, normal, x[0])
+    # Each wall crossing reverses the normal velocity; even counts cancel.
     reflections = jnp.ceil((jnp.abs(x[0])-length/2)/length)
     factor = jnp.where(hit & (code == 1), -1., 1.)
     factor = jnp.where(elastic, jnp.where(reflections % 2 == 0, 1., -1.), factor)
