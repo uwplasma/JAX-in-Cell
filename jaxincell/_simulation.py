@@ -1351,8 +1351,43 @@ class Simulation:
         # The accepted particles, ledger and RNG stream are untouched.
         return (jnp.where(valid, E_a, jnp.nan), B_a, state[2], state[3])
 
-    def _implicit_step(self, st, extra):
+    def _midpoint_scan(self, initial, st, q, picard, midpoint_fields, substeps, advance):
+        """Keep the native scan cheap; a coupled scan also records its last force/current."""
+        if midpoint_fields is None:
+            state, _ = lax.scan(picard, initial, None, length=self.solver.picard_iterations)
+            return self._check_picard(picard, state, st, q), None
+        E, B = initial[:2]
+
+        def coupled_picard(state, _):
+            E_new, B_new, orbits, (_, J_guess) = state[:4]
+            E_half, B_half = 0.5 * (E + E_new), 0.5 * (B + B_new)
+            E_force, B_force = midpoint_fields(E_half, B_half, J_guess)
+            if E_force.shape != E_half.shape or B_force.shape != B_half.shape:
+                raise ValueError("midpoint_fields must return the two grid field shapes")
+            particles, J, orbits = substeps(E_force, B_force, orbits)
+            used = (E_half, B_half, E_force, B_force, J_guess)
+            return (*advance(J), orbits, (particles, J), used), None
+
+        state, _ = lax.scan(coupled_picard, (*initial, (E, B, E, B, jnp.zeros_like(E))), None,
+                            length=self.solver.picard_iterations)
+        used = state[4]       # accepted scan, never the convergence-check replay
+
+        def checked_picard(physical, _):
+            replay, _ = coupled_picard((*physical, used), None)
+            return replay[:4], None
+
+        # The checker replays the coupled map with its original four-item state.
+        # A failure still marks ordinary E invalid and retains the accepted payload.
+        return self._check_picard(checked_picard, state[:4], st, q), used
+
+    def _implicit_step(self, st, extra, *, midpoint_fields=None):
         """Crank-Nicolson with a direct Maxwell solve and fixed particle Picard scan (docs/numerics/implicit.md).
+
+        Optional pure ``midpoint_fields(E_half, B_half, J_guess)`` returns the
+        two effective grid fields seen by the particles. Charge, mass, current deposition
+        and the physical Maxwell update stay unchanged. The enabled return adds
+        LAST USED ``(E_half, B_half, E_force, B_force, J_guess)`` to the usual pair;
+        the caller owns additional sector/work and coupled-force closure checks.
 
         Each sub-step moves a particle on a straight line at :meth:`_mean_velocity`. Its current is the
         continuity current of the deposits at the two ends, which keeps the discrete Gauss law, and E_x at
@@ -1456,15 +1491,16 @@ class Simulation:
         v = self._velocity(u)      # the first guess: every particle streams freely at its present velocity
         free = jax.vmap(lambda s: wrap_positions(x + s * dtau * v, w, box, d.particle_bc, dx))
         orbits = (free(jnp.arange(1.0, n_sub + 1)), jnp.broadcast_to(v, (n_sub,) + v.shape))
-        state, _ = lax.scan(picard, (E, B, orbits, ((x, u, w, qm, rho, st.wall), jnp.zeros_like(E))), None,
-                            length=self.solver.picard_iterations)
-        state = self._check_picard(picard, state, st, q)
+        initial = (E, B, orbits, ((x, u, w, qm, rho, st.wall), jnp.zeros_like(E)))
+        state, used = self._midpoint_scan(initial, st, q, picard, midpoint_fields, substeps, advance)
         E_new, B_new, _, ((x, u, w, qm, rho_next, wall), J) = state
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
         v = self._velocity(u)
-        return (State(E_new, B_new, x, u, w, qm, rho_next, st.sigma, key, st.time + dt, st.steps + 1, wall,
-                      self._accumulate(st.moments, x, v, w), st.x_phase),
-                (x, v, w, E_new, B_new, J, rho_next))
+        result = (State(
+            E_new, B_new, x, u, w, qm, rho_next, st.sigma, key, st.time + dt, st.steps + 1, wall,
+            self._accumulate(st.moments, x, v, w), st.x_phase),
+                  (x, v, w, E_new, B_new, J, rho_next))
+        return result if midpoint_fields is None else (*result, used)
 
     # -- the run ---------------------------------------------------------------------------------
     def run(self, steps, seed=0, store_every=1, store_particles=True, moments=False, state=None,
