@@ -29,6 +29,7 @@ collisions
 | `Langmuir_wave.py` | plasma oscillations at the plasma frequency | seconds |
 | `bump-on-tail.py`, `bump-on-tail.toml` | four populations, a weak beam on a Maxwellian, explicit or implicit | tens of seconds |
 | `Weibel_instability.py` | magnetic field generation from a temperature anisotropy | tens of seconds |
+| `3d_field_runs.py` | prescribed x, x-y, x-z and x-y-z fields checked against gyro-orbits; see {doc}`../user_guide/external_fields` | seconds |
 | `auto-differentiability.py` | gradient of a diagnostic with respect to the drift speed, against finite differences | a minute |
 | `optimize_two_stream_saturation.py` | minimise the saturated field energy over the ion temperature | minutes |
 | `inference_two_stream.py` | recover the drift speed from the growth rate with forward-mode derivatives | minutes |
