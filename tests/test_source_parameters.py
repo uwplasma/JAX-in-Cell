@@ -323,12 +323,8 @@ def test_build_source_hash_is_stable_and_sensitive_to_values():
     assert default_hash != species_changed_hash
 
 
-def test_active_source_parameters_do_not_warn(recwarn):
-    """Test jaxincell._parameters._source_parameters.clean_and_initialize_source_parameters.
-
-    Cases:
-    - source_term_active = 1 is validated and preserved without an obsolete warning.
-    """
+def test_active_source_does_not_warn(recwarn):
+    """Implemented injection accepts valid active source parameters silently."""
     cleaned = clean_and_initialize_source_parameters({"source_term_active": 1})
     assert cleaned["source_term_active"] == 1
     assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []
