@@ -53,7 +53,7 @@ None of these are differentiable inputs.
 
 A uniform magnetic field along $x$ is the simplest way to study magnetised plasma
 waves: particles gyrate in the $y$-$z$ plane while the fields remain functions of $x$
-only. Keep $c\,\Delta t/\Delta x \le 1$ in that case, because the transverse currents
+only. Keep $c\,\Delta t/\Delta x < 1$ in that case, because the transverse currents
 excite electromagnetic waves, and resolve the gyration with
 $\Omega_c \Delta t \ll 1$, where $\Omega_c = |q| B / m$.
 
@@ -62,7 +62,7 @@ $\Omega_c \Delta t \ll 1$, where $\Omega_c = |q| B / m$.
 Set `number_grid_points_y` and/or `number_grid_points_z` in `domain_parameters`.
 Their default zero disables that direction; `length_y` and `length_z` default to
 `length`. Supply a field of shape `(Nx, Ny, Nz, 3)` for the enabled directions
-(or `(Nx, Ny, 3)` when only y is enabled). Electric fields retain their x-face
+(or `(Nx, Ny, 3)` for y alone and `(Nx, Nz, 3)` for z alone). Electric fields retain their x-face
 locations, magnetic fields their x-centre locations; both use centres in y and z.
 These directions are periodic. Only prescribed fields gain transverse variation;
 the self-consistent Maxwell solve remains one dimensional.
