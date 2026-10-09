@@ -9,7 +9,7 @@ __all__ = [
 
 DEFAULT_SOLVER_PARAMETERS = {
         "print_info": True,                       # Print information about the simulation
-        "field_solver": 0,                       # Algorithm for solving fields - 0: Gauss's law, 1: FDTD
+        "field_solver": 0,                       # 0: Maxwell/Ampere; 1: overwrite longitudinal E with FFT Gauss solve
         "relativistic": False,                    # Whether to use the relativistic version of the Boris push (only relevant if time_evolution_algorithm is 0 (Boris))
         "time_evolution_algorithm": 0,             # Algorithm to evolve particles in time - 0: Boris, 1: Implicit_Crank Nicholson
         "max_number_of_Picard_iterations_implicit_CN": 20, # Maximum number of Picard iterations for implicit Crank-Nicholson method
@@ -40,7 +40,7 @@ def clean_and_initialize_solver_parameters(solver_parameters, input_parameters=N
     if type(solver_parameters["filter_strides"]) != tuple:
         solver_parameters["filter_strides"] = tuple(solver_parameters["filter_strides"])
 
-    assert solver_parameters["field_solver"] in [0, 1], "Invalid field solver. Must be 0 (Gauss's law) or 1 (FDTD)."
+    assert solver_parameters["field_solver"] in [0, 1], "Invalid field solver. Must be 0 (electromagnetic) or 1 (FFT Gauss)."
     assert solver_parameters["time_evolution_algorithm"] in [0, 1], "Invalid time evolution algorithm. Must be 0 (Boris) or 1 (Implicit Crank-Nicholson)."
     assert type(solver_parameters["max_number_of_Picard_iterations_implicit_CN"]) == int and solver_parameters["max_number_of_Picard_iterations_implicit_CN"] > 0, "Maximum number of Picard iterations for implicit Crank-Nicholson method must be a positive integer."
     assert type(solver_parameters["number_of_particle_substeps_implicit_CN"]) == int and solver_parameters["number_of_particle_substeps_implicit_CN"] > 0, "Number of particle substeps per field step for implicit Crank-Nicholson method must be a positive integer."
