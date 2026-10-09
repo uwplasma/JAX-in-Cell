@@ -83,6 +83,8 @@ def E_from_Gauss_1D_Cartesian(charge_density, dx, periodic=False):
     Returns:
         array: The electric field at each grid point due to the particles, shape (G,).
     """
+    if periodic:
+        charge_density = charge_density - jnp.mean(charge_density)
     # E_i - E_{i-1} = dx rho_i / epsilon_0, with zero field at the left face.
     E_field_from_Gauss = (dx / epsilon_0) * jnp.cumsum(
         charge_density, dtype=jnp.result_type(charge_density, jnp.dtype(float)))

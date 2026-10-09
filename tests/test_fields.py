@@ -27,6 +27,17 @@ from jaxincell._fields import (
 )
 
 
+@pytest.mark.parametrize("G", [2, 9, 35])
+def test_cartesian_periodic_gauss_removes_uniform_charge_and_has_correct_derivative(G):
+    rho = epsilon_0 * (2 + jnp.sin(1.7 * jnp.arange(G)))
+    dx = 0.3
+    E = E_from_Gauss_1D_Cartesian(rho, dx, periodic=True)
+    assert_allclose((E - jnp.roll(E, 1)) / dx, (rho - rho.mean()) / epsilon_0, atol=2e-14)
+    assert_allclose(E.mean(), 0, atol=1e-15)
+    assert_allclose(grad(lambda offset: jnp.sum(E_from_Gauss_1D_Cartesian(rho + epsilon_0 * offset, dx, periodic=True)**2))(0.),
+                    0, atol=1e-14)
+
+
 def test_E_from_Gauss_1D_FFT_zero_mode_and_shape():
     """Test jaxincell._fields.E_from_Gauss_1D_FFT.
 
@@ -191,8 +202,11 @@ def test_cartesian_gauss_gradients_match_the_discrete_charge_response(grid_size,
 
     # A unit charge in cell j raises each downstream face by dx. A periodic
     # zero-mean field subtracts dx (N-j)/N from every face's response.
+    # Its uniform neutralizing background also projects charge perturbations to zero mean.
     mean_weight = math.fsum(weights) / grid_size if periodic else 0.
     response = np.array([math.fsum(weights[j:]) - (grid_size - j) * mean_weight for j in range(grid_size)])
+    if periodic:
+        response -= math.fsum(response) / grid_size
     density_gradient, spacing_gradient = grad(sensor, argnums=(0, 1))(source, dx)
     assert_allclose(density_gradient, dx * response, rtol=2e-13, atol=2e-13)
     assert_allclose(spacing_gradient, math.fsum(np.asarray(source) * response), rtol=2e-13, atol=2e-12)

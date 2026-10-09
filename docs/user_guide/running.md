@@ -1,5 +1,13 @@
 # Running simulations
 
+To retain an irregular history, set `solver_parameters["snapshot_steps"]` to a sequence of
+zero-based post-step indices. Index 0 is the first completed step, at `dt`. Lists and NumPy
+integer arrays are sorted and deduplicated; indices outside `[0, total_steps)` are rejected.
+`None` stores every step, while `[]` stores no histories. The simulation always completes
+`total_steps`; `output["final_state"]` contains its final fields, particles and time independently
+of the schedule. This is a final-state record, not a restart API. TOML accepts the same key
+under `[solver_parameters]`. Use an explicit sequence for irregular sampling.
+
 ## The `Simulation` object
 
 {class}`jaxincell.Simulation` is constructed from a parameter dictionary or a path to a
@@ -100,3 +108,22 @@ Runs are deterministic for a given seed, parameter set, JAX version and device.
 Results on a GPU differ from those on a CPU at the level of floating-point rounding,
 which is amplified by the instabilities being simulated; growth rates and energies agree,
 individual particle trajectories do not after many e-foldings.
+
+
+## A sparse-output run
+
+This complete example stores three post-step rows while retaining the final state:
+
+```python
+from jax import block_until_ready
+from jaxincell import Simulation
+
+sim = Simulation({"domain_parameters": {"total_steps": 10},
+                  "solver_parameters": {"snapshot_steps": [0, 4, 9], "print_info": False}})
+out = block_until_ready(sim.run())
+print(out["time_array"] / out["dt"])  # [1, 5, 10]
+print(out["final_state"]["time"] / out["dt"])  # 10
+```
+
+An empty schedule still completes the run and returns `final_state`. Its history
+arrays contain no rows, so skip time-series diagnostics and plots.

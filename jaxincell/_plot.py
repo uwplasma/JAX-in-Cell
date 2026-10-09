@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple, Set
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, Normalize
 
 import jax.numpy as jnp
 
@@ -57,7 +57,7 @@ def _robust_vmax_from_samples(v_tn: np.ndarray, q: float = 99.5, pad: float = 1.
     Robust symmetric velocity span based on percentile(|v|) across the provided samples.
     This is what fixes the "ions look frozen because the v-axis is too wide" issue.
     """
-    val = np.percentile(np.abs(v_tn), q)
+    val = np.percentile(np.abs(v_tn), q) if np.asarray(v_tn).size else eps
     return float(max(pad * val, eps))
 
 def _robust_vmax_clipped(
@@ -261,12 +261,13 @@ def _make_ffmpeg_writer_auto(
     return FFMpegWriter(fps=fps, codec=codec, bitrate=-1, extra_args=extra_args)
 
 
-def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray) -> np.ndarray:
+def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray, weights=None) -> np.ndarray:
     """
     PDF histogram for many frames, fast-ish numpy implementation.
 
     v_frames_n: shape (F, N)
     edges: shape (B+1,) covering the full plotting range
+    weights: optional (F, N) live physical weights; zero-weight frames return zero.
     returns: pdf shape (F, B), with integral ~ 1 for each frame.
     """
     v = np.asarray(v_frames_n, dtype=np.float64)
@@ -281,10 +282,11 @@ def _pdf_over_frames_numpy(v_frames_n: np.ndarray, edges: np.ndarray) -> np.ndar
 
     counts = np.zeros((F, B), dtype=np.float32)
     f_idx = np.repeat(np.arange(F, dtype=np.int32), N)
-    np.add.at(counts, (f_idx, idx.reshape(-1)), 1.0)
+    np.add.at(counts, (f_idx, idx.reshape(-1)), 1.0 if weights is None else np.asarray(weights).reshape(-1))
 
     widths = np.diff(edges).astype(np.float32)
-    pdf = counts / (N * widths[None, :])
+    normalization = N if weights is None else np.asarray(weights, dtype=float).sum(axis=1, keepdims=True)
+    pdf = counts / (np.maximum(normalization, 1e-300) * widths[None, :])
     return pdf
 
 
@@ -297,8 +299,8 @@ class _PrecomputedPhaseSpace:
     v_edges_i: np.ndarray
     v_range_e: Tuple[float, float]
     v_range_i: Tuple[float, float]
-    norm_e: LogNorm
-    norm_i: LogNorm
+    norm_e: Optional[Normalize]
+    norm_i: Optional[Normalize]
 
 
 @dataclass
@@ -427,6 +429,13 @@ def plot(
     # multi-species safe combined arrays
     pos_e, vel_e = _combine_by_charge_sign(output, want_negative=True)
     pos_i, vel_i = _combine_by_charge_sign(output, want_negative=False)
+    weights_e, weights_i = output.get("weights_electrons"), output.get("weights_ions")
+    if "species" in output and any("weights" in sp for sp in output["species"]):
+        if weights_e is None:
+            weights_e = np.concatenate([sp["weights"] for sp in output["species"] if sp["charge"] < 0], axis=1)
+        if weights_i is None:
+            weights_i = np.concatenate([sp["weights"] for sp in output["species"] if sp["charge"] > 0], axis=1)
+    offset_e, offset_i = float(weights_e is None), float(weights_i is None)
 
     # to numpy for plotting/hist
     x_e = np.asarray(pos_e[:, :, 0])  # spatial axis is always x in this codebase
@@ -506,10 +515,12 @@ def plot(
 
         # Robust velocity spans (THIS fixes ion "no dynamics" view)
         # electrons: keep wide enough (fast physics)
-        vmax_e = _robust_vmax_from_samples(ve, q=99.5, pad=1.25)
+        vmax_e = _robust_vmax_from_samples(ve if weights_e is None else ve[weights_e > 0],
+                                          q=99.5 if weights_e is None else 100, pad=1.25)
 
         # ions: tighter, clipped to avoid rare fast-ion outliers destroying contrast
-        vmax_i = _robust_vmax_clipped(vi, q=99.0, pad=1.20, clip_multiple_of_median=25.0)
+        vmax_i = (_robust_vmax_clipped(vi, q=99.0, pad=1.20, clip_multiple_of_median=25.0) if weights_i is None
+                  else _robust_vmax_from_samples(vi[weights_i > 0], q=100, pad=1.20))
 
         v_edges_e = np.linspace(-vmax_e, vmax_e, bins_v + 1)
         v_edges_i = np.linspace(-vmax_i, vmax_i, bins_v + 1)
@@ -521,8 +532,8 @@ def plot(
         v_centers = 0.5 * (v_edges[:-1] + v_edges[1:])
 
         # PDFs over rendered frames only
-        e_pdf = _pdf_over_frames_numpy(ve, v_edges)
-        i_pdf = _pdf_over_frames_numpy(vi, v_edges)
+        e_pdf = _pdf_over_frames_numpy(ve, v_edges, weights_e)
+        i_pdf = _pdf_over_frames_numpy(vi, v_edges, weights_i)
 
         # Scale each species by its INITIAL max (axis fixed; bump/drift shows naturally)
         scale_e0 = float(max(np.max(e_pdf[0]), 1e-30))
@@ -549,12 +560,14 @@ def plot(
                 x_e[t], ve[t],
                 bins=[bins_x, bins_v],
                 range=[x_range, v_range_e],
+                weights=None if weights_e is None else weights_e[t],
             )[0].astype(np.float32)
 
             i_counts[t] = np.histogram2d(
                 x_i[t], vi[t],
                 bins=[bins_x, bins_v],
                 range=[x_range, v_range_i],
+                weights=None if weights_i is None else weights_i[t],
             )[0].astype(np.float32)
 
 
@@ -563,6 +576,10 @@ def plot(
         i_vmax = float(max(np.percentile(i_counts + 1.0, 99.5), 2.0))
         norm_e = None#LogNorm(vmin=1.0, vmax=e_vmax)
         norm_i = None#LogNorm(vmin=1.0, vmax=i_vmax)
+        if weights_e is not None:
+            norm_e = Normalize(vmin=0, vmax=max(float(e_counts.max()), 1e-30))
+        if weights_i is not None:
+            norm_i = Normalize(vmin=0, vmax=max(float(i_counts.max()), 1e-30))
 
         pre_ps[d] = _PrecomputedPhaseSpace(
             e_counts=e_counts,
@@ -689,7 +706,7 @@ def plot(
 
         ps = pre_ps[d]
         im_e = ax_e.imshow(
-            (ps.e_counts[0] + 1.0).T,
+            (ps.e_counts[0] + offset_e).T,
             aspect="auto",
             origin="lower",
             cmap="twilight",
@@ -700,7 +717,7 @@ def plot(
         ax_e.set_xlabel("x (m)")
         ax_e.set_ylabel(rf"$v_{d}$ (m/s)")
         cb = fig.colorbar(im_e, ax=ax_e, fraction=0.038, pad=0.02)
-        _cbar_label_top(cb, "counts")
+        _cbar_label_top(cb, "counts" if weights_e is None else r"weight (m$^{-2}$)")
 
         idx += 1
 
@@ -710,7 +727,7 @@ def plot(
         ps_images.setdefault(d, {})["i_ax"] = ax_i
 
         im_i = ax_i.imshow(
-            (ps.i_counts[0] + 1.0).T,
+            (ps.i_counts[0] + offset_i).T,
             aspect="auto",
             origin="lower",
             cmap="twilight",
@@ -721,7 +738,7 @@ def plot(
         ax_i.set_xlabel("x (m)")
         ax_i.set_ylabel(rf"$v_{d}$ (m/s)")
         cb = fig.colorbar(im_i, ax=ax_i, fraction=0.038, pad=0.02)
-        _cbar_label_top(cb, "counts")
+        _cbar_label_top(cb, "counts" if weights_i is None else r"weight (m$^{-2}$)")
 
         idx += 1
 
@@ -817,8 +834,8 @@ def plot(
         # phase space updates
         for d in dirs:
             ps = pre_ps[d]
-            ps_ims[d]["e"].set_array((ps.e_counts[t] + 1.0).T)
-            ps_ims[d]["i"].set_array((ps.i_counts[t] + 1.0).T)
+            ps_ims[d]["e"].set_array((ps.e_counts[t] + offset_e).T)
+            ps_ims[d]["i"].set_array((ps.i_counts[t] + offset_i).T)
             artists += [ps_ims[d]["e"], ps_ims[d]["i"]]
 
         # time label (only once)

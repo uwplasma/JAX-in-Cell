@@ -535,6 +535,7 @@ def test_build_runtime_parameter_sections_merges_all_sections():
         "external_field_parameters": {"external_electric_field": None},
         "source_parameters": {"source_term_active": 0},
         "solver_parameters": {"filter_alpha": 0.5, "filter_passes": 0},
+        "export_parameters": {"openpmd_output": False},
     }
     input_parameters = {
         "domain_parameters": {"length": 3.0},
@@ -544,6 +545,7 @@ def test_build_runtime_parameter_sections_merges_all_sections():
             },
         },
         "solver_parameters": {"filter_alpha": 0.25},
+        "export_parameters": {"openpmd_output": True},
     }
     base_copy = deepcopy(base_parameter_sections)
 
@@ -567,6 +569,7 @@ def test_build_runtime_parameter_sections_merges_all_sections():
     assert runtime_sections["external_field_parameters"] == base_parameter_sections["external_field_parameters"]
     assert runtime_sections["source_parameters"] == base_parameter_sections["source_parameters"]
     assert runtime_sections["solver_parameters"] == {"filter_alpha": 0.25, "filter_passes": 0}
+    assert runtime_sections["export_parameters"] == {"openpmd_output": True}
     assert base_parameter_sections == base_copy
 
     runtime_sections["source_parameters"]["source_term_active"] = 1

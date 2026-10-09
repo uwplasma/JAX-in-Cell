@@ -6,13 +6,16 @@ and the boundary conditions.
 | parameter | default | type | differentiable | meaning |
 |---|---|---|---|---|
 | `length` | `1e-2` | float | yes | Box length $L$ in metres along $x$. The box spans $[-L/2, L/2]$. |
-| `length_y`, `length_z` | `0` | float | yes | Periodic extent in $y$ and $z$; `0` means "same as `length`". Only used to wrap the $y$ and $z$ coordinates of particles. |
+| `length_y`, `length_z` | `0` | float | yes | Periodic extent in $y$ and $z$; `0` means "same as `length`". Used for particle wrapping and prescribed-field coordinates. |
 | `number_grid_points` | `50` | int | no | Number of cells $N_x \ge 2$ along $x$. |
-| `number_grid_points_y`, `number_grid_points_z` | `0` | int | no | Accepted for future use; `0` is replaced by `3`. No field is defined on a $y$ or $z$ grid. |
-| `total_steps` | `350` | int | no | Number of time steps. Every step is stored in the output. |
+| `number_grid_points_y`, `number_grid_points_z` | `0` | int | no | Transverse grid sizes for prescribed fields; `0` disables that direction. The self-consistent field solve stays one dimensional. |
+| `total_steps` | `350` | int | no | Number of time steps. Every step is stored by default; `snapshot_steps` selects fewer histories. |
 | `timestep_over_spatialstep_times_c` | `1.0` | float | yes | Finite, positive $c\,\Delta t/\Delta x$. |
-| `particle_BC_left`, `particle_BC_right` | `0` | int | no | Particle boundary condition at $x=-L/2$ and $x=+L/2$: `0` periodic, `1` reflective, `2` absorbing. |
+| `particle_BC_left`, `particle_BC_right` | `0` | int | no | Particle condition: `0` periodic, `1` reflective, `2` absorbing, `3` fractional return, `4` speed-dependent return. |
 | `field_BC_left`, `field_BC_right` | `0` | int | no | Field boundary condition: `0` periodic, `1` reflective, `2` absorbing. |
+| `mixed_BC_weight` | `1.0` | float | yes | Returned marker fraction for particle code `3`, in $[0,1]$. |
+| `mixed_BC_velocity_scale` | `299792458.0` | float | yes | Positive wall speed scale in m/s for particle code `4`. |
+| `COR_left`, `COR_right` | `1.0` | float | yes | Normal restitution coefficients in $[0,1]$ at the corresponding wall. |
 
 ## Derived quantities
 
@@ -29,11 +32,11 @@ output arrays have one value per cell for every quantity and the
 
 ## Choosing the resolution
 
-The grid spacing should resolve the electron Debye length. With the quadratic spline
-shape function and the digital filter switched on, $\Delta x \lesssim 2\lambda_D$ is
-safe; the finite-grid instability appears for coarser grids. The spacing is not set
-directly: `dx_over_Debye_length` in the species section fixes
-$\lambda_D/\Delta x$, and the density follows from it (see {doc}`species`).
+The grid spacing should resolve the electron Debye length; start with
+$\Delta x/\lambda_D \lesssim 0.5$ and check grid and particle-number convergence.
+Filtering does not guarantee accuracy on a coarse grid. `dx_over_Debye_length`
+in the species section fixes $\Delta x/\lambda_D$, and the density follows from
+it (see {doc}`species`).
 
 The time step has three constraints, discussed in {doc}`../numerics/stability`:
 
@@ -42,12 +45,12 @@ The time step has three constraints, discussed in {doc}`../numerics/stability`:
 * particle motion: a pseudo-particle should not cross more than one cell per half step,
   $v_{\max}\Delta t < 2\Delta x$, because the charge-conserving current deposit sweeps a
   window of six cells around each particle;
-* light waves, explicit scheme only: $c\,\Delta t/\Delta x \le 1$ whenever a transverse
+* light waves, explicit scheme: $c\,\Delta t/\Delta x < 1$ whenever a transverse
   field component can be excited. Purely electrostatic runs with velocities only along
   $x$ do not excite transverse fields and may use a larger value, as the examples do.
 
-The implicit Crank-Nicolson scheme removes the light-wave constraint but not the other
-two.
+The current Crank-Nicolson iteration also has a light-wave convergence limit;
+see {doc}`../numerics/implicit`. Check timestep and iteration convergence.
 
 ## Boundary conditions
 

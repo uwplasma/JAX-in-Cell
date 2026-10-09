@@ -6,8 +6,10 @@ sets the digital filter, the implicit-solver controls and the random seed.
 | parameter | default | differentiable | meaning |
 |---|---|---|---|
 | `time_evolution_algorithm` | `0` | no | `0` explicit leapfrog with the Boris pusher; `1` implicit Crank-Nicolson with Picard iteration. |
-| `field_solver` | `0` | no | `0` electromagnetic: $E_x$ follows Ampere's law; `1` electrostatic: $E_x$ is recomputed from Gauss's law by FFT every step. Only `0` and `1` are accepted. |
+| `field_solver` | `0` | no | `0`: $E_x$ follows Ampere's law; `1`: Fourier Gauss; `2`: Cartesian Gauss; `3`: Fourier Poisson. The nonzero selectors replace $E_x$ every step. |
 | `relativistic` | `false` | no | Use the relativistic Boris pusher (explicit scheme only). |
+| `collisions` | `false` | no | Optional Coulomb scattering for Newtonian periodic Boris; see {doc}`../examples/collisions`. |
+| `coulomb_logarithm` | `None` | no | Fixed finite nonnegative Coulomb logarithm, or the initial electron-ion NRL estimate when omitted. |
 | `filter_passes` | `5` | no | Number of passes of the compensated binomial filter applied to $\rho$ and $\mathbf J$ (explicit scheme only). `0` disables it; `1` is a no-op, see below. |
 | `filter_alpha` | `0.5` | yes | Weight of the centre point in each binomial pass, $0 < \alpha < 1$. |
 | `filter_strides` | `(1, 2, 4)` | no | Cell offsets of the three-point stencil; the filter is applied once per stride. |
@@ -26,12 +28,13 @@ per step. Its total energy drifts slowly, typically by $10^{-3}$ relative over a
 hundred plasma periods in the examples.
 
 The implicit scheme (`1`) solves the field and particle equations together with a
-time-centred discretisation and conserves total energy to round-off. It has no
-light-wave Courant limit, so it is the natural choice for large time steps in
-electromagnetic problems. Each step costs up to
+time-centred discretisation. Energy accuracy depends on convergence of both
+particle and field iterations. Its finite field iteration is not an exact curl
+solve, so a large light-wave Courant number still requires convergence checks. Each step costs up to
 `max_number_of_Picard_iterations_implicit_CN` particle pushes times the number of
 sub-steps. Its deposition and interpolation are written for periodic boundaries only,
-and it ignores the digital filter and the `relativistic` switch. Details in
+and it rejects nonperiodic particle/field boundaries and the relativistic pusher.
+The digital filter is not used. Details in
 {doc}`../numerics/implicit`.
 
 ## Choosing the field solver
@@ -43,7 +46,15 @@ additionally overwrites $E_x$ at the end of every step with the solution of Gaus
 from the deposited charge density, computed by FFT. This is the electrostatic mode: it
 is exact for periodic boundaries, removes any accumulated error in $\nabla\cdot\mathbf E$
 and costs one FFT per step. The transverse components $E_y$, $E_z$ and the magnetic
-field are advanced in the same way in both modes. See {doc}`../numerics/field_solvers`.
+field are advanced in the same way in all modes. Cartesian Gauss (`2`) satisfies
+the backward-difference divergence used by the charge deposit, preserves zero
+mean $E_x$ with periodic fields and sets the left-face field to zero with wall
+fields. A periodic net charge is balanced by a uniform background. Fourier
+solvers (`1`, `3`) require periodic fields and use the spectral derivative.
+Volumetric particle sources require `2`. See {doc}`../numerics/field_solvers`.
+
+The field-solver selector applies to the explicit Boris scheme. CN uses its
+coupled Maxwell/Ampere update and does not overwrite E_x with a Gauss solve.
 
 ## The digital filter
 
@@ -72,7 +83,8 @@ values (reflective) or zeros outside the box (absorbing).
 The Picard iteration stops when
 $\max|\mathbf E^{(k+1)} - \mathbf E^{(k)}| / \max|\mathbf E^{(k+1)}|$ falls below the
 tolerance or when the iteration cap is reached; there is no warning in the second
-case. With the default tolerance the examples converge in a handful of iterations.
+case. Check convergence by increasing the cap and tightening the tolerance; small
+changes in E alone do not prove convergence of every particle variable.
 Particle sub-stepping divides each field step into `number_of_particle_substeps_implicit_CN`
 pushes with the time-centred fields, which keeps the particle orbits accurate when the
 field time step is large.
