@@ -31,8 +31,10 @@ The scalar parameters `external_electric_field_amplitude`,
 `external_electric_field_wavenumber`, `external_magnetic_field_amplitude`,
 `external_magnetic_field_wavenumber`, `external_electric_field_function` and
 `external_magnetic_field_function` are accepted and validated, but on the `main`
-branch they do not create a field. The electric-field amplitude only appears in the
-`print_info` summary as the normalised field strength
+branch they do not create a field. Setting a non-zero amplitude or a field function
+raises a `UserWarning` at construction saying so, because the run would otherwise
+proceed silently with no external field. The electric-field amplitude only appears in
+the `print_info` summary as the normalised field strength
 $-q_e E_0 \lambda_D / k_B T_e$. Use the array form above to apply an external field.
 ```
 
