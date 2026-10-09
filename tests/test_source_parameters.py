@@ -321,3 +321,25 @@ def test_build_source_hash_is_stable_and_sensitive_to_values():
     species_changed_parameters = clean_and_initialize_source_parameters({"source_species": 0})
     species_changed_hash = build_source_hash(species_changed_parameters)
     assert default_hash != species_changed_hash
+
+
+def test_active_source_warns_that_no_particles_are_injected():
+    """Test jaxincell._parameters._source_parameters.clean_and_initialize_source_parameters.
+
+    Cases:
+    - source_term_active = 1 warns, because no code path injects particles.
+    - the parameters are still validated and preserved for the branches that use them.
+    """
+    with pytest.warns(UserWarning, match="not implemented"):
+        cleaned = clean_and_initialize_source_parameters({"source_term_active": 1})
+    assert cleaned["source_term_active"] == 1
+
+
+def test_inactive_source_does_not_warn(recwarn):
+    """Test jaxincell._parameters._source_parameters.clean_and_initialize_source_parameters.
+
+    Cases:
+    - the default, inactive source is silent.
+    """
+    clean_and_initialize_source_parameters({})
+    assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []

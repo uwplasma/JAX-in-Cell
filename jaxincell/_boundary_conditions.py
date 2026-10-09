@@ -4,10 +4,11 @@ from ._constants import speed_of_light
 
 __all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
 
-def _particle_boundary_map(x, vx, dx, grid, box, BC_left, BC_right,
+def _particle_boundary_map(x, vx, dx, grid, lengths, BC_left, BC_right,
                            mixed_BC_weight=1., COR_left=1., COR_right=1., max_vx=1., collected=False):
     """Common position map and impact factors; only two elastic walls permit repeated impacts."""
-    length = box[0]
+    length = lengths[0]
+    # Select the crossed wall; an exact wall contact counts only when outgoing.
     left = (x[0] < -length/2) | ((x[0] == -length/2) & (vx < 0))
     right = (x[0] > length/2) | ((x[0] == length/2) & (vx > 0))
     hit = left | right
@@ -19,16 +20,20 @@ def _particle_boundary_map(x, vx, dx, grid, box, BC_left, BC_right,
     fraction = jnp.where(hit & (code != 0), fraction, 1.)
     lost = hit & (code >= 2) & (fraction <= 0)
     parked = collected & hit & (code != 0)
-    periods = jnp.asarray(box, dtype=x.dtype)
+    # Transverse coordinates always wrap; x wraps only for a periodic wall.
+    periods = jnp.asarray(lengths, dtype=x.dtype)
     wrapped = (x + periods/2) % periods - periods/2
     normal = jnp.where(code == 0, wrapped[0], face-restitution*(x[0]-face))
     normal = jnp.where(hit | (code == 0), normal, x[0])
+    # Two unit-restitution elastic walls fold arbitrarily long flights.
     elastic = (BC_left == 1) & (BC_right == 1) & (COR_left == 1) & (COR_right == 1)
     phase = (x[0] + length/2) % (2*length)
     normal = jnp.where(elastic & hit, length/2-jnp.abs(phase-length), normal)
+    # Park collected particles beyond the deposition stencil.
     normal = jnp.where(lost, jnp.where(left, grid[0]-1.5*dx, grid[-1]+3*dx), normal)
     normal = jnp.where(parked, x[0], normal)
     normal = jnp.where((code != 0) & ~(lost | parked) & (jnp.abs(normal) > length/2), jnp.nan, normal)
+    # Each wall crossing reverses the normal velocity; even counts cancel.
     reflections = jnp.floor((jnp.abs(x[0])-length/2)/length)+1
     speed_factor = jnp.where(hit & (code != 0), -restitution, 1.)
     speed_factor = jnp.where(elastic & hit, jnp.where(reflections % 2 == 0, 1., -1.), speed_factor)
