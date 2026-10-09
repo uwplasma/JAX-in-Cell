@@ -1,0 +1,216 @@
+"""Writing a run's state to a file and reading it back, so that a restart survives the process.
+
+``Output.state`` already continues a run exactly -- that is what
+``run(..., state=out.state)`` does, and what makes a run split into chunks the run taken
+whole. It lives in memory, so it does not survive the process that made it, and a long
+campaign is a sequence of processes.
+
+This writes it as a **named, versioned** archive: one ``.npz`` with one array per field of
+:class:`~jaxincell._simulation.State` and of the :class:`~jaxincell._simulation.Wall` ledger
+inside it, under the names they have in the code, plus the shape of the run that made it. It
+is not a pickle: nothing here executes what it reads, and a field added or removed later is a
+name that is present or absent rather than a class that no longer unpickles.
+
+It is also not openPMD. :func:`~jaxincell.write_openpmd` writes what an analysis tool reads --
+the fields and the particles at the steps that were stored -- and that is not enough to carry
+on from: it has no random key, no wall ledger, no source bookkeeping, no charge density at the
+step the loop is about to begin, and its positions are at integer times while the periodic explicit
+loop carries half-step ones. The two files answer different questions and both are worth
+having.
+"""
+import dataclasses
+
+from jax import dtypes, random
+import jax.numpy as jnp
+import numpy as np
+
+__all__ = ["save_state", "load_state", "provenance"]
+
+FORMAT = 1      #: Version of the archive layout, written into every file and checked on reading.
+QUINTIC_FORMAT = 2  # an S2-only reader must refuse a state whose charge used S5
+INTEGRAL_FORMAT = 3  # a secant-only reader must refuse an integral-force restart
+WALL_FORMAT = 4  # a half-position reader must refuse an integer-position explicit wall restart
+VOLUME_FORMAT = 5  # a reservoir-only reader must refuse a state with a volume birth budget
+
+
+def _fields(obj):
+    return tuple(f.name for f in dataclasses.fields(obj))
+
+
+def provenance(**extra):
+    """What produced a number: the versions, the precision, the device and the commit.
+
+    A figure or a table without this is a number somebody has to reproduce from scratch to
+    check. It is a plain dictionary, so an example can write it beside its data as JSON, and it
+    takes whatever else the caller wants recorded -- the parameters of the run, usually.
+
+    ``git`` is the checked-out commit of the working directory, marked ``-dirty`` when tracked
+    files differ from it, and ``"unknown"`` outside a repository.
+    """
+    import platform
+    import subprocess
+    import sys
+
+    import jax
+
+    from . import __version__
+
+    def git():
+        try:
+            run = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
+            changed = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                                     capture_output=True, text=True, check=True).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return "unknown"
+        return run.stdout.strip() + ("-dirty" if changed else "")
+
+    return {"jaxincell": __version__, "jax": jax.__version__, "numpy": np.__version__,
+            "python": sys.version.split()[0], "platform": f"{platform.system()} {platform.machine()}",
+            "jax_enable_x64": bool(jax.config.read("jax_enable_x64")),
+            "backend": jax.default_backend(), "git": git(), **extra}
+
+
+def save_run(folder, example, settings, results, figure=None, **arrays):
+    """Write what an example measured beside what produced it, and return the folder.
+
+    ``run.json`` holds ``settings`` (what the run was asked for), ``results`` (what it measured)
+    and :func:`provenance`; ``data.npz`` holds ``arrays``, the numbers behind the figure; and
+    ``figure.png`` the figure, when one is given. Every example ends with this, so a number on a
+    page can be traced to the folder of the run that produced it.
+    """
+    import json
+    from pathlib import Path
+
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "run.json").write_text(json.dumps(provenance(example=example, settings=settings, results=results),
+                                                indent=1, default=lambda value: np.asarray(value).tolist()))
+    if arrays:
+        np.savez(folder / "data.npz", **{name: np.asarray(value) for name, value in arrays.items()})
+    if figure is not None:
+        figure.savefig(folder / "figure.png")
+    print(f"wrote {folder}: run.json" + (", data.npz" if arrays else "") + (", figure.png" if figure else ""))
+    return folder
+
+
+def save_state(path, state, simulation=None):
+    """Write ``state`` to ``path`` (``.npz`` appended if it has no suffix) and return the path.
+
+    ``simulation`` is the run the state came from; what it is for is the reading, where it says
+    whether the archive and the simulation are the same shape. It is stored as the counts and
+    names that have to match, not as the object.
+
+    Arrays that a run did not keep -- the moment sums when ``moments=False``, the impact spectrum
+    when no :class:`~jaxincell.Impacts` was given -- are absent rather than zero, and come back
+    as ``None``.
+    """
+    path = str(path)
+    path = path if path.endswith(".npz") else path + ".npz"
+    arrays = {"format": np.asarray(FORMAT)}
+    for name in _fields(state):
+        value = getattr(state, name)
+        if name == "wall":
+            for inner in _fields(value):
+                if getattr(value, inner) is not None:
+                    arrays[f"wall.{inner}"] = np.asarray(getattr(value, inner))
+        elif name == "key" and dtypes.issubdtype(value.dtype, dtypes.prng_key):
+            arrays[name] = np.asarray(random.key_data(value))
+            implementation = str(random.key_impl(value))
+            arrays["key_impl"] = np.asarray(
+                {"fry": "threefry2x32", "urbg": "unsafe_rbg"}.get(implementation, implementation))
+        elif value is not None:
+            arrays[name] = np.asarray(value)
+    if simulation is not None:
+        arrays["names"] = np.asarray([s.name for s in simulation.species])
+        arrays["counts"] = np.asarray([s.n for s in simulation.species])
+        arrays["cells"] = np.asarray(simulation.domain.cells)
+        arrays["algorithm"] = np.asarray(simulation.solver.algorithm)
+        if simulation.solver.shape_order == 5:
+            arrays["format"] = np.asarray(QUINTIC_FORMAT)
+            arrays["shape_order"] = np.asarray(5)
+        if simulation.solver.orbit_force == "integral":
+            arrays["format"] = np.asarray(INTEGRAL_FORMAT)
+            arrays["shape_order"] = np.asarray(simulation.solver.shape_order)
+            arrays["orbit_force"] = np.asarray("integral")
+    arrays["format"] = np.asarray(WALL_FORMAT if state.x_phase == "wall" else arrays["format"])
+    arrays["format"] = np.asarray(VOLUME_FORMAT if state.wall.birth_budget is not None else arrays["format"])
+    np.savez(path, **arrays)
+    return path
+
+
+def _check_integral_format(version, stored):
+    """Format 3 must identify its force and shape even without a supplied simulation."""
+    if version == INTEGRAL_FORMAT and (not np.array_equal(stored.get("orbit_force"), np.asarray("integral"))
+                                       or not np.array_equal(stored.get("algorithm"), np.asarray("implicit"))
+                                       or not any(np.array_equal(stored.get("shape_order"), np.asarray(order))
+                                                  for order in (2, 5))):
+        raise ValueError("archive format 3 requires orbit_force='integral', "
+                         "algorithm='implicit' and shape_order=2 or 5")
+
+
+def _state_field(name, stored, wall, path):
+    """Decode one state field; strings and typed keys are not ordinary array leaves."""
+    if name == "wall":
+        return wall
+    if name == "x_phase":
+        return str(stored.get(name, "legacy"))
+    if name == "key" and "key_impl" in stored:
+        return random.wrap_key_data(jnp.asarray(stored[name]), impl=str(stored["key_impl"]))
+    if name in stored:
+        return jnp.asarray(stored[name])
+    if name == "moments":
+        return None
+    raise ValueError(f"{path} has no {name!r}, which a state needs; it is not a state archive")
+
+
+def load_state(path, simulation=None):
+    """Read an archive written by :func:`save_state` and return the
+    :class:`~jaxincell._simulation.State`.
+
+    With ``simulation``, the archive is checked against it first -- the species names and counts,
+    the cell count, integrator, particle shape and orbit force -- because a state restored into a differently shaped run
+    fails somewhere later and less clearly. Without it, the state is returned as it stands.
+
+    Raises:
+        ValueError: If the archive is of a format this version does not read, if a field the
+            state needs is missing, or if it does not match ``simulation``.
+    """
+    from ._simulation import State, Wall
+
+    with np.load(str(path), allow_pickle=False) as data:
+        stored = {key: data[key] for key in data.files}
+    version = int(stored.pop("format", -1))
+    if version not in (FORMAT, QUINTIC_FORMAT, INTEGRAL_FORMAT, WALL_FORMAT, VOLUME_FORMAT):
+        raise ValueError(f"{path} is a format {version} archive; this jaxincell reads formats "
+                         f"{FORMAT}, {QUINTIC_FORMAT}, {INTEGRAL_FORMAT}, {WALL_FORMAT} and {VOLUME_FORMAT}; "
+                         "it was written by a different version")
+    if version == QUINTIC_FORMAT and not np.array_equal(stored.get("shape_order"), np.asarray(5)):
+        raise ValueError("archive format 2 requires stored shape_order=5")
+    _check_integral_format(version, stored)
+    phase = str(stored.get("x_phase", "legacy"))
+    if version == WALL_FORMAT and phase != "wall":
+        raise ValueError("archive format 4 requires the explicit wall position convention x_phase='wall'")
+    if version == VOLUME_FORMAT and ("wall.birth_budget" not in stored or phase not in ("half", "wall")
+                                     or np.shape(stored["wall.birth_budget"]) !=
+                                     np.shape(stored.get("wall.arrived"))[:1] + (6,)):
+        raise ValueError("archive format 5 requires a volume birth_budget and explicit position convention")
+    if simulation is not None:
+        if phase != simulation._x_phase() and not (phase == "legacy" and simulation._x_phase() != "wall"):
+            raise ValueError("archive position convention does not match this simulation; old explicit wall "
+                             "states processed future impacts and cannot be continued")
+        stored.setdefault("shape_order", np.asarray(2))  # archives predating shape selection used S2
+        stored.setdefault("orbit_force", np.asarray("secant"))
+        wanted = {"names": np.asarray([s.name for s in simulation.species]),
+                  "counts": np.asarray([s.n for s in simulation.species]),
+                  "cells": np.asarray(simulation.domain.cells),
+                  "algorithm": np.asarray(simulation.solver.algorithm),
+                  "shape_order": np.asarray(simulation.solver.shape_order),
+                  "orbit_force": np.asarray(simulation.solver.orbit_force)}
+        for key, want in wanted.items():
+            if key in stored and not np.array_equal(stored[key], want):
+                raise ValueError(f"{path} was written by a run whose {key} is {stored[key].tolist()!r}, "
+                                 f"and this simulation's is {want.tolist()!r}: a state restored into a "
+                                 "differently shaped run is not the run it came from")
+    wall = Wall(*[jnp.asarray(stored[f"wall.{name}"]) if f"wall.{name}" in stored else None
+                  for name in _fields(Wall)])
+    return State(*[_state_field(name, stored, wall, path) for name in _fields(State)])
