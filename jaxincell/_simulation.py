@@ -1,8 +1,9 @@
-import jax.numpy as jnp
 from copy import deepcopy
 from functools import partial
 from jax_tqdm import scan_tqdm
 from jax import lax, jit, config
+
+import jax.numpy as jnp
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
@@ -198,14 +199,19 @@ class Simulation:
             **external_field_parameters,
             "external_electric_field": field_state["external_electric_field"],
             "external_magnetic_field": field_state["external_magnetic_field"],
+            "padded_external_electric_field": field_state["padded_external_electric_field"],
+            "padded_external_magnetic_field": field_state["padded_external_magnetic_field"],
         }
 
         total_steps = domain_parameters["total_steps"]
 
         # Extract parameters for convenience
-        dx = domain_state["dx"]
+        dxyz = domain_state["dxyz"]
+        dx = dxyz['x']
         dt = domain_state["dt"]
-        grid = domain_state["grid"]
+        grid_xyz = domain_state["grid_xyz"]
+        grid = grid_xyz['x']
+        dimensions = domain_state["dimensions"]
         box_size = domain_state["box_size"]
         E_field, B_field = field_state["fields"]
         charges = particle_state["charges"]
@@ -236,7 +242,7 @@ class Simulation:
                 positions_plus1_2, velocities, qs, ms, q_ms,
             )
             step_func = lambda carry, step_index: Boris_step(
-                carry, step_index, solver_parameters, runtime_external_field_parameters, dx, dt, grid, box_size,
+                carry, step_index, solver_parameters, runtime_external_field_parameters, dxyz, dt, grid_xyz, box_size, dimensions,
                 particle_BC_left, particle_BC_right, field_BC_left, field_BC_right, solver_parameters['field_solver']
             )
         else:
@@ -260,7 +266,8 @@ class Simulation:
 
         # Unpack results
         positions_over_time, velocities_over_time, electric_field_over_time, \
-        magnetic_field_over_time, current_density_over_time, charge_density_over_time = results
+        magnetic_field_over_time, current_density_over_time, \
+        charge_density_over_time, mus_over_time = results
 
         # **Output results**
         from ._constants import epsilon_0, mass_electron
@@ -299,22 +306,27 @@ class Simulation:
             "magnetic_field":  magnetic_field_over_time,
             "current_density": current_density_over_time,
             "charge_density":  charge_density_over_time,
+            "mus": mus_over_time,
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
             "time_array":  (jnp.arange(total_steps) + 1) * dt,
             "grid": grid,
+            "grid_xyz": grid_xyz,
             "dt": dt,
             "plasma_frequency": plasma_frequency,
             "max_initial_vth_electrons": particle_state["vth_electrons"],
             "vth_electrons_over_c": particle_state["vth_electrons_over_c"],
             "charge_electrons": particle_state["charge_electrons"],
             'dx': dx,
+            'dxyz': dxyz,
             'length': box_size[0],
             "box_size": box_size,
             "fields": field_state["fields"],
             "external_electric_field": field_state["external_electric_field"],
             "external_magnetic_field": field_state["external_magnetic_field"],
+            "padded_external_electric_field": field_state["padded_external_electric_field"],
+            "padded_external_magnetic_field": field_state["padded_external_magnetic_field"],
         }
 
         return temporary_output
@@ -341,6 +353,7 @@ class Simulation:
             **source_parameters,
             **solver_parameters,
             **simulation_output,
+            "dimensions": self.dimensions,
             "domain_parameters": domain_parameters,
             "species_parameters": parameter_sections["species_parameters"],
             "external_field_parameters": external_field_parameters,
@@ -466,16 +479,24 @@ class Simulation:
         return {
             "box_size": self.box_size,
             "dx": self.dx,
+            "dxyz": self.dxyz,
             "dt": self.dt,
             "grid": self.grid,
+            "grid_xyz": self.grid_xyz,
+            "number_grid_points_xyz": self.number_grid_points_xyz,
+            "dimensions": self.dimensions,
         }
 
     def build_domain(self):
         domain_state = build_domain_state(self._domain_parameters)
         self.box_size = domain_state["box_size"]
         self.dx = domain_state["dx"]
+        self.dxyz = domain_state["dxyz"]
         self.dt = domain_state["dt"]
         self.grid = domain_state["grid"]
+        self.grid_xyz = domain_state["grid_xyz"]
+        self.number_grid_points_xyz = domain_state["number_grid_points_xyz"]
+        self.dimensions = domain_state["dimensions"]
 
     def initialize_particles(self):
         domain_state = self.current_domain_state()
@@ -504,6 +525,8 @@ class Simulation:
         self.fields = field_state["fields"]
         self.external_magnetic_field = field_state["external_magnetic_field"]
         self.external_electric_field = field_state["external_electric_field"]
+        self.padded_external_magnetic_field = field_state["padded_external_magnetic_field"]
+        self.padded_external_electric_field = field_state["padded_external_electric_field"]
 
     def set_parameter_section(self, section_name, new_parameters):
         """

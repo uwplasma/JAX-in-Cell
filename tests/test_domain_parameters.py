@@ -95,6 +95,12 @@ def test_build_domain_hash_is_stable_and_sensitive_to_values():
     assert default_hash != total_steps_changed_hash
 
 
+def test_optional_transverse_cells_none_selects_one_dimensional_geometry():
+    parameters = clean_and_initialize_domain_parameters({"number_grid_points_y": None,
+                                                         "number_grid_points_z": None})
+    assert parameters["number_grid_points_y"] == parameters["number_grid_points_z"] == 0
+
+
 @pytest.mark.parametrize("kind", ["particle", "field"])
 @pytest.mark.parametrize("left,right", [(0, 1), (0, 2), (1, 0), (2, 0)])
 def test_periodic_boundaries_require_a_partner(kind, left, right):

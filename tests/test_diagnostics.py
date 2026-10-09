@@ -381,6 +381,53 @@ def test_diagnostics_gauss_law_error_and_momentum():
     assert jnp.all(output["gauss_error_Linf_rel"][jnp.array([0, 2])] < 1e-12)
 
 
+@pytest.mark.parametrize("transverse_shape", [(3,), (3, 2)])
+def test_prescribed_energy_averages_transverse_centres(transverse_shape):
+    # PIC still represents a unit-area planar column; tensor sampling adds no volume.
+    electric = jnp.zeros((2, 4, 3))
+    field = np.zeros((4, *transverse_shape, 3))
+    field[..., 0] = np.arange(field[..., 0].size).reshape(field.shape[:-1])
+    output = _minimal_diagnostic_output(electric_field=electric, external_electric_field=field)
+    output["dimensions"] = ("x", "y") if len(transverse_shape) == 1 else ("x", "y", "z")
+    diagnostics(output)
+    transverse_count = np.prod(transverse_shape)
+    expected = epsilon_0 / 2 * .5 * np.sum(field[..., 0]**2) / transverse_count
+    assert float(output["external_electric_field_energy"]) == pytest.approx(expected, rel=1e-13)
+
+
+@pytest.mark.parametrize("transverse_axis", ["y", "z"])
+def test_real_planar_run_preserves_axes_energy_and_optional_writer(tmp_path, transverse_axis):
+    import importlib.util
+    from jaxincell import Simulation
+    from tests.test_simulation import small_simulation_parameters
+    p = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    p["domain_parameters"].update(number_grid_points_y=0, number_grid_points_z=0, length_y=.03, length_z=.05)
+    p["domain_parameters"][f"number_grid_points_{transverse_axis}"] = 3
+    field = np.zeros((4, 3, 3))
+    field[..., 2] = np.arange(1, 4) * .001
+    p["external_field_parameters"] = {"external_magnetic_field": {"B": field}}
+    output = Simulation(p).run()
+    assert output["dimensions"] == ("x", transverse_axis)
+    # Exercise the merged optional writer when present; this feature alone stays independent of I/O.
+    if importlib.util.find_spec("jaxincell.openpmd") and importlib.util.find_spec("openpmd_api"):
+        import openpmd_api as io
+        from jaxincell.openpmd import write_openpmd
+        paths = write_openpmd(output, openpmd_filename=str(tmp_path / "planar.json"))
+        series = io.Series(paths["data"]["combined"], io.Access.read_only)
+        mesh = series.iterations[0].meshes["external_B"]
+        assert mesh.axis_labels == ["x", transverse_axis]
+        expected_spacing = [.01/4, (.03 if transverse_axis == "y" else .05)/3]
+        np.testing.assert_allclose(mesh.grid_spacing, expected_spacing, rtol=1e-14, atol=0)
+        values = mesh["z"].load_chunk()
+        series.flush()
+        np.testing.assert_array_equal(values, field[..., 2])
+        series.close()
+    diagnostics(output)
+    expected = .01 * np.mean(np.sum(field**2, axis=-1)) / (2*mu_0)
+    assert np.ndim(output["external_magnetic_field_energy"]) == 0
+    np.testing.assert_allclose(output["external_magnetic_field_energy"], expected, rtol=2e-14, atol=0)
+
+
 def test_diagnostics_preserves_populations_and_weighted_temperatures_on_repeat():
     """Distinct equal-q/m populations retain their names, physical moments and data."""
     weights = jnp.array([1.0, 3.0, 2.0, 2.0, 4.0])
