@@ -4,7 +4,6 @@ from jax_tqdm import scan_tqdm
 from jax import lax, jit, config, eval_shape, random
 
 import jax.numpy as jnp
-import numpy as np
 
 from ._boundary_conditions import set_BC_positions, set_BC_particles
 from ._algorithms import Boris_step, CN_step
