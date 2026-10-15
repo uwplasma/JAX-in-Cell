@@ -8,6 +8,7 @@ authors:
     affiliation: "Department of Physics, University of Wisconsin-Madison"
   - family-names: Jorge
     given-names: Rogerio
+    orcid: "https://orcid.org/0000-0003-2941-6571"
     affiliation: "Department of Physics, University of Wisconsin-Madison"
   - family-names: Lu
     given-names: Hongke
@@ -29,3 +30,21 @@ keywords:
   - kinetic simulation
   - JAX
   - differentiable programming
+preferred-citation:
+  type: article
+  title: "JAX-in-Cell: a differentiable particle-in-cell code for plasma physics applications"
+  year: 2025
+  identifiers:
+    - type: other
+      value: "arXiv:2512.12160"
+  authors:
+    - family-names: Ma
+      given-names: Longyu
+    - family-names: Jorge
+      given-names: Rogerio
+    - family-names: Lu
+      given-names: Hongke
+    - family-names: Tran
+      given-names: Aaron
+    - family-names: Woolford
+      given-names: Christopher

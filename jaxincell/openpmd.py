@@ -1,0 +1,200 @@
+"""openPMD export of a :class:`jaxincell.Output` (optional dependency ``openpmd-api``).
+
+One series (group-based by default, file-based with a ``%T`` filename), one iteration per stored step ``s``
+(``time = out.t[s]``,
+``dt = out.dt``, ``timeUnitSI = 1``); float64 SI data with ``unitSI = 1`` and ``unitDimension``.
+
+Layout:
+    Meshes ``E``, ``B``, ``J`` (components ``x``/``y``/``z``) and the scalar ``rho`` on the 1D
+    Cartesian grid: ``axis_labels=["x"]``, ``grid_spacing=[dx]``, ``grid_unit_SI=1``.
+
+    The standard places a component at
+    :math:`x_i = (\\mathrm{gridGlobalOffset} + (i + \\mathrm{position})\\,\\mathrm{gridSpacing})
+    \\times\\mathrm{gridUnitSI}`, with ``position`` in :math:`[0,1)` measured from the **lower
+    corner** of the cell. So a cell centre is ``position=0.5``, not ``0.0``; ``0.0`` is the left
+    face. ``B`` and ``rho`` live on the centres and are written with ``grid_global_offset =
+    [-length/2]`` and ``position=[0.5]``. ``E`` and ``J`` live on the faces this code stores,
+    which are the **right** face of each cell, :math:`-L/2 + (i+1)\\Delta x`; that is
+    ``position=1.0``, which the standard does not allow, so their offset is shifted a cell
+    instead: ``grid_global_offset = [-length/2 + dx]`` with ``position=[0.0]``. Both records then
+    read back at the coordinates the code puts them at, by the formula above and nothing else.
+
+    ``J`` is the average over the preceding step and has ``timeOffset=-out.dt/2``
+    in seconds. Other meshes and stored particles are at the iteration time.
+
+    Particles: one species per ``out.names`` with the vector records
+    ``position`` and ``momentum`` and the scalar ``weighting`` per particle, and ``positionOffset``
+    (zero), ``charge`` and ``mass`` (of one physical particle) as constant records; skipped when
+    ``out.x is None``. The momentum is the one the pusher advances: ``m * gamma * v`` for a
+    relativistic run and ``m * v`` otherwise. ``weighting`` is ``out.weight * area``, with ``area``
+    recorded as the attribute ``transverseArea`` (m^2), since a 1D weight counts particles per unit
+    area of the y-z plane.
+"""
+import glob
+import os
+import re
+
+import numpy as np
+
+from . import __version__
+from ._config import speed_of_light
+
+__all__ = ["write_openpmd"]
+_DIMS = {"E": dict(L=1, M=1, T=-3, I=-1), "B": dict(M=1, T=-2, I=-1), "J": dict(L=-2, I=1),
+         "rho": dict(L=-3, T=1, I=1), "position": dict(L=1), "positionOffset": dict(L=1),
+         "momentum": dict(L=1, M=1, T=-1), "weighting": {}, "charge": dict(T=1, I=1), "mass": dict(M=1)}
+_FACES = ("E", "J", "external_E")  # flat E/J on right faces; tensors and B/rho on centres
+
+
+def _describe(io, record, name, particle=False):
+    record.unit_dimension = {getattr(io.Unit_Dimension, k): float(v) for k, v in _DIMS[name].items()}
+    if particle:
+        record.set_attribute("macroWeighted", np.uint32(name == "weighting"))
+        record.set_attribute("weightingPower", 0.0 if name.startswith("position") else 1.0)
+
+
+def _store(io, component, data, keep):
+    # np.array copies, which matters twice: a JAX array converts to a read-only
+    # buffer that store_chunk refuses, and the buffer has to stay alive and
+    # writeable until the series is flushed, which is what ``keep`` is for.
+    data = np.array(data, dtype=np.float64, order="C")
+    component.reset_dataset(io.Dataset(data.dtype, data.shape))
+    component.store_chunk(data)
+    component.unit_SI = 1.0
+    keep.append(data)
+
+
+def _constant(io, component, value, count):
+    """A record component with the same value for all ``count`` particles."""
+    component.reset_dataset(io.Dataset(np.dtype(np.float64), [count]))
+    component.make_constant(float(value))
+    component.unit_SI = 1.0
+
+
+def _write_meshes(io, it, out, s, keep, external):
+    records = [(name, np.asarray(getattr(out, name)[s], dtype=np.float64), (float(out.length),))
+               for name in ("E", "B", "J", "rho")] + external
+    for name, data, lengths in records:
+        mesh = it.meshes[name]
+        mesh.geometry, mesh.axis_labels, mesh.grid_unit_SI = io.Geometry.cartesian, list("xyz"[:len(lengths)]), 1.0
+        # x_i = (offset + (i + position) * spacing); position is in [0, 1) from the lower corner,
+        # so a centre is 0.5 and the right face of cell i is the lower corner of cell i + 1
+        faces = name in _FACES and data.ndim == 2
+        spacing = [length / cells for length, cells in zip(lengths, data.shape)]
+        mesh.grid_spacing = spacing
+        mesh.grid_global_offset = [-0.5 * length + (spacing[0] if faces else 0.0) for length in lengths]
+        _describe(io, mesh, name.removeprefix("external_"))
+        mesh.set_attribute("timeOffset", -0.5 * float(out.dt) if name == "J" else 0.0)
+        components = zip("xyz", np.moveaxis(data, -1, 0)) if data.ndim > 1 else [(io.Record_Component.SCALAR, data)]
+        for label, column in components:
+            mesh[label].position = [0.0 if faces else 0.5] * len(lengths)
+            _store(io, mesh[label], column, keep)
+
+
+def _momentum(out, s):
+    """Momentum of one physical particle, as the pusher defines it."""
+    v, m = np.asarray(out.v[s], dtype=np.float64), np.asarray(out.mass, dtype=np.float64)
+    gamma = 1.0 / np.sqrt(1.0 - np.sum(v ** 2, axis=1) / speed_of_light ** 2) if out.relativistic else 1.0
+    return (m * gamma)[:, None] * v
+
+
+def _write_particles(io, it, out, s, area, keep):
+    x, p = np.asarray(out.x[s], dtype=np.float64), _momentum(out, s)
+    w = np.asarray(out.weight[s], dtype=np.float64) * area
+    start = 0
+    for name, count in zip(out.names, out.counts):
+        block, first, start = slice(start, start + count), start, start + count
+        sp = it.particles[name]
+        for rec, data in (("position", x[block]), ("momentum", p[block])):
+            _describe(io, sp[rec], rec, particle=True)
+            for label, column in zip("xyz", data.T):
+                _store(io, sp[rec][label], column, keep)
+        _describe(io, sp["positionOffset"], "positionOffset", particle=True)
+        for label in "xyz":
+            _constant(io, sp["positionOffset"][label], 0.0, count)
+        _describe(io, sp["weighting"], "weighting", particle=True)
+        sp["weighting"].set_attribute("transverseArea", float(area))
+        _store(io, sp["weighting"][io.Record_Component.SCALAR], w[block], keep)
+        for rec, values in (("charge", out.charge), ("mass", out.mass)):
+            _describe(io, sp[rec], rec, particle=True)
+            _constant(io, sp[rec][io.Record_Component.SCALAR], values[first], count)
+
+
+def _external_fields(out, simulation, meshes):
+    external = []
+    if simulation is not None:
+        d = simulation.domain
+        if d.cells != len(out.grid) or not np.allclose((d.length, d.dx), (out.length, out.dx), rtol=1e-12, atol=0):
+            raise ValueError("simulation geometry does not match the output's cells, length and dx")
+        for name in ("external_E", "external_B") if meshes else ():
+            field = getattr(simulation, name)
+            if field is not None:
+                data = np.asarray(field, dtype=np.float64)
+                lengths = (float(d.length),) if data.ndim == 2 else (
+                    float(d.length), float(d.length_y), float(d.length_z))
+                external.append((name, data, lengths))
+    return external
+
+
+def _paths(path, overwrite, sidecar):
+    root, ext = os.path.splitext(os.fspath(path))
+    path = root + (ext or ".json")
+    pointer = re.sub(r"%(?:0\d+)?T", "", root).rstrip("_-") + ".pmd" if sidecar else None
+    for name in (path, pointer) if pointer is not None else (path,):
+        existing = glob.glob(re.sub(r"%(?:0\d+)?T", "*", glob.escape(name)))
+        if not overwrite and (os.path.lexists(name) or existing):
+            raise FileExistsError(f"{name} already exists; pass overwrite=True to replace it")
+    return path, pointer
+
+
+def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, simulation=None, overwrite=False,
+                  sidecar=False):
+    """Write ``out`` to the openPMD series ``path`` and return the path.
+
+    Args:
+        out: :class:`jaxincell.Output` (or any object with the same attributes).
+        path: Output file; ``.json`` (default, appended if no extension), ``.h5`` or ``.bp`` pick the backend.
+        every: Export every ``every``-th stored step (the iteration index is the stored-step index).
+        meshes: Write the ``E``, ``B``, ``J`` and ``rho`` meshes.
+        particles: Write the per-species particle records (skipped when ``out.x is None``).
+        area: Transverse area in m^2 that the one-dimensional run stands for; ``weighting`` is
+            ``out.weight * area``, a number of physical particles (see the module docstring).
+        simulation: The simulation that produced ``out``, to include its static prescribed
+            fields as separate ``external_E``/``external_B`` meshes. Flat E/B keep their face/centre
+            staggering; 3D tensors are centred with the domain's x/y/z periods. No field histories
+            are added to ``out``. Omitted fields are not written, and ``meshes=False`` skips them.
+        overwrite: Allow replacing an existing file. By default it is protected.
+        sidecar: Write a ``.pmd`` discovery file containing the relative series filename or template.
+
+    Raises:
+        ImportError: If the optional dependency ``openpmd-api`` is missing.
+        ValueError: Invalid cadence/area, no stored steps, or incompatible simulation geometry.
+        FileExistsError: If the output path exists and ``overwrite`` is false.
+    """
+    try:
+        import openpmd_api as io
+    except ImportError as exc:
+        raise ImportError("write_openpmd needs the optional openpmd-api: pip install openpmd-api") from exc
+    if isinstance(every, (bool, np.bool_)) or not isinstance(every, (int, np.integer)) or every < 1:
+        raise ValueError("every must be a positive integer")
+    if not np.isfinite(area) or area <= 0:
+        raise ValueError("area must be finite and positive")
+    if not len(out.t):
+        raise ValueError("openPMD export requires at least one stored step")
+    external = _external_fields(out, simulation, meshes)
+    path, pointer = _paths(path, overwrite, sidecar)
+    series = io.Series(path, io.Access.create)
+    series.set_software("JAX-in-Cell", __version__)
+    for s in range(0, len(out.t), every):
+        it, keep = series.iterations[s], []
+        it.time, it.dt, it.time_unit_SI = float(out.t[s]), float(out.dt), 1.0
+        if meshes:
+            _write_meshes(io, it, out, s, keep, external)
+        if particles and out.x is not None:
+            _write_particles(io, it, out, s, area, keep)
+        series.flush()
+    series.close()
+    if pointer is not None:
+        with open(pointer, "w", encoding="utf-8") as file:
+            file.write(os.path.basename(path) + "\n")
+    return path
