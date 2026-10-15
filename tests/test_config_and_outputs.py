@@ -261,6 +261,7 @@ def test_irregular_snapshots_have_no_dominant_frequency():
                                float(diagnostics(every)["dominant_frequency"]), rtol=1e-12)
     assert np.isfinite(float(diagnostics(even)["dominant_frequency"]))
 
+
 @pytest.mark.parametrize("walls", ["periodic", "absorbing", "reflective", "thermal"])
 def test_the_charge_balance_is_independent_of_the_gauss_residual(walls):
     """Two checks of different things, and a run can pass either and fail the other.

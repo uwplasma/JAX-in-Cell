@@ -1508,21 +1508,7 @@ class Simulation:
             raise ValueError(f"steps ({steps}) must be a multiple of store_every ({store_every}), "
                              "which must be at least one")
         if snapshot_steps is not None:
-            if store_every != 1:
-                raise ValueError("snapshot_steps requires store_every=1")
-            if isinstance(snapshot_steps, (int, np.integer)) and not isinstance(snapshot_steps, (bool, np.bool_)):
-                if snapshot_steps < 1:
-                    raise ValueError("an integer snapshot_steps must be a stride of at least one step")
-                snapshot_steps = range(int(snapshot_steps) - 1, steps, int(snapshot_steps))
-            try:
-                schedule = tuple(snapshot_steps)
-            except TypeError as exc:
-                raise ValueError("snapshot_steps must be a sequence of integer indices") from exc
-            if any(isinstance(s, (bool, np.bool_)) or not isinstance(s, (int, np.integer)) for s in schedule):
-                raise ValueError("snapshot_steps must contain integer indices")
-            if any(s < 0 or s >= steps for s in schedule):
-                raise ValueError("snapshot_steps indices must lie in [0, steps)")
-            snapshot_steps = tuple(sorted(set(map(int, schedule))))
+            snapshot_steps = _snapshot_schedule(snapshot_steps, steps, store_every)
         level = "full" if moments is True else moments
         if level not in (False, None, *self.MOMENT_LEVELS):
             raise ValueError(f"moments is False, True, or one of {', '.join(map(repr, self.MOMENT_LEVELS))}, "
@@ -1532,6 +1518,25 @@ class Simulation:
         traced = any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves((self, state, seed)))
         meter = None if traced else reporter(verbose, steps)
         return _run(self, steps, seed, store_every, store_particles, level or None, state, meter, snapshot_steps)
+
+
+def _snapshot_schedule(snapshot_steps, steps, store_every):
+    """The sorted, deduplicated post-step indices that ``run(snapshot_steps=...)`` stores."""
+    if store_every != 1:
+        raise ValueError("snapshot_steps requires store_every=1")
+    if isinstance(snapshot_steps, (int, np.integer)) and not isinstance(snapshot_steps, (bool, np.bool_)):
+        if snapshot_steps < 1:
+            raise ValueError("an integer snapshot_steps must be a stride of at least one step")
+        snapshot_steps = range(int(snapshot_steps) - 1, steps, int(snapshot_steps))
+    try:
+        schedule = tuple(snapshot_steps)
+    except TypeError as exc:
+        raise ValueError("snapshot_steps must be a sequence of integer indices") from exc
+    if any(isinstance(s, (bool, np.bool_)) or not isinstance(s, (int, np.integer)) for s in schedule):
+        raise ValueError("snapshot_steps must contain integer indices")
+    if any(s < 0 or s >= steps for s in schedule):
+        raise ValueError("snapshot_steps indices must lie in [0, steps)")
+    return tuple(sorted(set(map(int, schedule))))
 
 
 @partial(jax.jit, static_argnames=("chunks", "store_every", "store_particles", "snapshot_steps"))
