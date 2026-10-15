@@ -101,6 +101,10 @@ diagnostics(output)                     # energies, momentum, Gauss residual, te
 plot(output)                            # animated fields, distributions and phase space
 ```
 
+`run` keeps every step by default; `store_every=k` keeps every k-th, and `snapshot_steps`
+keeps chosen steps instead: an integer `n` stores every n-th step, a list stores exactly those
+zero-based post-step indices, and only those are held in memory.
+
 `Domain`, `Species`, `Solver` and `Simulation` are frozen dataclasses registered as
 JAX pytrees. Physical quantities are leaves, so they can be changed without
 recompiling and differentiated with respect to; structural settings are static.
