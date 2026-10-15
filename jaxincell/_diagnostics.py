@@ -286,13 +286,17 @@ def temperatures(out):
 def dominant_frequency(out):
     """Angular frequency of the strongest peak of :math:`E_x` at the box centre,
     other than the mean, sampled at the stored steps. NaN when fewer than two
-    steps were stored, since one sample has no frequency."""
+    steps were stored, since one sample has no frequency, and NaN when the stored
+    times are not evenly spaced (snapshot_steps), where a discrete Fourier
+    transform has no frequency axis."""
     if out.t.shape[0] < 2:
         return jnp.asarray(jnp.nan)
     signal = out.E[:, out.E.shape[1] // 2, 0]
     spectrum = jnp.abs(jnp.fft.rfft(signal - jnp.mean(signal)))
-    freqs = 2 * jnp.pi * jnp.fft.rfftfreq(signal.shape[0], d=out.t[1] - out.t[0])
-    return freqs[jnp.argmax(spectrum[1:]) + 1]
+    gaps = jnp.diff(out.t)
+    freqs = 2 * jnp.pi * jnp.fft.rfftfreq(signal.shape[0], d=gaps[0])
+    uniform = jnp.ptp(gaps) <= 1e-6 * jnp.abs(gaps[0])
+    return jnp.where(uniform, freqs[jnp.argmax(spectrum[1:]) + 1], jnp.nan)
 
 
 def diagnostics(out):

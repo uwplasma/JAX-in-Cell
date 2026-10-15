@@ -246,6 +246,21 @@ def test_diagnostics_of_a_run_that_stored_one_step():
     assert "dominant_frequency" in jaxincell._diagnostics.__all__
 
 
+def test_irregular_snapshots_have_no_dominant_frequency():
+    """Uneven stored times have no Fourier frequency axis: NaN, not a number off a wrong
+    grid. Evenly spaced snapshots keep the frequency of the run that stored every step."""
+    electrons = Species.electrons(n=300, density=4e17, vth=(0.05 * c, 0.0, 0.0), drift=(6e7, 0.0, 0.0),
+                                  plus_minus=True, perturbation_amplitude=5e-7, perturbation_mode=1)
+    ions = Species.ions(n=100, density=4e17, electrons=electrons)
+    sim = Simulation(Domain(length=0.01, cells=16, dt_over_dx_c=2.0), [electrons, ions])
+    uneven = sim.run(10, seed=0, snapshot_steps=[0, 1, 9])
+    assert np.isnan(float(diagnostics(uneven)["dominant_frequency"]))
+    even = sim.run(10, seed=0, snapshot_steps=[1, 3, 5, 7, 9])
+    every = sim.run(10, seed=0, store_every=2)
+    np.testing.assert_allclose(float(diagnostics(even)["dominant_frequency"]),
+                               float(diagnostics(every)["dominant_frequency"]), rtol=1e-12)
+    assert np.isfinite(float(diagnostics(even)["dominant_frequency"]))
+
 @pytest.mark.parametrize("walls", ["periodic", "absorbing", "reflective", "thermal"])
 def test_the_charge_balance_is_independent_of_the_gauss_residual(walls):
     """Two checks of different things, and a run can pass either and fail the other.
