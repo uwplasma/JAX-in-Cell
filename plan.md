@@ -1381,3 +1381,41 @@ The README precision paragraph now states the W12 matrix (CPU float32 1.7 times 
 loaded host, GPU float32 about a hundred times slower, unprofiled) and links the performance
 table. The showcase movies (`docs/scripts/movies.py`) were re-rendered on GPU 1 and their mid and
 late frames inspected.
+
+## 17. Main sync of 2026-10 and diff reduction
+
+`main` at `aa881b3` (#41, #49, #53–#64, #69, #72 merged after 2026-09-20) is an ancestor of
+this branch since `597f2fe`/`add9300`; those merges kept this tree, so each fix was checked
+again in this branch's own code. #59, #60, #61 and #64 were written on this branch.
+
+| PR | carries | here | evidence or action |
+|---|---|---|---|
+| #41 | warn when an analytic field option or an inactive source is ignored | not applicable | external fields are arrays applied in every push; every `Source.model` is implemented and `_config.py` refuses the rest |
+| #49, #55 | `dx_over_Debye_length` rename; differentiable aliases and precedence | not applicable | no such parameter: `Species(density, vth)`, `Simulation.debye_length()` (section 15) |
+| #54 | floor instead of a floating remainder in grid indexing | already here | `_core.s2_weights`, `s5_weights`, `_face_spline` use `floor` |
+| #56 | wall charge at an exact wall; periodic partner; multiple reflections | already here | `_core.map_indices`/`deposit` (clamped or wrapped, absorbing part to the wall ledger); `_config.py` "a periodic wall needs a periodic partner"; `apply_particle_bc` crossing fraction |
+| #57 | parameter hash of array interiors; defensive copies; end-of-step times; quiet pairing; speed cap | here or not applicable | frozen dataclass pytrees (arrays are traced leaves, no hash or setter); `carry.time` stored after the step; `plus_minus` pairing; the cap is relativistic only, by design (`_momentum`: a Newtonian run has no speed limit) |
+| #58 | implicit uniform current, magnetic gather at centres, abs-max stopping norm | already here | implicit `substeps` keep the mean current; `_fields_at` gathers E and B with the deposit spline; `_check_picard` uses `max(abs(.))` |
+| #59, #60, #61, #64 | disjoint collision pairs; prescribed-field export; implicit wall energy at the crossing; quintic weighting | already here | `_collisions.py`; `openpmd._external_fields`; `_at_impact(time_fraction=1)`; `s5_weights`, `Solver(shape_order=5)` |
+| #62 | populations, weighted temperatures, one stored step, last positive bin, relativistic energy | already here | `_diagnostics._blocks`, `temperatures`, `dominant_frequency` NaN below two rows, `rfft` over `[1:]`, `_kinetic` |
+| #63 | Gauss solve as a prefix sum | already here | `_core._integrate_from_walls` |
+| #69 | one particle boundary map | already here | `wrap_positions`, `apply_particle_bc` |
+| #72 | Codecov comments off | taken | `codecov.yml` |
+| #34, #35, #36, #52, #53 (open) | half-flight walls; Coulomb collisions; openPMD; tensor fields; volume sources | already here | section 14; `apply_particle_bc`, `_collisions.py`, `openpmd.py`, `gather_xyz`, `Source(model="volume")` |
+| #37 (open) | `snapshot_steps` | here, two gaps closed now | (1) `dominant_frequency` read the frequency axis off the first gap, so uneven snapshots returned a number from a wrong grid: it now returns NaN unless the stored times are evenly spaced (`test_irregular_snapshots_have_no_dominant_frequency`, fails before the change). (2) the integer form agreed in the #37 review: `snapshot_steps=n` keeps every `n`-th completed step, indices `n-1, 2n-1, ...` (`test_an_integer_snapshot_stride_is_the_sequence_of_every_nth_step`) |
+| #70 (open) | relativistic two-stream example and solver guidance | already here | section 15 (#45 row); `numerics/stability.md` |
+| #71 (open draft, on this branch) | midpoint field hook in the implicit iteration | not taken | its own body says the physics qualification is not done; stays a draft |
+| #67 (open) | integration preview of #34–#37, #52, #53, #70 on `main` | not applicable | a preview; moot once #42 merges |
+
+Review comments on #33–#63 and #69 were checked item by item. All are fixed on `main`, here, or are
+moot in this API, except the integer `snapshot_steps` (done above). Two cosmetic items for
+`main` only (comments in `_particle_boundary_map` and the one-line wrapper
+`set_BC_single_particle_positions` in `_boundary_conditions.py`) matter only if `main`
+keeps shipping before #42.
+
+**Diff reduction.** Files that differed from `main` without need were aligned: the
+community files (`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`), `setup.py`, `docs/Makefile` and
+`docs/make.bat` are back; `.gitignore` and `CITATION.cff` are `main`'s with this branch's
+additions appended. What remains is the rewrite itself (the old modules and their tests are
+replaced, not edited), the new examples, documentation and figures. Figures were not reverted:
+each is drawn by this branch's scripts and quoted through `measurements.json`.

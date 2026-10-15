@@ -1478,7 +1478,8 @@ class Simulation:
             store_every: Keep every ``store_every``-th state in the output.
             snapshot_steps: Instead keep these zero-based post-step indices, sorted and deduplicated.
                 Integers must lie in ``[0, steps)``; an empty sequence keeps no history. Requires
-                ``store_every=1``. Every step still advances, and ``Output.state`` is always the final state.
+                ``store_every=1``. An integer ``n`` keeps every ``n``-th completed step (indices ``n-1, 2n-1, ...``).
+                Every step still advances, and ``Output.state`` is always the final state.
             store_particles: Keep the particle histories (the bulk of the memory).
             moments: Which velocity moments to sum over every step and store the running sums
                 of, so that a mean profile over a long window needs no particle history:
@@ -1509,6 +1510,10 @@ class Simulation:
         if snapshot_steps is not None:
             if store_every != 1:
                 raise ValueError("snapshot_steps requires store_every=1")
+            if isinstance(snapshot_steps, (int, np.integer)) and not isinstance(snapshot_steps, (bool, np.bool_)):
+                if snapshot_steps < 1:
+                    raise ValueError("an integer snapshot_steps must be a stride of at least one step")
+                snapshot_steps = range(int(snapshot_steps) - 1, steps, int(snapshot_steps))
             try:
                 schedule = tuple(snapshot_steps)
             except TypeError as exc:
