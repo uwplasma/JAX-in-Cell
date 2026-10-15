@@ -1414,8 +1414,8 @@ moot in this API, except the integer `snapshot_steps` (done above). Two cosmetic
 keeps shipping before #42.
 
 **Diff reduction.** Files that differed from `main` without need were aligned: the
-community files (`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`), `setup.py`, `docs/Makefile` and
-`docs/make.bat` are back; `.gitignore` and `CITATION.cff` are `main`'s with this branch's
+community files (`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`), `docs/Makefile` and
+`docs/make.bat` are back (`setup.py` stays removed: `pyproject.toml` is the one metadata source, which a test asserts); `.gitignore` and `CITATION.cff` are `main`'s with this branch's
 additions appended. What remains is the rewrite itself (the old modules and their tests are
 replaced, not edited), the new examples, documentation and figures. Figures were not reverted:
 each is drawn by this branch's scripts and quoted through `measurements.json`.
