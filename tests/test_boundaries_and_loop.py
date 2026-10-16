@@ -9,13 +9,100 @@ from jax import random
 
 import jaxincell._simulation as simulation_module
 from jaxincell import (Collisions, Domain, Simulation, Solver, Species, elementary_charge, epsilon_0,
-                       speed_of_light as c)
+                       mass_electron, speed_of_light as c)
 from jaxincell._core import E_x_from_rho, apply_particle_bc, current_from_continuity, deposit, wrap_positions
 
 L, CELLS = 1.0, 32
 DX = L / CELLS
 CENTRE0 = -L / 2 + DX / 2
 WALLS = [(0, 0), (1, 1), (1, 2), (2, 1), (2, 2)]           # every pair Domain accepts
+
+
+def midpoint_pair(**solver):
+    """Uniform neutral cold pair: all three currents have an analytic midpoint response."""
+    omega = 1e9
+    density = epsilon_0 * mass_electron * omega**2 / (2 * elementary_charge**2)
+    species = [Species(name, 8, sign, mass_electron, density, sampling="low_noise")
+               for name, sign in (("electrons", -1.), ("positrons", 1.))]
+    sim = Simulation(Domain(length=4*c/omega, cells=4, time_step=.04/omega), species,
+                     Solver(algorithm="implicit", shape_order=5, **solver))
+    state, extra = sim.initial_state(random.PRNGKey(0))
+    scale = mass_electron * c * omega / elementary_charge
+    field = scale * jnp.array([1e-4, -2e-4, 3e-4])
+    return sim, state.replace(E=jnp.broadcast_to(field, state.E.shape)), extra, omega, scale
+
+
+def test_identity_midpoint_hook_preserves_the_complete_native_return():
+    sim, state, extra, omega, scale = midpoint_pair()
+    native = jax.jit(lambda: sim._implicit_step(state, extra))()
+    explicit_none = jax.jit(lambda: sim._implicit_step(state, extra, midpoint_fields=None))()
+    identity = jax.jit(lambda: sim._implicit_step(
+        state, extra, midpoint_fields=lambda E, B, J: (E, B)))()
+    for expected, unchanged, hooked in zip(jax.tree.leaves(native), jax.tree.leaves(explicit_none),
+                                           jax.tree.leaves(identity[:2]), strict=True):
+        np.testing.assert_array_equal(unchanged, expected)
+        np.testing.assert_array_equal(hooked, expected)
+    E_half, B_half, E_force, B_force, J_guess = identity[2]
+    np.testing.assert_allclose(E_half, .5*(state.E + native[0].E), rtol=2e-13, atol=0.)
+    np.testing.assert_array_equal(E_force, E_half)
+    np.testing.assert_array_equal(B_force, B_half)
+    np.testing.assert_allclose(J_guess/(epsilon_0*omega*scale), native[1][5]/(epsilon_0*omega*scale),
+                               rtol=0., atol=2e-13)
+
+
+def test_current_midpoint_hook_matches_the_cold_response_and_its_derivative():
+    """Extra force -chi dt J/(2 eps0) changes the force, not the physical Maxwell current."""
+    sim, state, extra, omega, scale = midpoint_pair()
+    dt = sim.domain.dt
+
+    def step(chi):
+        return sim._implicit_step(state, extra,
+                                  midpoint_fields=lambda E, B, J: (E-chi*dt*J/(2*epsilon_0), B))
+
+    result, tangent = jax.jit(lambda chi: jax.jvp(step, (chi,), (jnp.ones_like(chi),)))(jnp.array(.3))
+    final, output, used = result
+    denominator = 1 + 1.3*(omega*dt/2)**2
+    force = np.asarray(state.E) / denominator
+    expected = epsilon_0*omega**2*dt/2 * force
+    current_scale = epsilon_0*omega*scale
+    # Fixed field/current/velocity units keep tiny cold deposits from setting their own tolerance.
+    np.testing.assert_allclose(output[5]/current_scale, expected/current_scale, rtol=0., atol=2e-13)
+    np.testing.assert_allclose(final.E/scale, (state.E-dt*expected/epsilon_0)/scale, rtol=0., atol=2e-13)
+    np.testing.assert_allclose(final.u/c, np.asarray(state.qm)[:, None]*dt*force[0]/c, rtol=0., atol=2e-13)
+    np.testing.assert_allclose(used[2]/scale, force/scale, rtol=0., atol=2e-13)
+    np.testing.assert_allclose(used[4]/current_scale, output[5]/current_scale, rtol=0., atol=2e-13)
+    derivative = -expected*(omega*dt/2)**2/denominator
+    np.testing.assert_allclose(tangent[1][5]/current_scale, derivative/current_scale, rtol=0., atol=2e-13)
+
+
+@pytest.mark.parametrize("iterations,valid", [(8, True), (1, False)])
+def test_midpoint_hook_checks_the_coupled_replay_and_keeps_last_used_fields(iterations, valid):
+    sim, state, extra, _, _ = midpoint_pair(picard_iterations=iterations, picard_tolerance=1e-8)
+
+    def callback(E, B, J):
+        return E-.3*sim.domain.dt*J/(2*epsilon_0), B
+
+    result = jax.jit(lambda: sim._implicit_step(state, extra, midpoint_fields=callback))()
+    assert bool(jnp.isfinite(result[0].E).all()) == valid
+    assert bool(jnp.isnan(result[0].E).all()) == (not valid)
+    assert all(np.isfinite(np.asarray(leaf)).all() for leaf in jax.tree.leaves(result[2]))
+    if not valid:
+        np.testing.assert_array_equal(result[2][0], state.E)
+        np.testing.assert_array_equal(result[2][4], jnp.zeros_like(state.E))
+        assert float(jnp.max(jnp.abs(result[1][5]))) > 0.
+
+
+@pytest.mark.parametrize("component", [0, 1])
+def test_midpoint_hook_requires_both_grid_field_shapes(component):
+    sim, state, extra, _, _ = midpoint_pair()
+
+    def wrong_shape(E, B, J):
+        fields = [E, B]
+        fields[component] = fields[component][:, :2]
+        return tuple(fields)
+
+    with pytest.raises(ValueError, match="grid field shapes"):
+        jax.jit(lambda: sim._implicit_step(state, extra, midpoint_fields=wrong_shape))()
 
 
 @pytest.mark.parametrize("gap,vx,vy,gyro", [(.055, .2, 0., 4.), (.04, .2, 0., 10.),

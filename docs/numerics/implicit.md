@@ -33,12 +33,15 @@ $x_p^{\nu+1} = x_p^\nu + \Delta\tau\,\bar v_{x,p}$ and is pushed by the Boris st
 
 ```{math}
 :label: implicit-push
-\frac{\mathbf u_p^{\nu+1} - \mathbf u_p^\nu}{\Delta\tau} = \frac{q_p}{m_p}\left(\mathbf E_p + \bar{\mathbf v}_p\times\mathbf B(x_p^{\nu+1/2})\right), \qquad
+\frac{\mathbf u_p^{\nu+1} - \mathbf u_p^\nu}{\Delta\tau} = \frac{q_p}{m_p}\left(\mathbf E_p + \bar{\mathbf v}_{B,p}\times\mathbf B(x_p^{\nu+1/2})\right), \qquad
 \bar{\mathbf v}_p = \frac{\mathbf u_p^\nu + \mathbf u_p^{\nu+1}}{\gamma_p^\nu + \gamma_p^{\nu+1}},
 ```
 
-with $\mathbf u = \gamma\mathbf v$ and $\gamma = 1$ in a Newtonian run, where $\bar{\mathbf v}$ is the
-mean of the two velocities. The Boris step changes $|\mathbf u|^2$ by exactly
+with $\mathbf u = \gamma\mathbf v$. The transport and work velocity is $\bar{\mathbf v}$.
+The Boris rotation uses $\bar{\mathbf v}_B=(\mathbf u^\nu+\mathbf u^{\nu+1})/(2\gamma_-)$,
+where $\gamma_-=\sqrt{1+|\mathbf u^\nu+(q/m)\mathbf E_p\Delta\tau/2|^2/c^2}$.
+In a Newtonian run all Lorentz factors are one and these two velocities coincide;
+they generally differ in a relativistic run. The Boris step changes $|\mathbf u|^2$ by exactly
 $(q/m)\Delta\tau\,\mathbf E_p\cdot(\mathbf u^\nu + \mathbf u^{\nu+1})$, so the kinetic energy,
 $\tfrac12 m|\mathbf v|^2$ or $(\gamma - 1)mc^2$, changes by $q\,\mathbf E_p\cdot\bar{\mathbf v}\,\Delta\tau$
 to round-off, and the magnetic field does no work. What remains is to choose $\mathbf E_p$
@@ -190,6 +193,29 @@ $2.3\times10^{-16}$ after 8 and 12, the Gauss residual $\le 2\times10^{-15}$ and
 $|\langle E_x\rangle|/\max|E_x| \le 6\times10^{-17}$ at every step.
 
 ## Solving the system
+
+### Additional coupled fields
+
+The internal step accepts a pure callback
+`sim._implicit_step(state, extra, midpoint_fields=callback)`, where
+`callback(E_half, B_half, J_guess)` returns the effective grid electric and
+magnetic fields used by the particles. `J_guess` is the physical current from
+the previous Picard iterate, initially zero. The particle charge, mass,
+deposition, boundary rules and physical Maxwell update retain their usual values.
+This allows another field sector to respond to that current within the same iteration.
+Both returned fields must have shape `(cells, 3)`.
+
+With a callback the return is `(state, output, used)`, where
+`used = (E_half, B_half, E_force, B_force, J_guess)` records the last accepted
+particle update. A convergence-check replay does not replace this record.
+The residual check replays the complete coupled map; failure marks the returned
+ordinary electric field invalid while retaining the accepted particles and `used`.
+The caller must also check the additional sector's constraints, work and agreement
+between the fields used and the accepted coupled solution. The callback alone
+does not establish conservation or convergence for a new physical model.
+Omitting the callback or passing `None` retains the original return pair and iteration.
+
+### Maxwell solve
 
 For a prescribed current the Maxwell equations are linear. Eliminating midpoint
 $\mathbf B$ gives a transverse Helmholtz system. In a periodic box,
