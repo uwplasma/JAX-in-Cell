@@ -1615,8 +1615,9 @@ class Simulation:
                 self._weight_floor(), displacement=displacement[:, 0])
             v = self._velocity(u)
             x_next = wrap_positions(x_next_half - 0.5 * dt * v, w, box, d.particle_bc, dx)
-        work = work.replace(collision_work=work.collision_work
-                            + self._species_sum(w * self._energy_change(m, before_collision, u)),
+        collision_change = (0.0 if self.collisions is None else
+                            self._species_sum(w * self._energy_change(m, before_collision, u)))
+        work = work.replace(collision_work=work.collision_work + collision_change,
                             kinetic=self._species_sum(w * self._kinetic(m, u)))
         # Second half step, x^{n+1/2} -> x^{n+1}, starting from the charge density the
         # first half already ended on. Depositing it again here would use the weights
@@ -1797,8 +1798,9 @@ class Simulation:
         before_collision = u
         u = self._collide_momenta(k_collide, x, u, w, qm, m, dt)
         v = self._velocity(u)
-        work = work.replace(collision_work=work.collision_work
-                            + self._species_sum(w * self._energy_change(m, before_collision, u)),
+        collision_change = (0.0 if self.collisions is None else
+                            self._species_sum(w * self._energy_change(m, before_collision, u)))
+        work = work.replace(collision_work=work.collision_work + collision_change,
                             kinetic=self._species_sum(w * self._kinetic(m, u)))
         return (State(E_new, B_new, x, u, w, qm, rho_next, st.sigma, key, st.time + dt, st.steps + 1, wall,
                       self._accumulate(st.moments, x, v, w), st.x_phase, work),
