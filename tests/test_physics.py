@@ -1080,7 +1080,7 @@ def test_explicit_radiation_wall_emission_uses_the_event_time_and_returned_weigh
     """Parallel E has constant Larmor power: integrate it only while each weight is present."""
     from jaxincell import Radiation
 
-    density, length, dt, field, gamma0 = 1e-3, 1., 3e-10, 1e8, 10.
+    density, length, dt, field, gamma0 = 1e-3, 1., 2e-10, 1e8, 10.
     u0 = c*np.sqrt(gamma0**2-1)
     acceleration = e_charge*field/mass_electron
     tau = e_charge**2 / (6*np.pi*epsilon_0*mass_electron*c**3)
@@ -1099,6 +1099,7 @@ def test_explicit_radiation_wall_emission_uses_the_event_time_and_returned_weigh
                 assert (hit_time < dt/2) == (gap == .01), case
                 hit_energy = mass_electron*c**2*(gamma_hit-1)
                 final_u = -u_hit+acceleration*(dt-hit_time)
+                assert final_u < 0, case     # no turn or second impact after reflection
                 final_energy = mass_electron*c**2*(np.sqrt(1+(final_u/c)**2)-1)
                 expected_emission = weight*power*(hit_time+returned*(dt-hit_time))
                 expected_work = weight*(hit_energy-initial_energy+returned*(final_energy-hit_energy))
