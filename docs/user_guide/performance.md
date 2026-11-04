@@ -155,6 +155,10 @@ PROFILE_CASE=collisions PROFILE_TRACE=1 PROFILE_DIR=/tmp/jic-collisions \
   python docs/scripts/profile_pic.py
 ```
 
+Forward mode returns the complete output, including the work ledger and field
+history, without particle histories. Reverse mode and JVP differentiate a scalar
+final-field objective; JAX may discard diagnostics unused by that objective.
+
 Use separate processes for the parent revision and this branch, with the same
 `PROFILE_N`, `PROFILE_STEPS`, precision and backend. Compiler temporary-buffer
 estimates are not measured peak resident memory. `PROFILE_COMPILE_ONLY=1` permits
