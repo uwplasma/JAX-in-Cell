@@ -1074,3 +1074,53 @@ def test_selected_radiating_source_subset_has_the_physical_parallel_electric_emi
     expected_u = initial_u-e_charge*field/mass_electron*elapsed
     assert float(np.asarray(output.state.u)[1:][slots, 0][0]) == pytest.approx(expected_u, rel=2e-13)
     assert float(output.state.u[0, 1]) == 1000*c
+
+
+def test_explicit_radiation_wall_emission_uses_the_event_time_and_returned_weight():
+    """Parallel E has constant Larmor power: integrate it only while each weight is present."""
+    from jaxincell import Radiation
+
+    density, length, dt, field, gamma0 = 1e-3, 1., 3e-10, 1e8, 10.
+    u0 = c*np.sqrt(gamma0**2-1)
+    acceleration = e_charge*field/mass_electron
+    tau = e_charge**2 / (6*np.pi*epsilon_0*mass_electron*c**3)
+    power = tau*e_charge**2/mass_electron*field**2
+    weight = density*length
+    initial_energy = mass_electron*c**2*(gamma0-1)
+    # Reuse one array shape and compiled step for both walls, both impact
+    # halves, complete absorption and an elastic partial-weight return.
+    for side in (-1., 1.):
+        for returned in (0., .3):
+            for gap in (.01, .05):
+                case = f"side={side}, returned={returned}, gap={gap}"
+                gamma_hit = gamma0+e_charge*field*gap/(mass_electron*c**2)
+                u_hit = c*np.sqrt(gamma_hit**2-1)
+                hit_time = (u_hit-u0)/acceleration
+                assert (hit_time < dt/2) == (gap == .01), case
+                hit_energy = mass_electron*c**2*(gamma_hit-1)
+                final_u = -u_hit+acceleration*(dt-hit_time)
+                final_energy = mass_electron*c**2*(np.sqrt(1+(final_u/c)**2)-1)
+                expected_emission = weight*power*(hit_time+returned*(dt-hit_time))
+                expected_work = weight*(hit_energy-initial_energy+returned*(final_energy-hit_energy))
+                particle = Species.electrons(1, density, x=jnp.array([[side*(length/2-gap), 0., 0.]]),
+                                             u=jnp.array([[side*u0, 0., 0.]]), reflection=returned)
+                simulation = Simulation(Domain(length=length, cells=4, time_step=dt,
+                                               particle_bc="absorbing", field_bc="reflective"), [particle],
+                                        Solver(model="electrostatic", relativistic=True), radiation=Radiation(),
+                                        external_E=jnp.zeros((4, 3)).at[:, 0].set(-side*field))
+                output = simulation.run(1, store_particles=False).validate()
+                work, wall = output.state.work, output.state.wall
+                wall_index = 0 if side < 0 else 1
+                assert float(work.radiated_energy[0]) == pytest.approx(expected_emission, rel=2e-11, abs=0), case
+                assert abs(float(work.rr_work[0])) < 1e-12*expected_emission, case
+                assert float(work.prescribed_work[0]) == pytest.approx(expected_work, rel=2e-11, abs=0), case
+                assert float(work.kinetic[0]) == pytest.approx(weight*returned*final_energy, rel=2e-11, abs=0), case
+                assert float(wall.arrived[0, wall_index]) == pytest.approx(weight, rel=2e-13), case
+                assert float(wall.energy_in[0, wall_index]) == pytest.approx(weight*hit_energy, rel=2e-11), case
+                assert float(wall.energy_out[0, wall_index]) == pytest.approx(weight*returned*hit_energy,
+                                                                              rel=2e-11, abs=0), case
+                assert float(output.state.w[0]) == pytest.approx(weight*returned, rel=2e-13, abs=0), case
+                if returned:
+                    assert float(output.state.u[0, 0]) == pytest.approx(side*final_u, rel=2e-11), case
+                    expected_x = side*(length/2+(final_energy-hit_energy)/(e_charge*field))
+                    assert float(output.state.x[0, 0]) == pytest.approx(expected_x, rel=2e-11), case
