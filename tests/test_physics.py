@@ -1116,7 +1116,7 @@ def test_explicit_radiation_wall_emission_uses_the_event_time_and_returned_weigh
                 assert float(work.prescribed_work[0]) == pytest.approx(expected_work, rel=2e-11, abs=0), case
                 assert float(work.kinetic[0]) == pytest.approx(weight*returned*final_energy, rel=2e-11, abs=0), case
                 assert float(wall.arrived[0, wall_index]) == pytest.approx(weight, rel=2e-13), case
-                assert float(wall.energy_in[0, wall_index]) == pytest.approx(weight*hit_energy, rel=2e-11), case
+                assert float(wall.energy_in[0, wall_index]) == pytest.approx(weight*hit_energy, rel=2e-11, abs=0), case
                 assert float(wall.energy_out[0, wall_index]) == pytest.approx(weight*returned*hit_energy,
                                                                               rel=2e-11, abs=0), case
                 assert float(output.state.w[0]) == pytest.approx(weight*returned, rel=2e-13, abs=0), case
