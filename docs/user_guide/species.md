@@ -31,6 +31,7 @@ gives an immobile neutralising background.
 | `plus_minus` | negate $v_x$ on every second particle: two counter-streaming beams (static) | `False` |
 | `sampling` | how the initial phase space is drawn: `"low_noise"`, `"lattice"` or `"random"` (static) | `"lattice"` |
 | `x`, `v` | arrays of shape `(n, 3)` replacing the generated phase space | `None` |
+| `u` | relativistic momentum per mass $p/m=\gamma v$ in m/s, replacing generated velocities; exclusive with `v` | `None` |
 | `reflection` | fraction of each particle an absorbing wall sends back: a number, a function of the normal impact speed in m/s, or a `(left, right)` pair | `0.0` |
 
 * `vth` and `drift` take three components as a tuple, list or array (NumPy or JAX) whose
@@ -100,6 +101,26 @@ electrons = Species.electrons(n=n, density=n_e, vth=(vx, 0.0, vz)).replace(x=x, 
   `perturbation_*`, `plus_minus` and `sampling` are ignored for the sampling.
 * `vth` and `density` are still what the linear-theory helpers and the Debye-length
   property read, so keep them consistent with the arrays.
+
+For a relativistic beam, specify momentum directly. A velocity rounded to $c$ no
+longer determines a finite Lorentz factor. Momentum remains useful at high energy:
+
+```python
+import jax.numpy as jnp
+from jaxincell import Solver
+
+gamma = 1000.0
+u = jnp.broadcast_to(jnp.array([c * jnp.sqrt(gamma**2 - 1), 0., 0.]), (n, 3))
+electrons = Species.electrons(n, n_e, u=u)
+solver = Solver(relativistic=True)
+```
+
+`u` is a differentiable leaf. The simulation retains it internally and, when
+particle history is requested, as `output.u`; `output.v` remains available. For
+relativistic kinetic energy use $mc^2\eta^2/(\sqrt{1+\eta^2}+1)$ with
+$\eta=u/c$, rather than recovering $\gamma$ from $v/c$. The generated Maxwellian
+velocities are a nonrelativistic initializer; `u` also accepts samples from an
+independently validated relativistic distribution.
 
 ## Walls that send particles back
 

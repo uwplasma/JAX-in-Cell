@@ -671,8 +671,10 @@ class Radiation:
     Args:
         model: ``"ll_reduced"``; other models are not implemented.
         species: Species name or tuple of names; ``None`` selects all species.
-        substeps: Positive number of particle substeps for resolving radiation
-            cooling. This refines the orbit update, not the Maxwell grid step.
+        substeps: Positive number of local momentum substeps in the explicit
+            scheme, or a multiplier of particle orbit substeps in the implicit
+            scheme. Explicit positions and currents still use the grid step;
+            refine that step to resolve trajectories and time-dependent fields.
     """
     model: str = "ll_reduced"
     species: object = None

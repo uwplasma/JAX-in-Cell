@@ -20,7 +20,7 @@ gradient = jax.grad(objective)(6e7)
 
 | kind | fields |
 |---|---|
-| differentiable (pytree leaves) | `length`, `dt_over_dx_c`, `restitution`, the species `charge`, `mass`, `density`, `vth`, `drift`, `perturbation_amplitude` and `reflection` (when it is a number), `filter_alpha`, and the external field arrays |
+| differentiable (pytree leaves) | `length`, `dt_over_dx_c`, `restitution`, the species `charge`, `mass`, `density`, `vth`, `drift`, `u`, `perturbation_amplitude` and `reflection` (when it is a number), `filter_alpha`, the external field arrays and `field_parameters` |
 | static, so not differentiable | particle counts, cell counts, boundary types, `algorithm` |
 
 Differentiating with respect to the whole object works too, and returns a matching
@@ -67,8 +67,10 @@ the {{ autodiff_ascent_iterations }} gradient-ascent iterates on it (blue circle
 black dashed vertical line marks the fastest-growing kinetic mode.
 ```
 
-* The gradient is exact to floating point, so the comparison is really a test of the
-  finite difference.
+* Autodiff differentiates the executed discrete program. Compare forward and reverse
+  derivatives with a finite-difference step sweep, then refine the physics timestep,
+  grid and particle count: agreement between derivatives alone does not establish the
+  accuracy of the continuum response.
 * The first call costs {{ autodiff_grad_time_first_s }} s including compilation and
   {{ autodiff_grad_time_warm_s }} s afterwards.
 

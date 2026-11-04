@@ -18,6 +18,9 @@ start with an underscore; the numerical kernels are documented too, because the
 
 .. autoclass:: jaxincell.Collisions
    :members:
+
+.. autoclass:: jaxincell.Radiation
+   :members:
 ```
 
 ## Simulation and output
