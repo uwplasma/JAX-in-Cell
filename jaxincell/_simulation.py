@@ -1271,6 +1271,9 @@ class Simulation:
         """The external E and B at positions ``x`` ``(N, 3)``, as ``(N, 6)``, gathered as the
         push gathers them: with the spline of the deposit along ``x`` and, for a field given on
         an ``(x, y, z)`` grid, along ``y`` and ``z`` as well. Zero where no field is given."""
+        if self.external_E is None and self.external_B is None:
+            zero = jnp.zeros((x.shape[0], 6), jnp.result_type(x.dtype, jnp.asarray(0.0).dtype))
+            return zero if self.prescribed_fields is None else zero + self._prescribed_at(x, time)
         d, order = self.domain, self.solver.shape_order
         zero = jnp.zeros((d.cells, 3))
         flat = [jnp.asarray(f) if f is not None and jnp.ndim(f) == 2 else zero
@@ -1295,6 +1298,11 @@ class Simulation:
             charge = jnp.where(selected, charge, 0.0)
         return landau_lifshitz(u, fields[:, :3], fields[:, 3:], charge, m)
 
+    def _prescribed_work(self, velocity, external, qm, m, dt):
+        if self.external_E is None and self.prescribed_fields is None:
+            return jnp.zeros_like(qm)
+        return qm * m * jnp.sum(external * velocity * dt, axis=1)
+
     def _push_work(self, u, fields, qm, dt, m, external, selected=None):
         """A local explicit push and its per-physical-particle energy exchanges.
 
@@ -1307,7 +1315,7 @@ class Simulation:
         interval = jnp.broadcast_to(jnp.asarray(dt), (u.shape[0], 1))
         if self.radiation is None:
             end = self._lorentz(u, fields, qm, interval)
-            prescribed = qm * m * jnp.sum(external * self._mean_velocity(u, end) * interval, axis=1)
+            prescribed = self._prescribed_work(self._mean_velocity(u, end), external, qm, m, interval)
             zero = jnp.zeros_like(prescribed)
             return end, jnp.stack([prescribed, zero, zero], axis=1)
 
@@ -1327,7 +1335,7 @@ class Simulation:
 
         before, loss1, emitted1 = radiation_half(u)
         rotated = self._lorentz(before, fields, qm, interval)
-        prescribed = qm * m * jnp.sum(external * self._mean_velocity(before, rotated) * interval, axis=1)
+        prescribed = self._prescribed_work(self._mean_velocity(before, rotated), external, qm, m, interval)
         end, loss2, emitted2 = radiation_half(rotated)
         return end, jnp.stack([prescribed, loss1 + loss2, emitted1 + emitted2], axis=1)
 
@@ -1351,7 +1359,7 @@ class Simulation:
             effective = fields.at[:, :3].add(force / jnp.where(qm != 0, qm, 1.0)[:, None])
         end = self._lorentz(u, effective, qm, dt)
         velocity = self._mean_velocity(u, end)
-        prescribed = dt * qm * m * jnp.sum(external * velocity, axis=1)
+        prescribed = self._prescribed_work(velocity, external, qm, m, dt)
         zero = jnp.zeros_like(prescribed)
         loss = zero if self.radiation is None else dt * m * jnp.sum(force * velocity, axis=1)
         emitted = zero if self.radiation is None else dt * power
