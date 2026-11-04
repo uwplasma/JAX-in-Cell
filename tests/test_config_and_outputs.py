@@ -133,6 +133,26 @@ def test_checkpoint_preserves_the_discrete_objective_gradient_and_restart(algori
     np.testing.assert_allclose(resumed.E, whole.E[-1:], rtol=2e-12, atol=0)
 
 
+def test_command_line_arrays_preserve_high_gamma_momentum_and_work(tmp_path):
+    from jaxincell import _write
+
+    gamma = 1e6
+    u = jnp.broadcast_to(jnp.array([0., c * np.sqrt(gamma**2 - 1), 0.]), (2, 3))
+    out = Simulation(Domain(cells=4), (Species.electrons(2, 1e-3, u=u),),
+                     Solver(relativistic=True)).run(1)
+    path = tmp_path / "input.toml"
+    path.write_text("# setup supplied through the Python API\n")
+    _write(tmp_path / "momentum", path, {}, {}, out)
+    with np.load(tmp_path / "momentum" / "fields.npz") as data:
+        energy = out.mass * c**2 * (np.sqrt(1 + np.sum((data["u"] / c)**2, axis=-1)) - 1)
+        represented = np.sum(data["weight"] * energy, axis=-1)
+        np.testing.assert_allclose(represented, np.sum(data["work.kinetic"], axis=-1), rtol=1e-14, atol=0)
+        assert np.sqrt(1 + np.sum((data["u"][0, 0] / c)**2)) == pytest.approx(gamma, rel=1e-12)
+    _write(tmp_path / "legacy", path, {}, {}, out.replace(u=None, work=None))
+    with np.load(tmp_path / "legacy" / "fields.npz") as data:
+        assert "v" in data and "u" not in data and not any(name.startswith("work.") for name in data.files)
+
+
 def test_ions_derived_from_electrons_are_differentiable_in_the_electron_thermal_speed():
     def ion_vth(u):
         electrons = Species.electrons(n=4, density=1.0, vth=(u, 0.0, 0.0))

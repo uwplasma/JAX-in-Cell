@@ -32,6 +32,9 @@ start with an underscore; the numerical kernels are documented too, because the
 .. autoclass:: jaxincell.Output
    :members:
 
+.. autoclass:: jaxincell.Work
+   :members:
+
 .. autofunction:: jaxincell.quiet_start
 
 .. autofunction:: jaxincell.load_toml
