@@ -1,9 +1,10 @@
 """Profile one real PIC program; all output stays in a chosen local directory.
 
-Run from the checkout: PROFILE_DIR=/tmp/jic-profile python docs/scripts/profile.py.
+Run from the checkout: PROFILE_DIR=/tmp/jic-profile python docs/scripts/profile_pic.py.
 Environment controls: PROFILE_CASE=explicit|implicit|collisions|radiation,
 PROFILE_MODE=forward|reverse|jvp, PROFILE_N=2048, PROFILE_STEPS=32,
 PROFILE_CHECKPOINT=0|1, PROFILE_TRACE=0|1, PROFILE_COMPILE_ONLY=0|1.
+PROFILE_SHARDS>1 distributes four independent parameter values per device.
 Use a fresh process for each case, precision and device. The default explicit
 case also runs unchanged against the parent research-release checkout.
 """
@@ -57,12 +58,21 @@ def tangent(beta):
 
 function = {"forward": objective, "reverse": jax.value_and_grad(objective), "jvp": tangent}[mode]
 beta = jnp.asarray(.6)
+shards = int(os.environ.get("PROFILE_SHARDS", 1))
+reference, finite_difference_objective = tangent, objective
+if shards > 1:
+    if shards > len(jax.devices()):
+        raise ValueError("PROFILE_SHARDS exceeds the number of available JAX devices")
+    mesh = jax.sharding.Mesh(np.asarray(jax.devices()[:shards]), ("ensemble",))
+    sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("ensemble"))
+    beta = jax.device_put(jnp.linspace(.55, .65, 4 * shards), sharding)
+    function, reference, finite_difference_objective = map(jax.vmap, (function, tangent, objective))
 start = time.perf_counter()
 executable = jax.jit(function).lower(beta).compile()
 compile_seconds = time.perf_counter() - start
 memory = executable.memory_analysis()
 report = provenance(case=case, mode=mode, checkpoint=checkpoint, particles=n + n // 2,
-                    steps=steps, cells=64, source=str(Path(jaxincell.__file__).resolve()),
+                    steps=steps, cells=64, shards=shards, source=str(Path(jaxincell.__file__).resolve()),
                     devices=[str(d) for d in jax.devices()], compile_seconds=compile_seconds,
                     memory={name: getattr(memory, name) for name in
                             ("argument_size_in_bytes", "output_size_in_bytes", "alias_size_in_bytes",
@@ -83,13 +93,21 @@ else:
         timings.append(time.perf_counter() - start)
     report.update(status="executed", warm_seconds=timings, median_seconds=float(np.median(timings)),
                   values=[np.asarray(x).tolist() for x in jax.tree.leaves(result)])
+    if shards > 1:
+        serial_beta = jax.device_put(beta, jax.sharding.SingleDeviceSharding(jax.devices()[0]))
+        serial = jax.block_until_ready(jax.jit(function)(serial_beta))
+        differences = [float(np.linalg.norm(np.asarray(a) - np.asarray(b))
+                             / max(np.linalg.norm(np.asarray(b)), np.finfo(float).tiny))
+                       for a, b in zip(jax.tree.leaves(result), jax.tree.leaves(serial))]
+        report["sharding_relative_difference"] = max(differences)
+        assert max(differences) < 1e-9, "sharded and single-device results disagree"
     if mode != "forward":
-        value, derivative = jax.block_until_ready(jax.jit(tangent)(beta))
+        value, derivative = jax.block_until_ready(jax.jit(reference)(beta))
         h = 1e-4
-        finite_difference = float((objective(beta + h) - objective(beta - h)) / (2 * h))
-        report.update(jvp=float(derivative), finite_difference=finite_difference,
-                      derivative_relative_difference=abs(float(result[1]) - float(derivative))
-                      / max(abs(float(derivative)), np.finfo(float).tiny))
+        finite_difference = (finite_difference_objective(beta + h) - finite_difference_objective(beta - h)) / (2 * h)
+        report.update(jvp=np.asarray(derivative).tolist(), finite_difference=np.asarray(finite_difference).tolist(),
+                      derivative_relative_difference=float(jnp.linalg.norm(result[1] - derivative)
+                      / jnp.maximum(jnp.linalg.norm(derivative), np.finfo(float).tiny)))
     if os.environ.get("PROFILE_TRACE", "0") == "1":
         with jax.profiler.trace(str(destination / "trace")):
             jax.block_until_ready(executable(beta))

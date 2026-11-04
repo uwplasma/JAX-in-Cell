@@ -138,3 +138,46 @@ Run on the CPU, or on a CUDA GPU.
 * Reach for the implicit scheme when it lets you take a step more than
   {{ scaling_implicit_over_explicit }} times larger; otherwise the explicit one is cheaper
   for the same physics.
+
+## Reproducible local profiles
+
+`docs/scripts/profile_pic.py` measures the actual compiled simulation, including
+relativistic collision and radiation variants. It separates compilation, first
+execution and five synchronized warm executions; records compiler buffer estimates;
+and optionally captures a JAX profiler trace. Results and HLO text go to
+`PROFILE_DIR`, outside the source tree by default:
+
+```bash
+PROFILE_DIR=/tmp/jic-explicit python docs/scripts/profile_pic.py
+PROFILE_CASE=implicit PROFILE_MODE=reverse PROFILE_CHECKPOINT=1 \
+  PROFILE_DIR=/tmp/jic-implicit-grad python docs/scripts/profile_pic.py
+PROFILE_CASE=collisions PROFILE_TRACE=1 PROFILE_DIR=/tmp/jic-collisions \
+  python docs/scripts/profile_pic.py
+```
+
+Use separate processes for the parent revision and this branch, with the same
+`PROFILE_N`, `PROFILE_STEPS`, precision and backend. Compiler temporary-buffer
+estimates are not measured peak resident memory. `PROFILE_COMPILE_ONLY=1` permits
+checking those estimates before attempting a gradient that may exceed device memory.
+Keep reports and traces local; commit the script and a deliberately selected,
+compressed documentation figure only when it communicates a useful result.
+
+For independent optimization starts or parameter ensembles, `PROFILE_SHARDS=k`
+distributes four simulations per device and checks the result against the same
+batch on one device. On a CPU, a small correctness rehearsal can use
+`XLA_FLAGS=--xla_force_host_platform_device_count=2 PROFILE_SHARDS=2`; virtual CPU
+devices do not establish accelerator scaling. This is ensemble sharding. A single
+PIC domain needs explicit ownership and communication of particles, current sums
+and collision-cell pairs before it can be distributed safely.
+
+### Where custom kernels would help
+
+Profile the complete forward and differentiated program before changing kernels.
+Candidate accelerator work is fused field gathering and particle pushing,
+collision sorting/pairing, and deposition with many particles competing for one
+cell. Elementwise radiation arithmetic alone may already fuse efficiently under
+XLA. A Pallas implementation earns its additional code only with measured benefit
+on the target hardware, matching force/current conservation tests and validated
+JVP/VJP rules. Keep the pure JAX implementation as the portable reference until
+those tests pass. See the upstream [profiling guide](https://docs.jax.dev/en/latest/profiling.html)
+and [Pallas documentation](https://docs.jax.dev/en/latest/pallas/index.html).
