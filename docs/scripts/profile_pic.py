@@ -7,6 +7,10 @@ PROFILE_CHECKPOINT=0|1, PROFILE_TRACE=0|1, PROFILE_COMPILE_ONLY=0|1.
 PROFILE_SHARDS>1 distributes four independent parameter values per device.
 Use a fresh process for each case, precision and device. The default explicit
 case also runs unchanged against the parent research-release checkout.
+Forward returns the complete Output with particle histories disabled; JSON values
+summarize final mean normalized E² only. Reverse/JVP use that scalar objective,
+so XLA can prune unused diagnostics. Checkpoint buffer estimates concern this AD
+workload; they establish neither peak runtime memory nor a runtime speedup.
 """
 import json
 import os
@@ -45,18 +49,21 @@ simulation = Simulation(Domain(length=.01, cells=64, dt_over_dx_c=.8), (electron
 scale = e * density * amplitude / epsilon_0
 
 
-def objective(beta):
+def forward(beta):
     sim = simulation.replace(species=(electrons.replace(drift=(beta * c, 0., 0.)), ions))
     settings = {"checkpoint": True} if checkpoint else {}
-    out = sim.run(steps, seed=3, store_every=steps, store_particles=False, **settings)
-    return jnp.mean((out.state.E / scale)**2)
+    return sim.run(steps, seed=3, store_every=steps, store_particles=False, **settings)
+
+
+def objective(beta):
+    return jnp.mean((forward(beta).state.E / scale)**2)
 
 
 def tangent(beta):
     return jax.jvp(objective, (beta,), (jnp.ones_like(beta),))
 
 
-function = {"forward": objective, "reverse": jax.value_and_grad(objective), "jvp": tangent}[mode]
+function = {"forward": forward, "reverse": jax.value_and_grad(objective), "jvp": tangent}[mode]
 beta = jnp.asarray(.6)
 shards = int(os.environ.get("PROFILE_SHARDS", 1))
 reference, finite_difference_objective = tangent, objective
@@ -72,6 +79,7 @@ executable = jax.jit(function).lower(beta).compile()
 compile_seconds = time.perf_counter() - start
 memory = executable.memory_analysis()
 report = provenance(case=case, mode=mode, checkpoint=checkpoint, particles=n + n // 2,
+                    workload="complete Output" if mode == "forward" else "scalar normalized E² objective",
                     steps=steps, cells=64, shards=shards, source=str(Path(jaxincell.__file__).resolve()),
                     devices=[str(d) for d in jax.devices()], compile_seconds=compile_seconds,
                     memory={name: getattr(memory, name) for name in
@@ -92,12 +100,13 @@ else:
         result = jax.block_until_ready(executable(beta))
         timings.append(time.perf_counter() - start)
     report.update(status="executed", warm_seconds=timings, median_seconds=float(np.median(timings)),
-                  values=[np.asarray(x).tolist() for x in jax.tree.leaves(result)])
+                  values=[np.mean((np.asarray(result.state.E) / scale)**2, axis=(-2, -1)).tolist()]
+                  if mode == "forward" else [np.asarray(x).tolist() for x in jax.tree.leaves(result)])
     if shards > 1:
         serial_beta = jax.device_put(beta, jax.sharding.SingleDeviceSharding(jax.devices()[0]))
         serial = jax.block_until_ready(jax.jit(function)(serial_beta))
-        differences = [float(np.linalg.norm(np.asarray(a) - np.asarray(b))
-                             / max(np.linalg.norm(np.asarray(b)), np.finfo(float).tiny))
+        differences = [float(np.linalg.norm(np.asarray(a, dtype=float) - np.asarray(b, dtype=float))
+                             / max(np.linalg.norm(np.asarray(b, dtype=float)), np.finfo(float).tiny))
                        for a, b in zip(jax.tree.leaves(result), jax.tree.leaves(serial))]
         report["sharding_relative_difference"] = max(differences)
         assert max(differences) < 1e-9, "sharded and single-device results disagree"
