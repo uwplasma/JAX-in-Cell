@@ -11,9 +11,9 @@ python examples/1_basic/two_stream.py
 ```
 
 Where an input file is listed the run needs no Python: `jaxincell inputs/<file>.toml`.
-Nine scripts — `sheath_unmagnetized.py`, `sheath_magnetized.py`, `sheath_optimization.py`,
+Scripts including `sheath_unmagnetized.py`, `sheath_magnetized.py`, `sheath_optimization.py`,
 `grazing_sheath.py`, `weibel.py`, `compare_models.py`, `electron_field.py`, `external_fields_3d.py` and
-`invariants.py` — take `--quick`, a smoke run of ten seconds to two minutes with
+`invariants.py`, `electron_cooling.py` and `runaway_rf.py` take `--quick`, a smoke run with
 far fewer particles. It reproduces the structure with more noise, and each says so when it
 starts, so that a smoke run is not quoted as a measurement.
 
@@ -52,6 +52,8 @@ starts, so that a smoke run is not quoted as a measurement.
 | {doc}`collisions` | the Takizuka-Abe operator against the Fokker-Planck rates | `2_intermediate/collisions.py` | `collisions.toml` |
 | {doc}`sheath_optimization` | a wall's reflectivity recovered from the sheath it holds | `3_advanced/sheath_optimization.py` | — |
 | {doc}`external_fields_3d` | a field on an $(x, y, z)$ grid: the grad-$B$ drift and a mirror | `2_intermediate/external_fields_3d.py` | — |
+| {doc}`../numerics/radiation` | electron and dilute-beam magnetic cooling, including analytic derivatives | `2_intermediate/electron_cooling.py` | — |
+| prescribed RF control | a finite-time pitch target with a field-exposure cost, AD and refinement | `3_advanced/runaway_rf.py` | — |
 
 ## Where the numbers come from
 

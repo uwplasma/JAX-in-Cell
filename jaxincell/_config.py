@@ -671,10 +671,10 @@ class Radiation:
     Args:
         model: ``"ll_reduced"``; other models are not implemented.
         species: Species name or tuple of names; ``None`` selects all species.
-        substeps: Positive number of local momentum substeps in the explicit
+        substeps: Positive number of radiation half-kick substeps in the explicit
             scheme, or a multiplier of particle orbit substeps in the implicit
-            scheme. Explicit positions and currents still use the grid step;
-            refine that step to resolve trajectories and time-dependent fields.
+            scheme. The explicit Lorentz kick, positions and currents still use
+            the grid step; refine it to resolve trajectories and applied fields.
     """
     model: str = "ll_reduced"
     species: object = None
@@ -694,7 +694,12 @@ class Radiation:
 
 @pytree_dataclass(static=("pairs",))
 class Collisions:
-    """Binary Coulomb collisions (Takizuka and Abe, 1977).
+    """Elastic binary Coulomb collisions.
+
+    The nonrelativistic solver uses Takizuka--Abe scattering. With
+    ``Solver(relativistic=True)``, center-of-momentum scattering uses the
+    relativistic Perez rate and Nanbu angles. Equal weights conserve pair energy
+    and momentum; unequal weights conserve those moments only in expectation.
 
     Args:
         pairs: Tuple of ``(name_a, name_b)`` species pairs to collide, including

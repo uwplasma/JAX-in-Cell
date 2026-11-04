@@ -28,11 +28,14 @@ components, and advances the fields on a staggered (Yee) grid. It has
   charge-conserving deposit, and an implicit Crank-Nicolson scheme with an exact field
   inversion; energy conservation requires a converged particle solve and orbit accuracy
   requires timestep refinement;
-* electromagnetic and electrostatic models, a compensated digital filter, and binary Coulomb
-  collisions;
+* electromagnetic and electrostatic models, a compensated digital filter, and nonrelativistic
+  or relativistic binary Coulomb collisions;
 * periodic, reflecting, absorbing and partly reflecting walls, particle sources, and floating
   collectors, so a plasma against a wall forms its own sheath;
-* external electric and magnetic fields on an $(x, y, z)$ grid;
+* external electric and magnetic fields on an $(x, y, z)$ grid, and differentiable prescribed
+  functions of position, absolute time and control parameters;
+* direct relativistic momentum initialization, classical reduced Landau–Lifshitz radiation
+  reaction, and separate ledgers for applied work, reaction work and emitted energy;
 * gradients of smooth observables with respect to physical inputs through `jax.grad`,
   with event and sampling limits described in the differentiation guide.
 
@@ -121,6 +124,20 @@ print(gradient.species[0].drift, gradient.domain.length)
 example leaves a folder with its settings, results and provenance.
 
 ## Benchmarks
+
+The radiation extension starts with
+[`electron_cooling.py`](examples/2_intermediate/electron_cooling.py), which checks
+single-electron and beam cooling against the exact uniform-magnetic-field solution,
+including its derivative. [`runaway_rf.py`](examples/3_advanced/runaway_rf.py)
+optimizes four prescribed RF envelope coefficients through the simulation and
+rechecks the result at finer resolution. Its finite-time objective is field exposure
+subject to a pitch-angle target; it does not claim minimum antenna power or sustained
+runaway suppression. The [radiation model and limits](docs/numerics/radiation.md)
+describe the additional physics required for that problem.
+
+`run(..., checkpoint=True)` reduces saved intermediates in reverse differentiation.
+[`profile_pic.py`](docs/scripts/profile_pic.py) reproduces local timing, compiler-memory
+and ensemble-sharding checks. Generated reports and traces stay outside the repository.
 
 Each case is checked against a closed-form or linear kinetic result, not against another
 simulation. Click a figure for its documentation page; the numbers come from

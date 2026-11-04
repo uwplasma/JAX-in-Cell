@@ -35,6 +35,7 @@ They are ordered by how much of the code they use, not by how interesting they a
 | `sheath_magnetized.py` | the sheath in a field oblique to the wall | its own limits, and the impact distributions | ~1 h |
 | `sheath_reflection.py` | a wall that returns part of the electron flux | Hobbs and Wesson (1967) | ~4 min |
 | `external_fields_3d.py` | an external field on an (x, y, z) grid: grad-B drift and a mirror bounce | guiding-centre theory | ~40 s; `--quick` ~20 s |
+| `electron_cooling.py` | classical radiation cooling of one electron and a dilute beam | exact uniform-B energy, gyrophase and field derivative | `--quick` smoke preset |
 
 ## 3_advanced
 
@@ -45,6 +46,7 @@ They are ordered by how much of the code they use, not by how interesting they a
 | `conservation.py` | the implicit scheme conserves energy and charge at once | round-off | ~1 min |
 | `optimize_two_stream.py` | gradient ascent on a growth rate, through the whole run | `sqrt(3/8)`, the cold-beam optimum | ~2 min |
 | `sheath_optimization.py` | a wall's reflectivity recovered from the sheath it holds | the value the target was made at | ~11 min |
+| `runaway_rf.py` | optimize a prescribed RF envelope for a finite-time pitch target | directional derivatives and refined trajectories | `--quick` smoke preset |
 
 `sheath_optimization.py` also takes `--oblique`, which runs the same experiment in a
 magnetic field 30 degrees to the wall, and writes its own folder of results.
