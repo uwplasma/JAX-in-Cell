@@ -972,3 +972,105 @@ def test_collision_stage_consumes_carried_high_gamma_momentum_without_a_velocity
                                atol=2e-3, rtol=0)
     assert float(jnp.max(jnp.linalg.norm(scattered-state.u, axis=1))) > 1e5
     assert float(jnp.min(simulation._gamma(scattered))) > 316
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_radiation_and_rf_work_objective_has_the_same_checkpointed_derivative(algorithm):
+    """Rematerialization preserves all nonzero work terms used by a sparse control objective."""
+    from jaxincell import Radiation
+
+    density, length, gamma0, dt = 1e-20, .01, 1000., 2e-15
+    particle = Species.electrons(1, density, u=jnp.array([[0., c*np.sqrt(gamma0**2-1), 0.]]))
+
+    def drive(x, time, amplitude):
+        field = jnp.zeros_like(x).at[:, 1].set(-amplitude*1e13*jnp.cos(4e13*time + .2))
+        return field, jnp.zeros_like(x)
+
+    simulation = Simulation(Domain(length=length, cells=4, time_step=dt), [particle],
+                            Solver(algorithm=algorithm, model="electrostatic", relativistic=True,
+                                   substeps=1, picard_iterations=4), radiation=Radiation(),
+                            external_B=jnp.zeros((4, 3)).at[:, 2].set(1e5),
+                            prescribed_fields=drive, field_parameters=.8)
+    energy0 = density*length*mass_electron*c**2*(gamma0-1)
+
+    def account(amplitude, checkpoint):
+        output = simulation.replace(field_parameters=amplitude).run(
+            4, snapshot_steps=[], store_particles=False, checkpoint=checkpoint)
+        work = output.state.work
+        return jnp.array([work.kinetic[0], work.prescribed_work[0], work.rr_work[0],
+                          work.radiated_energy[0]]) / energy0
+
+    coefficients = jnp.array([1., .37, .19, .53])
+
+    def objective(amplitude, checkpoint):
+        return jnp.dot(coefficients, account(amplitude, checkpoint))
+
+    original = jax.jit(jax.value_and_grad(lambda a: objective(a, False)))(.8)
+    recomputed = jax.jit(jax.value_and_grad(lambda a: objective(a, True)))(.8)
+    np.testing.assert_allclose(recomputed, original, rtol=2e-12, atol=2e-14)
+    assert abs(float(recomputed[1])) > 1e-3
+    ordinary, repeated = account(.8, False), account(.8, True)
+    assert np.min(np.abs(np.asarray(ordinary))) > 1e-4
+    assert float(ordinary[1]) > 0 and float(ordinary[2]) < 0 < float(ordinary[3])
+    np.testing.assert_allclose(repeated, ordinary, rtol=2e-13, atol=2e-14)
+    h = 1e-4
+    finite = (objective(.8+h, True) - objective(.8-h, True)) / (2*h)
+    assert float(recomputed[1]) == pytest.approx(float(finite), rel=2e-7, abs=0)
+
+
+@pytest.mark.parametrize("iterations,converged", [(1, False), (8, True)])
+def test_radiation_picard_residual_rejects_an_unconverged_momentum_orbit(iterations, converged):
+    """A finite radiation iterate is insufficient; replay must resolve its nonlinear momentum force."""
+    from jaxincell import Radiation
+
+    particle = Species.electrons(1, 1e-18, u=jnp.array([[0., c*np.sqrt(1000.**2-1), 0.]]))
+    solver = Solver(algorithm="implicit", model="electrostatic", relativistic=True,
+                    substeps=1, picard_iterations=iterations, picard_tolerance=1e-9)
+    simulation = Simulation(Domain(length=.01, cells=4, time_step=2e-14), [particle], solver,
+                            radiation=Radiation(), external_B=jnp.zeros((4, 3)).at[:, 2].set(1e5))
+    checked = simulation.run(1, store_particles=False)
+    unchecked = simulation.replace(solver=solver.replace(picard_tolerance=None)).run(1, store_particles=False)
+    assert np.isfinite(np.asarray(unchecked.state.u)).all()
+    assert float(unchecked.state.work.rr_work[0]) < 0
+    # The diagnostic replay must not accumulate another iteration's radiation.
+    for actual, expected in zip(jax.tree.leaves(checked.state.work), jax.tree.leaves(unchecked.state.work)):
+        np.testing.assert_array_equal(actual, expected)
+    if converged:
+        checked.validate()
+        np.testing.assert_array_equal(checked.state.u, unchecked.state.u)
+        np.testing.assert_array_equal(checked.state.E, unchecked.state.E)
+    else:
+        with pytest.raises(RuntimeError, match="picard_tolerance"):
+            checked.validate()
+        assert np.isnan(np.asarray(checked.state.E)).all()
+
+
+def test_selected_radiating_source_subset_has_the_physical_parallel_electric_emission():
+    """One emitted slot uses its physical charge/mass; an unselected high-gamma resident does not radiate."""
+    from jaxincell import Radiation
+
+    dt, density, speed, field = 1e-15, 1e5, .05*c, -1e9
+    resident = Species.electrons(1, 1e-18, name="resident", u=jnp.array([[0., 1000*c, 0.]]))
+    source = Source(density=density, vth=0., drift=(speed, 0., 0.), emit=1, every=2)
+    feed = Species.electrons(5, 0., name="feed", active=0, source=source)
+    simulation = Simulation(Domain(length=.01, cells=4, time_step=dt,
+                                   particle_bc="absorbing", field_bc="reflective"), [resident, feed],
+                            Solver(model="electrostatic", relativistic=True), radiation=Radiation(species="feed"),
+                            external_E=jnp.zeros((4, 3)).at[:, 0].set(field))
+    output = simulation.run(2, store_particles=False).validate()
+    work = output.state.work
+    weight = density*speed*2*dt
+    elapsed = 1.5*dt                   # cadence-2 birth at dt/2, output at 2dt
+    tau = e_charge**2 / (6*np.pi*epsilon_0*mass_electron*c**3)
+    power = tau*e_charge**2/mass_electron*field**2
+    assert float(work.radiated_energy[1]) == pytest.approx(weight*power*elapsed, rel=2e-12, abs=0)
+    assert float(work.radiated_energy[0]) == float(work.rr_work[0]) == 0.
+    assert abs(float(work.rr_work[1])) < 1e-12*float(work.radiated_energy[1])
+    initial_energy = float(output.state.wall.energy_injected[1].sum())
+    assert float(work.kinetic[1]-initial_energy) == pytest.approx(float(work.prescribed_work[1]), rel=2e-12, abs=0)
+    slots = np.asarray(output.state.w)[1:] > 0
+    assert slots.sum() == source.emit < feed.n
+    initial_u = speed/np.sqrt(1-speed**2/c**2)
+    expected_u = initial_u-e_charge*field/mass_electron*elapsed
+    assert float(np.asarray(output.state.u)[1:][slots, 0][0]) == pytest.approx(expected_u, rel=2e-13)
+    assert float(output.state.u[0, 1]) == 1000*c

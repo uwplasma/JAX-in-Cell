@@ -1214,3 +1214,14 @@ steps = 2
     assert simulation.radiation.species == ("beam",)
     output = simulation.run(**options).validate()
     assert float(output.work.radiated_energy[-1, 0]) > 0
+
+
+def test_legacy_diagnostics_preserve_existing_results_without_a_work_ledger():
+    particle = Species.electrons(2, 1e3, vth=0.)
+    output = Simulation(Domain(cells=4), [particle], Solver(model="electrostatic")).run(3)
+    current = diagnostics(output)
+    legacy = diagnostics(output.replace(work=None))
+    assert set(current)-set(legacy) == {"energy_balance", "collision_work"}
+    for name, values in legacy.items():
+        for old, new in zip(jax.tree.leaves(values), jax.tree.leaves(current[name])):
+            np.testing.assert_array_equal(old, new)
