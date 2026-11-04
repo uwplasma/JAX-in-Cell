@@ -27,6 +27,9 @@ quick = "--quick" in sys.argv
 B0, duration, density = 1000., 1e-9, 1e-3      # T, s, m^-3; an intentionally dilute test ensemble
 steps, cells, length = (4096 if quick else 32768), 8, .02
 frames = 128
+double_precision = jax.config.read("jax_enable_x64")
+gamma_tolerance = 1e-8 if double_precision else .003
+energy_tolerance = 1e-10 if double_precision else .005
 tau = e**2 / (6 * np.pi * epsilon_0 * m * c**3)
 B_schwinger = 4.4140052e9                    # electron critical magnetic field, T
 
@@ -61,7 +64,7 @@ beam = jnp.asarray(c * np.sqrt(g0[:, None]**2 - 1) * np.column_stack(
     (np.cos(pitch), np.sin(pitch) * np.cos(phase), np.sin(pitch) * np.sin(phase))))
 fig, axes = figure(2)
 for label, u0 in (("electron", mono), ("beam", beam)):
-    out = simulation(u0, B0).run(steps, store_every=steps // frames, moments=False)
+    out = simulation(u0, B0).run(steps, store_every=steps // frames, moments=False).validate()
     gamma = np.sqrt(1 + np.sum((np.asarray(out.u) / c)**2, axis=-1))
     analytic = exact_gamma(u0, np.asarray(out.t), B0)
     initial = np.sqrt(1 + np.sum((np.asarray(u0) / c)**2, axis=1))
@@ -69,17 +72,26 @@ for label, u0 in (("electron", mono), ("beam", beam)):
     energy_end = float(out.work.kinetic[-1, 0])
     emitted = float(out.work.radiated_energy[-1, 0])
     reaction = float(out.work.rr_work[-1, 0])
-    print(f"{label}: max relative gamma error {np.max(abs(gamma / analytic - 1)):.3e}; "
-          f"(K_final + emitted - K_initial)/K_initial = {(energy_end + emitted - energy0) / energy0:.3e}")
+    gamma_error = np.max(abs(gamma / analytic - 1))
+    energy_residual = (energy_end + emitted - energy0) / energy0
+    assert gamma_error < gamma_tolerance, f"{label}: cooling does not match the exact solution"
+    assert abs(energy_residual) < energy_tolerance, f"{label}: emission does not close the magnetic energy balance"
+    assert emitted > 0 and reaction < 0, f"{label}: radiation did not remove mechanical energy"
+    print(f"{label}: max relative gamma error {gamma_error:.3e}; "
+          f"(K_final + emitted - K_initial)/K_initial = {energy_residual:.3e}")
     print(f"  mechanical RR work {reaction:.6e} J/m^2; emitted energy {emitted:.6e} J/m^2; "
           f"initial chi <= {np.max(initial) * B0 / B_schwinger:.3e}")
     if label == "electron":
         a = tau * (e * B0 / m)**2
         s0 = np.arctanh(1 / initial[0])
-        logcosh = lambda s: np.log1p(2 * np.sinh(s / 2)**2)
+
+        def logcosh(s):
+            return np.log1p(2 * np.sinh(s / 2)**2)
         phase_exact = e * B0 / (m * a) * (logcosh(s0 + a * duration) - logcosh(s0))
         final_u = np.asarray(out.state.u[0])
         phase_error = np.angle((final_u[1] + 1j * final_u[2]) * np.exp(-1j * phase_exact))
+        phase_tolerance = (.05 if quick else .001) + (0. if double_precision else .02)
+        assert abs(phase_error) < phase_tolerance, "the Lorentz gyrophase needs a smaller macro time step"
         print(f"  final gyrophase error (modulo 2 pi): {phase_error:.3e} rad")
     line, = axes[0].plot(np.asarray(out.t) * 1e9, np.mean(gamma, axis=1), label=label)
     axes[0].plot(np.asarray(out.t) * 1e9, np.mean(analytic, axis=1), "--", color=line.get_color())
@@ -96,6 +108,9 @@ value, derivative = jax.jit(lambda b: jax.jvp(final_gamma, (b,), (1.,)))(B0)
 expected = exact_gamma(mono, duration, B0)[0]
 a = tau * (e * B0 / m)**2
 exact_derivative = -2 * a * duration / B0 * (expected**2 - 1)
+assert abs(float(value) / expected - 1) < gamma_tolerance, "the differentiated forward result is inaccurate"
+assert abs(float(derivative) / exact_derivative - 1) < (2e-7 if double_precision else .02), \
+    "the field-strength derivative does not match the analytic sensitivity"
 print(f"d gamma_final/d B: AD {float(derivative):.8e} /T, exact {exact_derivative:.8e} /T; "
       f"relative error {abs(float(derivative) / exact_derivative - 1):.3e}")
 print("Energy accuracy alone does not establish gyrophase accuracy: refine the macro time step as well.")

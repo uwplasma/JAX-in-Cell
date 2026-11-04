@@ -87,16 +87,27 @@ quantities**; defining one as minus the other would fail this basic control.
 ## Integration and the energy ledger
 
 The explicit mover composes a midpoint Runge–Kutta radiation half-step, a relativistic
-Boris step, and another radiation half-step. `Radiation.substeps` repeats these
-local momentum updates with the gathered fields held fixed. It refines the local
-cooling and rotation map, but **does not refine the particle positions, deposited
-current, or sampled RF phase**. Resolve those by decreasing `Domain.time_step`.
+Boris step, and another radiation half-step. `Radiation.substeps` subdivides only
+the two radiation half-steps, with the gathered fields held fixed; there is still
+one original Boris Lorentz kick. It refines the local cooling map, but **does not
+refine the Lorentz rotation, particle positions, deposited current, or sampled RF
+phase**. Resolve those by decreasing `Domain.time_step`.
 
 The implicit mover includes the radiation force at the midpoint momentum in the
 particle/field Picard iteration. Its particle substep count is
 `Solver.substeps * Radiation.substeps`. A radiation update after a converged
 collisionless solve would solve a different discrete problem. The Picard residual,
 iteration count, and time-step convergence remain part of the accuracy check.
+
+Radiation or a time-dependent prescribed-field callback currently requires periodic
+particle boundaries with the implicit solver. That combination is rejected for
+implicit reflecting, absorbing, or thermal walls: the current, work, and emission
+would all need a consistent split at the event. The explicit solver supports these
+wall paths. A source entry window must also end before any newly loaded trajectory
+reaches a wall; an unresolved crossing during that window invalidates the output.
+Call `out.validate()` and shorten `Source.every` or the time step if it reports this
+condition. The guard prevents work or radiation from being assigned to an already
+collected particle.
 
 Mechanical work uses the discrete kinetic-energy gradient
 
@@ -204,8 +215,9 @@ J=\frac{1}{E_*^2 T_c}\int_0^{T_c}\langle E_{\rm RF}^2\rangle_x\,dt
 
 subject to a target rms $\sin\theta$ and a fixed 0.5% design margin. The script checks
 a directional derivative against central differences, then repeats the optimized
-control with half the time step and twice the gyro-phase samples. This verifies a
-best-found control in a fixed finite parameterization; it is not a global optimum
+control with half the time step and twice the gyro-phase samples. Assertions enforce
+the derivative check, the target in both runs, a declared refinement tolerance, and
+a reduction in field exposure. This verifies a best-found control in a fixed finite parameterization; it is not a global optimum
 or a long-time response derivative.
 
 The dimensional field exposure is $J E_*^2 T_c$, in V² s/m². **It is not input energy.**

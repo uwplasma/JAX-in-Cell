@@ -123,16 +123,22 @@ def cost(a):
 
 start = np.full(4, 1.4)
 direction = np.array([1., -.5, .25, -.75])
-h = 1e-3 if jax.config.read("jax_enable_x64") else .03
+double_precision = jax.config.read("jax_enable_x64")
+h = 1e-3 if double_precision else .03
 value, gradient = measured(tuple(start))
 finite_difference = float((forward(start + h * direction) - forward(start - h * direction)) / (2 * h))
 derivative = float(gradient @ direction)
 print(f"directional derivative: AD {derivative:.7e}, finite difference {finite_difference:.7e}; "
       f"relative mismatch {abs(derivative - finite_difference) / max(abs(derivative), 1e-15):.3e}")
+gradient_tolerance = 2e-4 if double_precision else .02
+assert np.isfinite(derivative) and np.isfinite(finite_difference), "nonfinite control sensitivity"
+assert abs(derivative - finite_difference) <= gradient_tolerance * max(abs(derivative), pitch_target**2 / 100), \
+    "the directional derivative failed its physical-response-scale check"
 constraint = {"type": "ineq", "fun": lambda a: measured(tuple(a))[0] - design_target**2,
               "jac": lambda a: measured(tuple(a))[1]}
 result = minimize(cost, start, jac=True, method="SLSQP", bounds=[(0., coefficient_max)] * 4,
-                  constraints=constraint, options={"maxiter": 25, "ftol": 1e-10, "disp": False})
+                  constraints=constraint,
+                  options={"maxiter": 25, "ftol": 1e-10 if double_precision else 1e-6, "disp": False})
 controls = np.asarray(result.x)
 reached = float(forward(controls))
 refined = float(response(controls, count=2 * steps, gyrophases=2 * phases))
@@ -142,20 +148,27 @@ print(f"normalized field exposure {float(budget(start)):.6g} -> {float(budget(co
       f"physical exposure {exposure:.6g} V^2 s/m^2")
 print(f"rms sin(pitch): target {pitch_target:.6f}, optimized {np.sqrt(reached):.6f}, "
       f"half-step/double-phase verification {np.sqrt(refined):.6f}")
-feasible = result.success and reached >= pitch_target**2 and refined >= pitch_target**2
-print("Finite-time target and refinement gate: " + ("passed" if feasible else "NOT MET"))
+assert result.success, result.message
+assert np.all(np.isfinite(controls)) and np.isfinite(reached) and np.isfinite(refined), "nonfinite optimized response"
+assert reached >= pitch_target**2 and refined >= pitch_target**2, "the optimized/refined control missed the target"
+refinement_tolerance = .003 if double_precision else .01
+assert abs(np.sqrt(refined) - np.sqrt(reached)) <= refinement_tolerance * pitch_target, \
+    "the refined rms pitch differs by more than the declared fraction of the target"
+assert float(budget(controls)) < .99 * float(budget(start)), "the optimizer did not reduce field exposure by 1%"
+print("Finite-time target, derivative, and refinement gates: passed")
 
 fig, axes = figure(2)
 t_plot = np.linspace(0, duration, 400)
 for label, a in (("RF off", np.zeros(4)), ("initial envelope", start), ("optimized envelope", controls)):
-    out = simulate(jnp.asarray(a), history=True)
+    out = simulate(jnp.asarray(a), history=True).validate()
     eta = np.asarray(out.u) / c
     pitch = np.sqrt(np.mean(np.sum(eta[..., 1:]**2, axis=-1) / np.sum(eta**2, axis=-1), axis=1))
     g, dg = envelope(jnp.asarray(t_plot), jnp.asarray(a))
     axes[0].plot(t_plot * 1e9, E_scale * np.sqrt(np.asarray(g**2 + (dg / omega)**2)) / 1e3, label=label)
     axes[1].plot(np.asarray(out.t) * 1e9, pitch, label=label)
-    prescribed, emitted, reaction = (float(getattr(out.work, name)[-1, 0]) for name in
-                                    ("prescribed_work", "radiated_energy", "rr_work"))
+    prescribed = float(out.work.prescribed_work[-1, 0])
+    emitted = float(out.work.radiated_energy[-1, 0])
+    reaction = float(out.work.rr_work[-1, 0])
     energy0 = density * length * (gamma0 - 1) * m * c**2
     delta = float(out.work.kinetic[-1, 0]) - energy0
     gamma_end = np.sqrt(1 + np.sum(eta[-1]**2, axis=1))
@@ -167,7 +180,7 @@ for label, a in (("RF off", np.zeros(4)), ("initial envelope", start), ("optimiz
           f"instantaneous magnetic cooling time {cooling_time:.3g} s")
 print("This is a short, dilute orbit-ensemble control. The physical radiation force is unscaled.")
 print("Field exposure is not input energy; prescribed particle work is not source power.")
-print("Radiation substeps refine the local momentum map, not RF phase or position sampling: refine Domain.time_step.")
+print("Radiation substeps refine RR half-kicks only; refine Domain.time_step for gyromotion, RF phase and orbits.")
 axes[0].set(xlabel="time (ns)", ylabel="prescribed RF |E| (kV/m)", title="fixed mode, smooth envelopes")
 axes[1].set(xlabel="time (ns)", ylabel="rms sin(pitch)", title="actual particle response")
 axes[1].axhline(pitch_target, color="k", ls="--", lw=1, label="target")
