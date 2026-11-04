@@ -169,6 +169,12 @@ def _sourced(emit=2, capacity=64, active=None):
                         radiation=Radiation(species="absent")), "not in this simulation"),
     (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], prescribed_fields=1), "pure callable"),
     (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], field_parameters=1.), "needs prescribed_fields"),
+    (lambda: Simulation(Domain(particle_bc="absorbing"), [Species.electrons(4, 1.)],
+                        Solver(algorithm="implicit", relativistic=True), radiation=Radiation()),
+     "require periodic particle boundaries"),
+    (lambda: Simulation(Domain(particle_bc="reflective"), [Species.electrons(4, 1.)],
+                        Solver(algorithm="implicit"), prescribed_fields=lambda x, t, p: (0., 0.)),
+     "require periodic particle boundaries"),
     (lambda: Simulation(Domain(), [Species.electrons(4, 1.)],
                         prescribed_fields=lambda x, t, p: (jnp.zeros((4, 4)), 0)).run(1), "broadcastable"),
     *[(lambda value=value: Radiation(substeps=value), "positive whole number")
@@ -203,7 +209,7 @@ def _sourced(emit=2, capacity=64, active=None):
     (lambda: Impacts(energy_max=1e-18, angle_bins=0), "at least one bin of each"),
     (lambda: _sourced(emit=8, capacity=4), "into 4 slots"),
     (lambda: Simulation(Domain(), [Species.electrons(n=4, density=1.0)],
-                        Solver(relativistic=True), Collisions()), "explicit Coulomb logarithm"),
+                        Solver(relativistic=True), Collisions()), "explicit Collisions"),
 ])
 def test_invalid_input_raises_a_value_error_that_python_O_keeps(build, message):
     with pytest.raises(ValueError, match=message):
