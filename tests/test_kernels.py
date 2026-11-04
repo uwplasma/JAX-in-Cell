@@ -796,8 +796,7 @@ def test_landau_lifshitz_matches_independent_force_and_radiated_power():
     ve = np.sum(v * E, axis=-1, keepdims=True)
     invariant = np.sum(force**2, axis=-1, keepdims=True) - ve**2 / c**2
     rate = charge**4 / (6 * np.pi * epsilon_0 * mass**3 * c**3)
-    expected = rate[:, None] * (np.cross(force, B) + ve * E / c**2
-                               - gamma**2 * invariant * v / c**2)
+    expected = rate[:, None] * (np.cross(force, B) + ve * E / c**2 - gamma**2 * invariant * v / c**2)
     emitted = (rate[:, None] * mass[:, None] * gamma**2 * invariant)[:, 0]
     acceleration, power = jax.jit(landau_lifshitz)(u, E, B, charge, mass)
     np.testing.assert_allclose(acceleration, expected, rtol=3e-14, atol=0)
@@ -863,8 +862,13 @@ def test_landau_lifshitz_derivatives_are_finite_at_zero_momentum():
     """No norm division or branch may poison an outer derivative at a stopped marker."""
     B = jnp.array([0., 0., 2.])
     zero = jnp.zeros(3)
-    acceleration = lambda u: landau_lifshitz(u, zero, B, -elementary_charge, mass_electron)[0]
-    power = lambda u: landau_lifshitz(u, zero, B, -elementary_charge, mass_electron)[1]
+
+    def acceleration(u):
+        return landau_lifshitz(u, zero, B, -elementary_charge, mass_electron)[0]
+
+    def power(u):
+        return landau_lifshitz(u, zero, B, -elementary_charge, mass_electron)[1]
+
     tau = elementary_charge**2 / (6 * np.pi * epsilon_0 * mass_electron * c**3)
     a = tau * (2 * elementary_charge / mass_electron)**2
     np.testing.assert_allclose(jax.jacfwd(acceleration)(zero), -a * np.diag([1., 1., 0.]), rtol=2e-15, atol=0)
