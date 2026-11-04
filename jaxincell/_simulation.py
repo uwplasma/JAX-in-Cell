@@ -1468,7 +1468,7 @@ class Simulation:
 
     # -- the run ---------------------------------------------------------------------------------
     def run(self, steps, seed=0, store_every=1, store_particles=True, moments=False, state=None,
-            verbose=False, snapshot_steps=None):
+            verbose=False, snapshot_steps=None, checkpoint=False):
         """Advance ``steps`` time steps and return an :class:`Output`.
 
         Args:
@@ -1481,6 +1481,9 @@ class Simulation:
                 ``store_every=1``. An integer ``n`` keeps every ``n``-th completed step (indices ``n-1, 2n-1, ...``).
                 Every step still advances, and ``Output.state`` is always the final state.
             store_particles: Keep the particle histories (the bulk of the memory).
+            checkpoint: Recompute each physics step during reverse differentiation
+                instead of retaining its intermediates. Trades computation for
+                gradient memory without changing the forward discrete scheme.
             moments: Which velocity moments to sum over every step and store the running sums
                 of, so that a mean profile over a long window needs no particle history:
                 ``False``, ``"density"``, ``"flux"`` (the density and the three fluxes) or
@@ -1509,6 +1512,8 @@ class Simulation:
                              "which must be at least one")
         if snapshot_steps is not None:
             snapshot_steps = _snapshot_schedule(snapshot_steps, steps, store_every)
+        if not isinstance(checkpoint, (bool, np.bool_)):
+            raise ValueError("checkpoint must be a static boolean")
         level = "full" if moments is True else moments
         if level not in (False, None, *self.MOMENT_LEVELS):
             raise ValueError(f"moments is False, True, or one of {', '.join(map(repr, self.MOMENT_LEVELS))}, "
@@ -1517,7 +1522,8 @@ class Simulation:
         # differentiated path; under jit, grad or vmap it turns itself off without being asked
         traced = any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves((self, state, seed)))
         meter = None if traced else reporter(verbose, steps)
-        return _run(self, steps, seed, store_every, store_particles, level or None, state, meter, snapshot_steps)
+        return _run(self, steps, seed, store_every, store_particles, level or None, state, meter,
+                    snapshot_steps, bool(checkpoint))
 
 
 def _snapshot_schedule(snapshot_steps, steps, store_every):
@@ -1539,8 +1545,8 @@ def _snapshot_schedule(snapshot_steps, steps, store_every):
     return tuple(sorted(set(map(int, schedule))))
 
 
-@partial(jax.jit, static_argnames=("chunks", "store_every", "store_particles", "snapshot_steps"))
-def _advance(sim, carry, extra, chunks, store_every, store_particles, snapshot_steps=None):
+@partial(jax.jit, static_argnames=("chunks", "store_every", "store_particles", "snapshot_steps", "checkpoint"))
+def _advance(sim, carry, extra, chunks, store_every, store_particles, snapshot_steps=None, checkpoint=False):
     """``chunks * store_every`` steps from ``carry``, keeping the state at the end of each chunk.
 
     This is the whole loop, and it is the only compiled thing here. A run of one group is the
@@ -1548,6 +1554,8 @@ def _advance(sim, carry, extra, chunks, store_every, store_particles, snapshot_s
     times, which the state makes identical -- the guarantee a restart already rests on."""
     step = partial(sim._explicit_step if sim.solver.algorithm == "explicit" else sim._implicit_step,
                    extra=extra)
+    if checkpoint:
+        step = jax.checkpoint(step)
     # an output, overwritten before it is read
     placeholder = (carry.x, carry.u, carry.w, carry.E, carry.B, jnp.zeros_like(carry.E), carry.rho)
 
@@ -1590,7 +1598,7 @@ def _advance(sim, carry, extra, chunks, store_every, store_particles, snapshot_s
     return lax.scan(chunk, carry, None, length=chunks)
 
 
-def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose, snapshot_steps):
+def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose, snapshot_steps, checkpoint):
     """Drive :func:`_advance`, in one group or in several with a meter between them."""
     carry, extra = sim.initial_state(random.PRNGKey(seed)) if state is None else (state, sim.per_particle)
     if any(sp.source.model == "volume" for sp, _ in sim.sources) and carry.wall.birth_budget is None:
@@ -1611,7 +1619,7 @@ def _run(sim, steps, seed, store_every, store_particles, moments, state, verbose
         for count in _groups(chunks, verbose):
             schedule = None if snapshot_steps is None else tuple(s - done for s in snapshot_steps
                                                                  if done <= s < done + count)
-            carry, history = _advance(sim, carry, extra, count, store_every, store_particles, schedule)
+            carry, history = _advance(sim, carry, extra, count, store_every, store_particles, schedule, checkpoint)
             histories.append(history)
             done += count * store_every
             if verbose is not None:
@@ -1649,7 +1657,8 @@ def _join(histories):
 
 #: Keys ``[run]`` may hold: the arguments of :meth:`Simulation.run` that a file can give,
 #: and ``plot``, which the command line reads.
-RUN_KEYS = ("steps", "seed", "store_every", "store_particles", "moments", "verbose", "snapshot_steps", "plot")
+RUN_KEYS = ("steps", "seed", "store_every", "store_particles", "moments", "verbose",
+            "snapshot_steps", "checkpoint", "plot")
 
 
 def _only(where, given, allowed):

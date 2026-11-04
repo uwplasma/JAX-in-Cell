@@ -7,7 +7,7 @@ when the physical parameters change.
 
 ```python
 output = simulation.run(steps, seed=0, store_every=1, store_particles=True,
-                        moments=False, state=None, verbose=False, snapshot_steps=None)
+                        moments=False, state=None, verbose=False, snapshot_steps=None, checkpoint=False)
 ```
 
 ## Arguments
@@ -19,6 +19,7 @@ output = simulation.run(steps, seed=0, store_every=1, store_particles=True,
 | `store_every` | keep every n-th state | `1` |
 | `snapshot_steps` | keep an explicit sequence of zero-based post-step indices instead, or an integer `n` for every `n`-th completed step; requires `store_every=1` | `None` |
 | `store_particles` | keep the particle histories, the bulk of the memory | `True` |
+| `checkpoint` | recompute physics steps during reverse differentiation to reduce saved intermediates | `False` |
 | `moments` | running velocity-moment sums ({doc}`sources`) | `False` |
 | `state` | a previous `Output.state` to continue from | `None` |
 | `verbose` | report progress: `True`, or anything to call with `(done, total)` | `False` |
@@ -27,7 +28,7 @@ output = simulation.run(steps, seed=0, store_every=1, store_particles=True,
 
 | | |
 |---|---|
-| static — changing one rebuilds the program | `steps`, `store_every`, `snapshot_steps`, `store_particles`, the particle counts, the cell count, the boundary types, every switch in {class}`~jaxincell.Solver` |
+| static — changing one rebuilds the program | `steps`, `store_every`, `snapshot_steps`, `store_particles`, `checkpoint`, the particle counts, the cell count, the boundary types, every switch in {class}`~jaxincell.Solver` |
 | pytree leaves — free to change | lengths, densities, drifts, thermal speeds, the filter weight, the restitution, the external fields |
 
 ```python
@@ -91,9 +92,11 @@ The particle history is almost always the binding constraint, not speed:
 \text{bytes} = \frac{\text{steps}}{\text{store\_every}} \times N \times 8 \times (3 + 3 + 1)
 ```
 
-for the positions, the velocities and the weights. Six thousand steps of sixty thousand
-particles is 20 GB; the same run's fields on a 128-cell grid are under a hundred megabytes.
-Two ways out:
+for nonrelativistic positions, velocities and weights in float64. Relativistic
+runs also retain three momentum components, increasing the factor from 7 to 10.
+Six thousand steps of sixty thousand particles therefore need about 20 GB or
+29 GB, respectively; the fields on a 128-cell grid are under a hundred megabytes.
+Reduce the stored history:
 
 ```python
 output = simulation.run(20000, store_every=20)        # 1/20 of the samples
@@ -113,7 +116,8 @@ the number of snapshots; differentiation can also retain intermediate states.
 `store_particles=False` keeps the fields and the charge density, which is all the field
 diagnostics need, and is the right choice for a growth-rate measurement. `kinetic`,
 `total`, `momentum` and `temperatures` are then absent from
-{func}`~jaxincell.diagnostics`: they cannot be computed without the particles.
+{func}`~jaxincell.diagnostics`. The streamed per-species kinetic energy remains
+available as `output.work.kinetic`, with the work budgets and mechanical balance.
 
 ## Restarts
 
@@ -182,7 +186,7 @@ Every table is a constructor.
 | `[collisions]` | {class}`~jaxincell.Collisions` |
 | `[impacts]` | {class}`~jaxincell.Impacts` |
 | `[external]` | uniform external fields, `E` and `B` as three components broadcast over the grid |
-| `[run]` | the arguments of `run` — `steps`, `seed`, `store_every`, `snapshot_steps`, `store_particles`, `moments`, `verbose` — and `plot`, which the command line reads |
+| `[run]` | the arguments of `run` — `steps`, `seed`, `store_every`, `snapshot_steps`, `store_particles`, `moments`, `verbose`, `checkpoint` — and `plot`, which the command line reads |
 
 * Every species states its `mass`, by name or in kilograms, optionally times `mass_ratio`.
   A species without one, or with a name other than `"electron"` or `"proton"`, is a

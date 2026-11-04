@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from jaxincell import (Collisions, Domain, Impacts, Radiation, Simulation, Solver, Source, Species,
-                      diagnostics, load_toml)
+                       diagnostics, load_toml)
 from jaxincell import mass_electron, mass_proton, speed_of_light as c
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -103,6 +103,36 @@ def test_radiation_configuration_is_static_and_normalizes_species():
     assert single.replace(species=()).species == ()
 
 
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_checkpoint_preserves_the_discrete_objective_gradient_and_restart(algorithm):
+    electrons = Species.electrons(16, 1e14, vth=.01 * c, drift=.2 * c, plus_minus=True,
+                                  perturbation_amplitude=1e-5, perturbation_mode=1, sampling="low_noise")
+    ions = Species.ions(8, 1e14, vth=0., mass_ratio=1e6)
+    sim = Simulation(Domain(length=.01, cells=8, dt_over_dx_c=.4), (electrons, ions),
+                     Solver(algorithm=algorithm, relativistic=True))
+
+    def objective(beta, checkpoint):
+        varied = sim.replace(species=(electrons.replace(drift=beta * c), ions))
+        return jnp.mean(varied.run(4, snapshot_steps=[], store_particles=False,
+                                   checkpoint=checkpoint).state.E**2)
+
+    original = jax.jit(jax.value_and_grad(lambda beta: objective(beta, False)))(.2)
+    recomputed = jax.jit(jax.value_and_grad(lambda beta: objective(beta, True)))(.2)
+    forward = jax.jvp(lambda beta: objective(beta, True), (.2,), (1.,))
+    assert np.isfinite(np.asarray(recomputed)).all() and abs(float(recomputed[1])) > 0
+    np.testing.assert_allclose(recomputed, original, rtol=2e-11, atol=0)
+    np.testing.assert_allclose(recomputed, forward, rtol=2e-11, atol=0)
+    h = 1e-4
+    fd = (objective(.2 + h, True) - objective(.2 - h, True)) / (2 * h)
+    assert float(fd) == pytest.approx(float(recomputed[1]), rel=1e-5, abs=0)
+    first = sim.run(2, checkpoint=True)
+    resumed = sim.run(2, state=first.state, checkpoint=True, snapshot_steps=[1])
+    whole = sim.run(4, store_every=2, checkpoint=False)
+    for a, b in zip(jax.tree.leaves(resumed.state), jax.tree.leaves(whole.state)):
+        np.testing.assert_allclose(a, b, rtol=2e-12, atol=0)
+    np.testing.assert_allclose(resumed.E, whole.E[-1:], rtol=2e-12, atol=0)
+
+
 def test_ions_derived_from_electrons_are_differentiable_in_the_electron_thermal_speed():
     def ion_vth(u):
         electrons = Species.electrons(n=4, density=1.0, vth=(u, 0.0, 0.0))
@@ -132,6 +162,7 @@ def _sourced(emit=2, capacity=64, active=None):
     (lambda: Radiation(species=("electrons", "electrons")), "distinct, nonempty"),
     (lambda: Radiation(species=("",)), "distinct, nonempty"),
     (lambda: Radiation(species=(1,)), "distinct, nonempty"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)]).run(0, checkpoint=1), "static boolean"),
     *[(lambda value=value: Radiation(substeps=value), "positive whole number")
       for value in (0, -1, 1.5, True, np.bool_(True))],
     (lambda: Species.electrons(n=4, density=1.0, reflection=(0.1, 0.2, 0.3)), "reflection takes"),
