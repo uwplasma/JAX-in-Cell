@@ -120,8 +120,9 @@ print(gradient.species[0].drift, gradient.domain.length)
 ```
 
 `examples/1_basic/parameters_and_sampling.py` is the tutorial on the inputs and
-`examples/2_intermediate/output_and_restart.py` on saving, restarting and openPMD. Every
-example leaves a folder with its settings, results and provenance.
+`examples/2_intermediate/output_and_restart.py` on saving, restarting and openPMD.
+Examples that save results include settings and provenance; the radiation and RF
+examples print their validation results and display figures without writing files.
 
 ## Benchmarks
 
