@@ -810,3 +810,165 @@ def test_optional_picard_replay_does_not_redraw_thermal_walls_or_add_impacts():
     assert np.any(np.asarray(out.v[0, :, 1:]))
     for checked, baseline in zip(jax.tree.leaves(out.state), jax.tree.leaves(reference.state)):
         np.testing.assert_array_equal(checked, baseline)
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+@pytest.mark.parametrize("double,gamma", [(False, 1e3), (True, 1e8)])
+def test_direct_momentum_preserves_high_gamma_and_streamed_energy(algorithm, double, gamma):
+    """A neutral relativistic marker retains u exactly; diagnostics never invert v/c."""
+    from jaxincell._diagnostics import energies, energy_balance
+    try:
+        from jax import enable_x64
+    except ImportError:
+        from jax.experimental import enable_x64
+
+    with enable_x64(double):
+        dtype = jnp.float64 if double else jnp.float32
+        momentum = jnp.asarray([[0., c * np.sqrt(gamma**2 - 1), 0.]], dtype=dtype)
+        species = Species("marker", 1, 0., mass_electron, 1., u=momentum)
+        simulation = Simulation(Domain(length=.01, cells=4, time_step=1e-13), [species],
+                                Solver(algorithm=algorithm, model="electrostatic", relativistic=True,
+                                       picard_iterations=2))
+        output = simulation.run(3)
+        np.testing.assert_array_equal(output.u, np.broadcast_to(np.asarray(momentum), (3, 1, 3)))
+        eta2 = np.sum(np.asarray(momentum, dtype=np.float64)**2, axis=-1) / c**2
+        expected = mass_electron * c**2 * eta2 / (np.sqrt(1 + eta2) + 1) * .01
+        tolerance = 2e-6 if not double else 2e-14
+        np.testing.assert_allclose(energies(output)["kinetic"], np.full(3, expected[0]), rtol=tolerance)
+        sparse = simulation.run(3, store_particles=False)
+        assert sparse.u is None and sparse.v is None
+        np.testing.assert_allclose(sparse.work.kinetic[:, 0], np.full(3, expected[0]), rtol=tolerance)
+        np.testing.assert_array_equal(energy_balance(sparse), np.zeros(3))
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_streamed_relativistic_energy_has_the_momentum_derivative(algorithm):
+    gamma = 1e4
+    simulation = Simulation(Domain(length=.01, cells=4, time_step=1e-13),
+                            [Species("marker", 1, 0., mass_electron, 1., u=jnp.array([[0., gamma*c, 0.]]))],
+                            Solver(algorithm=algorithm, model="electrostatic", relativistic=True,
+                                   picard_iterations=2))
+    scale = mass_electron * c**2 * .01
+
+    def energy(amplitude):
+        particle = simulation.species[0].replace(u=jnp.array([[0., amplitude*c, 0.]]))
+        return simulation.replace(species=(particle,)).run(2, store_particles=False).state.work.kinetic[0] / scale
+
+    value, derivative = jax.jit(jax.value_and_grad(energy))(gamma)
+    assert float(value) == pytest.approx(np.sqrt(1 + gamma**2) - 1, rel=2e-14)
+    assert float(derivative) == pytest.approx(gamma / np.sqrt(1 + gamma**2), rel=2e-14)
+
+
+def test_relativistic_source_and_thermal_wall_leave_other_momenta_untouched():
+    from jaxincell import Source
+
+    gamma = 1000.
+    u = jnp.zeros((4, 3)).at[0, 1].set(c * np.sqrt(gamma**2 - 1))
+    source = Source(density=1., vth=0., drift=(.1*c, 0., 0.), emit=1, every=2)
+    particle = Species("marker", 4, 0., mass_electron, 1., active=1, u=u, source=source)
+    domain = Domain(length=.01, cells=4, time_step=1e-13, particle_bc="absorbing", field_bc="reflective")
+    simulation = Simulation(domain, [particle], Solver(model="electrostatic", relativistic=True))
+    output = simulation.run(4).validate()
+    np.testing.assert_array_equal(output.u[:, 0], np.broadcast_to(np.asarray(u[0]), (4, 3)))
+    assert np.count_nonzero(np.asarray(output.state.w)) == 3
+    assert float(output.state.wall.injected.sum()) == pytest.approx(4e-13 * .1*c)
+
+    thermal = simulation.replace(domain=domain.replace(particle_bc="thermal"),
+                                 species=(particle.replace(source=None, active=4),))
+    result = thermal.run(2).validate()
+    np.testing.assert_array_equal(result.u[:, 0], np.broadcast_to(np.asarray(u[0]), (2, 3)))
+
+
+def test_high_gamma_specular_wall_preserves_momentum_magnitude():
+    gamma = 1000.
+    speed = c * np.sqrt(1 - gamma**-2)
+    u = jnp.array([[gamma * speed, 0., 0.]])
+    particle = Species("marker", 1, 0., mass_electron, 1., x=jnp.array([[.0049, 0., 0.]]), u=u)
+    domain = Domain(length=.01, cells=8, time_step=2e-12, particle_bc="reflective", field_bc="reflective")
+    output = Simulation(domain, [particle], Solver(model="electrostatic", relativistic=True)).run(1).validate()
+    np.testing.assert_allclose(output.state.u, -np.asarray(u), rtol=2e-14, atol=0)
+    assert float(output.state.x[0, 0]) == pytest.approx(.005 - (2e-12*speed - .0001), abs=2e-15)
+    np.testing.assert_array_equal(output.wall.energy_in, output.wall.energy_out)
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_radiation_cooling_and_distinct_energy_ledgers_converge(algorithm):
+    from jaxincell import Radiation, epsilon_0
+    from jaxincell._diagnostics import energy_balance
+
+    gamma0, field, duration = 1000., 1e5, 1e-13
+    particle = Species.electrons(1, 1e-18, u=jnp.array([[0., c*np.sqrt(gamma0**2-1), 0.]]))
+    rate = e_charge**4 * field**2 / (6 * np.pi * epsilon_0 * mass_electron**3 * c**3)
+    expected = 1 / np.tanh(np.arctanh(1/gamma0) + rate*duration)
+    errors, emission_errors = [], []
+    for steps in (16, 32):
+        simulation = Simulation(Domain(length=.01, cells=4, time_step=duration/steps), [particle],
+                                Solver(algorithm=algorithm, model="electrostatic", relativistic=True,
+                                       picard_iterations=8), radiation=Radiation(substeps=2),
+                                external_B=jnp.zeros((4, 3)).at[:, 2].set(field))
+        result = simulation.run(steps, store_every=steps, store_particles=False).validate()
+        gamma = float(simulation._gamma(result.state.u)[0, 0])
+        errors.append(abs(gamma / expected - 1))
+        mechanical = float(result.state.work.rr_work[0])
+        emitted = float(result.state.work.radiated_energy[0])
+        assert mechanical < 0 < emitted
+        emission_errors.append(abs((emitted + mechanical) / mechanical))
+        initial, _ = simulation.initial_state(jax.random.PRNGKey(0))
+        change = float(result.state.work.kinetic[0] - initial.work.kinetic[0])
+        assert abs((change-mechanical)/mechanical) < 5e-11
+        assert energy_balance(result).shape == (1,)
+    assert 0 < errors[1] < errors[0] / 3
+    assert errors[1] < 2e-4
+    assert 0 < emission_errors[1] < emission_errors[0] / 3
+
+
+def test_parallel_electric_radiation_is_emission_without_mechanical_drag():
+    from jaxincell import Radiation
+
+    particle = Species.electrons(1, 1e-18, u=jnp.array([[0., 10*c, 0.]]))
+    simulation = Simulation(Domain(length=.01, cells=4, time_step=1e-16), [particle],
+                            Solver(model="electrostatic", relativistic=True),
+                            external_E=jnp.zeros((4, 3)).at[:, 1].set(1e12))
+    ordinary = simulation.run(3)
+    radiating = simulation.replace(radiation=Radiation(substeps=3)).run(3).validate()
+    np.testing.assert_allclose(radiating.u, ordinary.u, rtol=1e-13, atol=1e-12)
+    assert float(radiating.state.work.radiated_energy[0]) > 0
+    assert abs(float(radiating.state.work.rr_work[0])) < 1e-12 * float(radiating.state.work.radiated_energy[0])
+    np.testing.assert_allclose(radiating.work.prescribed_work, ordinary.work.prescribed_work, rtol=1e-13)
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_empty_radiation_selection_recovers_the_existing_pusher(algorithm):
+    from jaxincell import Radiation
+
+    particle = Species.electrons(1, 1e-18, u=jnp.array([[0., 1000*c, 0.]]))
+    simulation = Simulation(Domain(length=.01, cells=4, time_step=1e-15), [particle],
+                            Solver(algorithm=algorithm, model="electrostatic", relativistic=True,
+                                   picard_iterations=3), external_B=jnp.ones((4, 3))*1e4)
+    original = simulation.run(2)
+    selection = simulation.replace(radiation=Radiation(species=())).run(2)
+    np.testing.assert_allclose(selection.u, original.u, rtol=2e-14, atol=1e-14)
+    np.testing.assert_array_equal(selection.work.rr_work, np.zeros((2, 1)))
+    np.testing.assert_array_equal(selection.work.radiated_energy, np.zeros((2, 1)))
+
+
+def test_collision_stage_consumes_carried_high_gamma_momentum_without_a_velocity_roundtrip():
+    from jaxincell import Collisions
+
+    n = 8
+    angle = jnp.arange(n) * (2*jnp.pi/n)
+    u = 1000*c*jnp.stack([jnp.cos(angle), jnp.sin(angle), jnp.zeros(n)], axis=1)
+    particle = Species.electrons(n, 1e38, x=jnp.zeros((n, 3)), u=u)
+    simulation = Simulation(Domain(length=1., cells=4, time_step=1e-15), [particle],
+                            Solver(model="electrostatic", relativistic=True),
+                            collisions=Collisions(coulomb_log=10.))
+    state, (mass, _) = simulation.initial_state(jax.random.PRNGKey(0))
+    scattered = jax.jit(simulation._collide_momenta)(jax.random.PRNGKey(12), state.x, state.u,
+                                                     state.w, state.qm, mass, simulation.domain.dt)
+    before = np.asarray(simulation._kinetic(mass, state.u)).sum()
+    after = np.asarray(simulation._kinetic(mass, scattered)).sum()
+    assert after == pytest.approx(before, rel=2e-13, abs=0)
+    np.testing.assert_allclose(np.asarray(scattered).sum(axis=0), np.asarray(state.u).sum(axis=0),
+                               atol=2e-3, rtol=0)
+    assert float(jnp.max(jnp.linalg.norm(scattered-state.u, axis=1))) > 1e5
+    assert float(jnp.min(simulation._gamma(scattered))) > 316

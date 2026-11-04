@@ -1428,7 +1428,7 @@ def test_volume_births_preserve_sparse_restart_and_feature_archive(tmp_path):
     path = save_state(tmp_path / "volume", first.state, sim)
     with np.load(path) as data:
         stored = dict(data)
-    assert int(stored["format"]) == VOLUME_FORMAT
+    assert int(stored["format"]) == 6 and int(stored["physics_format"]) == VOLUME_FORMAT
     rest = sim.run(2, snapshot_steps=(1,), state=load_state(path, sim), store_particles=False)
     for a, b in zip(jax.tree.leaves(whole.state), jax.tree.leaves(rest.state)):
         np.testing.assert_array_equal(a, b)

@@ -1105,3 +1105,112 @@ def test_an_integer_snapshot_stride_is_the_sequence_of_every_nth_step():
             sim.run(4, snapshot_steps=bad)
     with pytest.raises(ValueError, match="sequence"):
         sim.run(4, snapshot_steps=True)
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_work_archive_preserves_high_momentum_and_cumulative_radiation(tmp_path, algorithm):
+    from jaxincell import Radiation, load_state, save_state
+    from jaxincell._archive import WORK_FORMAT
+
+    particle = Species.electrons(1, 1e-16, u=jnp.array([[0., 1e4*c, 0.]]))
+    simulation = Simulation(Domain(length=.01, cells=4, time_step=1e-15), [particle],
+                            Solver(algorithm=algorithm, model="electrostatic", relativistic=True,
+                                   picard_iterations=4), radiation=Radiation(species="electrons", substeps=2),
+                            external_B=jnp.zeros((4, 3)).at[:, 2].set(1e4))
+    full = simulation.run(4, store_particles=False)
+    first = simulation.run(2, store_particles=False)
+    path = save_state(tmp_path / "work", first.state, simulation)
+    with np.load(path) as data:
+        stored = dict(data)
+    assert int(stored["format"]) == WORK_FORMAT
+    assert int(stored["physics_format"]) == 1
+    restored = load_state(path, simulation)
+    resumed = simulation.run(2, state=restored, store_particles=False)
+    for got, expected in zip(jax.tree.leaves(resumed.state), jax.tree.leaves(full.state)):
+        np.testing.assert_array_equal(got, expected)
+    assert float(restored.work.radiated_energy[0]) > 0
+    for missing in ("work.kinetic", "work.radiated_energy", "physics_format"):
+        np.savez(path, **{key: value for key, value in stored.items() if key != missing})
+        with pytest.raises(ValueError, match="format 6 requires"):
+            load_state(path)
+    for changed in ({"physics_format": 0}, {"work.kinetic": np.zeros((2,))}):
+        np.savez(path, **{**stored, **changed})
+        with pytest.raises(ValueError, match="format 6 requires"):
+            load_state(path)
+    # Velocity and momentum conventions cannot be interchanged across a restart.
+    np.savez(path, **stored)
+    newtonian = simulation.replace(species=(particle.replace(u=None),),
+                                   solver=simulation.solver.replace(relativistic=False), radiation=None)
+    with pytest.raises(ValueError, match="relativistic"):
+        load_state(path, newtonian)
+
+
+def test_legacy_state_starts_a_new_work_budget_and_sparse_history_stays_small(tmp_path):
+    from jaxincell import load_state, save_state
+    from jaxincell._diagnostics import energy_balance
+
+    particle = Species("marker", 1, 0., mass_electron, 1., u=jnp.array([[0., 1e8*c, 0.]]))
+    simulation = Simulation(Domain(length=.01, cells=4, time_step=1e-13), [particle],
+                            Solver(model="electrostatic", relativistic=True))
+    first = simulation.run(1)
+    path = save_state(tmp_path / "legacy", first.state.replace(work=None), simulation)
+    restored = load_state(path, simulation)
+    assert restored.work is None
+    continued = simulation.run(2, state=restored, snapshot_steps=[], store_particles=False)
+    assert continued.work.kinetic.shape == (0, 1) and continued.u is None
+    np.testing.assert_array_equal(continued.state.u, first.state.u)
+    np.testing.assert_array_equal(continued.state.work.kinetic, first.state.work.kinetic)
+    assert energy_balance(continued).shape == (0,)
+    with pytest.raises(ValueError, match="Work ledger"):
+        energy_balance(first.replace(work=None))
+
+
+def test_momentum_diagnostics_and_export_use_u_with_velocity_only_compatibility():
+    from jaxincell._diagnostics import energies, magnetic_moment
+    from jaxincell.openpmd import _momentum
+
+    particle = Species("marker", 1, 0., mass_electron, 1., u=jnp.array([[0., 1e8*c, 0.]]))
+    simulation = Simulation(Domain(length=.01, cells=4, time_step=1e-13), [particle],
+                            Solver(model="electrostatic", relativistic=True),
+                            external_B=jnp.zeros((4, 3)).at[:, 2].set(2.))
+    result = simulation.run(1)
+    np.testing.assert_array_equal(_momentum(result, 0), np.asarray(result.mass)[:, None]*np.asarray(result.u[0]))
+    np.testing.assert_allclose(magnetic_moment(result, simulation), mass_electron*(1e8*c)**2/4, rtol=2e-14)
+    # Older Output objects only have v. Check that path at a well-resolved speed.
+    low = simulation.replace(species=(particle.replace(u=jnp.array([[0., .1*c, 0.]])),)).run(1)
+    old = low.replace(u=None)
+    np.testing.assert_allclose(_momentum(old, 0), _momentum(low, 0), rtol=2e-14)
+    np.testing.assert_allclose(energies(old)["kinetic"], energies(low)["kinetic"], rtol=2e-14)
+    np.testing.assert_allclose(magnetic_moment(old, simulation), magnetic_moment(low, simulation), rtol=2e-14)
+
+
+def test_radiation_toml_preserves_direct_momentum_and_model_selection(tmp_path):
+    path = tmp_path / "radiation.toml"
+    path.write_text('''
+[domain]
+length = 0.01
+cells = 4
+time_step = 1e-15
+[solver]
+model = "electrostatic"
+relativistic = true
+[[species]]
+name = "beam"
+n = 1
+charge = -1
+mass = "electron"
+density = 1e-16
+u = [[0.0, 3e11, 0.0]]
+[radiation]
+model = "ll_reduced"
+species = ["beam"]
+substeps = 2
+[external]
+B = [0.0, 0.0, 1e4]
+[run]
+steps = 2
+''')
+    simulation, options = load_toml(path)
+    assert simulation.radiation.species == ("beam",)
+    output = simulation.run(**options).validate()
+    assert float(output.work.radiated_energy[-1, 0]) > 0

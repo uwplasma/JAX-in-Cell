@@ -385,7 +385,8 @@ def test_integral_force_all_components_work_charge_wrap_and_complete_restart(ord
         np.testing.assert_array_equal(actual, expected)
     with np.load(path) as data:
         stored = dict(data)
-    assert int(stored['format']) == 3 and str(stored['orbit_force']) == 'integral'
+    assert int(stored['format']) == 6 and int(stored['physics_format']) == 3
+    assert str(stored['orbit_force']) == 'integral'
     with pytest.raises(ValueError, match='orbit_force'):
         load_state(path, sim.replace(solver=sim.solver.replace(orbit_force='secant')))
     malformed = [{k: v for k, v in stored.items() if k != key} for key in ('orbit_force', 'shape_order', 'algorithm')]
@@ -645,14 +646,14 @@ def test_quintic_rejects_unsupported_solver_and_walls_and_checks_restart_shape(t
     path = save_state(tmp_path / 'quadratic', state, sim)
     quintic = sim.replace(solver=Solver(shape_order=5))
     archive = dict(np.load(path))
-    assert int(archive['format']) == 1 and 'shape_order' not in archive
+    assert int(archive['format']) == 6 and int(archive['physics_format']) == 1 and 'shape_order' not in archive
     np.testing.assert_array_equal(load_state(path, sim).rho, state.rho)
     with pytest.raises(ValueError, match='shape_order'):
         load_state(path, quintic)
     state5, _ = quintic.initial_state(jax.random.PRNGKey(0))
     save_state(path, state5, quintic)
     archive = dict(np.load(path))
-    assert int(archive['format']) == 2 and int(archive['shape_order']) == 5
+    assert int(archive['format']) == 6 and int(archive['physics_format']) == 2 and int(archive['shape_order']) == 5
     with pytest.raises(ValueError, match='shape_order'):
         load_state(path, sim)
     np.testing.assert_array_equal(load_state(path, quintic).rho, state5.rho)
