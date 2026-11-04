@@ -105,6 +105,10 @@ else:
     if shards > 1:
         serial_beta = jax.device_put(beta, jax.sharding.SingleDeviceSharding(jax.devices()[0]))
         serial = jax.block_until_ready(jax.jit(function)(serial_beta))
+        if mode == "forward":
+            # Typed PRNG keys need their raw buffers before NumPy conversion.
+            result, serial = (out.replace(state=out.state.replace(key=jax.random.key_data(out.state.key)))
+                              for out in (result, serial))
         differences = [float(np.linalg.norm(np.asarray(a, dtype=float) - np.asarray(b, dtype=float))
                              / max(np.linalg.norm(np.asarray(b, dtype=float)), np.finfo(float).tiny))
                        for a, b in zip(jax.tree.leaves(result), jax.tree.leaves(serial))]
