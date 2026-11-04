@@ -8,7 +8,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from jaxincell import Collisions, Domain, Impacts, Simulation, Solver, Source, Species, diagnostics, load_toml
+from jaxincell import (Collisions, Domain, Impacts, Radiation, Simulation, Solver, Source, Species,
+                      diagnostics, load_toml)
 from jaxincell import mass_electron, mass_proton, speed_of_light as c
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -78,6 +79,30 @@ def test_thermal_speed_and_drift_accept_arrays():
             Species.electrons(n=4, density=1.0, vth=bad)
 
 
+def test_direct_momentum_is_a_differentiable_leaf_and_stacks_without_conversion():
+    momentum = jnp.asarray([[0.0, 1e6 * c, -2e6 * c]])
+    species = Species.electrons(n=1, density=1.0, u=momentum)
+    assert species.v is None and np.array_equal(species.u, momentum)
+    objective = jax.jit(lambda u: jnp.sum(Species.electrons(1, 1.0, u=u).u / c))
+    assert np.allclose(jax.grad(objective)(momentum) * c, 1.0, rtol=1e-15, atol=0)
+    stacked = jax.tree.map(lambda a, b: jnp.stack((a, b)), species, species.replace(u=2 * momentum))
+    assert stacked.u.shape == (2, 1, 3)
+    assert stacked.replace(u=stacked.u).u.shape == (2, 1, 3)
+    axes = jax.tree.map(lambda _: None, species).replace(u=0)
+    assert axes.u == 0 and type(axes.u) is int
+    assert np.array_equal(jax.vmap(lambda s: s.u)(stacked), stacked.u)
+
+
+def test_radiation_configuration_is_static_and_normalizes_species():
+    assert Radiation().species is None
+    single = Radiation(species="electrons", substeps=np.int64(2))
+    assert single.species == ("electrons",) and type(single.substeps) is int
+    assert jax.tree_util.tree_leaves(single) == []
+    assert jax.tree.map(lambda x: x, single) == single
+    assert single == Radiation(species=["electrons"], substeps=2)
+    assert single.replace(species=()).species == ()
+
+
 def test_ions_derived_from_electrons_are_differentiable_in_the_electron_thermal_speed():
     def ion_vth(u):
         electrons = Species.electrons(n=4, density=1.0, vth=(u, 0.0, 0.0))
@@ -100,6 +125,15 @@ def _sourced(emit=2, capacity=64, active=None):
     (lambda: Species.electrons(n=0, density=1.0), "at least one particle"),
     (lambda: Species.electrons(n=4, density=1.0, x=np.zeros((3, 3))), "x must have shape"),
     (lambda: Species.electrons(n=4, density=1.0, v=np.zeros(4)), "v must have shape"),
+    (lambda: Species.electrons(n=4, density=1.0, u=np.zeros(4)), "u must have shape"),
+    (lambda: Species.electrons(n=1, density=1.0, u=np.zeros((1, 3)), v=np.zeros((1, 3))), "either v or u"),
+    (lambda: Species.electrons(n=1, density=1.0, u=np.full((1, 3), np.inf)), "finite momentum"),
+    (lambda: Radiation(model="quantum"), "model must be"),
+    (lambda: Radiation(species=("electrons", "electrons")), "distinct, nonempty"),
+    (lambda: Radiation(species=("",)), "distinct, nonempty"),
+    (lambda: Radiation(species=(1,)), "distinct, nonempty"),
+    *[(lambda value=value: Radiation(substeps=value), "positive whole number")
+      for value in (0, -1, 1.5, True, np.bool_(True))],
     (lambda: Species.electrons(n=4, density=1.0, reflection=(0.1, 0.2, 0.3)), "reflection takes"),
     (lambda: Domain(restitution=-0.5), "restitution takes a number in"),
     (lambda: Domain(particle_bc="sticky"), "particle_bc takes one of"),

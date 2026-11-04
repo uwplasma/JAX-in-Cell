@@ -1,7 +1,7 @@
 """JAX-in-Cell: a differentiable 1D3V particle-in-cell code."""
 import sys
 
-from ._config import (Collisions, Domain, Impacts, Solver, Source, Species, boltzmann_constant,
+from ._config import (Collisions, Domain, Impacts, Radiation, Solver, Source, Species, boltzmann_constant,
                       elementary_charge, epsilon_0, mass_electron, mass_proton, mu_0, speed_of_light)
 from ._diagnostics import (bohm_edge, charge_balance, diagnostics, dominant_frequency, energies,
                            gauss_residual, magnetic_moment, moment_profiles, potential, temperatures)
@@ -13,7 +13,7 @@ try:
 except ImportError:  # a source tree that was never installed: version.py is written at build time
     __version__ = "unknown"
 
-__all__ = ["Simulation", "Output", "Domain", "Species", "Solver", "Source", "Collisions", "Impacts",
+__all__ = ["Simulation", "Output", "Domain", "Species", "Solver", "Source", "Collisions", "Radiation", "Impacts",
            "load_toml", "save_state", "load_state", "provenance", "save_run",
            "quiet_start",
            "diagnostics", "energies", "gauss_residual", "charge_balance", "magnetic_moment", "moment_profiles",

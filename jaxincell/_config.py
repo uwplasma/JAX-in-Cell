@@ -26,7 +26,7 @@ mass_electron = 9.1093837015e-31      # kg
 mass_proton = 1.67262192369e-27       # kg
 boltzmann_constant = 1.380649e-23     # J/K
 
-__all__ = ["Domain", "Species", "Solver", "Source", "Collisions", "Impacts", "BOUNDARIES"]
+__all__ = ["Domain", "Species", "Solver", "Source", "Collisions", "Radiation", "Impacts", "BOUNDARIES"]
 
 BOUNDARIES = {"periodic": 0, "reflective": 1, "absorbing": 2, "thermal": 3, "open": 4}
 
@@ -500,6 +500,10 @@ class Species:
             * ``"random"``: uniformly random positions and random velocities.
         x, v: Optional arrays of shape ``(n, 3)`` that replace the generated
             phase space.
+        u: Optional relativistic momentum per unit mass, :math:`u=p/m=\\gamma v`,
+            in m/s, of shape ``(n, 3)``. Give either ``v`` or ``u``. Direct momentum
+            avoids the loss of precision when a relativistic velocity rounds to
+            the speed of light; it requires ``Solver(relativistic=True)``.
         source: A :class:`Source` supplying this species through a wall or by volume
             births, or ``None``. The particles it emits occupy the species' own dead slots,
             so ``n`` is a capacity rather than a fixed population.
@@ -526,6 +530,7 @@ class Species:
     v: object = None
     source: object = None
     reflection: object = 0.0
+    u: object = None
 
     def __post_init__(self):
         if _template(self):
@@ -543,9 +548,12 @@ class Species:
         object.__setattr__(self, "reflection", _walls(self.reflection, "reflection"))
         for name in ("vth", "drift"):
             object.__setattr__(self, name, _components(getattr(self, name), name))
-        for name in ("x", "v"):      # a leading axis is an ensemble, stacked by a tree operation
+        _require(self.v is None or self.u is None, "give Species either v or u, not both")
+        for name in ("x", "v", "u"):  # a leading axis is an ensemble, stacked by a tree operation
             value = getattr(self, name)
             _require(value is None or np.shape(value)[-2:] == (self.n, 3), f"{name} must have shape (n, 3)")
+        if self.u is not None and not isinstance(self.u, jax.core.Tracer):
+            _require(np.isfinite(np.asarray(self.u)).all(), "u must contain finite momentum components")
 
     @staticmethod
     def electrons(n, density, vth=(0.0, 0.0, 0.0), name="electrons", **kwargs):
@@ -651,6 +659,37 @@ class Solver:
         return self.model == "electrostatic"
 
 
+@pytree_dataclass(static=("model", "species", "substeps"))
+class Radiation:
+    """Classical radiation reaction on selected relativistic species.
+
+    ``ll_reduced`` retains the field-quadratic Landau--Lifshitz force and omits
+    derivatives of the fields. It needs fields that vary slowly over the
+    radiation-reaction time and a quantum parameter much less than one.
+    The emitted power and the mechanical work are distinct energy budgets.
+
+    Args:
+        model: ``"ll_reduced"``; other models are not implemented.
+        species: Species name or tuple of names; ``None`` selects all species.
+        substeps: Positive number of particle substeps for resolving radiation
+            cooling. This refines the orbit update, not the Maxwell grid step.
+    """
+    model: str = "ll_reduced"
+    species: object = None
+    substeps: int = 1
+
+    def __post_init__(self):
+        _require(self.model == "ll_reduced", "Radiation model must be 'll_reduced'")
+        if self.species is not None:
+            names = (self.species,) if isinstance(self.species, str) else tuple(self.species)
+            _require(all(isinstance(name, str) and name for name in names) and len(set(names)) == len(names),
+                     "Radiation species must contain distinct, nonempty species names")
+            object.__setattr__(self, "species", names)
+        _require(isinstance(self.substeps, (int, np.integer)) and not isinstance(self.substeps, (bool, np.bool_))
+                 and self.substeps >= 1, "Radiation substeps must be a positive whole number")
+        object.__setattr__(self, "substeps", int(self.substeps))
+
+
 @pytree_dataclass(static=("pairs",))
 class Collisions:
     """Binary Coulomb collisions (Takizuka and Abe, 1977).
@@ -660,6 +699,8 @@ class Collisions:
             ``(name, name)`` for self-collisions. ``None`` collides every pair.
         coulomb_log: Coulomb logarithm; ``None`` uses the NRL formulary value
             from the electron density and temperature at the start of the run.
+            Relativistic collisions require an explicit value: that thermal
+            estimate does not describe screening in a relativistic plasma.
     """
     pairs: object = None
     coulomb_log: object = None
