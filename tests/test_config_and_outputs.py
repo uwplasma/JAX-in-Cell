@@ -163,6 +163,14 @@ def _sourced(emit=2, capacity=64, active=None):
     (lambda: Radiation(species=("",)), "distinct, nonempty"),
     (lambda: Radiation(species=(1,)), "distinct, nonempty"),
     (lambda: Simulation(Domain(), [Species.electrons(4, 1.)]).run(0, checkpoint=1), "static boolean"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1., u=np.zeros((4, 3)))]), "Species.u requires"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], radiation=Radiation()), "Radiation requires"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], Solver(relativistic=True),
+                        radiation=Radiation(species="absent")), "not in this simulation"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], prescribed_fields=1), "pure callable"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], field_parameters=1.), "needs prescribed_fields"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)],
+                        prescribed_fields=lambda x, t, p: (jnp.zeros((4, 4)), 0)).run(1), "broadcastable"),
     *[(lambda value=value: Radiation(substeps=value), "positive whole number")
       for value in (0, -1, 1.5, True, np.bool_(True))],
     (lambda: Species.electrons(n=4, density=1.0, reflection=(0.1, 0.2, 0.3)), "reflection takes"),
@@ -195,7 +203,7 @@ def _sourced(emit=2, capacity=64, active=None):
     (lambda: Impacts(energy_max=1e-18, angle_bins=0), "at least one bin of each"),
     (lambda: _sourced(emit=8, capacity=4), "into 4 slots"),
     (lambda: Simulation(Domain(), [Species.electrons(n=4, density=1.0)],
-                        Solver(relativistic=True), Collisions(coulomb_log=10.0)), "not implemented"),
+                        Solver(relativistic=True), Collisions()), "explicit Coulomb logarithm"),
 ])
 def test_invalid_input_raises_a_value_error_that_python_O_keeps(build, message):
     with pytest.raises(ValueError, match=message):
@@ -378,7 +386,7 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     import numpy as np
 
     from jaxincell import load_state, save_state
-    from jaxincell._archive import VOLUME_FORMAT
+    from jaxincell._archive import WORK_FORMAT
 
     domain = Domain(length=1e-2, cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
     species = Species("electrons", 2000, -1.0, mass_electron, 0.0,
@@ -413,8 +421,8 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     # an archive of another format is refused rather than half read, and so is one that is not
     # a state at all
     stored = dict(np.load(path))
-    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(VOLUME_FORMAT + 1)})
-    with pytest.raises(ValueError, match=f"format {VOLUME_FORMAT + 1}"):
+    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(WORK_FORMAT + 1)})
+    with pytest.raises(ValueError, match=f"format {WORK_FORMAT + 1}"):
         load_state(tmp_path / "future.npz")
     np.savez(tmp_path / "partial.npz", **{k: v for k, v in stored.items() if k != "rho"})
     with pytest.raises(ValueError, match="not a state archive"):
@@ -425,7 +433,7 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
                                                 ("explicit", "thermal")])
 def test_restart_position_conventions_and_legacy_wall_rejection(tmp_path, algorithm, boundary):
     from jaxincell import load_state, save_state
-    from jaxincell._archive import WALL_FORMAT
+    from jaxincell._archive import WALL_FORMAT, WORK_FORMAT
     domain = Domain(length=1., cells=8, time_step=1., particle_bc=boundary,
                     field_bc="periodic" if boundary == "periodic" else "reflective")
     species = Species("neutral", 1, 0., 1., 1., vth=(.05, .02, .02),
@@ -441,7 +449,8 @@ def test_restart_position_conventions_and_legacy_wall_rejection(tmp_path, algori
         np.testing.assert_array_equal(a, b)
     with np.load(path) as data:
         stored = dict(data)
-    assert int(stored["format"]) == (WALL_FORMAT if boundary == "thermal" else 1)
+    assert int(stored["format"]) == WORK_FORMAT
+    assert int(stored["physics_format"]) == (WALL_FORMAT if boundary == "thermal" else 1)
     old = {k: v for k, v in stored.items() if k != "x_phase"}
     np.savez(tmp_path / "legacy.npz", **{**old, "format": np.asarray(1)})
     legacy = load_state(tmp_path / "legacy.npz")

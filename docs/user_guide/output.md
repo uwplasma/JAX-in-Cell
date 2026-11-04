@@ -125,6 +125,9 @@ Flat E and B retain their face and centre staggering; 3D tensors use the domain'
 periods and cell centres. The exporter checks the simulation's x geometry against the output.
 These fields are read from `sim` at export time, so pass the simulation used for the run.
 They add no histories to `Output`, and `meshes=False` skips all mesh records.
+The time-dependent callable and its parameter pytree are not serialized as an
+openPMD field mesh. Keep their defining Python setup with the run; the state archive
+preserves the accumulated work budgets.
 
 openPMD's `weighting` counts physical particles, while `Output.weight` counts them per unit
 area of the $y$-$z$ plane ({doc}`units`). The export multiplies by the transverse area the
