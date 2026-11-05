@@ -143,9 +143,9 @@ Run on the CPU, or on a CUDA GPU.
 
 `docs/scripts/profile_pic.py` measures the actual compiled simulation, including
 relativistic collision and radiation variants. It separates compilation, first
-execution and five synchronized warm executions; records compiler buffer estimates;
+execution and synchronized warm executions (five by default); records compiler buffer estimates;
 and optionally captures a JAX profiler trace. Results and HLO text go to
-`PROFILE_DIR`, outside the source tree by default:
+`PROFILE_DIR`, which must be outside the package checkout:
 
 ```bash
 PROFILE_DIR=/tmp/jic-explicit python docs/scripts/profile_pic.py
@@ -160,15 +160,20 @@ history, without particle histories. Reverse mode and JVP differentiate a scalar
 final-field objective; JAX may discard diagnostics unused by that objective.
 
 Use separate processes for the parent revision and this branch, with the same
-`PROFILE_N`, `PROFILE_STEPS`, precision and backend. Compiler temporary-buffer
+`PROFILE_N`, `PROFILE_CELLS`, `PROFILE_STEPS`, precision and backend.
+`PROFILE_REPEATS` sets the number of warm measurements, and
+`PROFILE_EXPECT_BACKEND=cpu` or `gpu` rejects an unintended backend before timing.
+Compiler temporary-buffer
 estimates are not measured peak resident memory. `PROFILE_COMPILE_ONLY=1` permits
 checking those estimates before attempting a gradient that may exceed device memory.
 Keep reports and traces local; commit the script and a deliberately selected,
 compressed documentation figure only when it communicates a useful result.
 
-For independent optimization starts or parameter ensembles, `PROFILE_SHARDS=k`
-distributes four simulations per device and checks the result against the same
-batch on one device. On a CPU, a small correctness rehearsal can use
+For optimization starts or parameter ensembles, `PROFILE_SHARDS=k`
+distributes four simulations per device by default and checks the result against
+the same batch on one device. Set the same `PROFILE_BATCH` for one and several
+devices when measuring strong scaling; the batch must divide evenly across devices.
+The profile uses common random numbers across its parameter cases. On a CPU, a small correctness rehearsal can use
 `XLA_FLAGS=--xla_force_host_platform_device_count=2 PROFILE_SHARDS=2`; virtual CPU
 devices do not establish accelerator scaling. This is ensemble sharding. A single
 PIC domain needs explicit ownership and communication of particles, current sums

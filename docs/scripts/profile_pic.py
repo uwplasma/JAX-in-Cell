@@ -3,8 +3,10 @@
 Run from the checkout: PROFILE_DIR=/tmp/jic-profile python docs/scripts/profile_pic.py.
 Environment controls: PROFILE_CASE=explicit|implicit|collisions|radiation,
 PROFILE_MODE=forward|reverse|jvp, PROFILE_N=2048, PROFILE_STEPS=32,
-PROFILE_CHECKPOINT=0|1, PROFILE_TRACE=0|1, PROFILE_COMPILE_ONLY=0|1.
-PROFILE_SHARDS>1 distributes four independent parameter values per device.
+PROFILE_CELLS=64, PROFILE_REPEATS=5, PROFILE_CHECKPOINT=0|1,
+PROFILE_TRACE=0|1, PROFILE_COMPILE_ONLY=0|1, PROFILE_EXPECT_BACKEND=cpu|gpu.
+PROFILE_SHARDS>1 distributes parameter cases over devices. PROFILE_BATCH fixes
+the same batch size for strong scaling; its default is four cases per device.
 Use a fresh process for each case, precision and device. The default explicit
 case also runs unchanged against the parent research-release checkout.
 Forward returns the complete Output with particle histories disabled; JSON values
@@ -28,11 +30,19 @@ from jaxincell import elementary_charge as e, epsilon_0, speed_of_light as c
 case = os.environ.get("PROFILE_CASE", "explicit")
 mode = os.environ.get("PROFILE_MODE", "forward")
 n, steps = int(os.environ.get("PROFILE_N", 2048)), int(os.environ.get("PROFILE_STEPS", 32))
+cells, repeats = int(os.environ.get("PROFILE_CELLS", 64)), int(os.environ.get("PROFILE_REPEATS", 5))
 checkpoint = os.environ.get("PROFILE_CHECKPOINT", "0") == "1"
 destination = Path(os.environ.get("PROFILE_DIR", "/tmp/jic-profile")).resolve()
-destination.mkdir(parents=True, exist_ok=True)
 if case not in ("explicit", "implicit", "collisions", "radiation") or mode not in ("forward", "reverse", "jvp"):
     raise ValueError("choose a documented PROFILE_CASE and PROFILE_MODE")
+if n < 4 or n % 2 or min(steps, repeats) < 1 or cells < 4:
+    raise ValueError("use an even PROFILE_N >= 4, positive steps/repeats, and at least four cells")
+expected_backend = os.environ.get("PROFILE_EXPECT_BACKEND")
+if expected_backend and jax.default_backend() != expected_backend:
+    raise RuntimeError(f"expected {expected_backend}, found {jax.default_backend()}")
+if destination.is_relative_to(Path(jaxincell.__file__).resolve().parents[1]):
+    raise ValueError("PROFILE_DIR must be outside the package checkout")
+destination.mkdir(parents=True, exist_ok=True)
 
 density, amplitude = 4.37e17, 5e-7
 electrons = Species.electrons(n, density, vth=(.02 * c, 0, 0), drift=(.6 * c, 0, 0),
@@ -42,8 +52,8 @@ ions = Species.ions(n // 2, density, mass_ratio=1836, vth=(0, 0, 0), sampling="l
 options = {"collisions": Collisions(coulomb_log=15)} if case == "collisions" else {}
 if case == "radiation":
     options = {"radiation": jaxincell.Radiation(species="electrons"),
-               "external_B": jnp.broadcast_to(jnp.asarray([0., 0., 3.]), (64, 3))}
-simulation = Simulation(Domain(length=.01, cells=64, dt_over_dx_c=.8), (electrons, ions),
+               "external_B": jnp.broadcast_to(jnp.asarray([0., 0., 3.]), (cells, 3))}
+simulation = Simulation(Domain(length=.01, cells=cells, dt_over_dx_c=.8), (electrons, ions),
                         Solver(algorithm="implicit" if case == "implicit" else "explicit",
                                relativistic=True, picard_iterations=8), **options)
 scale = e * density * amplitude / epsilon_0
@@ -66,13 +76,14 @@ def tangent(beta):
 function = {"forward": forward, "reverse": jax.value_and_grad(objective), "jvp": tangent}[mode]
 beta = jnp.asarray(.6)
 shards = int(os.environ.get("PROFILE_SHARDS", 1))
+batch = int(os.environ.get("PROFILE_BATCH", 4 * shards if shards > 1 else 1))
+if shards < 1 or shards > len(jax.devices()) or batch < 1 or batch % shards:
+    raise ValueError("use available PROFILE_SHARDS and a positive PROFILE_BATCH divisible by it")
 reference, finite_difference_objective = tangent, objective
-if shards > 1:
-    if shards > len(jax.devices()):
-        raise ValueError("PROFILE_SHARDS exceeds the number of available JAX devices")
+if batch > 1 or shards > 1:
     mesh = jax.sharding.Mesh(np.asarray(jax.devices()[:shards]), ("ensemble",))
     sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("ensemble"))
-    beta = jax.device_put(jnp.linspace(.55, .65, 4 * shards), sharding)
+    beta = jax.device_put(jnp.linspace(.55, .65, batch), sharding)
     function, reference, finite_difference_objective = map(jax.vmap, (function, tangent, objective))
 start = time.perf_counter()
 executable = jax.jit(function).lower(beta).compile()
@@ -80,7 +91,9 @@ compile_seconds = time.perf_counter() - start
 memory = executable.memory_analysis()
 report = provenance(case=case, mode=mode, checkpoint=checkpoint, particles=n + n // 2,
                     workload="complete Output" if mode == "forward" else "scalar normalized E² objective",
-                    steps=steps, cells=64, shards=shards, source=str(Path(jaxincell.__file__).resolve()),
+                    steps=steps, cells=cells, shards=shards, batch=batch,
+                    dt=float(simulation.domain.dt), duration=steps * float(simulation.domain.dt),
+                    source=str(Path(jaxincell.__file__).resolve()),
                     devices=[str(d) for d in jax.devices()], compile_seconds=compile_seconds,
                     memory={name: getattr(memory, name) for name in
                             ("argument_size_in_bytes", "output_size_in_bytes", "alias_size_in_bytes",
@@ -95,10 +108,14 @@ else:
     result = jax.block_until_ready(executable(beta))
     report["first_seconds"] = time.perf_counter() - start
     timings = []
-    for _ in range(5):
+    for _ in range(repeats):
         start = time.perf_counter()
         result = jax.block_until_ready(executable(beta))
         timings.append(time.perf_counter() - start)
+    arrays = [jax.random.key_data(a) if jax.dtypes.issubdtype(a.dtype, jax.dtypes.prng_key) else a
+              for a in jax.tree.leaves(result)]
+    if not all(np.isfinite(np.asarray(a)).all() for a in arrays):
+        raise FloatingPointError("the profiled program returned nonfinite output")
     report.update(status="executed", warm_seconds=timings, median_seconds=float(np.median(timings)),
                   values=[np.mean((np.asarray(result.state.E) / scale)**2, axis=(-2, -1)).tolist()]
                   if mode == "forward" else [np.asarray(x).tolist() for x in jax.tree.leaves(result)])
@@ -113,14 +130,22 @@ else:
                              / max(np.linalg.norm(np.asarray(b, dtype=float)), np.finfo(float).tiny))
                        for a, b in zip(jax.tree.leaves(result), jax.tree.leaves(serial))]
         report["sharding_relative_difference"] = max(differences)
-        assert max(differences) < 1e-9, "sharded and single-device results disagree"
+        tolerance = 1e-9 if jax.config.read("jax_enable_x64") else 2e-5
+        report["sharding_relative_tolerance"] = tolerance
+        assert max(differences) < tolerance, "sharded and single-device results disagree"
     if mode != "forward":
         value, derivative = jax.block_until_ready(jax.jit(reference)(beta))
-        h = 1e-4
+        h = 1e-4 if jax.config.read("jax_enable_x64") else .01
         finite_difference = (finite_difference_objective(beta + h) - finite_difference_objective(beta - h)) / (2 * h)
+        if not all(np.isfinite(np.asarray(a)).all() for a in (value, derivative, finite_difference)):
+            raise FloatingPointError("the independent derivative comparison is nonfinite")
+        derivative_scale = jnp.maximum(jnp.linalg.norm(derivative), jnp.finfo(derivative.dtype).tiny)
         report.update(jvp=np.asarray(derivative).tolist(), finite_difference=np.asarray(finite_difference).tolist(),
+                      finite_difference_step=h,
+                      finite_difference_relative_difference=float(jnp.linalg.norm(finite_difference - derivative)
+                      / derivative_scale),
                       derivative_relative_difference=float(jnp.linalg.norm(result[1] - derivative)
-                      / jnp.maximum(jnp.linalg.norm(derivative), np.finfo(float).tiny)))
+                      / derivative_scale))
     if os.environ.get("PROFILE_TRACE", "0") == "1":
         with jax.profiler.trace(str(destination / "trace")):
             jax.block_until_ready(executable(beta))
