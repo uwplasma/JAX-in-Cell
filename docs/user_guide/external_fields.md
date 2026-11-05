@@ -76,10 +76,12 @@ print(elementary_charge * 0.05 / mass_electron * domain.dt)   # Omega_c dt
 
 ## Time-dependent fields
 
-`prescribed_fields(x, t, parameters)` returns electric and magnetic arrays of shape
-`(N, 3)` in SI units at the supplied particle positions. It is a pure JAX function;
+`prescribed_fields(x, t, parameters)` returns electric and magnetic arrays broadcastable
+to `(N, 3)` in SI units at the supplied particle positions. It is a pure JAX function;
 `field_parameters` is a dynamic pytree of its amplitudes, phases or coefficients.
 The returned fields add to the static arrays and the self-consistent fields.
+Evaluate each position independently of the other particles in the input batch:
+source and boundary events may evaluate the callback on a single particle.
 
 ```python
 import jax.numpy as jnp
@@ -98,9 +100,13 @@ simulation = Simulation(domain, [electrons, ions], solver,
 
 This example is a vacuum plane wave traveling along $+x$. An imposed plasma RF
 mode needs the appropriate dispersion and polarization; the callback does not
-solve the antenna or the background dielectric response. For a periodic domain,
+enforce Maxwell's equations or solve the antenna or the background dielectric response. For a periodic domain,
 use a compatible spatial period. Time is absolute simulation time in seconds,
-including across restarts, and the integrators evaluate it at their force stages.
+carried in `State.time`, and the integrators evaluate it at their force stages.
+For identical continuation, reconstruct the same simulation, including its
+timestep, fields and radiation settings: archives preserve time and state but
+do not serialize or validate those settings. Changing the timestep also changes
+the periodic explicit half-position convention and requires a phase conversion.
 
 Define the callable once; changing numeric parameters then does not create a new
 program. Differentiating the parameters differentiates the imposed waveform and

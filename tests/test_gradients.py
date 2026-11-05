@@ -452,7 +452,7 @@ def test_the_mean_over_realisations_has_the_derivative_of_the_mean():
                                       perturbation_amplitude=1e-3 * 10 * DEBYE)
         ions = Species.ions(n=4000, density=DENSITY, electrons=electrons, sampling="random")
         out = Simulation(box(cells=32), [electrons, ions], Solver(model="electrostatic")).run(
-            100, seed=seed, store_every=100, store_particles=False)
+            100, seed=seed, store_every=100, store_particles=False, checkpoint=True)
         return jnp.log(jnp.abs(jnp.fft.rfft(out.E[-1, :, 0])[1]) ** 2)
 
     mean = jax.jit(lambda d: jnp.mean(jax.vmap(lambda s: sensor(d, s))(seeds)))

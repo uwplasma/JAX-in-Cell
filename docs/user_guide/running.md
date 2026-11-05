@@ -149,7 +149,8 @@ second = simulation.run(1000, seed=2, state=load_state("checkpoint.npz", simulat
   periodic explicit loop carries half-step ones.
 
 Explicit wall states now carry integer-time positions, recorded by `State.x_phase`.
-Their archives use format 4 so an older half-position reader refuses them. Legacy
+Format 4 introduced this convention; current archives use format 6 and also store
+the momentum and work state. Older half-position readers refuse these formats. Legacy
 explicit wall archives are also refused on continuation: their wall ledgers and
 thermal random streams may already include future events, which a position shift
 cannot undo. Periodic explicit and implicit archive conventions remain compatible.
