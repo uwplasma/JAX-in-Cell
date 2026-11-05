@@ -54,6 +54,8 @@ starts, so that a smoke run is not quoted as a measurement.
 | {doc}`external_fields_3d` | a field on an $(x, y, z)$ grid: the grad-$B$ drift and a mirror | `2_intermediate/external_fields_3d.py` | — |
 | {doc}`../numerics/radiation` | electron and dilute-beam magnetic cooling, including analytic derivatives | `2_intermediate/electron_cooling.py` | — |
 | prescribed RF control | a finite-time pitch target with a field-exposure cost, AD and refinement | `3_advanced/runaway_rf.py` | — |
+| laser–beam cooling | finite energy/pitch spread, exact reduced-LL endpoint and amplitude sensitivity | `3_advanced/beam_laser.py` | — |
+| RF source control | supplied energy and cross-field accounting in a cold-plasma benchmark | `3_advanced/rf_source_control.py` | — |
 
 ## Where the numbers come from
 

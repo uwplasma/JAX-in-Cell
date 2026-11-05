@@ -9,7 +9,8 @@ python examples/1_basic/two_stream.py
 ```
 
 They are ordered by how much of the code they use, not by how interesting they are.
-`JAX_ENABLE_X64=0` in front of any of them switches the whole run to single precision.
+Most accept `JAX_ENABLE_X64=0` to run in single precision. The analytic reference
+gates in `beam_laser.py` and `rf_source_control.py` require float64.
 
 ## 1_basic
 
@@ -47,6 +48,8 @@ They are ordered by how much of the code they use, not by how interesting they a
 | `optimize_two_stream.py` | gradient ascent on a growth rate, through the whole run | `sqrt(3/8)`, the cold-beam optimum | ~2 min |
 | `sheath_optimization.py` | a wall's reflectivity recovered from the sheath it holds | the value the target was made at | ~11 min |
 | `runaway_rf.py` | optimize a prescribed RF envelope for a finite-time pitch target | directional derivatives and refined trajectories | `--quick` smoke preset |
+| `beam_laser.py` | finite-spread electron-beam cooling in a laser pulse | exact reduced-LL endpoint, phase ODE, invariants and analytic AD | ~35 s on one CPU core |
+| `rf_source_control.py` | supplied RF energy for a declared cold-plasma deposition target | Maxwell source/cross-energy budget, analytic response and frozen-control refinement | ~95 s on one CPU core |
 
 `sheath_optimization.py` also takes `--oblique`, which runs the same experiment in a
 magnetic field 30 degrees to the wall, and writes its own folder of results.

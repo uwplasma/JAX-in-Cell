@@ -71,8 +71,9 @@ For a GPU, install the matching JAX wheel first (for example `pip install -U "ja
 
 ### Precision
 
-Runs are in double precision unless `JAX_ENABLE_X64=0` is set before JAX is imported; every
-example sets it at its top. Single precision reproduces the rates and sheaths but not
+Examples default to double precision. Most accept `JAX_ENABLE_X64=0` before JAX is
+imported; `beam_laser.py` and `rf_source_control.py` require float64 for their declared
+reference gates. Single precision reproduces the rates and sheaths but not
 conservation to round-off. It is not uniformly faster: on a loaded CPU host float32 took 14.7 s
 against 24.4 s in float64 (1.7 times faster), while on the GPU tested it was about a hundred
 times slower than float64 (not yet profiled); see the device and precision table in
@@ -121,27 +122,34 @@ print(gradient.species[0].drift, gradient.domain.length)
 
 `examples/1_basic/parameters_and_sampling.py` is the tutorial on the inputs and
 `examples/2_intermediate/output_and_restart.py` on saving, restarting and openPMD.
-Examples that save results include settings and provenance; the radiation and RF
-examples print their validation results and display figures without writing files.
+Examples that save results include settings and provenance. The radiation and RF
+examples print validation results and display figures; the source-control example
+can optionally save its report and figure outside the checkout.
 
 ## Benchmarks
 
 The radiation extension starts with
 [`electron_cooling.py`](examples/2_intermediate/electron_cooling.py), which checks
 single-electron and beam cooling against the exact uniform-magnetic-field solution,
-including its derivative. [`runaway_rf.py`](examples/3_advanced/runaway_rf.py)
+including its derivative. [`beam_laser.py`](examples/3_advanced/beam_laser.py)
+checks finite-spread beam cooling in a laser pulse against an exact reduced-LL
+final state, an independent phase ODE and an analytic pulse-strength derivative.
+[`runaway_rf.py`](examples/3_advanced/runaway_rf.py)
 optimizes four prescribed RF envelope coefficients through the simulation and
 rechecks the result at finer resolution. Its finite-time objective is field exposure
 subject to a pitch-angle target; it does not claim minimum antenna power or sustained
-runaway suppression. The [radiation model and limits](docs/numerics/radiation.md)
+runaway suppression. [`rf_source_control.py`](examples/3_advanced/rf_source_control.py)
+adds an explicit Maxwell-source and cross-field energy budget, and minimizes supplied
+energy for a declared nonrecovering actuator in a cold-plasma deposition benchmark.
+The [radiation model and limits](docs/numerics/radiation.md)
 describe the additional physics required for that problem.
 
 `run(..., checkpoint=True)` reduces saved intermediates in reverse differentiation.
 [`profile_pic.py`](docs/scripts/profile_pic.py) reproduces local timing, compiler-memory
 and ensemble-sharding checks. Generated reports and traces stay outside the repository.
 
-Each case is checked against a closed-form or linear kinetic result, not against another
-simulation. Click a figure for its documentation page; the numbers come from
+The figure cases below are checked against closed-form or linear kinetic results.
+Click a figure for its documentation page; these numbers come from
 `docs/_static/figures/measurements.json`, regenerated with the figures by
 `python docs/scripts/make_all.py`. The thumbnails are panels of the documentation's figures
 (`docs/scripts/readme_figures.py`).
@@ -285,7 +293,8 @@ without change.
 
 ## Run one from a file
 
-`inputs/` holds a TOML file for each of the runs above. Every table in it is a constructor
+`inputs/` holds TOML files for standard benchmark cases; prescribed callbacks and
+control programs use the Python examples. Every TOML table is a constructor
 and nothing is ignored, so a misspelled key is an error in the file rather than a surprise in
 the answer:
 
@@ -315,8 +324,9 @@ pip install -e ".[docs]"
 sphinx-build -W -b html docs docs/_build/html
 ```
 
-The figures and every number the text quotes are regenerated with
-`python docs/scripts/make_all.py`.
+The existing documentation-figure suite is regenerated with
+`python docs/scripts/make_all.py`. The radiation and prescribed-control numbers
+are reproduced by their standalone example scripts.
 
 ## Testing
 
@@ -325,8 +335,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-270 tests, about eight minutes, covering every statement and branch. They
-are physics tests rather than regression tests: closed-form rates and frequencies,
+637 tests cover every statement and branch. They check closed-form rates and frequencies,
 conservation laws, exact results for the kernels, and the behaviour of the interface.
 They run on Python 3.10 to 3.13 on every pull request, together with a build of the
 documentation.

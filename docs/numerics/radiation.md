@@ -237,6 +237,87 @@ Minimum **source power** requires an explicit source/Poynting balance, bulk abso
 returned and retained wave energy, and suppression throughout a declared RF-off hold.
 Those are subsequent physics and validation gates, not results of this example.
 
+## Laser–beam cooling
+
+`examples/3_advanced/beam_laser.py` follows a dilute beam with energy, pitch and
+gyrophase spread through a counterpropagating 800 nm pulse. Its compact potential
+is $A_y=mc\,a(\phi)/e$, with
+$a=a_0\cos^2[\phi/(2N)]\sin\phi$ for $|\phi|<\pi N$ and zero outside.
+For integer $N\geq2$, the potential and its first two derivatives vanish at the
+edges. The callback evaluates $E_y=-mc\omega a'/e$ and $B_z=E_y/c$.
+
+Writing $s=\gamma-\eta_x$ and $\rho=\tau\omega$, the reduced-LL phase equations are
+
+```{math}
+s'=-\rho(a')^2s^2,\qquad (\eta_y/s)'=a'/s,\qquad \eta_z/s=\text{constant}.
+```
+
+The odd potential gives $\int a(a')^2d\phi=0$. With
+$I=\pi a_0^2(3N+1/N)/8$ and $h=1+\rho s_0 I$, the complete-pulse result is
+
+```{math}
+s_f=s_0/h,\qquad \eta_{\perp f}=\eta_{\perp0}/h,\qquad
+\gamma_f=\frac{h^2+s_0^2+|\eta_{\perp0}|^2}{2hs_0}.
+```
+
+The script checks this endpoint, an independent phase ODE, no-RR canonical and
+light-front invariants, work/emission, timestep convergence and an analytic
+amplitude derivative. At 8,192 steps its maximum final-gamma error is $1.59\times
+10^{-8}$ and the amplitude-derivative error is $1.44\times10^{-6}$ relative;
+the mean gamma decreases from 80 to 78.42357. These are classical-model numerical
+errors: the bound $\chi<0.0082$ does not bound quantum corrections at that level.
+The full LL solution's extra endpoint terms vanish for this special complete
+pulse, but its trajectory inside the pulse can differ. See
+[Di Piazza's plane-wave solution](https://doi.org/10.1007/s11005-008-0228-9).
+The incident fluence equals the initial pulse energy per area; it is distinct
+from particle work and from boundary energy crossing this box during the run.
+
+## A prescribed source-energy benchmark
+
+`examples/3_advanced/rf_source_control.py` uses a cold neutral electron–proton
+plasma with a four-cycle, 500 MHz drive. Its linear response has an independent
+five-frequency solution. The simulation is spatially uniform; finite-wave-number
+checks separately verify the analytic Maxwell identities. There is no radiation,
+collision or runaway suppression in this source-accounting example.
+
+For the prescribed vector potential, the external current and its supplied power
+per area are
+
+```{math}
+\boldsymbol J_{\rm ext}=\epsilon_0(c^2\nabla\times\boldsymbol B_p-
+\partial_t\boldsymbol E_p),\qquad
+P_s=-\int\boldsymbol J_{\rm ext}\cdot(\boldsymbol E_s+\boldsymbol E_p)\,dx.
+```
+
+The plasma current already drives the self fields; subtracting it again would
+double count it. The periodic energy balance includes
+$U_\times=\epsilon_0\int(\boldsymbol E_s\cdot\boldsymbol E_p+
+c^2\boldsymbol B_s\cdot\boldsymbol B_p)dx$:
+$\Delta(K+U_s+U_p+U_\times)=\int P_sdt$. The example checks convergence of this
+external diagnostic, including the large error from omitting cross energy.
+It is not a new exact discrete production conservation law.
+
+The declared ideal actuator supplies all positive instantaneous work and dumps
+returned energy: $Q_+=\int\max(P_s,0)dt$, $Q_-=\int\max(-P_s,0)dt$.
+Their difference equals signed source work. A physical port with reactive storage
+or recovery needs that model; arbitrary cycle-average bins change the cost and
+can change pulse rankings. This example does not estimate wall-plug power.
+
+Four bounded Bernstein coefficients minimize $Q_+$ for a fixed terminal
+plasma-energy target. Frozen controls are checked at 512, 1,024 and 2,048 steps.
+The best-found pulse lowers supplied energy by 2.18% relative to flat amplitude;
+minimizing field exposure instead raises supplied energy by about 0.98%.
+Peak field, current and power are reported but have no independent constraint.
+This is a finite control-family result, not a global minimum or a runaway result.
+
+Source-power zero crossings matter for derivatives. The script integrates the
+positive area of the linearly interpolated endpoint powers before rectification,
+and uses the same endpoint trapezoid for signed work. It checks triangle areas,
+isolated-zero sensitivity, AD/finite differences and quadratic homogeneity.
+AD agreement with the same discrete quadrature alone cannot establish a continuum
+gradient. The default displays a figure; `JIC_RF_OUTPUT` optionally names a results
+directory outside the checkout. Keep generated reports and plots out of Git.
+
 ## Classical validity
 
 For electrons, the local quantum parameter can be evaluated without a large-square
