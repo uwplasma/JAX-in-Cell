@@ -205,8 +205,8 @@ def _scatter(key, v, i, j, active, density, fraction, weight, mass, charge, coul
     w_i, w_j = weight[i], weight[j]
     accept = random.uniform(k_accept, active.shape, v.dtype) * jnp.maximum(w_i, w_j)
     take_i, take_j = active & (accept < w_j), active & (accept < w_i)
-    v = v.at[i].add(jnp.where(take_i[:, None], du_i, 0.0))
-    return v.at[j].add(jnp.where(take_j[:, None], du_j, 0.0))
+    return v.at[jnp.concatenate([i, j])].add(jnp.concatenate(
+        [jnp.where(take_i[:, None], du_i, 0.0), jnp.where(take_j[:, None], du_j, 0.0)]))
 
 
 def _within(key, v, start, n, cell, n_cells, dx, *args):
