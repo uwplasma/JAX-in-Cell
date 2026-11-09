@@ -14,6 +14,8 @@ open wall is the electrical condition of a plane a ``Source`` supplies through:
 nothing beyond it, as at a conductor, but no condition on the field either, whose
 constant then comes from the charge on the electrode opposite.
 """
+import os
+
 import jax.numpy as jnp
 
 from ._config import epsilon_0, speed_of_light as c
@@ -143,9 +145,15 @@ def deposit(x, q, x0, dx, n, bc, shape_order=2):
     idx, w = shape_weights(x, x0, dx, shape_order)
     idx, keep = map_indices(idx, n, bc)
     w = jnp.where(keep, w, 0.0)
-    if q.ndim == 1:
-        return jnp.zeros(n).at[idx].add(w * (q / dx)[:, None])
-    return jnp.zeros((n, q.shape[1])).at[idx].add(w[:, :, None] * (q / dx)[:, None, :])
+    lanes = int(os.environ.get("JIC_LANES", "1"))
+    columns = q[:, None] if q.ndim == 1 else q
+    values = w[:, :, None] * (columns / dx)[:, None, :]
+    if lanes > 1:
+        lane = (jnp.arange(x.shape[0]) % lanes)[:, None]
+        out = jnp.zeros((lanes, n, columns.shape[1])).at[lane, idx].add(values).sum(axis=0)
+    else:
+        out = jnp.zeros((n, columns.shape[1])).at[idx].add(values)
+    return out[:, 0] if q.ndim == 1 else out
 
 
 # Sign of (E_x, E_y, E_z, B_x, B_y, B_z) under the reflection x -> -x: E is a vector, B a pseudovector.
