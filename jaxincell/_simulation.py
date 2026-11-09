@@ -169,6 +169,9 @@ class Work:
     the realized numerical stage's kinetic change, not automatically heat given
     to a physical background. Emitted energy is a
     separate physical-power integral: it is not defined as minus ``rr_work``.
+    ``chi_emission`` integrates emitted power times the local quantum parameter
+    :math:`\\chi`: divided by ``radiated_energy`` it is the emission-weighted mean
+    :math:`\\chi`, the monitor of where the classical model fails.
     These small arrays are retained even when particle histories are disabled.
     """
     kinetic: object
@@ -176,6 +179,7 @@ class Work:
     rr_work: object
     radiated_energy: object
     collision_work: object
+    chi_emission: object
 
 
 @pytree_dataclass(static=("x_phase",))
@@ -727,7 +731,7 @@ class Simulation:
 
     def _empty_work(self, u, w, m):
         zero = jnp.zeros((len(self.species),), u.dtype)
-        return Work(self._species_sum(w * self._kinetic(m, u)), zero, zero, zero, zero)
+        return Work(self._species_sum(w * self._kinetic(m, u)), zero, zero, zero, zero, zero)
 
     def _energy_change(self, m, before, after):
         """Stable kinetic-energy difference, including a very small change at high gamma."""
@@ -737,7 +741,8 @@ class Simulation:
         delta = self._species_sum(weighted)
         return work.replace(prescribed_work=work.prescribed_work + delta[:, 0],
                             rr_work=work.rr_work + delta[:, 1],
-                            radiated_energy=work.radiated_energy + delta[:, 2])
+                            radiated_energy=work.radiated_energy + delta[:, 2],
+                            chi_emission=work.chi_emission + delta[:, 3])
 
     def _at_impact(self, u, hits, fields, qm, dt, time_fraction=0.5):
         """The carried momentum of each particle at the moment it met a wall.
@@ -894,7 +899,8 @@ class Simulation:
                 delta = jnp.where((weight > 0) & jnp.any(hit | unresolved), jnp.nan, delta)
                 work = work.replace(prescribed_work=work.prescribed_work.at[i].add(delta[0]),
                                     rr_work=work.rr_work.at[i].add(delta[1]),
-                                    radiated_energy=work.radiated_energy.at[i].add(delta[2]))
+                                    radiated_energy=work.radiated_energy.at[i].add(delta[2]),
+                                    chi_emission=work.chi_emission.at[i].add(delta[3]))
                 return (x.at[slots].set(position), u.at[slots].set(carried), w.at[slots].set(weight),
                         qm.at[slots].set(sp.charge_si / sp.mass), wall, work)
 
@@ -1317,7 +1323,9 @@ class Simulation:
                 selected = jnp.concatenate([jnp.full((s.n,), s.name in self.radiation.species)
                                             for s in self.species])
             charge = jnp.where(selected, charge, 0.0)
-        return landau_lifshitz(u, fields[:, :3], fields[:, 3:], charge, m, derivative)
+        force, power, chi = landau_lifshitz(u, fields[:, :3], fields[:, 3:], charge, m, derivative,
+                                            self.radiation.model == "ll_quantum", True)
+        return force, jnp.stack([power, power * chi], axis=1)
 
     def _prescribed_work(self, velocity, external, qm, m, dt):
         if self.external_E is None and self.prescribed_fields is None:
@@ -1338,7 +1346,7 @@ class Simulation:
             end = self._lorentz(u, fields, qm, interval)
             prescribed = self._prescribed_work(self._mean_velocity(u, end), external, qm, m, interval)
             zero = jnp.zeros_like(prescribed)
-            return end, jnp.stack([prescribed, zero, zero], axis=1)
+            return end, jnp.stack([prescribed, zero, zero, zero], axis=1)
 
         step = interval / (2 * self.radiation.substeps)
 
@@ -1349,16 +1357,18 @@ class Simulation:
                 midpoint = u + 0.5 * step * first
                 force, power = self._radiation_force(midpoint, fields, qm, m, selected, derivative)
                 end = u + step * force
-                return (end, loss + self._energy_change(m, u, end), emitted + step[:, 0] * power), None
+                return (end, loss + self._energy_change(m, u, end), emitted + step * power), None
 
             zero = jnp.zeros(u.shape[0], u.dtype)
-            return lax.scan(one, (start, zero, zero), None, length=self.radiation.substeps)[0]
+            return lax.scan(one, (start, zero, jnp.zeros((u.shape[0], 2), u.dtype)), None,
+                            length=self.radiation.substeps)[0]
 
         before, loss1, emitted1 = radiation_half(u)
         rotated = self._lorentz(before, fields, qm, interval)
         prescribed = self._prescribed_work(self._mean_velocity(before, rotated), external, qm, m, interval)
         end, loss2, emitted2 = radiation_half(rotated)
-        return end, jnp.stack([prescribed, loss1 + loss2, emitted1 + emitted2], axis=1)
+        emitted = emitted1 + emitted2
+        return end, jnp.stack([prescribed, loss1 + loss2, emitted[:, 0], emitted[:, 1]], axis=1)
 
     def _accelerate(self, u, fields, qm, dt, m=None, selected=None):
         if self.radiation is None:
@@ -1383,8 +1393,8 @@ class Simulation:
         prescribed = self._prescribed_work(velocity, external, qm, m, dt)
         zero = jnp.zeros_like(prescribed)
         loss = zero if self.radiation is None else dt * m * jnp.sum(force * velocity, axis=1)
-        emitted = zero if self.radiation is None else dt * power
-        return end, jnp.stack([prescribed, loss, emitted], axis=1)
+        emitted = jnp.stack([zero, zero], axis=1) if self.radiation is None else dt * power
+        return end, jnp.stack([prescribed, loss, emitted[:, 0], emitted[:, 1]], axis=1)
 
     def _flight_push(self, x, u, fields, qm, dt, m, time, field_time, selected=None, field_x=None):
         """Partial held-self-field flight, sampling a prescribed drive at its midpoint."""

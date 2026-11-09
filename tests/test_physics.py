@@ -1178,3 +1178,45 @@ def test_full_landau_lifshitz_follows_the_exact_plane_wave_solution_through_the_
         errors[model] = [np.max(abs(measured - [exact(p, full) for p in phi[inside]])) / a0 for full in (0, 1)]
     assert errors["ll_full"][1] < 2e-4 and errors["ll_reduced"][0] < 2e-4
     assert errors["ll_full"][0] > 4 * errors["ll_full"][1] and errors["ll_reduced"][1] > 4 * errors["ll_reduced"][0]
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_quantum_recoil_scales_emission_by_gaunt_factor_and_reports_chi(algorithm, tmp_path):
+    """One electron in a strong B: ll_quantum emits g(chi) times the classical energy, and the monitor
+    returns chi = gamma B/B_S (emission weighted); archives written before the monitor still load."""
+    from scipy import constants
+
+    from jaxincell import Radiation, lcfa_parameter, load_state, save_state
+    from jaxincell._core import gaunt
+
+    gamma0, b = 100., 4e7
+    particle = Species.electrons(1, 1e-18, u=jnp.array([[0., c*np.sqrt(gamma0**2 - 1), 0.]]))
+    solver = Solver(algorithm=algorithm, model="electrostatic", relativistic=True, picard_iterations=8)
+    runs = {}
+    for model in ("ll_reduced", "ll_quantum"):
+        simulation = Simulation(Domain(length=.01, cells=4, time_step=1e-21), [particle], solver,
+                                radiation=Radiation(model=model, substeps=2),
+                                external_B=jnp.zeros((4, 3)).at[:, 2].set(b))
+        runs[model] = simulation, simulation.run(2, store_particles=False).validate()
+    chi = gamma0*b/(constants.m_e**2*constants.c**2/(constants.e*constants.hbar))
+    classical, quantum = (runs[k][1].state.work for k in ("ll_reduced", "ll_quantum"))
+    ratio = float(quantum.radiated_energy[0]/classical.radiated_energy[0])
+    assert ratio == pytest.approx(float(gaunt(chi)), rel=1e-3)          # cooling over 2 steps is ~5e-5
+    assert float(quantum.chi_emission[0]/quantum.radiated_energy[0]) == pytest.approx(chi, rel=1e-3)
+    assert float(classical.chi_emission[0]/classical.radiated_energy[0]) == pytest.approx(chi, rel=1e-3)
+    assert float(diagnostics(runs["ll_quantum"][1])["chi_mean"][-1, 0]) == pytest.approx(chi, rel=1e-3)
+    assert 0 < float(gaunt(chi)) < 0.5 and chi == pytest.approx(0.9, rel=0.1)
+    # lcfa_parameter: the formation length (hbar/mc)/chi against c/omega, for 800 nm light
+    omega = 2*np.pi*c/800e-9
+    assert float(lcfa_parameter(chi, omega)) == pytest.approx(chi*constants.m_e*constants.c**2/(constants.hbar*omega))
+    assert float(lcfa_parameter(chi, omega)) == pytest.approx(c/omega/(constants.hbar/(constants.m_e*c)/chi))
+    # an archive from before the monitor has no chi_emission and loads as zeros
+    path = tmp_path/"state.npz"
+    simulation, output = runs["ll_quantum"]
+    save_state(path, output.state, simulation)
+    with np.load(path) as data:
+        stored = {k: data[k] for k in data.files if k != "work.chi_emission"}
+    np.savez(tmp_path/"old.npz", **stored)
+    old = load_state(tmp_path/"old.npz")
+    np.testing.assert_array_equal(old.work.chi_emission, 0.)
+    np.testing.assert_array_equal(old.work.radiated_energy, output.state.work.radiated_energy)

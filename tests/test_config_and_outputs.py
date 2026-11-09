@@ -95,6 +95,7 @@ def test_direct_momentum_is_a_differentiable_leaf_and_stacks_without_conversion(
 
 def test_radiation_configuration_is_static_and_normalizes_species():
     assert Radiation().species is None
+    assert Radiation(model="ll_quantum").model == "ll_quantum"
     single = Radiation(species="electrons", substeps=np.int64(2))
     assert single.species == ("electrons",) and type(single.substeps) is int
     assert jax.tree_util.tree_leaves(single) == []

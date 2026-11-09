@@ -431,12 +431,90 @@ AD agreement with the same discrete quadrature alone cannot establish a continuu
 gradient. The default displays a figure; `JIC_RF_OUTPUT` optionally names a results
 directory outside the checkout. Keep generated reports and plots out of Git.
 
-## Classical validity
+## Quantum parameter and mean recoil
 
-For electrons, the local quantum parameter can be evaluated without a large-square
-subtraction as $\chi=\sqrt S/B_S$, with $B_S\simeq4.4140\times10^9$ T.
+For a charge $q$ of mass $m$ the local quantum parameter is
+$\chi=\sqrt S\,|q|\hbar/(m^2c^2)=\sqrt S/B_S$, with $S$ the invariant above (in
+T$^2$). `State.work.chi_emission` accumulates $\int\sum_p w_pP_p\chi_p\,dt$ for
+every radiating species, in J/m². Divided by `radiated_energy`, which
+`diagnostics(out)["chi_mean"]` does, it is the emission-weighted mean $\chi$. It is a
+mean, not a maximum: a few particles at $\chi\sim1$ in a cold bulk can be
+hidden in it, so also bound $\chi$ from the fields and $\gamma$ for the run.
+
+The synchrotron formation length is $\bar\lambda_C/\chi$ with
+$\bar\lambda_C=\hbar/mc$. The locally constant crossed-field approximation needs
+this to be short against the field's scale $c/\omega$, that is
+$a=\chi\,mc^2/(\hbar\omega)\gg1$:
+{func}`~jaxincell.lcfa_parameter` evaluates $a$ for an `omega` the user supplies. The
+code does not know a field's frequency, so it reports no verdict.
+
+`Radiation(model="ll_quantum")` multiplies the reduced force and the emitted power by
+the Gaunt factor of [Niel et al. (2018)](https://doi.org/10.1088/1361-6587/aab3b3),
+
+```{math}
+g(\chi)=\left[1+4.8(1+\chi)\ln(1+1.7\chi)+2.44\chi^2\right]^{-2/3},
+```
+
+the fit to the constant-crossed-field emitted power divided by its classical value.
+This lowers the mean recoil. It does not sample photons, include the stochastic
+diffusion of the momentum, or conserve anything beyond the mean energy and momentum
+exchanged; the reduced model's neglect of field derivatives remains. Time stepping and
+the energy ledger are those of `ll_reduced`; `radiated_energy` is the quantum power.
+
+Independent gates, all in `tests/test_kernels.py` and `tests/test_physics.py`:
+
+| check | reference | result |
+|---|---|---|
+| $g(0)=1$, $\chi\to0$ | Bessel moments, $g'(0)=-55\sqrt3/16$ | fit slope $-5.44$ against $-5.954$ (9% low) |
+| $g(\chi)$, $10^{-6}\le\chi\le10^3$ | quadrature of the nonlinear-Compton spectrum | at most 1.4% in value |
+| $dg/d\chi$ | derivative of that quadrature | at most 8.6%, at $\chi\to0$ |
+| $\chi\to\infty$ | $16\Gamma(2/3)/(27\cdot3^{1/3})\chi^{-4/3}$ | within 1% at $\chi=10^5$ |
+| kernel $\chi$, power ratio | $\gamma B/B_S$ from CODATA constants; quadrature | 1e-4; within 2.5% |
+| emitted energy in `Simulation` | $g(\chi)$ times the `ll_reduced` energy | $10^{-3}$, explicit and implicit |
+| gradient of cooled $\gamma$ with respect to $B$ | central finite differences | $10^{-6}$ |
+
+The fit is accurate in value but not in slope: a gradient of $g$ is biased by up to 9%,
+and the bias of $d(\chi^2g)/d\chi$ is smaller (1.8% in the audit of
+`handoff/continuation/quantum`). A control gradient through $\chi\sim0.1$ to 1 should
+state that bias. The tests also confirm that the gradient of the product $Sg(\chi)$ is
+finite at zero field, where $g$ alone has an infinite slope in $S$.
+
+## Next stages and their gates
+
+These are not implemented. Each has an acceptance gate that must be passed before
+the stage is called available; none may be relaxed to obtain a pass.
+
+1. **Fokker–Planck diffusion** (energy diffusion beyond the mean loss). Add the
+   momentum diffusion of Niel et al. (2018). Gates: the one-step second moment of the
+   energy loss equals the quadrature of the spectrum's second moment, within 5%; the
+   mean follows $g(\chi)$; at $\chi\to0$ the diffusion vanishes as $\chi^3$ and the
+   run reduces to `ll_quantum`; the stationary energy-spread of an ensemble in a
+   constant magnetic field follows the Fokker–Planck solution; ensemble statistics,
+   not one trajectory, are compared; gradients are those of expectations over a fixed
+   random stream, with a variance estimate.
+2. **Stochastic photon emission.** Sample the emitted energy from the
+   nonlinear-Compton spectrum with a Monte Carlo event probability, in a $\chi$ range
+   the spectrum sampler is checked in. Gates: the emitted-energy distribution passes a
+   Kolmogorov–Smirnov test against the quadrature at several $\chi$; the mean over
+   many emissions equals the `ll_quantum` rate within the sampling error; the
+   probability per step is below 1% (or the step is split); energy and momentum are
+   conserved per event; the sampled mean loss at small $\chi$ reproduces `ll_reduced`; the memory and cost of the photon register is reported;
+   discontinuous sampling is not differentiated, so gradients use an expectation
+   or a score-function estimator with its variance.
+3. **Pair creation.** A photon of parameter $\chi_\gamma$ creates a pair with the
+   Erber rate. Gates: the rate against the published constant-crossed-field value over
+   $0.1\le\chi_\gamma\le20$; exponential attenuation of a photon beam through a
+   region of constant field; charge, energy and momentum conserved per event;
+   created particles are inserted without breaking the Gauss-law ledger. This is new
+   physics, a separate `Species` and not a `Radiation` switch.
+
+All three need the locally constant field validity to be demonstrated with
+$a\gg1$ for the field in use; for $a\sim1$ the emission is not local in the field.
+
+## Validity of the classical model
+
+For electrons, the local quantum parameter is $\chi=\sqrt S/B_S$, with $B_S\simeq4.4140\times10^9$ T.
 The classical model requires $\chi\ll1$ and a justified neglect of the field-derivative
 term. Neither `Radiation.substeps` nor a smaller time step changes that model range.
-There is no quantum-correction switch, photon sampling, pair creation, or automatic
-transition to another model. Implement and verify those separately after the
-classical force, trajectories, energy exchanges, and derivatives are established.
+`ll_quantum` corrects the mean recoil only. There is no photon sampling, pair creation, or
+automatic transition to another model.
