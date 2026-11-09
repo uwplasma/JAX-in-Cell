@@ -17,6 +17,8 @@ from functools import lru_cache
 from pathlib import Path
 import time
 
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -26,8 +28,6 @@ from scipy.optimize import minimize
 from jaxincell import (Domain, Simulation, Solver, Species, elementary_charge as e,
                        epsilon_0 as eps, figure, mass_electron as m, mass_proton as mi,
                        speed_of_light as c)
-
-jax.config.update("jax_enable_x64", True)
 
 # Fixed target, actuator convention and coefficient bounds precede optimization.
 design_steps, reference_steps, verification_steps = 512, (128, 256, 512, 1024), (512, 1024, 2048)
