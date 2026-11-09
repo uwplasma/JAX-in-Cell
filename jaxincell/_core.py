@@ -138,10 +138,14 @@ def map_indices(idx, n, bc):
 
 def deposit(x, q, x0, dx, n, bc, shape_order=2):
     """Density on the grid from particle positions ``x`` and amounts ``q``
-    (charge, or charge times a velocity component), with the selected spline degree."""
+    (charge, or charge times a velocity component), with the selected spline degree.
+    ``q`` of shape ``(N, C)`` deposits its ``C`` columns with one shared stencil, ``(n, C)``."""
     idx, w = shape_weights(x, x0, dx, shape_order)
     idx, keep = map_indices(idx, n, bc)
-    return jnp.zeros(n).at[idx].add(jnp.where(keep, w, 0.0) * (q / dx)[:, None])
+    w = jnp.where(keep, w, 0.0)
+    if q.ndim == 1:
+        return jnp.zeros(n).at[idx].add(w * (q / dx)[:, None])
+    return jnp.zeros((n, q.shape[1])).at[idx].add(w[:, :, None] * (q / dx)[:, None, :])
 
 
 # Sign of (E_x, E_y, E_z, B_x, B_y, B_z) under the reflection x -> -x: E is a vector, B a pseudovector.
