@@ -107,8 +107,8 @@ for label, u0 in (("electron", mono), ("beam", beam)):
     axes[1].plot(np.asarray(out.t) * 1e9, np.mean(gamma / analytic - 1, axis=1), label=label)
 
 
-# Collective ring formation. Gyrophase does not matter to a homogeneous ensemble and the Boris rotation keeps
-# |p_perp|, so the step follows the cooling time t_R = 3/(4 alpha chi_th) rather than the gyroperiod.
+# Collective ring formation. Gyrophase does not matter to a homogeneous ensemble and the Boris rotation
+# keeps |p_perp|, so the step follows the cooling time t_R = 3/(4 alpha chi_th), not the gyroperiod.
 alpha = e**2 / (4 * np.pi * epsilon_0 * hbar * c)
 B_ring, p_th, n_ring, per_ring, n_e = 1e5, 50., (20000 if quick else 200000), 400, 1e22
 omega_c, chi_th = e * B_ring / m, 50. * 1e5 / B_schwinger
@@ -121,7 +121,8 @@ ring_out = Simulation(
     Domain(length=ring_length, cells=ring_cells, time_step=ring_dt),
     (Species.electrons(n=n_ring, density=n_e, x=ring_x, u=jnp.asarray(c * eta_ring)),), Solver(relativistic=True),
     external_B=jnp.broadcast_to(jnp.array([B_ring, 0., 0.]), (ring_cells, 3)),
-    radiation=Radiation(species="electrons")).run(3 * per_ring, store_every=per_ring // 4, moments=False).validate()
+    radiation=Radiation(species="electrons", substeps=4)
+).run(3 * per_ring, store_every=per_ring // 4, moments=False).validate()
 ring_t, u_ring = np.asarray(ring_out.t), np.asarray(ring_out.u) / c
 
 
@@ -156,7 +157,7 @@ asymptotic = ring_t >= 1.5 * t_ring    # Eq. (7) needs p_parallel << p_perp, tru
 theory = ring_theory(ring_t[late])
 centre, density, peak = ring_profile(measured[-1])
 inversion = np.max(density) / np.mean(density[centre < .3 * peak])
-print(f"ring: chi_th {chi_th:.2e}, t_R {t_ring:.3e} s, {n_ring} particles, {per_ring} steps per t_R, "
+print(f"ring: chi_th {chi_th:.2e}, t_R {t_ring:.3e} s, {n_ring} particles, {per_ring} steps per t_R, 4 RR substeps, "
       f"omega_p/omega_ce {np.sqrt(n_e * e**2 / (epsilon_0 * m)) / omega_c:.1e}")
 print(f"  max |p_perp|/exact - 1 for exact p_perp > m c: {pperp_error:.2e}; radius peaks at "
       f"{ring_t[np.argmax(radius)] / t_ring:.2f} t_R (Eq. 8: 1); f(p_R)/f(core) at 3 t_R: {inversion:.2f}")
