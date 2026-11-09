@@ -22,7 +22,7 @@ from ._config import epsilon_0, speed_of_light as c
 __all__ = ["accelerated", "s2_weights", "s5_weights", "shape_weights", "map_indices", "deposit", "PARITY", "PARK",
            "to_centres", "with_ghosts", "gather", "gather_xyz", "current_from_continuity", "to_faces", "wall_faces_E",
            "curl_E", "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic", "landau_lifshitz",
-           "apply_particle_bc", "wrap_positions", "smooth"]
+           "gaunt", "apply_particle_bc", "wrap_positions", "smooth"]
 
 
 # --- shape function and boundary mapping ---------------------------------------
@@ -433,7 +433,18 @@ def boris_relativistic(u, E, B, qm, dt):
     return u + qm * E * (dt / 2)
 
 
-def landau_lifshitz(u, E, B, charge, mass, derivative=None):
+HBAR = 1.054571817e-34      # J s, CODATA 2018
+
+
+def gaunt(chi):
+    """Quantum-to-classical emitted-power ratio :math:`g(\\chi)` of Niel et al. (2018).
+
+    The standard fit to the constant-crossed-field synchrotron power, with
+    :math:`g(0)=1` and :math:`g\\sim\\chi^{-4/3}` at large :math:`\\chi`; ``chi >= 0``."""
+    return (1 + 4.8 * (1 + chi) * jnp.log1p(1.7 * chi) + 2.44 * chi ** 2) ** (-2 / 3)
+
+
+def landau_lifshitz(u, E, B, charge, mass, derivative=None, quantum=False, with_chi=False):
     """Field-quadratic Landau--Lifshitz ``du/dt`` and emitted power per particle.
 
     All inputs are SI: ``u = gamma*v`` and vector fields have shape ``(..., 3)``;
@@ -448,6 +459,10 @@ def landau_lifshitz(u, E, B, charge, mass, derivative=None):
     energy. Cross products also cancel the longitudinal electric force exactly.
     Emission is nevertheless positive there: mechanical RR work and radiation
     differ by near-field energy, so the caller must accumulate them separately.
+
+    ``quantum=True`` multiplies force and power by :math:`g(\\chi)` (:func:`gaunt`), with the
+    local quantum parameter :math:`\\chi=\\sqrt{S}\\,|q|\\hbar/(m^2c^2)`. ``with_chi=True``
+    appends :math:`\\chi` to the returned pair.
     """
     eta = u / c
     gamma = jnp.sqrt(1 + jnp.sum(eta * eta, axis=-1, keepdims=True))
@@ -462,11 +477,20 @@ def landau_lifshitz(u, E, B, charge, mass, derivative=None):
     acceleration = rate[..., None] * c * (
         jnp.cross(f, B) - jnp.sum(beta * f, axis=-1, keepdims=True) * magnetic
         + jnp.cross(jnp.cross(beta, f), f) - h2 * beta)
-    power = rate * mass * c**2 * (jnp.sum(f * f, axis=-1) + h2[..., 0])
+    invariant = jnp.sum(f * f, axis=-1) + h2[..., 0]
+    power = rate * mass * c**2 * invariant
     if derivative is not None:
         total = derivative[..., 0, :] + jnp.sum(c * beta[..., None] * derivative[..., 1:, :], axis=-2)
         acceleration += (tau * qm)[..., None] * gamma * (total[..., :3] + jnp.cross(c * beta, total[..., 3:]))
-    return acceleration, power
+    chi = 0.0
+    if quantum or with_chi:
+        # sqrt has an infinite slope at zero; S*g(chi) is smooth, so cut the slope there.
+        root = jnp.where(invariant > 0, jnp.sqrt(jnp.where(invariant > 0, invariant, 1.0)), 0.0)
+        chi = jnp.abs(qm) * (HBAR / (mass * c**2)) * root
+    if quantum:
+        g = gaunt(chi)
+        acceleration, power = g[..., None] * acceleration, g * power
+    return (acceleration, power, chi) if with_chi else (acceleration, power)
 
 
 PARK = 1.5      # cells beyond a wall where an absorbed particle is parked; see apply_particle_bc

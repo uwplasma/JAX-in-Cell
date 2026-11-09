@@ -198,6 +198,7 @@ def _check_physics_layout(version, stored):
         raise ValueError("archive format 5 requires a volume birth_budget and explicit position convention")
     if version == WORK_FORMAT:
         shape = np.shape(stored.get("wall.arrived"))[:1]
+        stored.setdefault("work.chi_emission", np.zeros(shape))  # archives before the chi monitor
         if any(f"work.{name}" not in stored or np.shape(stored[f"work.{name}"]) != shape for name in _fields(Work)):
             raise ValueError("archive format 6 requires every per-species Work array")
 

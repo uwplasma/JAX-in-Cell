@@ -4,10 +4,11 @@ stored arrays and can be recomputed at will."""
 import jax
 import jax.numpy as jnp
 
-from ._config import epsilon_0, mu_0, speed_of_light as c, elementary_charge
+from ._config import epsilon_0, mu_0, speed_of_light as c, elementary_charge, mass_electron
+from ._core import HBAR
 
 __all__ = ["bohm_edge", "charge_balance", "diagnostics", "dominant_frequency", "energies", "energy_balance",
-           "gauss_residual", "magnetic_moment", "moment_profiles", "potential", "temperatures"]
+           "gauss_residual", "lcfa_parameter", "magnetic_moment", "moment_profiles", "potential", "temperatures"]
 
 
 def _blocks(out):
@@ -334,6 +335,16 @@ def dominant_frequency(out):
     return jnp.where(uniform, freqs[jnp.argmax(spectrum[1:]) + 1], jnp.nan)
 
 
+def lcfa_parameter(chi, omega, mass=mass_electron):
+    """Local field strength parameter :math:`a=\\chi\\,mc^2/(\\hbar\\omega)` of a lepton.
+
+    The synchrotron formation length is :math:`\\bar\\lambda_C/\\chi`, with
+    :math:`\\bar\\lambda_C=\\hbar/mc`; divided by the field scale :math:`c/\\omega` it is :math:`1/a`.
+    The locally constant crossed-field model needs :math:`a\\gg1`.
+    ``omega`` is the angular frequency (or inverse time scale) of the field's variation."""
+    return chi * mass * c ** 2 / (HBAR * omega)
+
+
 def diagnostics(out):
     """All of the above in one dictionary."""
     result = energies(out)
@@ -344,6 +355,8 @@ def diagnostics(out):
     if out.work is not None:
         result["energy_balance"] = energy_balance(out)
         result["collision_work"] = out.work.collision_work
+        emitted = out.work.radiated_energy
+        result["chi_mean"] = out.work.chi_emission / jnp.where(emitted > 0, emitted, 1.0)
     if out.v is not None:
         result["temperatures"] = temperatures(out)
     return result
