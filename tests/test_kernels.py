@@ -871,7 +871,8 @@ def test_landau_lifshitz_derivative_term_is_the_convective_field_derivative():
     rng = np.random.default_rng(92)
     eta, E, B = rng.normal(size=(3, 5, 3))
     u, E, B = eta * 2 * c, E * 1e7, B
-    derivative = rng.normal(size=(5, 4, 6)) * np.array([1e18] * 3 + [1e10] * 3) * np.array([1, 1e-9, 1e-9, 1e-9])[:, None]
+    units = np.array([1e18] * 3 + [1e10] * 3) * np.array([1, 1e-9, 1e-9, 1e-9])[:, None]
+    derivative = rng.normal(size=(5, 4, 6)) * units
     q, m = -elementary_charge, mass_electron
     gamma = np.sqrt(1 + np.sum(u**2, axis=-1, keepdims=True) / c**2)
     v = u / gamma

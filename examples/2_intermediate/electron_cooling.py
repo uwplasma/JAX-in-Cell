@@ -7,7 +7,15 @@ The strong field makes cooling measurable within nanoseconds without scaling the
 radiation force. Compare every marker with the exact uniform-B energy solution,
 and check an autodiff sensitivity against its analytic derivative.
 
-Run with --quick for fewer steps; refine the macro time step to resolve gyrophase.
+A third case is the collective ring formation of Bilbao & Silva, PRL 130, 165101 (2023): an isotropic
+Maxwellian of 3D momentum spread 50 m c in a uniform field cools perpendicular momentum faster than
+parallel, and its perpendicular density f(p_perp), integrated over p_parallel, develops a ring. The
+self-consistent PIC fields are on; omega_p/omega_ce~3e-4, so (their Eq. 9) the ring forms long before
+any maser growth. Each particle is compared with the exact uniform-B solution evolved from the same
+sample, which isolates the PIC integration error; the ring radius is compared with their Eq. (7),
+which assumes p_parallel << p_perp and only approximates the exact-LL ring.
+
+Run with --quick for fewer steps and particles; refine the macro time step to resolve gyrophase.
 No files are written. Edit the parameters below, or save the displayed figure.
 """
 import os
@@ -19,6 +27,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.constants import hbar
 
 from jaxincell import (Domain, Radiation, Simulation, Solver, Species, elementary_charge as e,
                        epsilon_0, figure, mass_electron as m, speed_of_light as c)
@@ -62,7 +71,7 @@ pitch = np.linspace(.6, .8, 32)
 phase = 2 * np.pi * np.arange(32) / 32
 beam = jnp.asarray(c * np.sqrt(g0[:, None]**2 - 1) * np.column_stack(
     (np.cos(pitch), np.sin(pitch) * np.cos(phase), np.sin(pitch) * np.sin(phase))))
-fig, axes = figure(2)
+fig, axes = figure(3)
 for label, u0 in (("electron", mono), ("beam", beam)):
     out = simulation(u0, B0).run(steps, store_every=steps // frames, moments=False).validate()
     gamma = np.sqrt(1 + np.sum((np.asarray(out.u) / c)**2, axis=-1))
@@ -98,6 +107,68 @@ for label, u0 in (("electron", mono), ("beam", beam)):
     axes[1].plot(np.asarray(out.t) * 1e9, np.mean(gamma / analytic - 1, axis=1), label=label)
 
 
+# Collective ring formation. Gyrophase does not matter to a homogeneous ensemble and the Boris rotation keeps
+# |p_perp|, so the step follows the cooling time t_R = 3/(4 alpha chi_th) rather than the gyroperiod.
+alpha = e**2 / (4 * np.pi * epsilon_0 * hbar * c)
+B_ring, p_th, n_ring, per_ring, n_e = 1e5, 50., (20000 if quick else 200000), 400, 1e22
+omega_c, chi_th = e * B_ring / m, 50. * 1e5 / B_schwinger
+t_ring = 3 / (4 * alpha * chi_th) / omega_c
+ring_dt, ring_cells = t_ring / per_ring, 8
+ring_length = ring_cells * 1.5 * c * ring_dt
+eta_ring = np.random.default_rng(0).normal(0, p_th, (n_ring, 3))
+ring_x = jnp.zeros((n_ring, 3)).at[:, 0].set(ring_length * ((jnp.arange(n_ring) + .5) / n_ring - .5))
+ring_out = Simulation(
+    Domain(length=ring_length, cells=ring_cells, time_step=ring_dt),
+    (Species.electrons(n=n_ring, density=n_e, x=ring_x, u=jnp.asarray(c * eta_ring)),), Solver(relativistic=True),
+    external_B=jnp.broadcast_to(jnp.array([B_ring, 0., 0.]), (ring_cells, 3)),
+    radiation=Radiation(species="electrons")).run(3 * per_ring, store_every=per_ring // 4, moments=False).validate()
+ring_t, u_ring = np.asarray(ring_out.t), np.asarray(ring_out.u) / c
+
+
+def ring_profile(p_perp):
+    """Smoothed f(p_perp) (counts per unit perpendicular-plane area) and its peak radius."""
+    counts, edges = np.histogram(p_perp, bins=np.linspace(0, np.percentile(p_perp, 99), 400))
+    centre = .5 * (edges[1:] + edges[:-1])
+    density = np.convolve(counts / centre, np.ones(10) / 10, "same")
+    return centre, density, centre[np.argmax(density[10:-10]) + 10]
+
+
+def ring_theory(t):
+    """Eq. (7) of Bilbao & Silva, tau = (2/3) alpha B_0 omega_ce t with B_0 = B/B_Schwinger."""
+    tau_t = 2 / 3 * alpha * B_ring / B_schwinger * omega_c * t
+    return (1 + 6 * p_th**2 * tau_t**2 - np.sqrt(1 + 12 * p_th**2 * tau_t**2)) / (6 * p_th**2 * tau_t**3)
+
+
+def exact_perpendicular(t):
+    """|p_perp|/(m c): v_parallel is constant, so eta_parallel = gamma * eta_parallel0 / gamma0."""
+    gamma_t = exact_gamma(c * eta_ring, t, B_ring)
+    eta_par = gamma_t * eta_ring[:, 0] / np.sqrt(1 + np.sum(eta_ring**2, axis=1))
+    return np.sqrt(np.maximum(gamma_t**2 - 1 - eta_par**2, 0.))
+
+
+measured = [np.hypot(u[:, 1], u[:, 2]) for u in u_ring]
+exact_ring = [exact_perpendicular(t) for t in ring_t]
+radius = np.array([ring_profile(p)[2] for p in measured])
+exact_radius = np.array([ring_profile(p)[2] for p in exact_ring])
+pperp_error = max(np.max(abs(a / b - 1)[b > 1]) for a, b in zip(measured[1:], exact_ring[1:]))
+late = ring_t >= .6 * t_ring
+asymptotic = ring_t >= 1.5 * t_ring    # Eq. (7) needs p_parallel << p_perp, true after differential cooling
+theory = ring_theory(ring_t[late])
+centre, density, peak = ring_profile(measured[-1])
+inversion = np.max(density) / np.mean(density[centre < .3 * peak])
+print(f"ring: chi_th {chi_th:.2e}, t_R {t_ring:.3e} s, {n_ring} particles, {per_ring} steps per t_R, "
+      f"omega_p/omega_ce {np.sqrt(n_e * e**2 / (epsilon_0 * m)) / omega_c:.1e}")
+print(f"  max |p_perp|/exact - 1 for exact p_perp > m c: {pperp_error:.2e}; radius peaks at "
+      f"{ring_t[np.argmax(radius)] / t_ring:.2f} t_R (Eq. 8: 1); f(p_R)/f(core) at 3 t_R: {inversion:.2f}")
+print("  t/t_R", np.round(ring_t[late] / t_ring, 2), "\n  PIC radius", np.round(radius[late], 2),
+      "\n  exact-LL ensemble", np.round(exact_radius[late], 2), "\n  Eq. (7)", np.round(theory, 2))
+assert pperp_error < 1e-2, "the PIC ensemble does not follow the exact uniform-B cooling"
+assert np.all(abs(radius[late] / exact_radius[late] - 1) < .06), "the PIC ring differs from its exact-LL ensemble"
+assert np.all(abs(radius[asymptotic] / ring_theory(ring_t[asymptotic]) - 1) < .15), "ring radius departs from Eq. (7)"
+assert .6 <= ring_t[np.argmax(radius)] / t_ring <= 1.8, "ring formation time disagrees with t_R"
+assert inversion > 1.5, "no population inversion df/dp_perp > 0"
+
+
 def final_gamma(strength):
     out = simulation(mono, strength).run(steps, store_every=steps, store_particles=False, moments=False)
     return jnp.sqrt(1 + jnp.sum((out.state.u[0] / c)**2))
@@ -116,6 +187,10 @@ print(f"d gamma_final/d B: AD {float(derivative):.8e} /T, exact {exact_derivativ
 print("Energy accuracy alone does not establish gyrophase accuracy: refine the macro time step as well.")
 axes[0].set(xlabel="time (ns)", ylabel="mean Lorentz factor", title="solid: simulation; dashed: exact")
 axes[1].set(xlabel="time (ns)", ylabel="mean relative gamma error", title="uniform magnetic field")
+axes[2].plot(ring_t / t_ring, radius, "o", label="PIC")
+axes[2].plot(ring_t / t_ring, exact_radius, "-", label="exact-LL ensemble")
+axes[2].plot(ring_t[late] / t_ring, theory, "--", label="Bilbao & Silva Eq. (7)")
+axes[2].set(xlabel="t / t_R", ylabel="ring radius (m c)", title="collective ring formation")
 for ax in axes:
     ax.legend()
 fig.tight_layout()

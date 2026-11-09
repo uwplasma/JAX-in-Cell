@@ -1138,9 +1138,15 @@ def test_full_landau_lifshitz_follows_the_exact_plane_wave_solution_through_the_
     rho = e_charge**2 / (6 * np.pi * epsilon_0 * mass_electron * c**3) * omega
     eta0 = np.sqrt(gamma0**2 - 1) * np.array([-np.cos(pitch), np.sin(pitch), 0.])
     s0, length, x0 = gamma0 - eta0[0], 24 * 0.8e-6, 6 * 0.8e-6
-    window = lambda p: np.cos(p / (2 * cycles))**2
-    a = lambda p: a0 * window(p) * np.sin(p)
-    g = lambda p: a0 * (window(p) * np.cos(p) - np.sin(p / cycles) * np.sin(p) / (2 * cycles))
+
+    def window(p):
+        return np.cos(p / (2 * cycles))**2
+
+    def a(p):
+        return a0 * window(p) * np.sin(p)
+
+    def g(p):
+        return a0 * (window(p) * np.cos(p) - np.sin(p / cycles) * np.sin(p) / (2 * cycles))
 
     def fields(x, t, amplitude):
         phi = omega * (t - (x[:, 0] - x0) / c) - np.pi * cycles
@@ -1159,9 +1165,9 @@ def test_full_landau_lifshitz_follows_the_exact_plane_wave_solution_through_the_
 
     def exact(phi, full):
         edge = np.pi * cycles
-        I = integrate.quad(lambda p: g(p)**2, -edge, phi, epsabs=1e-12, epsrel=1e-10)[0]
+        energy = integrate.quad(lambda p: g(p)**2, -edge, phi, epsabs=1e-12, epsrel=1e-10)[0]
         J = integrate.quad(lambda p: a(p) * g(p)**2, -edge, phi, epsabs=1e-12, epsrel=1e-10)[0]
-        return (eta0[1] + full * rho * s0 * g(phi) - rho * s0 * J) / (1 + rho * s0 * I) + a(phi)
+        return (eta0[1] + full * rho * s0 * g(phi) - rho * s0 * J) / (1 + rho * s0 * energy) + a(phi)
 
     errors = {}
     for model in ("ll_reduced", "ll_full"):
