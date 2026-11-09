@@ -17,6 +17,8 @@ from functools import lru_cache
 from pathlib import Path
 import time
 
+os.environ.setdefault("JAX_ENABLE_X64", "1")
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
