@@ -181,6 +181,51 @@ pitch damping, marker splitting, float32/high-$\gamma$ cancellation, and derivat
 at zero momentum. Refine a full orbit as well as the radiation substep: cooling can
 converge well before gyrophase does.
 
+## Collective ring formation
+
+`electron_cooling.py` also reproduces the ring distribution of
+[Bilbao and Silva](https://doi.org/10.1103/PhysRevLett.130.165101): an isotropic Maxwellian with 3D momentum spread
+$p_{th}=50\,mc$ in $B=10^5$ T ($\chi_{th}=1.1\times10^{-3}$) cools perpendicular momentum faster than parallel, and
+$f_\perp(p_\perp)=\int f\,dp_\parallel$ acquires a maximum away from the axis. Their ring radius
+(their Eq. 7, $\tau=\tfrac23\alpha B_0\omega_{ce}t$, $B_0=B/B_S$)
+
+```{math}
+p_R=\frac{1+6p_{th}^2\tau^2-\sqrt{1+12p_{th}^2\tau^2}}{6p_{th}^2\tau^3},\qquad
+t_R=\frac{3}{4\alpha\chi_{th}\omega_{ce}}=5.16\ \mathrm{ps}
+\ \text{(their Eq. 8)}
+```
+
+assumes $p_\parallel\ll p_\perp$. The run uses 200,000 markers in 8 cells at $n=10^{22}\,\mathrm{m^{-3}}$
+($\omega_p/\omega_{ce}=3.2\times10^{-4}$), self-consistent fields on, and 400 steps per $t_R$ (the gyrophase does not
+matter to a homogeneous ensemble and Boris keeps $|p_\perp|$, so the step follows the cooling time). Ring radius
+in $mc$:
+
+| $t/t_R$ | 0.75 | 1 | 1.5 | 2 | 2.5 | 3 |
+|---|---|---|---|---|---|---|
+| PIC | 38.70 | 37.39 | 34.08 | 31.04 | 26.92 | 24.10 |
+| exact-LL ensemble, same markers | 38.70 | 37.24 | 34.07 | 31.04 | 27.01 | 24.35 |
+| Eq. (7) | 32.3 | 33.3 | 31.4 | 28.3 | 25.3 | 22.7 |
+
+The PIC ring matches the exact-LL evolution of the same markers to 1% (the difference is estimator noise). The
+radius peaks near $0.75\,t_R$ and then shrinks as $1/\tau$; $f_\perp(p_R)/f_\perp(\text{core})=9.2$ at $3\,t_R$,
+an inverted population. Eq. (7) is 8-12% below the exact ring for $t\ge1.5\,t_R$ and up to 19% at $0.75\,t_R$,
+where $p_\parallel\ll p_\perp$ fails (the paper also notes the early-time mismatch); the example gates the
+$t\ge1.5\,t_R$ agreement at 15% and does not claim the formula is accurate earlier.
+
+Per-particle $|p_\perp|$ against the exact uniform-$B$ solution: 99th percentile $1.95\times10^{-3}$, worst
+$1.3\times10^{-2}$, with the worst markers at small $p_\perp$ and large $p_\parallel$. This is self-field noise,
+not integration error: at $n=10^{10}$ with the same step and markers the worst is $6.8\times10^{-7}$
+(20,000 markers), and it does not shrink with `Radiation.substeps`. No maser growth is expected or looked for:
+$\Gamma t_R\sim\tfrac12(\omega_p/\omega_{ce})^2p_{th}\approx2.5\times10^{-6}$ (their Eq. 9). The field is
+$10^5$ T, far above laboratory fields, chosen to make $t_R$ short while $\chi_{th}\ll1$; the paper's physical
+timescale is $t_R\propto B^{-2}$. The classical force is used throughout; the mean $\chi$ of this ensemble is
+$1.4\times10^{-3}$.
+
+![Ring radius against time](../_static/figures/electron_cooling_ring.png)
+
+*Left and middle: single-electron and beam magnetic cooling against the exact solution; right: ring radius.
+Produced by `examples/2_intermediate/electron_cooling.py` on this branch, default settings, float64, CPU.*
+
 ## Prescribed RF and a finite-time control example
 
 Run `examples/3_advanced/runaway_rf.py` for a short control demonstration through the
@@ -309,6 +354,12 @@ particle boundaries, no sources and a `prescribed_fields` callback, whose deriva
 forward-mode passes per step; self-consistent and gridded fields keep the reduced force. On the CPU test case
 (2,000 markers, 4,096 steps, a loaded laptop) a step with no radiation took 2.45 s, `ll_reduced` 4.61 s and
 `ll_full` 6.49 s, a 41% cost over reduced. Where $\chi\ll1$, as here, the reduced model is adequate.
+
+![Through-pulse comparison](../_static/figures/beam_laser_models.png)
+
+*Mean Lorentz factor, final Lorentz factor against the exact reduced-LL result, and through-pulse $\eta_y$ error
+convergence of both models for the strong beam. Produced by `examples/3_advanced/beam_laser.py`, default settings,
+float64, CPU.*
 
 ## Mover convergence and Picard controls
 
