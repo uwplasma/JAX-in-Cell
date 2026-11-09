@@ -1487,8 +1487,13 @@ class Simulation:
                 return contact, times, unresolved
 
             initial_times, initial_contact = times, contact
-            contact, times, unresolved = lax.cond(jnp.any(near), refine,
-                                                  lambda _: (contact, times, unresolved), None)
+            if self.prescribed_fields is not None and not self.solver.relativistic:
+                # ``near`` is then every particle inside the box, so the branch is nearly always taken, and
+                # JAX 0.6 (the last release for Python 3.10) differentiates a cond of this size to NaN.
+                contact, times, unresolved = refine(None)
+            else:
+                contact, times, unresolved = lax.cond(jnp.any(near), refine,
+                                                      lambda _: (contact, times, unresolved), None)
         selected = jnp.where(contact, times, jnp.inf)
         side = jnp.argmin(selected, axis=0)
         hit = jnp.any(contact, axis=0)
