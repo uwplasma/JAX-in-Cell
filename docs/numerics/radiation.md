@@ -7,7 +7,8 @@ field. This is the reduced model used in radiation-reaction PIC treatments such 
 [Tamburini et al. (2010)](https://doi.org/10.1088/1367-2630/12/12/123005).
 The field-derivative term of full Landau–Lifshitz is omitted. Small quantum effects
 alone do not establish that this additional approximation is adequate for a rapidly
-varying field.
+varying field. `Radiation(model="ll_full")` adds it for `Simulation.prescribed_fields`
+only (see [below](#full-and-reduced-ll-through-a-pulse)); the default stays `ll_reduced`.
 
 ```python
 from jaxincell import Radiation, Simulation, Solver, Species
@@ -267,10 +268,71 @@ amplitude derivative. At 8,192 steps its maximum final-gamma error is $1.59\time
 the mean gamma decreases from 80 to 78.42357. These are classical-model numerical
 errors: the bound $\chi<0.0082$ does not bound quantum corrections at that level.
 The full LL solution's extra endpoint terms vanish for this special complete
-pulse, but its trajectory inside the pulse can differ. See
-[Di Piazza's plane-wave solution](https://doi.org/10.1007/s11005-008-0228-9).
+pulse, so the endpoint cannot test the omitted term; the next section does.
 The incident fluence equals the initial pulse energy per area; it is distinct
 from particle work and from boundary energy crossing this box during the run.
+
+## Full and reduced LL through a pulse
+
+Full Landau–Lifshitz adds $\tau(q/m)\gamma[D_t\boldsymbol E+\boldsymbol v\times D_t\boldsymbol B]$,
+$D_t=\partial_t+\boldsymbol v\cdot\nabla$. In the plane-wave phase variables it leaves $s=s_0/h$ unchanged and
+adds $\rho g'$ to $(\eta_y/s)'$, with $g=a'$. Di Piazza's exact solution is
+
+```{math}
+\eta_y=\frac{\eta_{y0}+\rho s_0 g-\rho s_0\int a(a')^2d\phi}{h}+a,\qquad
+\eta_z=\eta_{z0}/h,
+```
+
+and the reduced model is the same without $\rho s_0 g$. `beam_laser.py` checks this closed form against a
+separate DOP853 integration of the full-LL phase equations (difference $2.7\times10^{-13}$ of $a_0$ for the
+default beam, $2\times10^{-10}$ for the strong beam below), then runs both models at 2,048, 4,096 and 8,192
+steps. $\eta_y$ is compared through the whole pulse by mapping each output sample to its phase
+$\phi=\omega[t-(x-x_0)/c]-\pi N$. Maximum $\eta_y$ errors in units of $a_0$:
+
+| beam | model | vs own exact, 2,048 / 4,096 / 8,192 | vs other exact, 8,192 | model gap |
+|---|---|---|---|---|
+| default ($\gamma_0\approx80$, $a_0=15$, $\chi\le0.008$) | `ll_reduced` | 4.48e-4 / 1.12e-4 / 2.80e-5 | 2.81e-5 | 2.6e-6 |
+| | `ll_full` | 4.48e-4 / 1.12e-4 / 2.80e-5 | 2.81e-5 | |
+| strong ($\gamma_0\approx3\times10^4$, $a_0=1$, $\chi\le0.19$) | `ll_reduced` | 4.52e-4 / 1.13e-4 / 2.83e-5 | 8.84e-4 | 8.85e-4 |
+| | `ll_full` | 4.52e-4 / 1.13e-4 / 2.83e-5 | 8.85e-4 | |
+
+Each model converges at second order (ratio 4.00) to its own solution. The model gap does not converge. For the
+default beam it is ten times below the integration error at 8,192 steps, so the term cannot be seen; for the
+strong beam it is 31 times the finest `ll_full` error. The gap scales as
+$\rho s_0\approx\tfrac23\alpha\chi/a_0$: for $a_0\gtrsim1$ and $\chi\ll1$ it is below $5\times10^{-3}\chi$ of
+the Lorentz momentum, smaller than the radiation reaction itself by $1/a_0$. The strong beam is deliberately
+outside the classical validity range ($\chi$ of order 0.2 invites quantum corrections that dwarf the term); it only
+shows that the implementation reproduces the exact term where it is visible.
+
+**Decision.** `ll_full` is kept as an opt-in model, not the default. It needs the explicit solver, periodic
+particle boundaries, no sources and a `prescribed_fields` callback, whose derivatives are taken by four
+forward-mode passes per step; self-consistent and gridded fields keep the reduced force. On the CPU test case
+(2,000 markers, 4,096 steps, a loaded laptop) a step with no radiation took 2.45 s, `ll_reduced` 4.61 s and
+`ll_full` 6.49 s, a 41% cost over reduced. Where $\chi\ll1$, as here, the reduced model is adequate.
+
+## Mover convergence and Picard controls
+
+Uniform $B=1000$ T, $\gamma_0=1000$, 1 ns (28 gyroperiods), one electron, compared with the exact solution.
+Maximum errors at the end, explicit versus implicit (8 Picard iterations, 2 particle substeps), laptop CPU:
+
+| steps | explicit $\gamma$ error | explicit phase (rad) | implicit $\gamma$ error | implicit phase (rad) |
+|---|---|---|---|---|
+| 512 | 3.66e-9 | 2.25 | 2.14e-3 | 0.78 |
+| 1,024 | 9.14e-10 | 0.572 | 5.40e-4 | 0.197 |
+| 2,048 | 2.29e-10 | 0.144 | 1.35e-4 | 0.0493 |
+| 4,096 | 5.71e-11 | 0.0359 | 3.39e-5 | 0.0123 |
+
+Both movers are second order (error ratio 4.00 per halving) in energy and phase. The explicit energy error is
+about $6\times10^{5}$ times smaller at equal step because its radiation half-steps are Runge–Kutta and the Boris
+rotation is exact in $|p_\perp|$; the implicit midpoint force makes a larger, still second-order, energy error.
+
+Controls at 1,024 steps: explicit `Radiation.substeps` 1/2/4/8 reduce the energy error 9.14e-10, 2.29e-10, 5.71e-11,
+1.43e-11 (second order) and leave the phase error (0.572 rad) untouched, as stated above. In the implicit scheme
+the Picard error saturates at the discretization error: 1, 2, 3 iterations give 7.89e-4, 5.403e-4, 5.402e-4 and
+4 or 8 give 5.402e-4 with identical phase. Particle `substeps` 1/2/4/8 give 2.14e-3, 5.40e-4, 1.35e-4, 3.39e-5
+and phase 0.78, 0.197, 0.0493, 0.0123 rad; the `Radiation.substeps` multiplier of the particle orbit substeps gives
+the same sequence. Use `picard_tolerance` to check closure and increase `Domain.time_step` resolution (explicit) or
+particle `substeps` (implicit) to reduce the error. Timings were taken under heavy load and are not recorded.
 
 ## A prescribed source-energy benchmark
 
