@@ -497,6 +497,11 @@ class Simulation:
             unknown = set(self.radiation.species) - {s.name for s in self.species}
             if unknown:
                 raise ValueError(f"Radiation species are not in this simulation: {sorted(unknown)}")
+        if self.radiation.model == "ll_full" and (
+                self.prescribed_fields is None or self.solver.algorithm != "explicit" or self.sources
+                or self.domain.particle_bc != (0, 0)):
+            raise ValueError("Radiation(model='ll_full') needs prescribed_fields, algorithm='explicit', "
+                             "periodic particle boundaries and no sources")
 
     def _check_collisions(self):
         """The default Coulomb logarithm is taken from the lightest negatively charged species,
@@ -1297,21 +1302,29 @@ class Simulation:
         push = boris_relativistic if self.solver.relativistic else boris
         return push(v, fields[:, :3], fields[:, 3:], qm[:, None], dt)
 
-    def _radiation_force(self, u, fields, qm, m, selected=None):
+    def _field_derivative(self, x, time):
+        """``(N, 4, 6)``: partials of the prescribed ``(E, B)`` along ``t, x, y, z`` (``ll_full``)."""
+        def along(t_tangent, x_tangent):
+            return jax.jvp(lambda xx, tt: self._prescribed_at(xx, tt), (x, jnp.asarray(time)),
+                           (x_tangent, t_tangent))[1]
+        zero, eye = jnp.zeros_like(x), jnp.eye(3, dtype=x.dtype)
+        return jnp.stack([along(1.0, zero)] + [along(0.0, jnp.broadcast_to(e, x.shape)) for e in eye], axis=1)
+
+    def _radiation_force(self, u, fields, qm, m, selected=None, derivative=None):
         charge = qm * m
         if self.radiation.species is not None:
             if selected is None:
                 selected = jnp.concatenate([jnp.full((s.n,), s.name in self.radiation.species)
                                             for s in self.species])
             charge = jnp.where(selected, charge, 0.0)
-        return landau_lifshitz(u, fields[:, :3], fields[:, 3:], charge, m)
+        return landau_lifshitz(u, fields[:, :3], fields[:, 3:], charge, m, derivative)
 
     def _prescribed_work(self, velocity, external, qm, m, dt):
         if self.external_E is None and self.prescribed_fields is None:
             return jnp.zeros_like(qm)
         return qm * m * jnp.sum(external * velocity * dt, axis=1)
 
-    def _push_work(self, u, fields, qm, dt, m, external, selected=None):
+    def _push_work(self, u, fields, qm, dt, m, external, selected=None, derivative=None):
         """A local explicit push and its per-physical-particle energy exchanges.
 
         Radiation uses symmetric midpoint-RK half updates around one Lorentz
@@ -1332,9 +1345,9 @@ class Simulation:
         def radiation_half(start):
             def one(carry, _):
                 u, loss, emitted = carry
-                first, _ = self._radiation_force(u, fields, qm, m, selected)
+                first, _ = self._radiation_force(u, fields, qm, m, selected, derivative)
                 midpoint = u + 0.5 * step * first
-                force, power = self._radiation_force(midpoint, fields, qm, m, selected)
+                force, power = self._radiation_force(midpoint, fields, qm, m, selected, derivative)
                 end = u + step * force
                 return (end, loss + self._energy_change(m, u, end), emitted + step[:, 0] * power), None
 
@@ -1600,7 +1613,9 @@ class Simulation:
         # push with the fields at t^{n+1/2}
         fields = self._fields_at(x_half, E, B, rho_half, st.time + dt / 2)
         external = self.external_fields_at(x_half, st.time + dt / 2)[:, :3]
-        u, change = self._push_work(u, fields, qm, dt, m, external)
+        derivative = (self._field_derivative(x_half, st.time + dt / 2)
+                      if self.radiation is not None and self.radiation.model == "ll_full" else None)
+        u, change = self._push_work(u, fields, qm, dt, m, external, derivative=derivative)
         work = self._add_work(work, w[:, None] * change)
         if walls:
             x_next, u, w, qm, wall, work = self._wall_drift(k_wall, x_half, u, w, qm, wall, fields, m,
