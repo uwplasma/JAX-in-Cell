@@ -1411,7 +1411,7 @@ class Simulation:
             kT_ev = mass[e] * vth ** 2 / 2 / elementary_charge
             ln_lambda = jnp.where(jnp.any(charge < 0), coulomb_logarithm(density, kT_ev), jnp.nan)
         return collide(key, x, v, w, m, qm * m, self.blocks, pairs, ln_lambda, dt, d.dx, d.length, d.cells,
-                       relativistic=self.solver.relativistic)
+                       relativistic=self.solver.relativistic, restore=self.collisions.restore)
 
     def _wall_contact(self, x, start, fields, qm, dt, time=0.0, field_time=None, m=None, field_x=None, selected=None):
         """First contact of a held-field flight; the quadratic is exact for Newtonian E.

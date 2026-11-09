@@ -230,6 +230,31 @@ sampling fewer partners; keep its collisional time step small and check
 [convergence](#time-step). With unequal weights conservation remains statistical,
 so a single realization can finish above or below its initial-energy equilibrium.
 
+### Restoring the moments of a cross-species stage
+
+The acceptance rule above makes each pair's energy change a lump: with a light marker of
+weight $w_l$ and a partner of weight $w_h=Rw_l$, a candidate collision that moves energy $q$
+from one to the other gives the weighted defect $D=w_lq(1-RB)$, with $B$ a Bernoulli$(1/R)$
+draw. Then $\mathbb E[D]=0$ but $\operatorname{Var}D=w_l^2q^2(R-1)$, which for a dilute
+population ($R=1.25\times10^4$ for a $10^{-5}$ seed fraction on 512 bulk markers) exceeds the
+seed's own energy transfer. `Collisions(restore=True)`, or `collide(..., restore=True)`, removes
+the defect of every cross-species stage cell by cell from the species of larger weight, the one
+that sampled the lumps, and leaves the lighter species, whose rates the stage computes, as sampled.
+After the stage let $\Delta\mathbf P$ and $\Delta K$ be the weighted momentum and kinetic-energy
+changes of the cell. The heavy markers $i$ receive the uniform shift $\mathbf u_i\to\mathbf u_i-\Delta\mathbf P/\sum_h w_im_i$,
+which restores the momentum exactly. About the weighted mean $\bar{\mathbf u}$ the momenta are then
+scaled, $\mathbf u_i\to\bar{\mathbf u}+\lambda(\mathbf u_i-\bar{\mathbf u})$, with $\lambda$ solving
+$\sum_h w_iK(\bar{\mathbf u}+\lambda\mathbf d_i)=\sum_h w_iK(\mathbf u_i)-\Delta K$. Since
+$K(\lambda)$ is convex, Newton's method from $\lambda=1$ converges monotonically and six steps
+reach round-off for the defects of interest; $\lambda$ stops at 0, the state with no spread,
+when the heavy markers cannot give up the energy, and a cell whose heavy markers have no spread
+keeps its energy defect. Equal weights are left alone. A species colliding with itself is not
+corrected. The correction is the expected update spread over the heavy population: the
+heavy species' mean momentum and energy are those the lumps would give on average, without their
+variance. In the 64-seed pilots of the dilute-seed example the unrestored defect has a standard
+error of $2\times10^{-4}$ J/m$^3$ and the restored one is $3\times10^{-13}$ J/m$^3$, while the
+energy the seed loses is unchanged within its sampling error.
+
 ## Where in the step
 
 The periodic explicit step carries the position at half-integer times and the velocity at integer

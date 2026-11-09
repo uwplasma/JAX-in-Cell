@@ -7,6 +7,7 @@ and kinetic energy; unequal weights conserve these moments in expectation. The
 shared pairing, Higginson density correction and the two rate/angle models are
 derived on the Collisions page of the numerical methods."""
 import jax.numpy as jnp
+import numpy as np
 from jax import lax, random
 
 from ._config import epsilon_0, speed_of_light as c
@@ -237,8 +238,64 @@ def _within(key, v, start, n, cell, n_cells, dx, *args):
     return v
 
 
-def _between(key, v, block_a, block_b, cell_a, cell_b, n_cells, dx, *args):
-    """Disjoint random pairs between two species, with the sampled pair density."""
+def _kinetic(v, mass, relativistic):
+    """Kinetic energy of ``v`` (a velocity, or ``u=gamma*v`` if relativistic) without cancellation."""
+    s = jnp.sum(v * v, axis=-1)
+    return mass * s / (jnp.sqrt(1 + s / c ** 2) + 1) if relativistic else 0.5 * mass * s
+
+
+def _restore(v, new, index, cell, n_cells, weight, mass, relativistic):
+    """Return ``new`` with the weighted momentum and energy defect of one cross-species stage
+    removed, cell by cell, from the species of larger weight.
+
+    Unequal weights conserve both moments only on average: the high-weight partner
+    of a pair accepts the update with probability ``w_low / w_high``, and each acceptance
+    is a lump. The expected update is its smooth equivalent, spread over the population
+    that sampled it. A uniform shift of the momentum removes the momentum defect; then the
+    momenta about their weighted mean are scaled by ``lam`` so that the total kinetic energy
+    returns to its value before the stage. The energy is convex in ``lam``, so Newton's method
+    from ``lam = 1`` converges monotonically; ``lam`` stops at 0, the state with no spread, when
+    the energy to be removed is more than the cell holds, and a cell whose heavy particles have no
+    spread, as with one of them, keeps its energy defect. The low-weight species, whose rates the
+    stage computes, is untouched."""
+    w, m, old, now = weight[index], mass[index], v[index], new[index]
+
+    def per_cell(x):
+        return jnp.zeros((n_cells + 1,) + x.shape[1:], x.dtype).at[cell].add(x)
+
+    kinetic = _kinetic(now, m, relativistic)
+    d_momentum = per_cell((w * m)[:, None] * (now - old))
+    d_energy = per_cell(w * (kinetic - _kinetic(old, m, relativistic)))
+    # the heavy species is the one whose weight exceeds the cell's mean by more than roundoff
+    mean_weight = per_cell(w)[cell] / jnp.maximum(per_cell((w > 0) * 1.0), 1)[cell]
+    heavy = w > mean_weight * (1 + 8 * jnp.finfo(w.dtype).eps)
+    wm = jnp.where(heavy, w * m, 0.0)
+    total = per_cell(wm)
+    inverse = 1 / jnp.where(total > 0, total, 1.0)
+    shifted = now - jnp.where(heavy[:, None], (d_momentum * inverse[:, None])[cell], 0.0)
+    mean = per_cell(wm[:, None] * shifted) * inverse[:, None]
+    spread = jnp.where(heavy[:, None], shifted - mean[cell], 0.0)
+    w_heavy = jnp.where(heavy, w, 0.0)
+    target = per_cell(w_heavy * kinetic) - d_energy
+    # a spread at round-off level, as of a single heavy marker, cannot be scaled
+    scalable = (per_cell(wm * jnp.sum(spread * spread, axis=-1))
+                > (64 * jnp.finfo(w.dtype).eps) ** 2 * per_cell(wm * jnp.sum(shifted * shifted, axis=-1)))
+
+    def newton(_, lam):
+        u = mean[cell] + lam[cell][:, None] * spread
+        gamma = jnp.sqrt(1 + jnp.sum(u * u, axis=-1) / c ** 2) if relativistic else 1.0
+        slope = per_cell(w_heavy * m * jnp.sum(u * spread, axis=-1) / gamma)
+        energy = per_cell(w_heavy * _kinetic(u, m, relativistic))
+        step = jnp.where(scalable & (slope > 0), (energy - target) / jnp.where(slope > 0, slope, 1.0), 0.0)
+        return jnp.maximum(lam - step, 0.0)
+
+    lam = lax.fori_loop(0, 6, newton, jnp.ones(n_cells + 1, v.dtype))
+    return new.at[index].set(jnp.where(heavy[:, None], mean[cell] + lam[cell][:, None] * spread, now))
+
+
+def _between(key, v, block_a, block_b, cell_a, cell_b, n_cells, dx, *args, restore=False):
+    """Disjoint random pairs between two species, with the sampled pair density. With ``restore``
+    the weighted momentum and energy of every cell are returned to their values before the stage."""
     if block_a[1] > block_b[1]:
         block_a, block_b, cell_a, cell_b = block_b, block_a, cell_b, cell_a
     (start_a, n_a), (start_b, n_b) = block_a, block_b
@@ -254,10 +311,15 @@ def _between(key, v, block_a, block_b, cell_a, cell_b, n_cells, dx, *args):
     i, j = ia, ib[jnp.minimum(first_b[sorted_a] + rank_a, n_b - 1)]
     active = rank_a < on_b
     density = jnp.maximum(count_a, count_b)[sorted_a] * jnp.maximum(weight[i], weight[j]) / dx
-    return _scatter(k_scatter, v, i, j, active, density, 1.0, *args)
+    new = _scatter(k_scatter, v, i, j, active, density, 1.0, *args)
+    if restore:
+        index = np.concatenate((np.arange(start_a, start_a + n_a), np.arange(start_b, start_b + n_b)))
+        new = _restore(v, new, index, jnp.concatenate((cell_a, cell_b)), n_cells, weight, args[1], args[5])
+    return new
 
 
-def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx, length, n_cells, relativistic=False):
+def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx, length, n_cells, relativistic=False,
+            restore=False):
     """Apply one collision step to velocities, or to SI momentum per mass.
 
     Args:
@@ -274,6 +336,10 @@ def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx,
             relativistic Perez rate and Nanbu angles. Requires an explicit
             Coulomb logarithm; the nonrelativistic default is not a relativistic
             screening model. Unequal weights conserve moments in expectation.
+        restore: Static flag. Return the momentum and energy of every cell to their values
+            before each cross-species stage, by a shift and a scaling of the momenta of the
+            species of larger weight; the other species keeps its sampled collisions. Nothing
+            changes between equal weights. Collisions of a species with itself are not corrected.
     """
     # A particle a wall has collected has no weight left. It goes to a cell of its own
     # past the last one, where it neither collides nor takes a partner from one that can.
@@ -288,5 +354,5 @@ def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx,
                 v = _within(sub, v, start_a, n_a, cell[start_a:start_a + n_a], n_cells, dx, *args)
         else:
             v = _between(sub, v, blocks[a], blocks[b], cell[start_a:start_a + n_a],
-                         cell[start_b:start_b + n_b], n_cells, dx, *args)
+                         cell[start_b:start_b + n_b], n_cells, dx, *args, restore=restore)
     return v

@@ -679,3 +679,248 @@ def test_maxwell_juttner_is_stationary_under_relativistic_self_collisions(temper
     assert np.linalg.norm(new - u) / np.linalg.norm(u) > .1
     before, after = (_kinetic_relativistic(p, mass_electron).sum() for p in (u, new))
     assert abs(after / before - 1) < 1e-12
+
+
+def _juttner_mean_gamma(theta):
+    """Exact <gamma> of f ~ exp(-gamma/theta) d^3p: 3 theta + K1(1/theta)/K2(1/theta)."""
+    from scipy.special import kve
+    return 3 * theta + kve(1, 1 / theta) / kve(2, 1 / theta)
+
+
+def test_collisions_drive_a_nonequilibrium_gas_to_the_juttner_distribution():
+    """Stationarity does not say the operator relaxes TO Maxwell-Juttner. A uniform ball of
+    momenta (|p| <= 2 mc, isotropic) has the equipartition temperature <p.v>/3 about 3% above
+    the Juttner temperature that carries its mean gamma. Collisions conserve <gamma>, so
+    the relativistic fixed point is determined: <p.v>/3 must reach theta with
+    <gamma> = 3 theta + K1/K2, and the gamma histogram must pass a Kolmogorov test."""
+    from scipy.integrate import cumulative_trapezoid
+    from scipy.optimize import brentq
+    from scipy.stats import kstest
+    n, density = 20000, 1e20
+    rng = np.random.default_rng(0)
+    direction = rng.normal(size=(n, 3))
+    eta = 2 * rng.random(n)[:, None] ** (1 / 3) * direction / np.linalg.norm(direction, axis=1)[:, None]
+
+    def stats(eta):
+        gamma = np.sqrt(1 + np.sum(eta ** 2, axis=1))
+        return gamma.mean(), np.mean(np.sum(eta ** 2, axis=1) / gamma) / 3
+    gamma0, temperature0 = stats(eta)
+    theta = brentq(lambda t: _juttner_mean_gamma(t) - gamma0, 1e-2, 50)
+    assert temperature0 > 1.025 * theta
+    dt = .05 * 4 * np.pi * epsilon_0 ** 2 * mass_electron ** 2 * c_light ** 3 / (density * e_charge ** 4 * 15.)
+    u = c_light * jnp.asarray(eta)
+
+    @jax.jit
+    def relax(u, key):
+        def step(u, k):
+            return collide(k, jnp.zeros_like(u), u, jnp.full(n, density / n), jnp.full(n, mass_electron),
+                           jnp.full(n, -e_charge), ((0, n),), ((0, 0),), 15., dt, 1., 1., 1, relativistic=True), None
+        return jax.lax.scan(step, u, random.split(key, 100))[0]
+    for key in range(6):
+        u = relax(u, random.PRNGKey(key))
+    gamma1, temperature1 = stats(np.asarray(u) / c_light)
+    assert abs(gamma1 / gamma0 - 1) < 1e-12
+    assert abs(temperature1 / theta - 1) < 4e-3 < (temperature0 / theta - 1) / 6
+    gamma = np.sort(np.sqrt(1 + np.sum((np.asarray(u) / c_light) ** 2, axis=1)))
+    grid = np.linspace(1, gamma[-1] + 1, 20001)
+    pdf = grid * np.sqrt(grid ** 2 - 1) * np.exp(-grid / theta)
+    cdf = cumulative_trapezoid(pdf, grid, initial=0)
+    assert kstest(gamma, lambda g: np.interp(g, grid, cdf / cdf[-1])).pvalue > .01
+
+
+def test_electron_ion_energy_exchange_matches_the_spitzer_rate_at_a_large_temperature_ratio():
+    """Spitzer's equipartition frequency, nu = 8 sqrt(2 pi)/3 n e^4 lnL sqrt(m_e m_i)/
+    ((4 pi eps0)^2 (m_e T_i + m_i T_e)^(3/2)), is exact for any mass ratio and unequal
+    temperatures; here m_i = 25 m_e and T_e/T_i = 4. The ion heating of a short step must equal
+    nu (T_e - T_i) dt to the sampling error plus the 3% the finite step costs at dt = tau_e/400."""
+    n, density, logarithm, te, ti, ratio = 100000, 1e20, 10., 2000. * e_charge, 500. * e_charge, 25.
+    mi = ratio * mass_electron
+    nu = (8 * np.sqrt(2 * np.pi) / 3 * density * e_charge ** 4 * logarithm * np.sqrt(mass_electron * mi)
+          / ((4 * np.pi * epsilon_0) ** 2 * (mass_electron * ti + mi * te) ** 1.5))
+    tau_e = (6 * np.sqrt(2) * np.pi ** 1.5 * epsilon_0 ** 2 * np.sqrt(mass_electron) * te ** 1.5
+             / (logarithm * e_charge ** 4 * density))
+    dt = tau_e / 400
+    rng = np.random.default_rng(1)
+    half = rng.normal(size=(n // 2, 3)) * np.sqrt(np.repeat([te / mass_electron, ti / mi], [1, 0])[0])
+    ions = rng.normal(size=(n // 2, 3)) * np.sqrt(ti / mi)
+    u = jnp.asarray(np.concatenate((half, -half, ions, -ions)))
+    mass = jnp.repeat(jnp.array([mass_electron, mi]), n)
+
+    def temperatures(u):
+        return mass_electron * jnp.sum(u[:n] ** 2) / (3 * n), mi * jnp.sum(u[n:] ** 2) / (3 * n)
+    start = temperatures(u)
+
+    def heating(key):
+        new = collide(key, jnp.zeros_like(u), u, jnp.full(2 * n, density / n), mass,
+                      jnp.repeat(jnp.array([-e_charge, e_charge]), n), ((0, n), (n, n)), ((0, 1),),
+                      logarithm, dt, 1., 1., 1, relativistic=True)
+        return temperatures(new)[1] - start[1]
+    measured = np.asarray(jax.jit(jax.vmap(heating))(random.split(random.PRNGKey(3), 16)))
+    expected = nu * (start[0] - start[1]) * dt
+    assert abs(measured.mean() / expected - .97) < 5 * measured.std(ddof=1) / np.sqrt(16) / expected + .02
+
+
+def _cold_target_defect(ratio, restore, replicates=512, pairs=2048):
+    """Weighted energy defect of one stage, in units of the expected energy lost by the incident
+    light electrons, for gamma = 5 on targets at rest of ``ratio`` times their weight."""
+    gamma, density = 5., 1e20
+    u = jnp.zeros((2 * pairs, 3)).at[:pairs, 0].set(c_light * np.sqrt(gamma ** 2 - 1))
+    weight = jnp.repeat(jnp.array([1., ratio]) * density / (ratio * pairs), pairs)
+    mass, charge = jnp.full(2 * pairs, mass_electron), jnp.full(2 * pairs, -e_charge)
+    s = .002
+    dt = s / _cold_relativistic_rate(gamma, 1., density)
+
+    def realization(key):
+        new = collide(key, jnp.zeros_like(u), u, weight, mass, charge, ((0, pairs), (pairs, pairs)), ((0, 1),),
+                      15., dt, 1., 1., 1, relativistic=True, restore=restore)
+
+        def kinetic(v):
+            return mass_electron * c_light ** 2 * (jnp.sqrt(1 + jnp.sum(v * v, axis=1) / c_light ** 2) - 1)
+        change = weight * (kinetic(new) - kinetic(u))
+        return jnp.sum(change), jnp.sum(change[:pairs])
+    defect, light = jax.vmap(realization)(random.split(random.PRNGKey(5), replicates))
+    expected = -weight[0] * pairs * mass_electron * c_light ** 2 * (gamma - 1) / 2 * (1 - np.exp(-s))
+    return np.asarray(defect) / -expected, np.asarray(light) / expected  # expected < 0
+
+
+def test_unequal_weight_energy_defect_has_the_higginson_variance_and_restoration_removes_it():
+    """A light marker is always updated and its heavy partner with probability 1/R, so the defect
+    summed over M pairs, in units of the light population's expected loss, has mean zero and
+    variance 2 (R - 1)/M (cold target: Q has <Q^2> = 2 <Q>^2 at small s). With restoration it
+    is zero to round-off while the energy the light species loses is unchanged."""
+    ratio, pairs = 64., 2048
+    defect, light = (np.asarray(a) for a in _cold_target_defect(ratio, False))
+    variance = np.var(defect, ddof=1)
+    standard_error = np.std((defect - defect.mean()) ** 2) / np.sqrt(len(defect))
+    assert abs(defect.mean()) < 5 * defect.std(ddof=1) / np.sqrt(len(defect))
+    assert abs(variance - 2 * (ratio - 1) / pairs) < 5 * standard_error
+    fixed, light_fixed = (np.asarray(a) for a in _cold_target_defect(ratio, True))
+    assert np.abs(fixed).max() < 1e-10 < variance ** .5 / 1e6
+    np.testing.assert_array_equal(light_fixed, light)
+    assert abs(light.mean() - 1) < 5 * light.std(ddof=1) / np.sqrt(len(light)) + .02
+
+
+def _restore_cells(rng, per_cell=(20, 30, 20, 20), light_per_cell=(6, 7, 6, 6)):
+    """Light electrons and heavy markers in four cells, one heavy marker collected by a wall,
+    with the heavy block listed first or second."""
+    n_cells = len(per_cell)
+    cell = np.concatenate((np.repeat(np.arange(n_cells), light_per_cell), np.repeat(np.arange(n_cells), per_cell)))
+    x = jnp.zeros((cell.size, 3)).at[:, 0].set((cell + .5) / n_cells - .5)
+    nl = sum(light_per_cell)
+    u = jnp.asarray(np.concatenate((c_light * .5 * rng.normal(size=(nl, 3)),
+                                    c_light * .05 * rng.normal(size=(cell.size - nl, 3)))))
+    weight = np.concatenate((np.full(nl, 1e16), np.full(cell.size - nl, 2e18)))
+    weight[nl] = 0.
+    mass = np.concatenate((np.full(nl, mass_electron), np.full(cell.size - nl, 100 * mass_electron)))
+    charge = np.concatenate((np.full(nl, -e_charge), np.full(cell.size - nl, e_charge)))
+    return n_cells, cell, x, u, *(jnp.asarray(a) for a in (weight, mass, charge)), nl
+
+
+@pytest.mark.parametrize("relativistic", [False, True])
+@pytest.mark.parametrize("heavy_first", [False, True])
+def test_restoration_returns_every_cell_to_its_momentum_and_energy_and_spares_the_light_species(
+        relativistic, heavy_first):
+    n_cells, cell, x, u, weight, mass, charge, nl = _restore_cells(np.random.default_rng(0))
+    blocks, pairs = ((0, nl), (nl, cell.size - nl)), ((0, 1),)
+    if heavy_first:
+        order = np.concatenate((np.arange(nl, cell.size), np.arange(nl)))
+        x, u, weight, mass, charge, cell = x[order], u[order], weight[order], mass[order], charge[order], cell[order]
+        blocks, pairs = ((0, cell.size - nl), (cell.size - nl, nl)), ((1, 0),)
+    light = np.asarray(mass) == mass_electron
+
+    def run(restore):
+        return np.asarray(collide(random.PRNGKey(3), x, u, weight, mass, charge, blocks, pairs, 10., 1e-9,
+                                  1 / n_cells, 1., n_cells, relativistic=relativistic, restore=restore))
+    raw, fixed = run(False), run(True)
+
+    def moments(v):
+        energy = (_kinetic_relativistic(v, np.asarray(mass)) if relativistic
+                  else np.asarray(mass) * np.sum(v * v, axis=1) / 2)
+        wm = np.asarray(weight * mass)
+        return (_per_cell(cell, n_cells, wm[:, None] * v), _per_cell(cell, n_cells, np.asarray(weight) * energy))
+    p0, e0 = moments(np.asarray(u))
+    for v, tolerance in ((raw, None), (fixed, 1e-13)):
+        p, e = moments(v)
+        error = max(np.abs(e - e0).max() / e0.max(), np.abs(p - p0).max() / np.abs(p0).max())
+        assert (error > 1e-8) if tolerance is None else (error < tolerance)
+    np.testing.assert_array_equal(fixed[light], raw[light])
+    assert np.all(fixed[np.asarray(weight) == 0] == raw[np.asarray(weight) == 0])
+    assert np.abs(fixed[~light] - raw[~light]).max() > 0
+
+
+def test_restoration_is_the_identity_between_equal_weights_and_finite_where_it_cannot_act():
+    """Equal weights have no defect, so nothing is changed; a cell with a single heavy marker has no
+    spread to scale, and one whose heavy markers cannot give up the energy to be removed
+    stops at their common velocity: momentum is still exact and nothing is NaN."""
+    u = jnp.asarray(c_light * np.array([[.9, 0, 0], [-.3, .1, 0], [.02, 0, 0], [0, .02, 0], [.001, 0, 0]]))
+    mass = jnp.array([mass_electron, mass_electron, mass_electron, 50. * mass_electron, 50. * mass_electron])
+    charge = jnp.array([-e_charge, -e_charge, -e_charge, e_charge, e_charge])
+    x = jnp.zeros((5, 3))
+    for weight in (jnp.full(5, 1e18), jnp.array([1., 1., 1e4, 1e4, 1e4]) * 1e18):
+        args = (random.PRNGKey(1), x, u, weight, mass, charge, ((0, 2), (2, 3)), ((0, 1),), 10., 1e-9, 1., 1., 1)
+        raw, fixed = (np.asarray(collide(*args, relativistic=True, restore=r)) for r in (False, True))
+        assert np.isfinite(fixed).all()
+        if weight[0] == weight[-1]:
+            np.testing.assert_array_equal(fixed, raw)
+    one = jnp.array([[.9, 0, 0], [-.3, .1, 0], [.002, 0, 0]]) * c_light
+    mass, charge = jnp.array([1., 1., 50.]) * mass_electron, jnp.array([-1., -1., 1.]) * e_charge
+    weight = jnp.array([1., 1., 1e4]) * 1e18
+    for relativistic in (False, True):
+        fixed = np.asarray(collide(random.PRNGKey(2), jnp.zeros((3, 3)), one, weight, mass, charge,
+                                   ((0, 2), (2, 1)), ((0, 1),), 10., 1e-9, 1., 1., 1,
+                                   relativistic=relativistic, restore=True))
+        assert np.isfinite(fixed).all()
+        p0 = np.sum(np.asarray(weight * mass)[:, None] * np.asarray(one), axis=0)
+        p1 = np.sum(np.asarray(weight * mass)[:, None] * fixed, axis=0)
+        assert np.abs(p1 - p0).max() < 1e-12 * np.abs(p0).max()
+
+
+def test_restoration_gradients_stay_finite():
+    n_cells, cell, x, u, weight, mass, charge, nl = _restore_cells(np.random.default_rng(1))
+
+    def energy(scale, relativistic):
+        v = collide(random.PRNGKey(4), x, u * scale, weight, mass, charge, ((0, nl), (nl, cell.size - nl)),
+                    ((0, 1),), 10., 1e-9, 1 / n_cells, 1., n_cells, relativistic=relativistic, restore=True)
+        return jnp.sum(weight[:, None] * v[:, 0] ** 2 * mass[:, None])
+    for relativistic in (False, True):
+        assert np.isfinite(float(jax.grad(energy)(1.0, relativistic)))
+
+
+def test_collisions_validate_and_apply_the_restoration_option():
+    with pytest.raises(ValueError, match="restore"):
+        Collisions(coulomb_log=10., restore=1)
+    assert Collisions(coulomb_log=10., restore=np.True_).restore is True
+    electrons = Species.electrons(n=256, density=1e20, vth=2e6, sampling="low_noise")
+    ions = Species.ions(n=128, density=1e20, electrons=electrons, temperature_ratio=1., sampling="low_noise")
+    domain = Domain(length=1e-4, cells=4, dt_over_dx_c=1.0)
+
+    def ledger(restore):
+        out = Simulation(domain, [ions, electrons], Solver(), Collisions(coulomb_log=10., restore=restore)).run(
+            20, seed=0)
+        return float(np.sum(np.asarray(out.work.collision_work)[-1])), float(np.sum(np.asarray(out.work.kinetic)[-1]))
+    raw, kinetic = ledger(False)
+    fixed, _ = ledger(True)
+    assert abs(raw) > 1e-9 * kinetic > 100 * abs(fixed)
+
+
+def test_ultrarelativistic_drag_on_cold_electrons_is_the_connor_hastie_critical_force():
+    """Connor and Hastie (1975): an electron with v -> c loses energy to cold background electrons at
+    e E_c c, E_c = n e^3 lnL/(4 pi eps0^2 m c^2). At n = 1e18, lnL = 15, E_c = 7.649e-4 V/m, the
+    field of the 5 mV/m runaway baseline being 6.5 E_c. The kernel's stopping of gamma = 100 electrons,
+    which sets the collisional drag that the baseline's reduced model assumes, must equal that force."""
+    pairs, density, logarithm, gamma = 8192, 1e18, 15., 100.
+    critical = density * e_charge ** 3 * logarithm / (4 * np.pi * epsilon_0 ** 2 * mass_electron * c_light ** 2)
+    assert abs(critical / 7.6486e-4 - 1) < 1e-4
+    u = jnp.zeros((2 * pairs, 3)).at[:pairs, 0].set(c_light * np.sqrt(gamma ** 2 - 1))
+    mass, charge = jnp.full(2 * pairs, mass_electron), jnp.full(2 * pairs, -e_charge)
+    dt = 1e-3 / _cold_relativistic_rate(gamma, 1., density, logarithm)
+
+    def lost(key):
+        new = collide(key, jnp.zeros_like(u), u, jnp.full(2 * pairs, density / pairs), mass, charge,
+                      ((0, pairs), (pairs, pairs)), ((0, 1),), logarithm, dt, 1., 1., 1, relativistic=True)
+        gamma_new = jnp.sqrt(1 + jnp.sum(new[:pairs] ** 2, axis=1) / c_light ** 2)
+        return (gamma - gamma_new) * mass_electron * c_light ** 2 / dt
+    power = np.asarray(jax.vmap(lost)(random.split(random.PRNGKey(8), 16))).mean(axis=0)
+    speed = c_light * np.sqrt(1 - 1 / gamma ** 2)
+    expected = e_charge * critical * speed
+    assert abs(power.mean() / expected - 1) < 5 * power.std(ddof=1) / np.sqrt(power.size) / expected + 2e-3
