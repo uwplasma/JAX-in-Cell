@@ -121,7 +121,7 @@ ring_out = Simulation(
     Domain(length=ring_length, cells=ring_cells, time_step=ring_dt),
     (Species.electrons(n=n_ring, density=n_e, x=ring_x, u=jnp.asarray(c * eta_ring)),), Solver(relativistic=True),
     external_B=jnp.broadcast_to(jnp.array([B_ring, 0., 0.]), (ring_cells, 3)),
-    radiation=Radiation(species="electrons", substeps=4)
+    radiation=Radiation(species="electrons")
 ).run(3 * per_ring, store_every=per_ring // 4, moments=False).validate()
 ring_t, u_ring = np.asarray(ring_out.t), np.asarray(ring_out.u) / c
 
@@ -151,19 +151,21 @@ measured = [np.hypot(u[:, 1], u[:, 2]) for u in u_ring]
 exact_ring = [exact_perpendicular(t) for t in ring_t]
 radius = np.array([ring_profile(p)[2] for p in measured])
 exact_radius = np.array([ring_profile(p)[2] for p in exact_ring])
-pperp_error = max(np.max(abs(a / b - 1)[b > 1]) for a, b in zip(measured[1:], exact_ring[1:]))
+errors = [abs(a / b - 1)[b > 1] for a, b in zip(measured[1:], exact_ring[1:])]
+pperp_error, pperp_worst = max(np.percentile(q, 99) for q in errors), max(np.max(q) for q in errors)
 late = ring_t >= .6 * t_ring
 asymptotic = ring_t >= 1.5 * t_ring    # Eq. (7) needs p_parallel << p_perp, true after differential cooling
 theory = ring_theory(ring_t[late])
-centre, density, peak = ring_profile(measured[-1])
-inversion = np.max(density) / np.mean(density[centre < .3 * peak])
-print(f"ring: chi_th {chi_th:.2e}, t_R {t_ring:.3e} s, {n_ring} particles, {per_ring} steps per t_R, 4 RR substeps, "
+centre, profile, peak = ring_profile(measured[-1])
+inversion = np.max(profile) / np.mean(profile[centre < .3 * peak])
+print(f"ring: chi_th {chi_th:.2e}, t_R {t_ring:.3e} s, {n_ring} particles, {per_ring} steps per t_R, "
       f"omega_p/omega_ce {np.sqrt(n_e * e**2 / (epsilon_0 * m)) / omega_c:.1e}")
-print(f"  max |p_perp|/exact - 1 for exact p_perp > m c: {pperp_error:.2e}; radius peaks at "
+print(f"  |p_perp|/exact - 1 for exact p_perp > m c: 99th percentile {pperp_error:.2e}, worst {pperp_worst:.2e} "
+      f"; radius peaks at "
       f"{ring_t[np.argmax(radius)] / t_ring:.2f} t_R (Eq. 8: 1); f(p_R)/f(core) at 3 t_R: {inversion:.2f}")
 print("  t/t_R", np.round(ring_t[late] / t_ring, 2), "\n  PIC radius", np.round(radius[late], 2),
       "\n  exact-LL ensemble", np.round(exact_radius[late], 2), "\n  Eq. (7)", np.round(theory, 2))
-assert pperp_error < 1e-2, "the PIC ensemble does not follow the exact uniform-B cooling"
+assert pperp_error < 3e-3, "the PIC ensemble does not follow the exact uniform-B cooling"
 assert np.all(abs(radius[late] / exact_radius[late] - 1) < .06), "the PIC ring differs from its exact-LL ensemble"
 assert np.all(abs(radius[asymptotic] / ring_theory(ring_t[asymptotic]) - 1) < .15), "ring radius departs from Eq. (7)"
 assert .6 <= ring_t[np.argmax(radius)] / t_ring <= 1.8, "ring formation time disagrees with t_R"
