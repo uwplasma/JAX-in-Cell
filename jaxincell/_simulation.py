@@ -50,6 +50,13 @@ def _bracketed_newton(function, times, lower, upper, orientation):
     return lax.fori_loop(0, 8, step, (times, lower, upper))[0]
 
 
+def _cond_unless(always, predicate, true_branch, false_branch):
+    """``lax.cond``, or just the true branch when it is statically always taken: with a prescribed
+    drive every particle in the box needs the contact refinement, so the cond only costs, and JAX 0.6
+    (the last release for Python 3.10) differentiates a cond of this size to NaN."""
+    return true_branch(None) if always else lax.cond(predicate, true_branch, false_branch, None)
+
+
 def _implicit_fields(E, B, J, dt, dx, bc):
     """Solve the linear midpoint Maxwell equations for a prescribed current.
 
@@ -1487,13 +1494,9 @@ class Simulation:
                 return contact, times, unresolved
 
             initial_times, initial_contact = times, contact
-            if self.prescribed_fields is not None and not self.solver.relativistic:
-                # ``near`` is then every particle inside the box, so the branch is nearly always taken, and
-                # JAX 0.6 (the last release for Python 3.10) differentiates a cond of this size to NaN.
-                contact, times, unresolved = refine(None)
-            else:
-                contact, times, unresolved = lax.cond(jnp.any(near), refine,
-                                                      lambda _: (contact, times, unresolved), None)
+            contact, times, unresolved = _cond_unless(
+                self.prescribed_fields is not None and not self.solver.relativistic,
+                jnp.any(near), refine, lambda _: (contact, times, unresolved))
         selected = jnp.where(contact, times, jnp.inf)
         side = jnp.argmin(selected, axis=0)
         hit = jnp.any(contact, axis=0)
