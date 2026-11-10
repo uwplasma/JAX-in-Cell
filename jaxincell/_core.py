@@ -136,16 +136,24 @@ def map_indices(idx, n, bc):
     return jnp.clip(idx, 0, n - 1), keep
 
 
+# A scatter-add of 3N weights into n cells serialises on the few addresses that many particles share.
+# Giving each particle one of LANES private copies of the grid, which are summed afterwards, cuts that
+# contention; on a GPU it is what the deposit costs (docs/user_guide/performance.md).
+LANES = 32
+
+
 def deposit(x, q, x0, dx, n, bc, shape_order=2):
     """Density on the grid from particle positions ``x`` and amounts ``q``
     (charge, or charge times a velocity component), with the selected spline degree.
     ``q`` of shape ``(N, C)`` deposits its ``C`` columns with one shared stencil, ``(n, C)``."""
     idx, w = shape_weights(x, x0, dx, shape_order)
     idx, keep = map_indices(idx, n, bc)
-    w = jnp.where(keep, w, 0.0)
-    if q.ndim == 1:
-        return jnp.zeros(n).at[idx].add(w * (q / dx)[:, None])
-    return jnp.zeros((n, q.shape[1])).at[idx].add(w[:, :, None] * (q / dx)[:, None, :])
+    columns = q[:, None] if q.ndim == 1 else q
+    lane = (jnp.arange(x.shape[0]) % LANES)[:, None]
+    lanes = jnp.zeros((LANES, n, columns.shape[1])).at[lane, idx].add(
+        jnp.where(keep, w, 0.0)[:, :, None] * (columns / dx)[:, None, :])
+    out = lanes.sum(axis=0)
+    return out[:, 0] if q.ndim == 1 else out
 
 
 # Sign of (E_x, E_y, E_z, B_x, B_y, B_z) under the reflection x -> -x: E is a vector, B a pseudovector.
