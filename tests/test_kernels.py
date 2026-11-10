@@ -881,7 +881,7 @@ def test_landau_lifshitz_derivative_term_is_the_convective_field_derivative():
     tau = q**2 / (6 * np.pi * epsilon_0 * m * c**3)
     extra = tau * q / m * gamma * (total[:, :3] + np.cross(v, total[:, 3:]))
     base, power = landau_lifshitz(u, E, B, q, m)
-    full, full_power = landau_lifshitz(u, E, B, q, m, derivative)
+    full, full_power = landau_lifshitz(u, E, B, q, m, derivative=derivative)
     np.testing.assert_allclose(full - base, extra, rtol=1e-10, atol=0)
     np.testing.assert_array_equal(full_power, power)
 

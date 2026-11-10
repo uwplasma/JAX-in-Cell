@@ -1323,8 +1323,8 @@ class Simulation:
                 selected = jnp.concatenate([jnp.full((s.n,), s.name in self.radiation.species)
                                             for s in self.species])
             charge = jnp.where(selected, charge, 0.0)
-        force, power, chi = landau_lifshitz(u, fields[:, :3], fields[:, 3:], charge, m, derivative,
-                                            self.radiation.model == "ll_quantum", True)
+        force, power, chi = landau_lifshitz(u, fields[:, :3], fields[:, 3:], charge, m,
+                                            self.radiation.model == "ll_quantum", True, derivative)
         return force, jnp.stack([power, power * chi], axis=1)
 
     def _prescribed_work(self, velocity, external, qm, m, dt):
