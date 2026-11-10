@@ -13,6 +13,7 @@ boundaries
 filtering
 collisions
 radiation
+runaway_rf_control
 initialization
 stability
 diagnostics
