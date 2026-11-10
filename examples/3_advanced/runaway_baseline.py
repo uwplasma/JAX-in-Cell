@@ -25,7 +25,7 @@ scattering (Z+1) gamma/eta^3 in units of the collision time tau_c, Connor and Ha
     d xi/dt  = a_E (1 - xi^2)/eta - (Z+1) xi gamma/(tau_c eta^3) + a_B xi (1 - xi^2)/gamma.
 Its synchrotron-limited fixed point and its relaxation/regrowth times are printed. Because
 tau_c is seconds at this density, the default 100 us run is a short precursor; BASELINE_TIME
-and BASELINE_STEPS (dt <= 0.2 us resolves the thermal bulk) extend it. Requires scipy.
+and BASELINE_STEPS (tau_e = 23 us; dt = 0.2 us gave a few-percent exchange error) extend it. Requires scipy.
 
 Run with --quick for a smoke run; BASELINE_N, BASELINE_STEPS, BASELINE_TIME, BASELINE_REPEATS,
 BASELINE_RAW=0 (skip the unrestored comparison run) and BASELINE_GAMMA / BASELINE_PITCH (the seed)
