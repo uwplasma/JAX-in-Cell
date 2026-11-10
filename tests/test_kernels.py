@@ -556,6 +556,26 @@ def test_quintic_simulation_sources_moments_and_external_gathers_use_the_selecte
                                expected, rtol=0, atol=5e-15)
 
 
+def test_a_large_deposit_of_several_columns_is_the_numpy_scatter_whatever_the_copy_count():
+    """Above 8192 particles the deposit spreads its scatter over private grid copies and sums them;
+    each cell must still receive exactly the weights of the particles whose cloud covers it, for
+    every column of a multi-column amount, with and without a wall that drops the part outside."""
+    rng = np.random.default_rng(7)
+    count = 20000
+    x = rng.uniform(-.5, .5, count)
+    amounts = rng.normal(size=(count, 3))
+    index, weights = (np.asarray(a) for a in s2_weights(jnp.asarray(x), x0, dx))
+    for bc, wrap in (((0, 0), True), ((2, 2), False)):
+        expected = np.zeros((G, 3))
+        inside = np.ones_like(index, bool) if wrap else (index >= 0) & (index < G)
+        np.add.at(expected, index[inside] % G if wrap else index[inside],
+                  (weights[inside][:, None] * (amounts / dx)[:, None, :].repeat(3, axis=1)[inside]))
+        np.testing.assert_allclose(deposit(jnp.asarray(x), jnp.asarray(amounts), x0, dx, G, bc), expected,
+                                   rtol=0, atol=1e-10 * np.abs(expected).max())
+        np.testing.assert_allclose(deposit(jnp.asarray(x), jnp.asarray(amounts[:, 0]), x0, dx, G, bc),
+                                   expected[:, 0], rtol=0, atol=1e-10 * np.abs(expected).max())
+
+
 def test_default_shape_keeps_the_quadratic_kernel_arithmetic():
     x, q = jnp.asarray([-.5, -.499, .003, .498, .5]), jnp.asarray([1., -2., 3., -4., 5.])
     index, weights = s2_weights(x, x0, dx)
