@@ -444,7 +444,7 @@ def gaunt(chi):
     return (1 + 4.8 * (1 + chi) * jnp.log1p(1.7 * chi) + 2.44 * chi ** 2) ** (-2 / 3)
 
 
-def landau_lifshitz(u, E, B, charge, mass, derivative=None, quantum=False, with_chi=False):
+def landau_lifshitz(u, E, B, charge, mass, quantum=False, with_chi=False, derivative=None):
     """Field-quadratic Landau--Lifshitz ``du/dt`` and emitted power per particle.
 
     All inputs are SI: ``u = gamma*v`` and vector fields have shape ``(..., 3)``;
