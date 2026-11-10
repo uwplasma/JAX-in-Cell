@@ -556,10 +556,13 @@ def test_quintic_simulation_sources_moments_and_external_gathers_use_the_selecte
                                expected, rtol=0, atol=5e-15)
 
 
-def test_a_large_deposit_of_several_columns_is_the_numpy_scatter_whatever_the_copy_count():
-    """Above 8192 particles the deposit spreads its scatter over private grid copies and sums them;
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_a_large_deposit_of_several_columns_is_the_numpy_scatter_whatever_the_copy_count(backend, monkeypatch):
+    """Above 8192 particles on an accelerator the deposit spreads its scatter over private grid copies and sums them;
+    the copy count is chosen from the backend name, which is patched here so that both paths run on any host;
     each cell must still receive exactly the weights of the particles whose cloud covers it, for
     every column of a multi-column amount, with and without a wall that drops the part outside."""
+    monkeypatch.setattr(jax, "default_backend", lambda: backend)
     rng = np.random.default_rng(7)
     count = 20000
     x = rng.uniform(-.5, .5, count)
@@ -576,10 +579,12 @@ def test_a_large_deposit_of_several_columns_is_the_numpy_scatter_whatever_the_co
                                    expected[:, 0], rtol=0, atol=1e-10 * np.abs(expected).max())
 
 
-def test_a_large_gather_is_the_numpy_interpolation_and_its_transpose_is_the_deposit():
-    """Above 8192 particles the gather reads from private copies of the field so that its transpose
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_a_large_gather_is_the_numpy_interpolation_and_its_transpose_is_the_deposit(backend, monkeypatch):
+    """Above 8192 particles on an accelerator the gather reads from private copies of the field so that its transpose
     scatters into private copies; the values must still be the weighted sum of the three centres a
     particle covers, and the transpose must still be the deposit, column by column."""
+    monkeypatch.setattr(jax, "default_backend", lambda: backend)
     rng = np.random.default_rng(11)
     count = 20000
     x = jnp.asarray(rng.uniform(-.5, .5, count))

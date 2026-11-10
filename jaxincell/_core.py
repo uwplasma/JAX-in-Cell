@@ -14,6 +14,7 @@ open wall is the electrical condition of a plane a ``Source`` supplies through:
 nothing beyond it, as at a conductor, but no condition on the field either, whose
 constant then comes from the charge on the electrode opposite.
 """
+import jax
 import jax.numpy as jnp
 
 from ._config import epsilon_0, speed_of_light as c
@@ -138,9 +139,14 @@ def map_indices(idx, n, bc):
 
 # A scatter-add of 3N weights into n cells serialises on the few addresses that many particles share.
 # Giving each particle one of LANES private copies of the grid, which are summed afterwards, cuts that
-# contention; on a GPU it is what the deposit costs (docs/user_guide/performance.md). Below LANES_FROM
-# particles the copies cost more than the contention does, so there is one.
+# contention; on a GPU it is what the deposit costs (docs/user_guide/performance.md). A CPU has no such
+# contention and pays for the copies (6 to 29 % on the profiled x86 core), as it does below LANES_FROM
+# particles on any device, so there is one copy there.
 LANES, LANES_FROM = 32, 8192
+
+
+def _copies(count):
+    return LANES if count >= LANES_FROM and jax.default_backend() != "cpu" else 1
 
 
 def deposit(x, q, x0, dx, n, bc, shape_order=2):
@@ -150,7 +156,7 @@ def deposit(x, q, x0, dx, n, bc, shape_order=2):
     idx, w = shape_weights(x, x0, dx, shape_order)
     idx, keep = map_indices(idx, n, bc)
     columns = q[:, None] if q.ndim == 1 else q
-    copies = LANES if x.shape[0] >= LANES_FROM else 1
+    copies = _copies(x.shape[0])
     lane = (jnp.arange(x.shape[0]) % copies)[:, None]
     lanes = jnp.zeros((copies, n, columns.shape[1])).at[lane, idx].add(
         jnp.where(keep, w, 0.0)[:, :, None] * (columns / dx)[:, None, :])
@@ -209,7 +215,7 @@ def gather(F, x, x0, dx, shape_order=2):
     idx, w = shape_weights(x, x0 - (3 if shape_order == 5 else 1) * dx, dx, shape_order)
     # Reading from one of several copies of the field costs nothing, and its transpose, which is what
     # differentiating a gather means, is then the lane-split scatter of the deposit.
-    copies = LANES if x.shape[0] >= LANES_FROM else 1
+    copies = _copies(x.shape[0])
     lane = (jnp.arange(x.shape[0]) % copies)[:, None]
     return jnp.einsum("nk,nkc->nc", w, jnp.broadcast_to(F, (copies,) + F.shape)[lane, jnp.clip(idx, 0, F.shape[0] - 1)])
 
