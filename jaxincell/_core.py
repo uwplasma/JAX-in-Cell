@@ -138,8 +138,9 @@ def map_indices(idx, n, bc):
 
 # A scatter-add of 3N weights into n cells serialises on the few addresses that many particles share.
 # Giving each particle one of LANES private copies of the grid, which are summed afterwards, cuts that
-# contention; on a GPU it is what the deposit costs (docs/user_guide/performance.md).
-LANES = 32
+# contention; on a GPU it is what the deposit costs (docs/user_guide/performance.md). Below LANES_FROM
+# particles the copies cost more than the contention does, so there is one.
+LANES, LANES_FROM = 32, 8192
 
 
 def deposit(x, q, x0, dx, n, bc, shape_order=2):
@@ -149,8 +150,9 @@ def deposit(x, q, x0, dx, n, bc, shape_order=2):
     idx, w = shape_weights(x, x0, dx, shape_order)
     idx, keep = map_indices(idx, n, bc)
     columns = q[:, None] if q.ndim == 1 else q
-    lane = (jnp.arange(x.shape[0]) % LANES)[:, None]
-    lanes = jnp.zeros((LANES, n, columns.shape[1])).at[lane, idx].add(
+    copies = LANES if x.shape[0] >= LANES_FROM else 1
+    lane = (jnp.arange(x.shape[0]) % copies)[:, None]
+    lanes = jnp.zeros((copies, n, columns.shape[1])).at[lane, idx].add(
         jnp.where(keep, w, 0.0)[:, :, None] * (columns / dx)[:, None, :])
     out = lanes.sum(axis=0)
     return out[:, 0] if q.ndim == 1 else out
