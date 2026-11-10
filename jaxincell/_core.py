@@ -155,12 +155,17 @@ def deposit(x, q, x0, dx, n, bc, shape_order=2):
     ``q`` of shape ``(N, C)`` deposits its ``C`` columns with one shared stencil, ``(n, C)``."""
     idx, w = shape_weights(x, x0, dx, shape_order)
     idx, keep = map_indices(idx, n, bc)
-    columns = q[:, None] if q.ndim == 1 else q
+    w = jnp.where(keep, w, 0.0)
     copies = _copies(x.shape[0])
-    lane = (jnp.arange(x.shape[0]) % copies)[:, None]
-    lanes = jnp.zeros((copies, n, columns.shape[1])).at[lane, idx].add(
-        jnp.where(keep, w, 0.0)[:, :, None] * (columns / dx)[:, None, :])
-    out = lanes.sum(axis=0)
+    if q.ndim == 1 and copies == 1:
+        return jnp.zeros(n).at[idx].add(w * (q / dx)[:, None])
+    columns = q[:, None] if q.ndim == 1 else q
+    amounts = w[:, :, None] * (columns / dx)[:, None, :]
+    if copies == 1:
+        out = jnp.zeros((n, columns.shape[1])).at[idx].add(amounts)
+    else:
+        lane = (jnp.arange(x.shape[0]) % copies)[:, None]
+        out = jnp.zeros((copies, n, columns.shape[1])).at[lane, idx].add(amounts).sum(axis=0)
     return out[:, 0] if q.ndim == 1 else out
 
 
@@ -213,11 +218,13 @@ def gather(F, x, x0, dx, shape_order=2):
     particles parked beyond a wall, whose force is zero anyway. Quintic fields have
     three ghost centres per wall, provided by ``with_ghosts(..., shape_order=5)``."""
     idx, w = shape_weights(x, x0 - (3 if shape_order == 5 else 1) * dx, dx, shape_order)
+    clipped, copies = jnp.clip(idx, 0, F.shape[0] - 1), _copies(x.shape[0])
+    if copies == 1:
+        return jnp.einsum("nk,nkc->nc", w, F[clipped])
     # Reading from one of several copies of the field costs nothing, and its transpose, which is what
     # differentiating a gather means, is then the lane-split scatter of the deposit.
-    copies = _copies(x.shape[0])
     lane = (jnp.arange(x.shape[0]) % copies)[:, None]
-    return jnp.einsum("nk,nkc->nc", w, jnp.broadcast_to(F, (copies,) + F.shape)[lane, jnp.clip(idx, 0, F.shape[0] - 1)])
+    return jnp.einsum("nk,nkc->nc", w, jnp.broadcast_to(F, (copies,) + F.shape)[lane, clipped])
 
 
 def gather_xyz(G, x, x0, dx, periods, shape_order=2):
