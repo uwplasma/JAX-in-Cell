@@ -19,9 +19,9 @@ import jax.numpy as jnp
 
 from ._config import epsilon_0, speed_of_light as c
 
-__all__ = ["s2_weights", "s5_weights", "shape_weights", "map_indices", "deposit", "PARITY", "PARK", "to_centres",
-           "with_ghosts", "gather", "gather_xyz", "current_from_continuity", "to_faces", "wall_faces_E", "curl_E",
-           "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic", "landau_lifshitz",
+__all__ = ["accelerated", "s2_weights", "s5_weights", "shape_weights", "map_indices", "deposit", "PARITY", "PARK",
+           "to_centres", "with_ghosts", "gather", "gather_xyz", "current_from_continuity", "to_faces", "wall_faces_E",
+           "curl_E", "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic", "landau_lifshitz",
            "apply_particle_bc", "wrap_positions", "smooth"]
 
 
@@ -145,8 +145,13 @@ def map_indices(idx, n, bc):
 LANES, LANES_FROM = 32, 8192
 
 
+def accelerated():
+    """Whether the program is traced for an accelerator, where the scatters below are the cost."""
+    return jax.default_backend() != "cpu"
+
+
 def _copies(count):
-    return LANES if count >= LANES_FROM and jax.default_backend() != "cpu" else 1
+    return LANES if count >= LANES_FROM and accelerated() else 1
 
 
 def deposit(x, q, x0, dx, n, bc, shape_order=2):

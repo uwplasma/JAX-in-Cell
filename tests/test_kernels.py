@@ -599,6 +599,25 @@ def test_a_large_gather_is_the_numpy_interpolation_and_its_transpose_is_the_depo
     np.testing.assert_allclose(transpose, reference, rtol=0, atol=1e-10)
 
 
+def test_the_accelerator_deposit_path_is_the_same_physics_as_the_cpu_one(monkeypatch):
+    """On an accelerator the three deposits of a half step are one scatter and the large ones use private
+    copies; the run they produce must be the CPU run to round-off. The backend name is patched, and the
+    compilation caches cleared, so that both paths are traced on any host."""
+    def run(backend):
+        monkeypatch.setattr(jax, "default_backend", lambda: backend)
+        jax.clear_caches()
+        electrons = Species.electrons(6000, 1e17, vth=(.05 * c, .03 * c, .02 * c), drift=(.1 * c, 0, 0),
+                                      sampling="low_noise", perturbation_amplitude=1e-3, perturbation_mode=1)
+        ions = Species.ions(3000, 1e17, vth=0., sampling="low_noise")
+        return Simulation(Domain(length=.01, cells=16, dt_over_dx_c=.8), (electrons, ions)).run(
+            6, seed=1, store_every=6, store_particles=False)
+
+    cpu, gpu = run("cpu"), run("gpu")
+    for a, b in ((cpu.state.E, gpu.state.E), (cpu.state.B, gpu.state.B), (cpu.state.u, gpu.state.u)):
+        np.testing.assert_allclose(b, a, rtol=0, atol=1e-9 * float(np.abs(a).max()))
+    jax.clear_caches()
+
+
 def test_default_shape_keeps_the_quadratic_kernel_arithmetic():
     x, q = jnp.asarray([-.5, -.499, .003, .498, .5]), jnp.asarray([1., -2., 3., -4., 5.])
     index, weights = s2_weights(x, x0, dx)
