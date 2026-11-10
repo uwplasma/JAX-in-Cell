@@ -576,6 +576,24 @@ def test_a_large_deposit_of_several_columns_is_the_numpy_scatter_whatever_the_co
                                    expected[:, 0], rtol=0, atol=1e-10 * np.abs(expected).max())
 
 
+def test_a_large_gather_is_the_numpy_interpolation_and_its_transpose_is_the_deposit():
+    """Above 8192 particles the gather reads from private copies of the field so that its transpose
+    scatters into private copies; the values must still be the weighted sum of the three centres a
+    particle covers, and the transpose must still be the deposit, column by column."""
+    rng = np.random.default_rng(11)
+    count = 20000
+    x = jnp.asarray(rng.uniform(-.5, .5, count))
+    field = rng.normal(size=(G + 2, 6))
+    index, weights = (np.asarray(a) for a in s2_weights(x, x0 - dx, dx))
+    expected = np.einsum("nk,nkc->nc", weights, field[np.clip(index, 0, G + 1)])
+    np.testing.assert_allclose(gather(jnp.asarray(field), x, x0, dx), expected, rtol=0, atol=1e-13)
+    cotangent = jnp.asarray(rng.normal(size=(count, 6)))
+    transpose = jax.linear_transpose(lambda f: gather(f, x, x0, dx), jnp.asarray(field))(cotangent)[0]
+    reference = np.zeros_like(field)
+    np.add.at(reference, np.clip(index, 0, G + 1), weights[:, :, None] * np.asarray(cotangent)[:, None, :])
+    np.testing.assert_allclose(transpose, reference, rtol=0, atol=1e-10)
+
+
 def test_default_shape_keeps_the_quadratic_kernel_arithmetic():
     x, q = jnp.asarray([-.5, -.499, .003, .498, .5]), jnp.asarray([1., -2., 3., -4., 5.])
     index, weights = s2_weights(x, x0, dx)

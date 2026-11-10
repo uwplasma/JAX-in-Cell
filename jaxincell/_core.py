@@ -207,7 +207,11 @@ def gather(F, x, x0, dx, shape_order=2):
     particles parked beyond a wall, whose force is zero anyway. Quintic fields have
     three ghost centres per wall, provided by ``with_ghosts(..., shape_order=5)``."""
     idx, w = shape_weights(x, x0 - (3 if shape_order == 5 else 1) * dx, dx, shape_order)
-    return jnp.einsum("nk,nkc->nc", w, F[jnp.clip(idx, 0, F.shape[0] - 1)])
+    # Reading from one of several copies of the field costs nothing, and its transpose, which is what
+    # differentiating a gather means, is then the lane-split scatter of the deposit.
+    copies = LANES if x.shape[0] >= LANES_FROM else 1
+    lane = (jnp.arange(x.shape[0]) % copies)[:, None]
+    return jnp.einsum("nk,nkc->nc", w, jnp.broadcast_to(F, (copies,) + F.shape)[lane, jnp.clip(idx, 0, F.shape[0] - 1)])
 
 
 def gather_xyz(G, x, x0, dx, periods, shape_order=2):
