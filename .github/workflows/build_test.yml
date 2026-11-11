@@ -80,8 +80,7 @@ jobs:
         enable-cache: false
     - name: Install with CUDA JAX
       run: |
-        # --seed: the Python < 3.11 tomllib fallback imports pip._vendor
-        uv venv --seed
+        uv venv
         uv pip install . pytest 'jax[cuda12]'
     - name: Check the GPU backend
       run: uv run --no-project python -c "import jax; assert jax.default_backend()=='gpu', jax.devices()"

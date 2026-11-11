@@ -9,7 +9,7 @@ from ._fields import (E_from_Gauss_1D_Cartesian, E_from_Gauss_1D_FFT, curlB,curl
                       E_from_Poisson_1D_FFT, field_update1, field_update2)
 
 try: import tomllib
-except ModuleNotFoundError: import pip._vendor.tomli as tomllib
+except ModuleNotFoundError: import tomli as tomllib  # pragma: no cover
 
 __all__ = ['Boris_step', 'CN_step']
 
