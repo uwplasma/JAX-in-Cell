@@ -37,3 +37,5 @@ Homepage = "https://github.com/uwplasma/JAX-in-Cell"
 [project.scripts]
 jaxincell = "jaxincell.__main__:main"
  
+[tool.pytest.ini_options]
+markers = ["gpu: short checks run on the self-hosted GPU runner"]
