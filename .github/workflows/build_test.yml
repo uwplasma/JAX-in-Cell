@@ -20,7 +20,7 @@ jobs:
   build:
     # Self-hosted macOS runners for pushes and same-repo PRs; fork PRs never
     # touch them and run on a hosted Ubuntu runner instead.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') || 'ubuntu-22.04' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && matrix.python-version == '3.12')) && fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') || 'ubuntu-22.04' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
