@@ -27,7 +27,7 @@ from ._state_initialization import (
 )
 
 try: import tomllib
-except ModuleNotFoundError: import pip._vendor.tomli as tomllib
+except ModuleNotFoundError: import tomli as tomllib  # pragma: no cover
 
 config.update("jax_enable_x64", True)
 

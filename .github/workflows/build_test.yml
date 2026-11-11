@@ -12,32 +12,42 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-
-    runs-on: ubuntu-22.04
+    # Self-hosted CPU runners for pushes and same-repo PRs; fork PRs never
+    # touch them and run on a hosted Ubuntu runner instead.
+    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && matrix.python-version == '3.12')) && fromJSON('["self-hosted","uwplasma-cpu"]') || 'ubuntu-22.04' }}
+    timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
         python-version: [ '3.9', '3.10', '3.11', '3.12']
     name: Python ${{ matrix.python-version }} Test
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: astral-sh/setup-uv@v6
       with:
         python-version: ${{ matrix.python-version }}
+        enable-cache: false
     - name: Install jaxincell
       run: |
-        python -m pip install --upgrade pip
-        pip install .
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pytest coverage pytest-cov
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        # venv outside the checkout so flake8 does not lint it
+        uv venv --seed --clear "$RUNNER_TEMP/venv"
+        # GITHUB_ENV/GITHUB_PATH only apply to later steps, so also export here
+        echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+        echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+        export VIRTUAL_ENV="$RUNNER_TEMP/venv"
+        export PATH="$VIRTUAL_ENV/bin:$PATH"
+        uv pip install . flake8 pytest coverage pytest-cov pytest-xdist
+        if [ -f requirements.txt ]; then uv pip install -r requirements.txt; fi
     - name: Check installed package import outside source tree
       run: |
-        cd /tmp
+        cd "$RUNNER_TEMP"
         python -c "import jaxincell; import jaxincell._parameters; from jaxincell import Simulation"
     - name: Lint with flake8
       run: |
@@ -48,7 +58,7 @@ jobs:
 
     - name: Run tests with coverage
       run: |
-        pytest --cov-branch --cov-report=xml --cov=jaxincell
+        pytest -n 3 --cov-branch --cov-report=xml --cov=jaxincell
 
     - name: Upload coverage reports to Codecov
       if: matrix.python-version == '3.12'
@@ -56,3 +66,24 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         slug: uwplasma/JAX-in-Cell
+
+  gpu:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    name: GPU smoke test
+    runs-on: [self-hosted, Linux, uwplasma-gpu]
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v6
+      with:
+        python-version: '3.10'
+        enable-cache: false
+    - name: Install with CUDA JAX
+      run: |
+        uv venv
+        uv pip install . pytest 'jax[cuda12]'
+    - name: Check the GPU backend
+      run: uv run --no-project python -c "import jax; assert jax.default_backend()=='gpu', jax.devices()"
+    - name: GPU tests
+      timeout-minutes: 1
+      run: uv run --no-project pytest -m gpu -q -x

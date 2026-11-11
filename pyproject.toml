@@ -27,7 +27,7 @@ keywords = ["Plasma",
      "Simulation",
      "JAX"]
  
-dependencies = [ "jax", "jax_tqdm", "matplotlib"]
+dependencies = [ "jax", "jax_tqdm", "matplotlib", "tomli; python_version < \"3.11\""]
  
 requires-python = ">=3.9"
 
@@ -37,3 +37,5 @@ Homepage = "https://github.com/uwplasma/JAX-in-Cell"
 [project.scripts]
 jaxincell = "jaxincell.__main__:main"
  
+[tool.pytest.ini_options]
+markers = ["gpu: short checks run on the self-hosted GPU runner"]
