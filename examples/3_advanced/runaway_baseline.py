@@ -23,7 +23,11 @@ Reference. Test-particle limit of the same model, in eta = |u|/c and pitch xi (H
 scattering (Z+1) gamma/eta^3 in units of the collision time tau_c, Connor and Hastie 1975):
     d eta/dt = a_E xi - gamma^2/(tau_c eta^2) - a_B gamma eta (1 - xi^2)
     d xi/dt  = a_E (1 - xi^2)/eta - (Z+1) xi gamma/(tau_c eta^3) + a_B xi (1 - xi^2)/gamma.
-Its synchrotron-limited fixed point and its relaxation/regrowth times are printed. Because
+Its synchrotron-limited fixed point (gamma = 13.13 for the defaults) and its relaxation/regrowth
+times are printed. The fixed point belongs to the zero-noise ODE and is not a bound on the kinetic
+tail: with pitch-angle diffusion the stationary distribution peaks near gamma = 17.7 and agrees with
+DREAM's kinetic solution. Avalanche growth at E/E_c = 6.5 is 0.05-0.07 /s (DREAM, CODE and
+Rosenbluth and Putvinski 1997, eq. 18) and is not in the kernels. Because
 tau_c is seconds at this density, the default 100 us run is a short precursor; BASELINE_TIME
 and BASELINE_STEPS (tau_e = 23 us; dt = 0.2 us gave a few-percent exchange error) extend it. Requires scipy.
 
