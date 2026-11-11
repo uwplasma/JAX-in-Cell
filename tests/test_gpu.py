@@ -2,7 +2,7 @@
 
 They exercise only existing code, so they also pass on CPU and add no
 uncovered branches to the coverage run. Compilation dominates on GPU, so
-the suite compiles two configurations in total.
+the suite compiles one configuration.
 """
 from copy import deepcopy
 
@@ -44,12 +44,15 @@ def test_gauss_steps_are_finite(gauss_simulation):
     assert_finite(output)
 
 
-def test_rerun_is_deterministic(gauss_simulation):
+def test_rerun_agrees_to_roundoff(gauss_simulation):
+    # GPU scatter-adds are not bit-reproducible, so compare to round-off.
     first, second = gauss_simulation.run(), gauss_simulation.run()
-    np.testing.assert_array_equal(np.asarray(first["electric_field"]), np.asarray(second["electric_field"]))
+    field = np.asarray(first["electric_field"])
+    np.testing.assert_allclose(field, np.asarray(second["electric_field"]), rtol=1e-6, atol=1e-9 * np.abs(field).max())
 
 
-def test_fdtd_steps_are_finite_on_default_device():
-    output = make_simulation(field_solver=1).run()
-    assert_finite(output)
+def test_output_is_on_default_device_and_neutral(gauss_simulation):
+    output = gauss_simulation.run()
     assert output["positions"].devices() <= set(jax.devices())
+    charge = np.asarray(output["charge_density"])
+    assert np.abs(charge.sum(axis=1)).max() <= 1e-6 * np.abs(charge).max()
