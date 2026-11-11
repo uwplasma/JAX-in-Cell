@@ -2,8 +2,8 @@
     Someone needs to look through these tests and make sure they cover the
     intended cases, and that the expected results are correct.
 
-    They were written using Codex and I did go through at a high level
-    to make sure the tests are reasonable, but a more in depth review
+    These tests have been reviewed at a high level
+    to make sure they are reasonable, but a more in depth review
     would be valuable just in case.
 """
 
