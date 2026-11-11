@@ -37,9 +37,12 @@ jobs:
     - name: Install jaxincell
       run: |
         # venv outside the checkout so flake8 does not lint it
-        uv venv --seed "$RUNNER_TEMP/venv"
+        uv venv --seed --clear "$RUNNER_TEMP/venv"
+        # GITHUB_ENV/GITHUB_PATH only apply to later steps, so also export here
         echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
         echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+        export VIRTUAL_ENV="$RUNNER_TEMP/venv"
+        export PATH="$VIRTUAL_ENV/bin:$PATH"
         uv pip install . flake8 pytest coverage pytest-cov pytest-xdist
         if [ -f requirements.txt ]; then uv pip install -r requirements.txt; fi
     - name: Check installed package import outside source tree
