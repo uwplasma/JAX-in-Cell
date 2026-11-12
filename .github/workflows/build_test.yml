@@ -15,7 +15,7 @@ permissions:
 jobs:
   build:
 
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') || 'ubuntu-22.04' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "uwplasma-cpu"]') || 'ubuntu-22.04' }}
     strategy:
       fail-fast: false
       matrix:
@@ -66,7 +66,7 @@ jobs:
     # sheath, Weibel and model-comparison scripts in the smaller preset their `--quick` flag
     # selects; the rest (bump-on-tail, two-stream, the full presets) take minutes each and
     # are left to the documentation build of the figures.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') || 'ubuntu-22.04' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "uwplasma-cpu"]') || 'ubuntu-22.04' }}
     name: Examples
     env:
       MPLBACKEND: Agg
