@@ -179,3 +179,19 @@ jaxincell/version.py
 # Logs of the documentation figure scripts
 docs/scripts/*.log
 docs/_static/figures/.measurements.lock
+
+
+# research-release additions
+.venv/
+.DS_Store
+.vscode/
+!docs/_static/movies/*.avif
+*.h5
+*.bp
+!docs/_static/readme/*.png
+# the record an example writes beside wherever it was run
+/sheath_unmagnetized*/
+/sheath_magnetized*/
+/sheath_reflection*/
+/sheath_optimization*/
+/grazing_sheath*/

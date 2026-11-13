@@ -99,9 +99,27 @@ The sources on the grid follow from the same representation:
 although the longitudinal current is not deposited with this formula but from the
 continuity equation, as described in {doc}`explicit`.
 
+## Collisions
+
+The Vlasov equation above describes a collisionless plasma. Setting
+{class}`~jaxincell.Collisions` puts a Landau collision operator on its right-hand
+side,
+
+```{math}
+\left(\frac{\partial f_s}{\partial t}\right)_{c}
+= \sum_{s'}\frac{q_s^2 q_{s'}^2 \ln\Lambda}{8\pi\epsilon_0^2 m_s}
+\frac{\partial}{\partial \mathbf v}\cdot\!\int d^3v'\,
+\frac{u^2 \mathbb I - \mathbf u\mathbf u}{u^3}
+\left(\frac{1}{m_s}\frac{\partial}{\partial\mathbf v} - \frac{1}{m_{s'}}\frac{\partial}{\partial\mathbf v'}\right)
+f_s(\mathbf v) f_{s'}(\mathbf v'),
+```
+
+with $\mathbf u = \mathbf v - \mathbf v'$, represented by the binary Monte Carlo
+scheme of {doc}`collisions`.
+
 ## What is not included
 
-There are no collisions, no ionisation or recombination, no radiation reaction and no
-particle sources on the `main` branch. Fields are functions of $x$ only. Gravity and
-external forces other than a static external $\mathbf E$ and $\mathbf B$ are not
-available.
+There is no ionisation or recombination, no radiation reaction, no particle source
+and no field ionisation. Fields are functions of $x$ only, so $B_x$ can only be
+imposed externally and is constant in time. Gravity and forces other than the
+Lorentz force are not available.
