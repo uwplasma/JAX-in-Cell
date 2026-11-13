@@ -16,6 +16,8 @@ Round-off sets the floor: about 1e-16 in double precision, and about 1e-7 in sin
 This is the setup of docs/scripts/fig_conservation.py, whose numbers the documentation
 quotes: a quiet two-stream run of 200 steps and 2000 particles per species (400 and 4000 in the
 documentation).
+
+Runs in about 17 s.
 """
 
 import os

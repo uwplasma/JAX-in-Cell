@@ -3,7 +3,7 @@
 Stages, set in `stages` below: scenario, validate and source by default; then the long search
 stages opt_single, opt_random and opt_es (240 slow-model evaluations each in the research setting),
 verify (frozen controls) and margin (continue the verified controls past the hold). The search
-stages need `out_dir`, where the JSON results go. Runs in about RUNTIME s; the settings marked
+stages need `out_dir`, where the JSON results go. Runs in about 13 s; the settings marked
 `research` in the script give the converged version, which takes hours on a loaded 36-core node.
 
 Model, in the order it is used.

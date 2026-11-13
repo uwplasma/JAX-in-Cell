@@ -26,7 +26,7 @@ change of kinetic plus field energy. The time step keeps an electron at 40 v_Te 
 at t omega_pe = 200) within one cell per step, as the paper's did. Nothing asserts growth:
 the numbers are printed and saved, and the documentation says what they mean.
 
-Runs in about RUNTIME s; the settings marked `research` in the script give the converged version.
+Runs in about 43 s; the settings marked `research` in the script give the converged version.
 """
 
 import os

@@ -6,7 +6,7 @@ The ideal actuator supplies positive instantaneous work and dumps all returned
 energy. This is not a runaway-suppression or wall-plug-power result.
 
 Requires scipy (the development extra). Results go to ./rf_source_control. Runs in about
-RUNTIME s.
+37 s.
 """
 import gc
 import os

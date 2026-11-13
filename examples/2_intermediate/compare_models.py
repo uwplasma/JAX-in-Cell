@@ -23,7 +23,7 @@ explicit electromagnetic leapfrog with no filter:
 
 Each line prints the fitted rate against the kinetic root, the worst relative error of the
 total energy, and the wall time of the run.
-Runs in about RUNTIME s; the settings marked `research` in the script give the
+Runs in about 32 s; the settings marked `research` in the script give the
 converged version.
 """
 

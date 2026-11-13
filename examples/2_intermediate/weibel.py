@@ -22,7 +22,7 @@ the wide box the long wavelengths do before the ones near the cutoff have grown.
 whose fit leaves R^2 < 0.8 are drawn open and not compared: near the cutoff the growth is
 too slow to leave the noise in the window.
 
-Runs in about RUNTIME s; the settings marked `research` in the script give the converged version.
+Runs in about 33 s; the settings marked `research` in the script give the converged version.
 """
 
 import os

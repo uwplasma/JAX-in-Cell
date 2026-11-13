@@ -20,7 +20,7 @@ A short quantum case, chi = 0.29, runs `Radiation(model="ll_quantum")`: the Gaun
 independent integration of d gamma/dt = -a g(chi) (gamma^2 - 1).
 
 Refine the macro time step to resolve gyrophase.
-Runs in about RUNTIME s; the settings marked `research` in the script give the
+Runs in about 25 s; the settings marked `research` in the script give the
 converged version.
 """
 import os
