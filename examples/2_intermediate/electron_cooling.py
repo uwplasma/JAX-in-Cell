@@ -15,6 +15,10 @@ any maser growth. Each particle is compared with the exact uniform-B solution ev
 sample, which isolates the PIC integration error; the ring radius is compared with their Eq. (7),
 which assumes p_parallel << p_perp and only approximates the exact-LL ring.
 
+A short quantum case, chi = 0.29, runs `Radiation(model="ll_quantum")`: the Gaunt factor of Niel et al.
+(Plasma Phys. Control. Fusion 60, 094002, 2018) weakens the recoil, and the final energy is compared with an
+independent integration of d gamma/dt = -a g(chi) (gamma^2 - 1).
+
 Refine the macro time step to resolve gyrophase.
 Runs in about RUNTIME s; the settings marked `research` in the script give the
 converged version.
@@ -42,14 +46,14 @@ tau = e**2 / (6 * np.pi * epsilon_0 * m * c**3)
 B_schwinger = 4.4140052e9                    # electron critical magnetic field, T
 
 
-def simulation(u0, strength, count=steps):
+def simulation(u0, strength, count=steps, model="ll_reduced", span=duration):
     n = u0.shape[0]
     x = jnp.zeros((n, 3)).at[:, 0].set(length * ((jnp.arange(n) + .5) / n - .5))
     electrons = Species.electrons(n=n, density=density, x=x, u=u0)
-    return Simulation(Domain(length=length, cells=cells, time_step=duration / count),
+    return Simulation(Domain(length=length, cells=cells, time_step=span / count),
                       (electrons,), Solver(relativistic=True),
                       external_B=jnp.broadcast_to(jnp.array([strength, 0., 0.]), (cells, 3)),
-                      radiation=Radiation(species="electrons"))
+                      radiation=Radiation(model=model, species="electrons"))
 
 
 def exact_gamma(u0, t, strength):
@@ -104,6 +108,27 @@ for label, u0 in (("electron", mono), ("beam", beam)):
     line, = axes[0].plot(np.asarray(out.t) * 1e9, np.mean(gamma, axis=1), label=label)
     axes[0].plot(np.asarray(out.t) * 1e9, np.mean(analytic, axis=1), "--", color=line.get_color())
     axes[1].plot(np.asarray(out.t) * 1e9, np.mean(gamma / analytic - 1, axis=1), label=label)
+
+
+# Quantum correction to the mean recoil. At chi = gamma B / B_Schwinger of order one the emitted power falls
+# below the classical one by the Gaunt factor g(chi) (Niel et al., Plasma Phys. Control. Fusion 60, 094002, 2018);
+# Radiation(model="ll_quantum") applies it to the force, with no stochastic emission. A perpendicular electron then
+# obeys d gamma/dt = -a g(chi) (gamma^2 - 1), a = tau (eB/m)^2, which scipy integrates independently.
+from scipy.integrate import solve_ivp
+from jaxincell._core import gaunt
+
+gamma_q, span_q = 1.3e6, 4e-12
+u_q = jnp.array([[0., c * np.sqrt(gamma_q**2 - 1), 0.]])
+a = tau * (e * B0 / m)**2
+reference = solve_ivp(lambda t, g: -a * float(gaunt(g[0] * B0 / B_schwinger)) * (g**2 - 1), (0, span_q), [gamma_q],
+                      rtol=1e-10, atol=1e-6, t_eval=[span_q]).y[0, -1]
+final = {}
+for model in ("ll_reduced", "ll_quantum"):
+    q_out = simulation(u_q, B0, 512, model, span_q).run(512, store_every=512, moments=False).validate()
+    final[model] = float(jnp.sqrt(1 + jnp.sum((q_out.u[-1, 0] / c)**2)))
+print(f"chi = {gamma_q * B0 / B_schwinger:.2f}: final gamma {final['ll_reduced']:.4e} classical, "
+      f"{final['ll_quantum']:.4e} with the Gaunt factor, {reference:.4e} from the ODE")
+assert abs(final["ll_quantum"] / reference - 1) < 1e-3 and final["ll_quantum"] > final["ll_reduced"]
 
 
 # Collective ring formation. Gyrophase does not matter to a homogeneous ensemble and the Boris rotation
