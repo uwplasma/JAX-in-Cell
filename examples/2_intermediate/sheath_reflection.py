@@ -59,11 +59,11 @@ import numpy as np
 from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, figure, mass_electron,
                        potential, provenance, quiet_start, elementary_charge as e_charge)
 
-T_e, density, mass_ratio, particles, cells = 1.0, 1e16, 400.0, 12000, 120   # research: 30000 particles
+T_e, density, mass_ratio, particles, cells = 1.0, 1e16, 400.0, 6000, 60   # research: 30000 particles, 120 cells
 sigma = np.sqrt(T_e * e_charge / mass_electron)                  # electron thermal spread
 omega_pe = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
 debye, c_s = sigma / omega_pe, sigma / np.sqrt(mass_ratio)
-length, steps = 60 * debye, 6000                                  # about one ion transit
+length, steps = 30 * debye, 3000                                  # about one ion transit; research: 60, 6000
 v_th_e, v_th_i = np.sqrt(2) * sigma, np.sqrt(2) * sigma / np.sqrt(40 * mass_ratio)   # T_i = T_e / 40
 
 # electrostatic, so the time step follows the plasma frequency and not the speed of light
@@ -124,10 +124,10 @@ for name, (reflection, R_eff) in walls.items():
 # the plasma the sheath sits on is still there at the end.
 maintained_domain = Domain(length=length, cells=cells, time_step=0.2 / omega_pe,
                            particle_bc="absorbing", field_bc=("open", "absorbing"))
-# an ion entering at c_s takes one transit to cross, which is the whole 6000 steps here, so the
-# pool has to hold emit x 6000 of them: 12 a step is 72000, inside the capacity with room for the
-# 30000 it starts with. The run refuses to report anything if that is wrong.
-capacity, emit = 110000, 12
+# an ion entering at c_s takes one transit to cross, which is the whole 3000 steps here, so the
+# pool has to hold emit x 3000 of them: 12 a step is 36000, inside the capacity with room for the
+# 6000 it starts with. The run refuses to report anything if that is wrong.
+capacity, emit = 55000, 12      # research: 110000
 maintained = Simulation(
     maintained_domain,
     [Species("electrons", capacity, -1.0, mass_electron, density, (v_th_e,) * 3, active=particles,
@@ -181,7 +181,7 @@ plt.tight_layout()
 folder = Path.cwd() / "sheath_reflection"
 folder.mkdir(exist_ok=True)
 settings = dict(T_e=T_e, density=density, mass_ratio=mass_ratio, particles=particles, cells=cells,
-                length_debye=60, steps=steps, filter_passes=4, model="electrostatic",
+                length_debye=length / debye, steps=steps, filter_passes=4, model="electrostatic",
                 temperature_ratio=1 / 40)
 summary = {name: {k: r[k] for k in ("edge", "crossings", "sheath", "theory", "measured_R", "drained")}
            for name, r in results.items()}

@@ -94,15 +94,15 @@ electron_temperature = 1.0                  # eV
 density = 1e16                              # m^-3, at the entrance plane
 temperature_ratio = 1.0                     # tau = Z T_i / T_e, the width parameter of F above
 mass_ratio = 100.0                         # research: 400, or 900 for the matched case
-angle_degrees = 15.0                       # research: 5.0, or 4.0 for the matched case
+angle_degrees = 30.0                       # research: 5.0, or 4.0 for the matched case
 gyro_over_debye = 0.2                       # gamma = rho_e/lambda_D at the entrance plane; a GYRAZE
 #                                             manifest names the value that matches its own
-buffer_gyro = 2.0                           # rho_s of run-up before the presheath proper; research: 3.0
-presheath_gyro = 6.0                        # rho_s of magnetic presheath resolved; research: 15.0
-sheath_debye = 30.0                         # lambda_D of Debye sheath resolved; research: 60.0
+buffer_gyro = 1.5                           # rho_s of run-up before the presheath proper; research: 3.0
+presheath_gyro = 4.0                        # rho_s of magnetic presheath resolved; research: 15.0
+sheath_debye = 20.0                         # lambda_D of Debye sheath resolved; research: 60.0
 cells_per_debye = 2.0                       # dx = 0.5 lambda_D, which does not resolve rho_e
-markers_per_cell = 60                       # research: 100
-transits = 2.0                              # entrance-speed crossings of the box; research: 3.0
+markers_per_cell = 30                       # research: 100
+transits = 0.75                           # entrance-speed crossings of the box; research: 3.0
 # the steps between ion emissions, worked out below unless set: 1 is the control
 ion_every = None
 reservoir_samples = 200000                  # velocities drawn once to stand for each reservoir
