@@ -17,7 +17,8 @@ __all__ = ['Boris_step', 'CN_step']
 def Boris_step(carry, step_index, solver_parameters, external_field_parameters, dx, dt, grid, box_size,
                       particle_BC_left, particle_BC_right,
                       field_BC_left, field_BC_right,
-                      field_solver):
+                      field_solver, mixed_BC_weight=1., COR_left=1., COR_right=1.,
+                      mixed_BC_velocity_scale=speed_of_light):
     """One explicit leapfrog step with the Boris pusher.
 
     Deposits the current from the motion ``x^n -> x^{n+1/2}``, advances the fields
@@ -55,6 +56,13 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
 
     (E_field, B_field, positions_minus1_2, positions,
     positions_plus1_2, velocities, qs, ms, q_ms) = carry
+
+    wall_motion = particle_BC_left != 0 or particle_BC_right != 0
+    if wall_motion:
+        positions_plus1_2, velocities, qs, ms, q_ms = set_BC_particles(
+            positions + dt/2*velocities, velocities, qs, ms, q_ms, dx, grid,
+            *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight, COR_left, COR_right,
+            mixed_BC_velocity_scale)
 
     fpasses  = solver_parameters["filter_passes"]
     falpha   = solver_parameters["filter_alpha"]
@@ -94,13 +102,19 @@ def Boris_step(carry, step_index, solver_parameters, external_field_parameters, 
         operand=None
     )
 
-    # Apply boundary conditions
-    positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
-        positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
-        *box_size, particle_BC_left, particle_BC_right)
-    
-    positions_plus1 = set_BC_positions(positions_plus3_2 - (dt / 2) * velocities_plus1,
-                                    qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
+    if wall_motion:
+        positions_plus1, velocities_plus1, qs, ms, q_ms = set_BC_particles(
+            positions_plus1_2 + dt/2*velocities_plus1, velocities_plus1, qs, ms, q_ms, dx, grid,
+            *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight, COR_left, COR_right,
+            mixed_BC_velocity_scale)
+        positions_plus3_2 = positions_plus1 + dt/2*velocities_plus1
+    else:
+        positions_plus3_2, velocities_plus1, qs, ms, q_ms = set_BC_particles(
+            positions_plus3_2, velocities_plus1, qs, ms, q_ms, dx, grid,
+            *box_size, particle_BC_left, particle_BC_right, mixed_BC_weight, COR_left, COR_right,
+            mixed_BC_velocity_scale)
+        positions_plus1 = set_BC_positions(positions_plus3_2 - dt/2*velocities_plus1,
+                                          qs, dx, grid, *box_size, particle_BC_left, particle_BC_right)
 
     # Second half step, x^{n+1/2} -> x^{n+1}
     J = current_density(positions_plus1_2, positions_plus1, positions_plus1, velocities_plus1,

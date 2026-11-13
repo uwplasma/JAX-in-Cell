@@ -38,8 +38,8 @@ def test_clean_and_initialize_solver_parameters_rejects_invalid_values():
     - filter_alpha must be strictly between zero and one.
     - filter_strides must contain positive integers.
     """
-    input_parameters = {"field_solver": 2}
-    with pytest.raises(AssertionError, match="Invalid field solver. Must be 0"):
+    input_parameters = {"field_solver": 4}
+    with pytest.raises(AssertionError, match="Invalid field solver"):
         clean_and_initialize_solver_parameters({}, input_parameters)
     
     input_parameters = {"time_evolution_algorithm": 2}

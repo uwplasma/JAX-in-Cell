@@ -951,6 +951,124 @@ def test_simulation_run_delegates_to_simulation(monkeypatch):
     assert calls[-1] is runtime_input_parameters
 
 
+@pytest.mark.parametrize("side", [-1, 1])
+def test_relativistic_absorbed_slots_remain_finite_in_following_pushes(side):
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=6, number_pseudoparticles=2)
+    initial = Simulation(parameters)
+    speed, dt, length = .02*299792458., float(initial.dt), float(initial.box_size[0])
+    for population in parameters["species_parameters"].values():
+        for species in population.values():
+            species.update(initial_positions=jnp.zeros((2, 3)).at[:, 0].set(side*(length/2-dt*speed/4)),
+                           initial_velocities=jnp.zeros((2, 3)).at[:, 0].set(side*speed))
+    parameters["domain_parameters"].update(particle_BC_left=2, particle_BC_right=2,
+                                             field_BC_left=1, field_BC_right=1)
+    parameters["solver_parameters"].update(relativistic=True, field_solver=2)
+    output = Simulation(parameters).run()
+    for key in ("positions", "velocities", "electric_field", "magnetic_field"):
+        assert np.isfinite(output[key]).all()
+    np.testing.assert_array_equal(output["velocities"], 0.)
+    assert np.all(side*np.asarray(output["positions"])[..., 0] > length/2)
+
+
+@pytest.mark.parametrize("solver_change", [{"relativistic": True}, {"time_evolution_algorithm": 1}])
+@pytest.mark.parametrize("wall_change", [{"particle_BC_left": 3, "particle_BC_right": 3},
+                                        {"particle_BC_left": 4, "particle_BC_right": 4},
+                                        {"particle_BC_left": 1, "particle_BC_right": 1, "COR_right": .5}])
+def test_unsupported_wall_pushers_are_rejected_by_constructor_and_both_setters(solver_change, wall_change):
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    parameters["solver_parameters"]["field_solver"] = 2
+    parameters["domain_parameters"].update(wall_change, field_BC_left=1, field_BC_right=1)
+    unsupported = deepcopy(parameters)
+    unsupported["solver_parameters"].update(solver_change)
+    match = "periodic particle and field boundaries only" if solver_change.get("time_evolution_algorithm") else "require nonrelativistic Boris"
+    with pytest.raises(ValueError, match=match):
+        Simulation(unsupported)
+    sim = Simulation(parameters)
+    with pytest.raises(ValueError, match=match):
+        sim.solver_parameters = {**sim.solver_parameters, **solver_change}
+    periodic = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    periodic["solver_parameters"].update(solver_change, field_solver=2)
+    sim = Simulation(periodic)
+    with pytest.raises(ValueError, match=match):
+        sim.domain_parameters = parameters["domain_parameters"]
+
+
+@pytest.mark.parametrize("field_solver", [0, 1, 3])
+def test_mixed_walls_require_cartesian_gauss_through_constructor_and_setters(field_solver):
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    parameters["domain_parameters"].update(particle_BC_left=3, particle_BC_right=3,
+                                             field_BC_left=1, field_BC_right=1)
+    parameters["solver_parameters"]["field_solver"] = field_solver
+    with pytest.raises(ValueError, match="require field_solver=2"):
+        Simulation(parameters)
+    parameters["solver_parameters"]["field_solver"] = 2
+    sim = Simulation(parameters)
+    with pytest.raises(ValueError, match="require field_solver=2"):
+        sim.solver_parameters = {**sim.solver_parameters, "field_solver": field_solver}
+    periodic = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    periodic["solver_parameters"]["field_solver"] = field_solver
+    sim = Simulation(periodic)
+    with pytest.raises(ValueError, match="require field_solver=2"):
+        sim.domain_parameters = parameters["domain_parameters"]
+
+
+def test_mixed_run_stores_the_ballistic_fractional_return_mass_and_charge_history():
+    """A neutral co-moving electron/ion pulse hits the wall at t=1.75 dt.
+    Half returns with half its normal speed; transverse velocities stay fixed."""
+    parameters = small_simulation_parameters(total_steps=3, number_grid_points=4, number_pseudoparticles=2)
+    initial = Simulation(parameters)
+    dt, length = float(initial.dt), float(initial.box_size[0])
+    velocity = np.array([.02, .003, -.004]) * speed_of_light
+    for population in parameters["species_parameters"].values():
+        for species in population.values():
+            species.update(initial_positions=jnp.zeros((2, 3)).at[:, 0].set(length/2 - 1.75*dt*velocity[0]),
+                           initial_velocities=jnp.broadcast_to(velocity, (2, 3)))
+    parameters["domain_parameters"].update(particle_BC_left=3, particle_BC_right=3,
+                                             field_BC_left=1, field_BC_right=1, mixed_BC_weight=.5,
+                                             COR_left=.5, COR_right=.5)
+    parameters["solver_parameters"]["field_solver"] = 2
+    output = Simulation(parameters).run()
+    fractions = np.array([1., .5, .5])[:, None, None]
+    np.testing.assert_allclose(output["masses_over_time"], fractions * np.asarray(output["masses"]), rtol=1e-13)
+    np.testing.assert_allclose(output["charges_over_time"], fractions * np.asarray(output["charges"]), rtol=1e-13)
+    expected_v = np.broadcast_to(velocity, (3, 4, 3)).copy()
+    expected_v[1:, :, 0] *= -.5
+    np.testing.assert_allclose(output["velocities"], expected_v, rtol=1e-13)
+    masses = fractions * np.asarray(output["masses"])
+    expected_ke = np.sum(masses[..., 0] * np.sum(expected_v ** 2, axis=-1) / 2, axis=-1)
+    expected_p = np.sum(masses * expected_v, axis=1)
+    diagnostics(output)
+    np.testing.assert_allclose(output["kinetic_energy"], expected_ke, rtol=1e-13)
+    np.testing.assert_allclose(output["total_momentum"], expected_p, rtol=1e-13)
+
+
+def test_absorbed_marker_does_not_bias_retained_population_moments():
+    parameters = small_simulation_parameters(total_steps=2, number_grid_points=4, number_pseudoparticles=2)
+    initial = Simulation(parameters)
+    velocity = np.array([[.02, 0., 0.], [-.01, 0., 0.]]) * speed_of_light
+    position = np.zeros((2, 3))
+    position[0, 0] = float(initial.box_size[0]) / 2 - float(initial.dt) * velocity[0, 0] / 4
+    for population in parameters["species_parameters"].values():
+        for species in population.values():
+            species.update(weight=1., initial_positions=position, initial_velocities=velocity)
+    parameters["domain_parameters"].update(particle_BC_left=2, particle_BC_right=2,
+                                             field_BC_left=1, field_BC_right=1)
+    parameters["solver_parameters"]["field_solver"] = 2
+    output = Simulation(parameters).run()
+    live_masses = np.asarray(output["masses"])[None, ...] * np.array([0., 1., 0., 1.])[None, :, None]
+    np.testing.assert_allclose(output["masses_over_time"], np.broadcast_to(live_masses, (2, 4, 1)), rtol=1e-14)
+    diagnostics(output)
+    for species in output["species"]:
+        np.testing.assert_allclose(species["weights"], [[0., 1.], [0., 1.]], rtol=2e-15)
+        np.testing.assert_allclose(species["temperature_components"], 0., atol=1e-20)
+    expected_momentum = np.sum(live_masses, axis=1) * velocity[1]
+    np.testing.assert_allclose(output["total_momentum"], np.broadcast_to(expected_momentum, (2, 3)), rtol=1e-14)
+    first_energy = np.asarray(output["kinetic_energy"])
+    diagnostics(output)
+    np.testing.assert_array_equal(output["kinetic_energy"], first_energy)
+    assert "positions" in output and "velocities" in output
+
+
 @pytest.mark.parametrize("steps", [1, 4])
 def test_stored_times_are_end_of_step_times(steps):
     out = Simulation(small_simulation_parameters(total_steps=steps)).run()
