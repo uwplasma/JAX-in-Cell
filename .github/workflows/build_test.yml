@@ -143,4 +143,4 @@ jobs:
       run: |
         # shellcheck disable=SC2016  # the single quotes are meant: the inner shell expands them
         printf '%s\n' examples/*/*.py |
-        xargs -P 4 -I{} sh -c 't=$(date +%s); if log=$(python {} 2>&1); then echo "ok   $(($(date +%s) - t)) s  {}"; else echo "FAIL {}"; echo "$log"; exit 1; fi'
+        xargs -n 1 -P 4 sh -c 't=$(date +%s); if log=$(python "$1" 2>&1); then echo "ok   $(($(date +%s) - t)) s  $1"; else echo "FAIL $1"; echo "$log"; exit 1; fi' _

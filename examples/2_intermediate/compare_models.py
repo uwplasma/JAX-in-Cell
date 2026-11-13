@@ -42,10 +42,10 @@ from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnost
 from jaxincell.theory import two_stream_rate
 
 # --- what to change ------------------------------------------------------------------
-particles = 6000   # electrons (both beams); half as many protons; research: 20000
+particles = 3000   # electrons (both beams); half as many protons; research: 20000
 length, cells, density = 0.01, 64, 4.37e17
 drift, vth = 5e7, 0.05 * c            # beam speed and thermal spread, m/s
-seed_ak = 1e-4                        # displacement of mode 1, times k
+seed_ak = 1e-3                        # displacement of mode 1, times k; research: 1e-4
 dt_over_dx_c = 4.5                    # omega_pe dt = 0.2; no transverse velocity, so no light-wave limit
 t_end = 40.0                          # in 1/omega_pe: through saturation
 variants = {                          # name: the one switch changed from the reference

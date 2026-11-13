@@ -36,7 +36,7 @@ from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, figure, m
 from jaxincell.theory import landau_root
 
 # the real part of the least-damped kinetic root, omega/omega_pe, at each k lambda_D
-KINETIC = {kld: landau_root(kld).real for kld in (0.05, 0.10, 0.15, 0.20, 0.25, 0.30)}
+KINETIC = {kld: landau_root(kld).real for kld in (0.10, 0.20, 0.30)}   # research: 0.05 to 0.30 in steps of 0.05
 
 length, cells, seed_ak, steps = 1.0, 32, 1e-2, 1600
 k = 2 * np.pi / length
@@ -49,9 +49,10 @@ print(f"grid factor S(k) sqrt(k/K) = {grid:.4f}")
 print("k lambda_D   measured   kinetic x grid   deviation   Bohm-Gross x grid")
 measured = []
 for kld, kinetic in KINETIC.items():
-    electrons = Species.electrons(n=20000, density=density, vth=(kld / k * np.sqrt(2) * omega_pe, 0, 0),
+    electrons = Species.electrons(n=10000,   # research: 20000
+                                  density=density, vth=(kld / k * np.sqrt(2) * omega_pe, 0, 0),
                                   sampling="low_noise", perturbation_amplitude=seed_ak / k, perturbation_mode=1)
-    ions = Species.ions(n=5000, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="low_noise")
+    ions = Species.ions(n=2500, density=density, mass_ratio=1e9, vth=(0, 0, 0), sampling="low_noise")
     out = Simulation(Domain(length=length, cells=cells, dt_over_dx_c=1.0), [electrons, ions],
                      Solver(filter_passes=0)).run(steps, seed=0, store_particles=False)
     t = np.asarray(out.t) * omega_pe
@@ -72,7 +73,7 @@ ax.legend()
 fig.tight_layout()
 deviation = 100 * (np.array(measured) / (np.array(list(KINETIC.values())) * grid) - 1)
 save_run(Path.cwd() / "langmuir_wave", "langmuir_wave",
-         dict(length=length, cells=cells, seed_ak=seed_ak, steps=steps, particles=20000),
+         dict(length=length, cells=cells, seed_ak=seed_ak, steps=steps, particles=10000),
          dict(k_lambda_d=list(KINETIC), measured=measured, kinetic=list(KINETIC.values()), grid_factor=grid,
               max_deviation_percent=float(np.abs(deviation).max())),
          figure=fig)
