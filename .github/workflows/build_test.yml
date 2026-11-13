@@ -1,5 +1,6 @@
-# Lint, run the test suite with the coverage gate on every supported Python, and run the
-# fastest examples. Also called by pypi_publish.yml, so nothing is published untested.
+# Lint, run the whole test suite with the coverage gate on one Python, run it in part on the
+# others, and run the fastest examples. Also called by pypi_publish.yml, so nothing is
+# published untested: a release runs the whole suite on every supported Python.
 
 name: Build and Test
 
@@ -12,34 +13,46 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The runners keep their disk between jobs, and compiling the run loop dominates a short
+  # test: a cached executable is reused by every later job whose program is unchanged. The
+  # directory is set in the environment step of each job, since ~ is not expanded here.
+  JAX_COMPILATION_CACHE_MAX_SIZE: 4294967296
+
 jobs:
   build:
-
+    # Whole suite, branch coverage at 100 % (fail_under is in pyproject.toml), flake8.
     runs-on: ${{ fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: [ '3.10', '3.11', '3.12', '3.13']
-    name: Python ${{ matrix.python-version }} Test
+    timeout-minutes: 30
+    name: Python 3.12 Test
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python
       uses: astral-sh/setup-uv@v6
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.12'
         enable-cache: false
     - name: Create virtual environment
       run: |
         # venv outside the checkout so flake8 does not lint it
         uv venv --seed --clear "$RUNNER_TEMP/venv"
         echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-        echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+        # MPLCONFIGDIR: a per-job font cache, since the shared one lists fonts inside the
+        # virtual environment of a job that has since been deleted
+        {
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv"
+          echo "JAX_COMPILATION_CACHE_DIR=$HOME/.cache/jaxincell-jax"
+          echo "MPLCONFIGDIR=$RUNNER_TEMP/matplotlib"
+        } >> "$GITHUB_ENV"
     - name: Install jaxincell
       run: |
-        python -m pip install --upgrade pip
         # editable, so that coverage reports paths inside the repository rather
         # than inside site-packages, which codecov cannot map back to the diff
-        pip install -e ".[dev]"
+        uv pip install -e ".[dev]"
     - name: Check installed package import outside source tree
       run: |
         cd /tmp
@@ -47,26 +60,65 @@ jobs:
     - name: Lint with flake8
       # the configuration, line length and complexity included, is in .flake8
       run: flake8 . --count --show-source --statistics
-
     - name: Run tests with coverage
-      # fail_under = 100 and branch coverage are set in pyproject.toml
+      # fail_under = 100 and branch coverage are set in pyproject.toml; the workers share
+      # the compiled programs through the cache above, and the tests that read one set of
+      # runs share a worker
       run: |
-        pytest --cov=jaxincell --cov-report=xml --cov-report=term --durations=10
-
+        pytest -n 3 --dist loadgroup --cov=jaxincell --cov-report=xml --cov-report=term --durations=10
     - name: Upload coverage reports to Codecov
-      if: matrix.python-version == '3.12' && github.event_name != 'release'
+      # a missing gpg on a runner stops this action before it uploads; that is not a test failure
+      continue-on-error: true
+      if: github.event_name != 'release'
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         slug: uwplasma/JAX-in-Cell
 
+  compatibility:
+    # The other Pythons, and the JAX each of them resolves to, run the files that exercise
+    # the public interface, the configuration and the closed-form checks; a release runs
+    # everything.
+    runs-on: ${{ fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ '3.10', '3.11', '3.13' ]
+    name: Python ${{ matrix.python-version }} Test
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        enable-cache: false
+    - name: Create virtual environment
+      run: |
+        uv venv --seed --clear "$RUNNER_TEMP/venv"
+        echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+        # MPLCONFIGDIR: a per-job font cache, since the shared one lists fonts inside the
+        # virtual environment of a job that has since been deleted
+        {
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv"
+          echo "JAX_COMPILATION_CACHE_DIR=$HOME/.cache/jaxincell-jax"
+          echo "MPLCONFIGDIR=$RUNNER_TEMP/matplotlib"
+        } >> "$GITHUB_ENV"
+    - name: Install jaxincell
+      run: uv pip install -e ".[dev]"
+    - name: Run tests
+      run: |
+        files=(tests/test_api.py tests/test_config_and_outputs.py tests/test_theory.py)
+        if [ "${{ github.event_name }}" = release ]; then files=(tests); fi
+        pytest -n 2 "${files[@]}"
+
   examples:
     # The tests exercise the package; this checks that the scripts people copy from
-    # still run against it. These take a couple of minutes together on a CPU runner, the
-    # sheath, Weibel and model-comparison scripts in the smaller preset their `--quick` flag
-    # selects; the rest (bump-on-tail, two-stream, the full presets) take minutes each and
-    # are left to the documentation build of the figures.
+    # still run against it, four at a time. The sheath, Weibel and model-comparison scripts
+    # run in the smaller preset their `--quick` flag selects; the rest (bump-on-tail,
+    # two-stream, the full presets) take minutes each and are left to the documentation
+    # build of the figures.
     runs-on: ${{ fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') }}
+    timeout-minutes: 30
     name: Examples
     env:
       MPLBACKEND: Agg
@@ -78,28 +130,29 @@ jobs:
         enable-cache: false
     - name: Create virtual environment
       run: |
-        # venv outside the checkout so flake8 does not lint it
         uv venv --seed --clear "$RUNNER_TEMP/venv"
         echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-        echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+        # MPLCONFIGDIR: a per-job font cache, since the shared one lists fonts inside the
+        # virtual environment of a job that has since been deleted
+        {
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv"
+          echo "JAX_COMPILATION_CACHE_DIR=$HOME/.cache/jaxincell-jax"
+          echo "MPLCONFIGDIR=$RUNNER_TEMP/matplotlib"
+        } >> "$GITHUB_ENV"
     - name: Install jaxincell
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e . scipy     # scipy: the kinetic roots of jaxincell.theory
+      run: uv pip install -e . scipy     # scipy: the kinetic roots of jaxincell.theory
     - name: Run the fastest examples
       run: |
-        for script in 2_intermediate/collisions 2_intermediate/wall_reflection \
-                      3_advanced/conservation 1_basic/langmuir_wave \
-                      1_basic/parameters_and_sampling 2_intermediate/output_and_restart \
-                      2_intermediate/relativistic_two_stream; do
-          echo "::group::examples/$script.py"
-          python "examples/$script.py"
-          echo "::endgroup::"
-        done
-        for script in 1_basic/sheath_unmagnetized 2_intermediate/sheath_magnetized \
-                      3_advanced/sheath_optimization 2_intermediate/weibel 2_intermediate/compare_models \
-                      3_advanced/electron_field 2_intermediate/external_fields_3d 3_advanced/invariants; do
-          echo "::group::examples/$script.py --quick"
-          python "examples/$script.py" --quick
-          echo "::endgroup::"
-        done
+        # the slowest first, so that the last to start is not the last to finish
+        scripts=(
+          "2_intermediate/sheath_magnetized.py --quick" "3_advanced/sheath_optimization.py --quick"
+          "3_advanced/electron_field.py --quick" 2_intermediate/wall_reflection.py
+          1_basic/langmuir_wave.py 3_advanced/conservation.py "2_intermediate/compare_models.py --quick"
+          "2_intermediate/weibel.py --quick" 2_intermediate/relativistic_two_stream.py
+          "1_basic/sheath_unmagnetized.py --quick" "3_advanced/invariants.py --quick"
+          1_basic/parameters_and_sampling.py 2_intermediate/output_and_restart.py
+          2_intermediate/collisions.py "2_intermediate/external_fields_3d.py --quick"
+        )
+        # shellcheck disable=SC2016  # the single quotes are meant: the inner shell expands them
+        printf '%s\n' "${scripts[@]}" |
+        xargs -P 4 -I{} sh -c 'if log=$(python examples/{} 2>&1); then echo "ok   {}"; else echo "FAIL {}"; echo "$log"; exit 1; fi'

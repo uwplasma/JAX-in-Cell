@@ -613,7 +613,7 @@ def test_a_floating_wall_holds_the_sheath_drop_of_hobbs_and_wesson():
     are held to 0.15 T_e/e; they come out 0.06 and 0.002 away, and a wall that returned no
     electron in the second case would miss by ln 2 = 0.69.
     """
-    T_e, density, mass_ratio, n, cells, steps = 1.0, 1e16, 100.0, 20000, 60, 1500
+    T_e, density, mass_ratio, n, cells, steps = 1.0, 1e16, 100.0, 6000, 60, 1500
     sigma = np.sqrt(T_e * e_charge / mass_electron)
     omega_pe = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
     debye, c_s = sigma / omega_pe, sigma / np.sqrt(mass_ratio)

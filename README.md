@@ -337,8 +337,9 @@ pytest -q
 
 637 tests cover every statement and branch. They check closed-form rates and frequencies,
 conservation laws, exact results for the kernels, and the behaviour of the interface.
-They run on Python 3.10 to 3.13 on every pull request, together with a build of the
-documentation.
+They run in full on Python 3.12 on every pull request, together with a build of the
+documentation; Python 3.10, 3.11 and 3.13 run the interface and closed-form files, and a
+release runs everything on all four.
 
 ## Contributing and citing
 

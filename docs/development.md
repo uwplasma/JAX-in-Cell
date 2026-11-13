@@ -210,17 +210,19 @@ a hurry, and a tolerance chosen to make today's number pass is not a test.
 
 ### Continuous integration
 
-`build_test.yml` installs the `dev` extra and, on Python 3.10 to 3.13 for every push and
-pull request, runs `flake8` over the whole repository with the configuration in
-`.flake8` (120 columns, McCabe complexity 10) and then the suite under coverage. The
-build fails on any lint violation and on coverage below 100 per cent of statements and
-branches, the threshold set under `[tool.coverage]` in `pyproject.toml`, and it prints
-the ten slowest tests. A second job runs the four quickest examples (collisions, wall
-reflection, conservation and the Langmuir scan), so that a change to the
-interface cannot quietly break the scripts people start from; the others take minutes
-each. `docs.yml` builds the documentation with `-W`, so a broken cross-reference or a
-missing substitution fails the build, and the release workflow runs the same tests
-before it builds anything.
+`build_test.yml` installs the `dev` extra and, for every push and pull request, runs
+`flake8` over the whole repository with the configuration in `.flake8` (120 columns,
+McCabe complexity 10) and then the whole suite under coverage on Python 3.12, three
+workers sharing a persistent compilation cache. The build fails on any lint violation and
+on coverage below 100 per cent of statements and branches, the threshold set under
+`[tool.coverage]` in `pyproject.toml`, and it prints the ten slowest tests. Python 3.10,
+3.11 and 3.13 run the interface, configuration and closed-form files; a release
+runs the whole suite on all four. A further job runs fifteen of the examples, four at a
+time, so that a change to the interface cannot quietly break the scripts people start from;
+the others take minutes each. `docs.yml` builds the documentation with `-W`, so a broken
+cross-reference or a missing substitution fails the build, and the release workflow runs
+the same tests before it builds anything. A newer push to a pull request cancels the runs
+of the older one.
 
 ### Documentation
 
