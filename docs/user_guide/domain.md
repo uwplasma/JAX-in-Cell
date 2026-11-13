@@ -11,8 +11,11 @@ and the boundary conditions.
 | `number_grid_points_y`, `number_grid_points_z` | `0` | int | no | Accepted for future use; `0` is replaced by `3`. No field is defined on a $y$ or $z$ grid. |
 | `total_steps` | `350` | int | no | Number of time steps. Every step is stored in the output. |
 | `timestep_over_spatialstep_times_c` | `1.0` | float | yes | Finite, positive $c\,\Delta t/\Delta x$. |
-| `particle_BC_left`, `particle_BC_right` | `0` | int | no | Particle boundary condition at $x=-L/2$ and $x=+L/2$: `0` periodic, `1` reflective, `2` absorbing. |
+| `particle_BC_left`, `particle_BC_right` | `0` | int | no | Particle condition: `0` periodic, `1` reflective, `2` absorbing, `3` fractional return, `4` speed-dependent return. |
 | `field_BC_left`, `field_BC_right` | `0` | int | no | Field boundary condition: `0` periodic, `1` reflective, `2` absorbing. |
+| `mixed_BC_weight` | `1.0` | float | yes | Returned marker fraction for particle code `3`, in $[0,1]$. |
+| `mixed_BC_velocity_scale` | `299792458.0` | float | yes | Positive wall speed scale in m/s for particle code `4`. |
+| `COR_left`, `COR_right` | `1.0` | float | yes | Normal restitution coefficients in $[0,1]$ at the corresponding wall. |
 
 ## Derived quantities
 
@@ -33,7 +36,7 @@ The grid spacing should resolve the electron Debye length. With the quadratic sp
 shape function and the digital filter switched on, $\Delta x \lesssim 2\lambda_D$ is
 safe; the finite-grid instability appears for coarser grids. The spacing is not set
 directly: `dx_over_Debye_length` in the species section fixes
-$\lambda_D/\Delta x$, and the density follows from it (see {doc}`species`).
+$\Delta x/\lambda_D$, and the density follows from it (see {doc}`species`).
 
 The time step has three constraints, discussed in {doc}`../numerics/stability`:
 

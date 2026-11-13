@@ -6,7 +6,7 @@ sets the digital filter, the implicit-solver controls and the random seed.
 | parameter | default | differentiable | meaning |
 |---|---|---|---|
 | `time_evolution_algorithm` | `0` | no | `0` explicit leapfrog with the Boris pusher; `1` implicit Crank-Nicolson with Picard iteration. |
-| `field_solver` | `0` | no | `0` electromagnetic: $E_x$ follows Ampere's law; `1` electrostatic: $E_x$ is recomputed from Gauss's law by FFT every step. Only `0` and `1` are accepted. |
+| `field_solver` | `0` | no | `0`: $E_x$ follows Ampere's law; `1`: Fourier Gauss; `2`: Cartesian Gauss; `3`: Fourier Poisson. The nonzero selectors replace $E_x$ every step. |
 | `relativistic` | `false` | no | Use the relativistic Boris pusher (explicit scheme only). |
 | `filter_passes` | `5` | no | Number of passes of the compensated binomial filter applied to $\rho$ and $\mathbf J$ (explicit scheme only). `0` disables it; `1` is a no-op, see below. |
 | `filter_alpha` | `0.5` | yes | Weight of the centre point in each binomial pass, $0 < \alpha < 1$. |
@@ -43,7 +43,12 @@ additionally overwrites $E_x$ at the end of every step with the solution of Gaus
 from the deposited charge density, computed by FFT. This is the electrostatic mode: it
 is exact for periodic boundaries, removes any accumulated error in $\nabla\cdot\mathbf E$
 and costs one FFT per step. The transverse components $E_y$, $E_z$ and the magnetic
-field are advanced in the same way in both modes. See {doc}`../numerics/field_solvers`.
+field are advanced in the same way in all modes. Cartesian Gauss (`2`) satisfies
+the backward-difference divergence used by the charge deposit, preserves zero
+mean $E_x$ with periodic fields and sets the left-face field to zero with wall
+fields. A periodic net charge is balanced by a uniform background. Fourier
+solvers (`1`, `3`) require periodic fields and use the spectral derivative.
+Volumetric particle sources require `2`. See {doc}`../numerics/field_solvers`.
 
 ## The digital filter
 
