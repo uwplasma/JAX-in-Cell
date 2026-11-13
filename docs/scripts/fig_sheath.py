@@ -6,7 +6,7 @@ from common import COLORS, C_THEORY, figure, panel_label, record, savefig
 from jaxincell import (Domain, Simulation, Solver, Species, bohm_edge, epsilon_0, mass_electron,
                        potential, quiet_start, elementary_charge as e_charge, speed_of_light as c)
 
-# the same preset as examples/2_intermediate/sheath_reflection.py, so that the figure and the
+# the `research` settings of examples/2_intermediate/sheath_reflection.py, so that the figure and the
 # example are one run and not two that happen to look alike
 T_E, DENSITY, MASS_RATIO, PARTICLES, CELLS, BOX, STEPS = 1.0, 1e16, 400.0, 30000, 120, 60, 6000
 SIGMA = np.sqrt(T_E * e_charge / mass_electron)
