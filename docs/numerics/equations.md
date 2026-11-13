@@ -101,7 +101,9 @@ continuity equation, as described in {doc}`explicit`.
 
 ## What is not included
 
-There are no collisions, no ionisation or recombination, no radiation reaction and no
+Optional binary Coulomb collisions are described in {doc}`../examples/collisions`;
+the equations above describe the collisionless evolution between scattering steps.
+There is no ionisation or recombination, no radiation reaction and no
 particle sources on the `main` branch. Fields are functions of $x$ only. Gravity and
 external forces other than a static external $\mathbf E$ and $\mathbf B$ are not
 available.

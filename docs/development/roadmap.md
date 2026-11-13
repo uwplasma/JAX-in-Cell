@@ -9,10 +9,11 @@
 * Periodic, reflective and absorbing boundaries for particles and fields.
 * Compensated digital filter.
 * Differentiable inputs and runtime re-execution without recompilation.
+* Optional nonrelativistic binary collisions for periodic Boris runs; see
+  {doc}`../examples/collisions` for validated controls and coupling limits.
 
 ## Planned
 
-* Binary collisions, so that a plasma can relax to a Maxwellian.
 * Particle sources and sinks (the `source_parameters` section is reserved for this).
 * Time-dependent and user-defined external fields (the `*_function` parameters are
   reserved for this).
