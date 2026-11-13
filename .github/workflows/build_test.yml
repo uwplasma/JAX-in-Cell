@@ -45,6 +45,8 @@ jobs:
         # GITHUB_ENV/GITHUB_PATH only apply to later steps, so also export here
         echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
         echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+        # per-job matplotlib font cache: the shared one can list fonts of a deleted venv
+        echo "MPLCONFIGDIR=$RUNNER_TEMP/matplotlib" >> "$GITHUB_ENV"
         export VIRTUAL_ENV="$RUNNER_TEMP/venv"
         export PATH="$VIRTUAL_ENV/bin:$PATH"
         uv pip install . flake8 pytest coverage pytest-cov pytest-xdist
