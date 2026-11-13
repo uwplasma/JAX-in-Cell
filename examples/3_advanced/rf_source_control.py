@@ -7,6 +7,8 @@ energy. This is not a runaway-suppression or wall-plug-power result.
 
 Requires scipy (the development extra). Results go to ./rf_source_control. Runs in about
 37 s.
+
+Runs in about 51 s.
 """
 import gc
 import os

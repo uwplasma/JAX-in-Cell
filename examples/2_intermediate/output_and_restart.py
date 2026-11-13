@@ -13,7 +13,7 @@ particles as an openPMD series (optional dependency `openpmd-api`). The field is
 back here with openpmd-api itself, placed on the coordinates the standard's attributes
 give, and compared with the array in memory.
 
-Runs in about 7 s.
+Runs in about 8 s.
 """
 
 import os

@@ -13,7 +13,7 @@ noise; `jaxincell.theory.damped_mode` measures the floor where the amplitude sto
 falling and fits only the maxima well above it, so running longer does not change
 the answer (at 800 and 1200 steps it is the same to four digits).
 
-Runs in about 35 s.
+Runs in about 40 s.
 """
 
 import os

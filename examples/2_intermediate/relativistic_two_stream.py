@@ -20,7 +20,7 @@ Panels: (a) electric energy with the linear growth rates of the cold relativisti
 non-relativistic dispersion relations, (b) relative change of both total energies for both
 pushers, (c), (d) electron phase space at saturation.
 
-Runs in about 9 s.
+Runs in about 10 s.
 """
 import os
 import time

@@ -20,42 +20,42 @@ runtimes are those of the continuous-integration runner with four scripts runnin
 | script | what it shows | compared with | runs in |
 |---|---|---|---|
 | `two_stream.py` | two counter-streaming beams go unstable | the cold-beam growth rate (Buneman 1959) | 11 s |
-| `langmuir_wave.py` | the frequency of an electron plasma wave against `k` | the kinetic dispersion relation | 38 s |
-| `parameters_and_sampling.py` | physical and numerical inputs, derived scales, three particle loadings | the Poisson spread of random loading | 28 s |
-| `landau_damping.py` | a wave damped by resonant electrons, no collisions | the least-damped kinetic root (Canosa 1972) | 35 s |
-| `sheath_unmagnetized.py` | a maintained source-to-collector sheath | the kinetic floating potential in closed form | 33 s |
+| `langmuir_wave.py` | the frequency of an electron plasma wave against `k` | the kinetic dispersion relation | 42 s |
+| `parameters_and_sampling.py` | physical and numerical inputs, derived scales, three particle loadings | the Poisson spread of random loading | 33 s |
+| `landau_damping.py` | a wave damped by resonant electrons, no collisions | the least-damped kinetic root (Canosa 1972) | 40 s |
+| `sheath_unmagnetized.py` | a maintained source-to-collector sheath | the kinetic floating potential in closed form | 38 s |
 
 ## 2_intermediate
 
 | script | what it shows | compared with | runs in |
 |---|---|---|---|
 | `bump_on_tail.py` | a beam on the tail of a Maxwellian drives a wave | the kinetic growth rate | 22 s |
-| `weibel.py` | temperature anisotropy grows a magnetic field: the cutoff, then mode by mode | the transverse kinetic root | 33 s |
-| `output_and_restart.py` | save, restart and openPMD round trip | the uninterrupted run, bit for bit | 7 s |
+| `weibel.py` | temperature anisotropy grows a magnetic field: the cutoff, then mode by mode | the transverse kinetic root | 40 s |
+| `output_and_restart.py` | save, restart and openPMD round trip | the uninterrupted run, bit for bit | 8 s |
 | `compare_models.py` | one two-stream problem with seven solver settings | the kinetic growth rate; energy conservation | 32 s |
 | `collisions.py` | Takizuka-Abe slowing-down and perpendicular diffusion | the NRL formulary rates | 5 s |
-| `relativistic_two_stream.py` | relativistic counter-streaming beams | the cold and warm dispersion relations | 9 s |
-| `wall_reflection.py` | a velocity-dependent wall, through its flux average | `u^2/(u^2+sigma^2)` in closed form | 28 s |
-| `sheath_magnetized.py` | the sheath in a field oblique to the wall | its own limits and the impact distributions | 33 s |
-| `sheath_reflection.py` | a wall that returns part of the electron flux | Hobbs and Wesson (1967) | 60 s |
+| `relativistic_two_stream.py` | relativistic counter-streaming beams | the cold and warm dispersion relations | 10 s |
+| `wall_reflection.py` | a velocity-dependent wall, through its flux average | `u^2/(u^2+sigma^2)` in closed form | 31 s |
+| `sheath_magnetized.py` | the sheath in a field oblique to the wall | its own limits and the impact distributions | 34 s |
+| `sheath_reflection.py` | a wall that returns part of the electron flux | Hobbs and Wesson (1967) | 2 min |
 | `external_fields_3d.py` | an external field on an (x, y, z) grid: grad-B drift and a mirror bounce | guiding-centre theory | 8 s |
-| `electron_cooling.py` | classical and quantum-corrected radiation reaction, beam cooling, ring formation | exact uniform-B solution, Niel et al. Gaunt factor, Bilbao and Silva (2023) | 25 s |
+| `electron_cooling.py` | classical and quantum-corrected radiation reaction, beam cooling, ring formation | exact uniform-B solution, Niel et al. Gaunt factor, Bilbao and Silva (2023) | 30 s |
 
 ## 3_advanced
 
 | script | what it shows | compared with | runs in |
 |---|---|---|---|
-| `electron_field.py` | driven electron waves on uniform, frozen and mobile backgrounds | the accelerated-frame control and kinetic dielectric | 43 s |
-| `invariants.py` | quintic shapes and orbit integration | conservation and refinement controls | 16 s |
-| `conservation.py` | explicit and implicit schemes against energy, momentum and charge | round-off | 17 s |
-| `optimize_two_stream.py` | gradient ascent on a growth rate through the whole run | `sqrt(3/8)`, the cold-beam optimum | 25 s |
-| `sheath_optimization.py` | a wall reflectivity recovered from the sheath it holds | the value the target was made at | 52 s |
-| `grazing_sheath.py` | a sheath at grazing magnetic incidence | GYRAZE (Geraldini et al., arXiv:2508.09067), when `reference` is set | 67 s |
-| `runaway_rf.py` | a prescribed RF envelope optimized through the time loop | directional derivatives and refined trajectories | 10 s |
-| `runaway_baseline.py` | a no-RF runaway baseline with moment-restored collisions | the reduced test-particle ODE | 9 s |
-| `runaway_rf_minimum.py` | the minimum RF energy to hold a runaway tail below 10 MeV | resolved wave windows and frozen-control checks | 13 s |
-| `beam_laser.py` | finite-spread beam cooling in a laser pulse, reduced and full LL | exact LL endpoint, phase ODE and analytic AD | 18 s |
-| `rf_source_control.py` | supplied RF energy for a cold-plasma deposition target | the Maxwell source and cross-energy budget | 37 s |
+| `electron_field.py` | driven electron waves on uniform, frozen and mobile backgrounds | the accelerated-frame control and kinetic dielectric | 47 s |
+| `invariants.py` | quintic shapes and orbit integration | conservation and refinement controls | 18 s |
+| `conservation.py` | explicit and implicit schemes against energy, momentum and charge | round-off | 19 s |
+| `optimize_two_stream.py` | gradient ascent on a growth rate through the whole run | `sqrt(3/8)`, the cold-beam optimum | 31 s |
+| `sheath_optimization.py` | a wall reflectivity recovered from the sheath it holds | the value the target was made at | 58 s |
+| `grazing_sheath.py` | a sheath at grazing magnetic incidence | GYRAZE (Geraldini et al., arXiv:2508.09067), when `reference` is set | 77 s |
+| `runaway_rf.py` | a prescribed RF envelope optimized through the time loop | directional derivatives and refined trajectories | 14 s |
+| `runaway_baseline.py` | a no-RF runaway baseline with moment-restored collisions | the reduced test-particle ODE | 15 s |
+| `runaway_rf_minimum.py` | the minimum RF energy to hold a runaway tail below 10 MeV | resolved wave windows and frozen-control checks | 17 s |
+| `beam_laser.py` | finite-spread beam cooling in a laser pulse, reduced and full LL | exact LL endpoint, phase ODE and analytic AD | 24 s |
+| `rf_source_control.py` | supplied RF energy for a cold-plasma deposition target | the Maxwell source and cross-energy budget | 51 s |
 
 ## What each part of the code is shown by
 

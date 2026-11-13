@@ -71,7 +71,7 @@ passes the entrance value its manifest names as `gyro_over_debye`; a run that do
 to be a different problem. Nothing from that code is kept here: it is unlicensed, so it is
 run separately and read, not vendored.
 
-Runs in about 67 s.
+Runs in about 77 s.
 """
 
 import json

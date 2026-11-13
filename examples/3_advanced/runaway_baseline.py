@@ -30,7 +30,7 @@ DREAM's kinetic solution. Avalanche growth at E/E_c = 6.5 is 0.05-0.07 /s (DREAM
 Rosenbluth and Putvinski 1997, eq. 18) and is not in the kernels. Because
 tau_c is seconds at this density, the 100 us run is a short precursor; a longer `duration` with
 more `steps` extends it. Requires scipy.
-Runs in about 9 s; the settings marked `research` in the script give the
+Runs in about 15 s; the settings marked `research` in the script give the
 converged version.
 """
 import os

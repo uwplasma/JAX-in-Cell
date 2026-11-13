@@ -41,7 +41,7 @@ be, and checked rather than asserted:
 * **the ion impact energies and angles**, which are what a wall actually feels, binned at
   the crossing rather than read off a snapshot of who is nearby.
 
-Runs in about 33 s; the settings marked `research` in the script give the converged version.
+Runs in about 34 s; the settings marked `research` in the script give the converged version.
 """
 
 import json

@@ -16,7 +16,7 @@ against another run:
   at every step. The explicit electrostatic leapfrog on the same two-stream run is shown for
   scale.
 
-Runs in about 16 s; the settings marked `research` in the script give the converged version.
+Runs in about 18 s; the settings marked `research` in the script give the converged version.
 """
 
 import os

@@ -10,7 +10,7 @@ bulk reservoir, accelerating current, avalanche, and a source-power closure woul
 be needed for that claim. No quasilinear diffusion is added to the resolved wave.
 
 Requires scipy (the development extra).
-Runs in about 10 s; the settings marked `research` in the script give the
+Runs in about 14 s; the settings marked `research` in the script give the
 converged version.
 """
 import os
