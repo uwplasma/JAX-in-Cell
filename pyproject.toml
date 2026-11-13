@@ -60,6 +60,7 @@ jaxincell = "jaxincell:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+markers = ["gpu: short checks run on the self-hosted GPU runner"]
 
 # The README promises every statement and branch of the package covered; this is what
 # enforces it. CI installs the dev extra, openpmd-api included, so the exporter counts.
