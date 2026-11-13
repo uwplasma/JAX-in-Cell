@@ -116,6 +116,4 @@ The two runs took {{ relativistic_seconds_relativistic }} s and
 this documentation.
 
 
-For a smaller demonstration, run
-`python examples/2_intermediate/relativistic_two_stream.py --quick`.
-The default remains the documented benchmark; the quick preset is a smoke run.
+The script's defaults are a smaller demonstration; its `research` values are the documented benchmark.

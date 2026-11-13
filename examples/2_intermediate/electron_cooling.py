@@ -15,11 +15,11 @@ any maser growth. Each particle is compared with the exact uniform-B solution ev
 sample, which isolates the PIC integration error; the ring radius is compared with their Eq. (7),
 which assumes p_parallel << p_perp and only approximates the exact-LL ring.
 
-Run with --quick for fewer steps and particles; refine the macro time step to resolve gyrophase.
-No files are written. Edit the parameters below, or save the displayed figure.
+Refine the macro time step to resolve gyrophase.
+Runs in about RUNTIME s; the settings marked `research` in the script give the
+converged version.
 """
 import os
-import sys
 
 os.environ.setdefault("JAX_ENABLE_X64", "1")
 
@@ -32,9 +32,8 @@ from scipy.constants import hbar
 from jaxincell import (Domain, Radiation, Simulation, Solver, Species, elementary_charge as e,
                        epsilon_0, figure, mass_electron as m, speed_of_light as c)
 
-quick = "--quick" in sys.argv
 B0, duration, density = 1000., 1e-9, 1e-3      # T, s, m^-3; an intentionally dilute test ensemble
-steps, cells, length = (4096 if quick else 32768), 8, .02
+steps, cells, length = 4096, 8, .02   # research: 32768
 frames = 128
 double_precision = jax.config.read("jax_enable_x64")
 gamma_tolerance = 1e-8 if double_precision else .003
@@ -99,7 +98,7 @@ for label, u0 in (("electron", mono), ("beam", beam)):
         phase_exact = e * B0 / (m * a) * (logcosh(s0 + a * duration) - logcosh(s0))
         final_u = np.asarray(out.state.u[0])
         phase_error = np.angle((final_u[1] + 1j * final_u[2]) * np.exp(-1j * phase_exact))
-        phase_tolerance = (.05 if quick else .001) + (0. if double_precision else .02)
+        phase_tolerance = .05 + (0. if double_precision else .02)   # research: .001
         assert abs(phase_error) < phase_tolerance, "the Lorentz gyrophase needs a smaller macro time step"
         print(f"  final gyrophase error (modulo 2 pi): {phase_error:.3e} rad")
     line, = axes[0].plot(np.asarray(out.t) * 1e9, np.mean(gamma, axis=1), label=label)
@@ -110,7 +109,7 @@ for label, u0 in (("electron", mono), ("beam", beam)):
 # Collective ring formation. Gyrophase does not matter to a homogeneous ensemble and the Boris rotation
 # keeps |p_perp|, so the step follows the cooling time t_R = 3/(4 alpha chi_th), not the gyroperiod.
 alpha = e**2 / (4 * np.pi * epsilon_0 * hbar * c)
-B_ring, p_th, n_ring, per_ring, n_e = 1e5, 50., (20000 if quick else 200000), 400, 1e22
+B_ring, p_th, n_ring, per_ring, n_e = 1e5, 50., 20000, 400, 1e22   # research: 200000
 omega_c, chi_th = e * B_ring / m, 50. * 1e5 / B_schwinger
 t_ring = 3 / (4 * alpha * chi_th) / omega_c
 ring_dt, ring_cells = t_ring / per_ring, 8

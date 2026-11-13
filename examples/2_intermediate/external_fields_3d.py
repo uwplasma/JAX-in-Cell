@@ -17,11 +17,10 @@ Two checks against guiding-centre theory, with a single tenuous electron each:
   where B/B0 = 1/sin^2(theta), at y = L cot(theta), and its magnetic moment
   mu = m v_perp^2/(2B) -- the `magnetic_moment` diagnostic -- stays constant on the way.
 
-Run with `--quick` for one gradient length and one pitch angle.
+Runs in about RUNTIME s; the settings marked `research` in the script give the converged version.
 """
 
 import os
-import sys
 from pathlib import Path
 
 # Double precision is the default, and what the conservation checks rely on. Run with
@@ -37,20 +36,17 @@ from jaxincell import (Domain, Simulation, Solver, Species, figure, magnetic_mom
                        elementary_charge as e_charge)
 
 # --- what to change ---------------------------------------------------------------------
-quick = "--quick" in sys.argv
 B0 = 0.01                                            # T
 speed = 1e5                                          # m/s
 omega_dt = 0.1                                       # gyro-phase per step
-gradient_lengths = (20,) if quick else (10, 20, 40)  # L/rho for the grad-B drift
-pitch_angles = (45.0,) if quick else (30.0, 45.0, 60.0)   # degrees, at the mirror midplane
+gradient_lengths = (20,)   # L/rho for the grad-B drift; research: (10, 20, 40)
+pitch_angles = (45.0,)   # degrees, at the mirror midplane; research: (30.0, 45.0, 60.0)
 mirror_length = 50                                   # L/rho of the mirror
 
 # --- the setup ----------------------------------------------------------------------------
 omega = e_charge * B0 / mass_electron
 rho = speed / omega
 dt = omega_dt / omega
-if quick:
-    print("--quick runs one gradient length and one pitch angle; the documentation quotes the full set.\n")
 
 
 def centres(n, length):
@@ -139,10 +135,10 @@ field_axis.grid(False)
 # the colours are those of (b)
 plt.tight_layout()
 
-folder = Path.cwd() / ("external_fields_3d_quick" if quick else "external_fields_3d")
+folder = Path.cwd() / "external_fields_3d"
 save_run(folder, "external_fields_3d",
          dict(B0=B0, speed=speed, omega_dt=omega_dt, gradient_lengths=list(gradient_lengths),
-              pitch_angles=list(pitch_angles), mirror_length=mirror_length, quick=quick),
+              pitch_angles=list(pitch_angles), mirror_length=mirror_length),
          dict(grad_B={str(r): dict(measured=d["measured"], analytic=d["analytic"],
                                    deviation=d["measured"] / d["analytic"] - 1) for r, d in drift.items()},
               mirror={f"{a:.0f}": dict(turning=m["turning"], analytic_turning=m["analytic_turning"],
