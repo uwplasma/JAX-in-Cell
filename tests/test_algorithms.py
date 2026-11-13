@@ -2,9 +2,9 @@
     Someone needs to look through these tests and make sure they cover the
     intended cases, and that the expected results are correct.
 
-    They were written using Codex and seem reasonable to me,
-    but I haven't gone through the functions being tested myself to verify
-    the intended behavior.
+    These tests have only been reviewed at a high level;
+    the functions being tested have not been independently verified against the
+    intended behavior.
 """
 
 # tests/test_algorithms.py

@@ -30,9 +30,11 @@ jobs:
         python-version: [ '3.9', '3.10', '3.11', '3.12']
     name: Python ${{ matrix.python-version }} Test
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        persist-credentials: false
     - name: Set up Python
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       with:
         python-version: ${{ matrix.python-version }}
         enable-cache: false
@@ -43,6 +45,8 @@ jobs:
         # GITHUB_ENV/GITHUB_PATH only apply to later steps, so also export here
         echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
         echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+        # per-job matplotlib font cache: the shared one can list fonts of a deleted venv
+        echo "MPLCONFIGDIR=$RUNNER_TEMP/matplotlib" >> "$GITHUB_ENV"
         export VIRTUAL_ENV="$RUNNER_TEMP/venv"
         export PATH="$VIRTUAL_ENV/bin:$PATH"
         uv pip install . flake8 pytest coverage pytest-cov pytest-xdist
@@ -64,7 +68,7 @@ jobs:
 
     - name: Upload coverage reports to Codecov
       if: matrix.python-version == '3.12'
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         slug: uwplasma/JAX-in-Cell
