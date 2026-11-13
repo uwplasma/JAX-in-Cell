@@ -19,6 +19,8 @@ The frequency is measured from the spacing of the maxima of |E_k(t)|, which are 
 period apart. A seed of a k = 1e-2 followed for 1600 steps keeps the wave far enough
 above the particle noise for that; with a tenth of the seed the noise moves the maxima by
 a per cent or more at k lambda_D >= 0.25.
+
+Runs in about 38 s.
 """
 
 import os

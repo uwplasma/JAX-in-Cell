@@ -17,7 +17,7 @@ Two checks against guiding-centre theory, with a single tenuous electron each:
   where B/B0 = 1/sin^2(theta), at y = L cot(theta), and its magnetic moment
   mu = m v_perp^2/(2B) -- the `magnetic_moment` diagnostic -- stays constant on the way.
 
-Runs in about RUNTIME s; the settings marked `research` in the script give the converged version.
+Runs in about 8 s; the settings marked `research` in the script give the converged version.
 """
 
 import os

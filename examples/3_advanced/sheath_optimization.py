@@ -41,7 +41,7 @@ be neither useless nor wrong, but no longer the thing the optimiser wants.
 
 Set `oblique = True` for the same experiment in a magnetic field 30 degrees to the wall: one
 array added to the same `Simulation`, and nothing else in the script changes.
-Runs in about RUNTIME s; the settings marked `research` in the script give the
+Runs in about 52 s; the settings marked `research` in the script give the
 converged version.
 """
 

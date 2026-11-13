@@ -42,6 +42,8 @@ Three things this run does not leave to assumption:
 * the sheath edge comes from `bohm_edge`, which interpolates the crossing and says how
   many crossings there are. A bare `argmax` returns zero when the flow never reaches
   `c_s` and so invents an edge at the first bin.
+
+Runs in about 60 s.
 """
 
 import json
@@ -59,7 +61,7 @@ import numpy as np
 from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, figure, mass_electron,
                        potential, provenance, quiet_start, elementary_charge as e_charge)
 
-T_e, density, mass_ratio, particles, cells = 1.0, 1e16, 400.0, 6000, 60   # research: 30000 particles, 120 cells
+T_e, density, mass_ratio, particles, cells = 1.0, 1e16, 400.0, 3000, 60   # research: 30000 particles, 120 cells
 sigma = np.sqrt(T_e * e_charge / mass_electron)                  # electron thermal spread
 omega_pe = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
 debye, c_s = sigma / omega_pe, sigma / np.sqrt(mass_ratio)
@@ -125,9 +127,9 @@ for name, (reflection, R_eff) in walls.items():
 maintained_domain = Domain(length=length, cells=cells, time_step=0.2 / omega_pe,
                            particle_bc="absorbing", field_bc=("open", "absorbing"))
 # an ion entering at c_s takes one transit to cross, which is the whole 3000 steps here, so the
-# pool has to hold emit x 3000 of them: 12 a step is 36000, inside the capacity with room for the
-# 6000 it starts with. The run refuses to report anything if that is wrong.
-capacity, emit = 55000, 12      # research: 110000
+# pool has to hold emit x 3000 of them: 4 a step is 12000, inside the capacity with room for the
+# 3000 it starts with. The run refuses to report anything if that is wrong.
+capacity, emit = 16000, 4       # research: 110000, 12
 maintained = Simulation(
     maintained_domain,
     [Species("electrons", capacity, -1.0, mass_electron, density, (v_th_e,) * 3, active=particles,

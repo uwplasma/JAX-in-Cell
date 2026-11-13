@@ -70,6 +70,8 @@ against a tolerance declared below, with the reference dashed on the figure. GYR
 passes the entrance value its manifest names as `gyro_over_debye`; a run that does not match is said
 to be a different problem. Nothing from that code is kept here: it is unlicensed, so it is
 run separately and read, not vendored.
+
+Runs in about 67 s.
 """
 
 import json

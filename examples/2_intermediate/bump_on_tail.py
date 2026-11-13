@@ -10,6 +10,8 @@ A wave resonates with the beam when omega_pe / k = v_beam, so the thermal speed 
 chosen to put the fastest-growing mode at MODE, comfortably inside the box and well
 resolved by the grid. Picking it any other way risks seeding a mode that is not
 unstable at all.
+
+Runs in about 22 s.
 """
 
 import os
