@@ -23,6 +23,7 @@ scaling
 | script | what it shows | run time on a laptop CPU |
 |---|---|---|
 | `two-stream_instability.py`, `input.toml` | two counter-streaming beams, the default configuration | seconds |
+| `relativistic_two_stream.py` | relativistic beam growth against cold theory and relativistic energy | seconds |
 | `Landau_damping.py` | damping of a Langmuir wave in a warm plasma | seconds |
 | `Langmuir_wave.py` | plasma oscillations at the plasma frequency | seconds |
 | `bump-on-tail.py`, `bump-on-tail.toml` | four populations, a weak beam on a Maxwellian, explicit or implicit | tens of seconds |

@@ -53,7 +53,7 @@ None of these are differentiable inputs.
 
 A uniform magnetic field along $x$ is the simplest way to study magnetised plasma
 waves: particles gyrate in the $y$-$z$ plane while the fields remain functions of $x$
-only. Keep $c\,\Delta t/\Delta x \le 1$ in that case, because the transverse currents
+only. Keep $c\,\Delta t/\Delta x < 1$ in that case, because the transverse currents
 excite electromagnetic waves, and resolve the gyration with
 $\Omega_c \Delta t \ll 1$, where $\Omega_c = |q| B / m$.
 
