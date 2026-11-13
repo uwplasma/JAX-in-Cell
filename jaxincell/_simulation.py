@@ -12,7 +12,7 @@ import numpy as np
 from jax import lax, random
 from jax.scipy.special import erfinv
 
-from ._collisions import collide, coulomb_logarithm
+from ._collisions import _kinetic as kinetic_energy, collide, coulomb_logarithm
 from ._config import Collisions, Domain, Impacts, Radiation, Solver, Source, Species, pytree_dataclass
 from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
 from ._progress import reporter
@@ -713,13 +713,9 @@ class Simulation:
         return wall.spectrum + jnp.stack(rows)
 
     def _kinetic(self, m, u):
-        """Kinetic energy per unit weight of the carried ``u``, :math:`m|u|^2/(\\gamma+1)`.
-
-        In a Newtonian run :math:`\\gamma` is one and this is :math:`mv^2/2`. In a relativistic
-        one it is :math:`(\\gamma-1)mc^2` written so that it does not subtract two large numbers,
-        which at :math:`v \\ll c` would leave nothing but round-off."""
-        gamma = self._gamma(u)                 # 1.0, a scalar, in a Newtonian run
-        return m * jnp.sum(u * u, axis=1) / (jnp.reshape(gamma, (-1,)) + 1 if jnp.ndim(gamma) else gamma + 1)
+        """Kinetic energy per unit weight of the carried ``u``, :math:`m|u|^2/(\\gamma+1)`, written
+        so that it does not subtract two large numbers at :math:`v \\ll c`."""
+        return kinetic_energy(u, m, self.solver.relativistic)
 
     def _species_sum(self, value):
         return jnp.stack([jnp.sum(value[start:start + count], axis=0) for start, count in self.blocks])
