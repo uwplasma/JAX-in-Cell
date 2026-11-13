@@ -69,9 +69,9 @@ mass_ratio = 400.0                      # m_i/m_e, reduced so that the ion trans
 angles = (90.0, 30.0) if quick else (90.0, 30.0, 15.0)   # to the wall plane; 90 is normal incidence
 gyro_over_debye = 8.0                   # rho_s / lambda_D, which sets B_0
 box_debye_lengths = 60.0
-cells = 96 if quick else 240
+cells = 48 if quick else 240
 steps_per_plasma_period = 10.0
-transits = 0.15 if quick else 4.0
+transits = 0.03 if quick else 4.0
 # `Species.n` is a capacity and has to hold every particle alive at once, which is `emit`
 # times the residence time in steps. An ion entering at c_s takes a whole sound transit to
 # cross, 12000 steps here; an electron takes about a tenth of that, so the two want
@@ -82,7 +82,7 @@ transits = 0.15 if quick else 4.0
 # about 360000 ions in the 30000 slots it was given: the run overflowed by an order of magnitude
 # and printed numbers anyway. Those settings are history rather than a target; what a pool can
 # hold is what sets the preset here.
-capacity = 30000 if quick else 80000
+capacity = 6000 if quick else 80000
 emit_ions = 10 if quick else 5
 emit_electrons = 10 if quick else 40
 

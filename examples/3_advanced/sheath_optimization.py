@@ -72,21 +72,21 @@ beam_speed = 0.25                          # ion drift at the source plane, in e
 box_debye_lengths = 12.0
 cells = 48
 steps_per_plasma_period = 1 / 0.15         # omega_pe dt = 0.15
-capacity = 8000 if quick else 48000        # slots per species
-emit = 8 if quick else 48                  # emitted per step per species
-preparation = 300 if quick else 1200       # steps of preparation, at r_prepared, not differentiated
+capacity = 4000 if quick else 48000        # slots per species
+emit = 4 if quick else 48                  # emitted per step per species
+preparation = 150 if quick else 1200       # steps of preparation, at r_prepared, not differentiated
 window = 25                                # steps of the differentiated response experiment
 r_prepared = 0.25                          # the reflectivity the baseline plasma is prepared at
 r_reference = 0.35                         # the answer the optimiser has to find
 r_start = 0.08                             # where it starts, well away from it
 bounds = (0.02, 0.50)                      # admissible interval, away from the limiting branches
-training_seeds = (0, 1, 2) if quick else (0, 1, 2, 3)       # fixed across every call and line search
-held_out_seeds = (10, 11, 12) if quick else (10, 11, 12, 13)   # never used to choose a step
+training_seeds = (0, 1) if quick else (0, 1, 2, 3)       # fixed across every call and line search
+held_out_seeds = (10, 11) if quick else (10, 11, 12, 13)   # never used to choose a step
 # A third set, used for neither. The target built on the training realisations is exactly zero at
 # the reference by construction, which makes the recovery below a test of the differentiated chain
 # and not an inference; a target measured on realisations the optimiser never touches is an
 # inference, and its residual at the optimum is not zero because it should not be.
-target_seeds = (20, 21, 22) if quick else (20, 21, 22, 23, 24, 25)
+target_seeds = (20, 21) if quick else (20, 21, 22, 23, 24, 25)
 field_angle = 30.0                         # degrees to the wall plane, with --oblique
 gyro_over_debye = 6.0                      # rho_s/lambda_D, which sets B_0, with --oblique
 
@@ -150,11 +150,11 @@ def measure(r, state):
 
 
 if quick:
-    print("--quick is a smoke run: a sixth of the particles, a quarter of the preparation and three\n"
+    print("--quick is a smoke run: a twelfth of the particles, an eighth of the preparation and two\n"
           "realisations instead of four. It checks that every step of this script executes and that\n"
           "the gradient is still the derivative of the calculation. It usually recovers the control\n"
-          "too, but with three noisy realisations and eight scan points the error bar below comes\n"
-          "out around 0.09 against the full preset's 0.02, which is that check doing its job.\n"
+          "too, but with two noisy realisations and three scan points the error bar below is far\n"
+          "wider than the full preset's 0.02, which is that check doing its job.\n"
           "The documentation quotes the full preset.\n")
 # The pool has to hold every particle alive at once, and an electron lives longest at the
 # largest reflectivity the optimiser may try. Checking the worst case here, once, on the
@@ -202,25 +202,31 @@ print("measurement scales (the scatter between realisations): %s\n"
       % np.array2string(np.asarray(scales), precision=5))
 
 
-def loss(r):
-    """Half the squared mismatch of the mean measurement, in units of its own scatter, against
-    the target built on the **same** realisations. That makes the minimum exactly zero at the
-    reference by construction, so what the recovery tests is the differentiated chain -- the
-    source, the wall, the electrode closure, the gradient -- and not the ability to infer
-    anything. It is a paired-realisation self-test and is labelled as one."""
-    return 0.5 * jnp.sum(((readings(r, training_seeds) - target) / scales) ** 2)
+def mismatch(r, goal):
+    """Half the squared mismatch of the mean measurement against `goal`, in units of its own
+    scatter. The goal is an argument, not a constant of the trace, so the paired loss and the
+    independent one below share one compilation of the differentiated chain."""
+    return 0.5 * jnp.sum(((readings(r, training_seeds) - goal) / scales) ** 2)
 
 
-def inference(r):
+mismatch_value_and_grad = jax.jit(jax.value_and_grad(mismatch))
+
+
+def value_and_grad(r):
+    """The mismatch against the target built on the **same** realisations. That makes the
+    minimum exactly zero at the reference by construction, so what the recovery tests is the
+    differentiated chain -- the source, the wall, the electrode closure, the gradient -- and not
+    the ability to infer anything. It is a paired-realisation self-test and is labelled as one."""
+    return mismatch_value_and_grad(r, target)
+
+
+def inference_value_and_grad(r):
     """The same mismatch against a target measured on realisations the optimiser never touches.
     Nothing here is zero by construction: what is recovered is an estimate, its residual at the
     optimum is the noise it could not fit, and the two together are what an inverse problem on
     a noisy simulation actually looks like."""
-    return 0.5 * jnp.sum(((readings(r, training_seeds) - independent) / scales) ** 2)
+    return mismatch_value_and_grad(r, independent)
 
-
-value_and_grad = jax.jit(jax.value_and_grad(loss))
-inference_value_and_grad = jax.jit(jax.value_and_grad(inference))
 
 # --- 1. is the gradient the derivative of the calculation? ---------------------------------------
 print("the gradient of one realisation, against forward mode and against finite differences")
@@ -243,7 +249,7 @@ best = min(range(len(steps_of_h)), key=lambda i: abs(differences[i] / reverse - 
 print(" best agreement %.1e at h = %.0e\n" % (abs(differences[best] / reverse - 1), steps_of_h[best]))
 
 # --- 2. is the response identifiable above the scatter between realisations? ----------------------
-scan_points = np.linspace(bounds[0], bounds[1], 4 if quick else 9)
+scan_points = np.linspace(bounds[0], bounds[1], 3 if quick else 9)
 scan = np.array([np.asarray(readings(float(r), training_seeds)) for r in scan_points])
 spread_of_seeds = np.std([np.asarray(measure_jit(r_reference, prepared[s])) for s in held_out_seeds], axis=0)
 signal = np.ptp(scan, axis=0)
@@ -352,7 +358,7 @@ for name, value in (("start", r_start), ("recovered", r_final), ("inferred", r_i
 # The grid is anchored on the reference, so that a scan that does not contain the answer cannot
 # report the distance to its nearest node as an error bar -- the earlier one had spacing 0.02
 # and no node at 0.35, so its "uncertainty 0.01" was the grid, every time it ran.
-spacing = (bounds[1] - bounds[0]) / (6 if quick else 24)
+spacing = (bounds[1] - bounds[0]) / (4 if quick else 24)
 fine = np.unique(np.clip(r_reference + spacing * np.arange(-24, 25), *bounds))
 
 
