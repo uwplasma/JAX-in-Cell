@@ -18,6 +18,10 @@ def main(cl_args=sys.argv[1:]):
         parameters = load_parameters(cl_args[0])
         sim = Simulation(parameters)
     output = sim.run()
+    if "final_state" in output:
+        print(f"steps {output['total_steps']}  final time {float(output['final_state']['time']):.3e} s")
+    if not len(output.get("time_array", [0])):
+        return
     diagnostics(output)
     plot(output)
 
