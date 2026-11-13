@@ -59,7 +59,7 @@ import numpy as np
 from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, epsilon_0, figure, mass_electron,
                        potential, provenance, quiet_start, elementary_charge as e_charge)
 
-T_e, density, mass_ratio, particles, cells = 1.0, 1e16, 400.0, 30000, 120
+T_e, density, mass_ratio, particles, cells = 1.0, 1e16, 400.0, 12000, 120   # research: 30000 particles
 sigma = np.sqrt(T_e * e_charge / mass_electron)                  # electron thermal spread
 omega_pe = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
 debye, c_s = sigma / omega_pe, sigma / np.sqrt(mass_ratio)

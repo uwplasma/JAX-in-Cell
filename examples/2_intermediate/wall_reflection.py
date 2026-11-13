@@ -34,7 +34,7 @@ import numpy as np
 
 from jaxincell import Domain, Simulation, Solver, Species, figure, quiet_start, save_run
 
-sigma, length, n, restitution = 1e6, 1e-2, 200_000, 0.8          # m/s, m, particles, e
+sigma, length, n, restitution = 1e6, 1e-2, 50_000, 0.8           # m/s, m, particles (research: 200_000), e
 domain = Domain(length=length, cells=64, dt_over_dx_c=50.0, particle_bc="absorbing", field_bc="absorbing",
                 restitution=restitution)
 steps = int(round(0.1 * length / sigma / domain.dt))

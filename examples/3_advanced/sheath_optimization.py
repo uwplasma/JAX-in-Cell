@@ -233,7 +233,7 @@ forward = float(jax.jit(lambda r: jax.jvp(one, (r,), (1.0,))[1])(r_prepared))
 one_jit = jax.jit(one)
 print(" reverse %+.10e   forward %+.10e   relative difference %.1e"
       % (reverse, forward, abs(forward / reverse - 1)))
-steps_of_h = [1e-1, 1e-3, 1e-5]   # research: [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
+steps_of_h = [1e-1, 1e-3]   # research: [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
 differences = [float((one_jit(r_prepared + h) - one_jit(r_prepared - h)) / (2 * h)) for h in steps_of_h]
 for h, d in zip(steps_of_h, differences):
     print("   h %7.0e   central difference %+.8e   relative mismatch %.1e" % (h, d, abs(d / reverse - 1)))
@@ -306,7 +306,7 @@ def descend(objective_and_gradient, iterations):
     return history, outcome
 
 
-iterations = 8   # research: 20
+iterations = 5   # research: 20
 print("against the paired target, which is exactly zero at the reference by construction:")
 history, outcome = descend(value_and_grad, iterations)
 r_final = history[min(range(len(history)), key=lambda i: history[i][1])][0]
