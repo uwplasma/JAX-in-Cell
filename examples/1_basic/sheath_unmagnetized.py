@@ -30,7 +30,7 @@ The parameters are those of the sheath benchmark of Konewko, Maestracci and Van 
 (kobra, arXiv:2609.11563): m_i/m_e = 1836, v_0 = 0.2, a box ten Debye lengths across.
 Their printed wall potential, +0.739, does not solve their printed equation; the root of
 that equation at v_0 = 0.2 is -0.79926, which is what is used here.
-Runs in about 33 s; the settings marked `research` in the script give the converged version.
+Runs in about 38 s; the settings marked `research` in the script give the converged version.
 """
 
 import json

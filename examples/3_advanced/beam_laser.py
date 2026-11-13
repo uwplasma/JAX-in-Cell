@@ -29,7 +29,7 @@ Requires scipy (the development extra). No files are written; edit the settings
 below or save the displayed figure. Refine the physical timestep, not only RR
 substeps, to resolve the counterpropagating optical phase.
 
-Runs in about 18 s.
+Runs in about 24 s.
 """
 import os
 

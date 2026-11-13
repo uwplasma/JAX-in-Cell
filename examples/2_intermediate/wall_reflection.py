@@ -20,7 +20,7 @@ Here the electrons are too tenuous for any field to act. They run into two absor
 walls for a tenth of a thermal transit, so nothing arrives twice, and the weight and
 energy that come back are compared with the two formulas for several widths u.
 
-Runs in about 28 s.
+Runs in about 31 s.
 """
 
 import os

@@ -20,7 +20,7 @@ period apart. A seed of a k = 1e-2 followed for 1600 steps keeps the wave far en
 above the particle noise for that; with a tenth of the seed the noise moves the maxima by
 a per cent or more at k lambda_D >= 0.25.
 
-Runs in about 38 s.
+Runs in about 42 s.
 """
 
 import os

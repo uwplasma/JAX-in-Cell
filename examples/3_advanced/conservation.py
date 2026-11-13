@@ -17,7 +17,7 @@ This is the setup of docs/scripts/fig_conservation.py, whose numbers the documen
 quotes: a quiet two-stream run of 200 steps and 2000 particles per species (400 and 4000 in the
 documentation).
 
-Runs in about 17 s.
+Runs in about 19 s.
 """
 
 import os
