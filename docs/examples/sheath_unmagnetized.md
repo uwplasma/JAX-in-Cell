@@ -133,8 +133,7 @@ own standard error is four.
 ## How to run
 
 ```bash
-python examples/1_basic/sheath_unmagnetized.py            # about two minutes on a laptop
-python examples/1_basic/sheath_unmagnetized.py --quick    # about ten seconds, noisier
+python examples/1_basic/sheath_unmagnetized.py    # about ten seconds; the `research` values take two minutes
 jaxincell inputs/sheath_unmagnetized.toml
 ```
 

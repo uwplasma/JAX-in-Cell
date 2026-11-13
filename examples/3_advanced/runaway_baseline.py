@@ -28,15 +28,12 @@ times are printed. The fixed point belongs to the zero-noise ODE and is not a bo
 tail: with pitch-angle diffusion the stationary distribution peaks near gamma = 17.7 and agrees with
 DREAM's kinetic solution. Avalanche growth at E/E_c = 6.5 is 0.05-0.07 /s (DREAM, CODE and
 Rosenbluth and Putvinski 1997, eq. 18) and is not in the kernels. Because
-tau_c is seconds at this density, the default 100 us run is a short precursor; BASELINE_TIME
-and BASELINE_STEPS (tau_e = 23 us; dt = 0.2 us gave a few-percent exchange error) extend it. Requires scipy.
-
-Run with --quick for a smoke run; BASELINE_N, BASELINE_STEPS, BASELINE_TIME, BASELINE_REPEATS,
-BASELINE_RAW=0 (skip the unrestored comparison run) and BASELINE_GAMMA / BASELINE_PITCH (the seed)
-override the defaults. No files are written.
+tau_c is seconds at this density, the 100 us run is a short precursor; a longer `duration` with
+more `steps` extends it. Requires scipy.
+Runs in about RUNTIME s; the settings marked `research` in the script give the
+converged version.
 """
 import os
-import sys
 from functools import partial
 
 os.environ.setdefault("JAX_ENABLE_X64", "1")
@@ -52,15 +49,14 @@ from jaxincell import elementary_charge as e, epsilon_0, figure, mass_electron a
 from jaxincell._collisions import collide
 from jaxincell._core import landau_lifshitz
 
-quick = "--quick" in sys.argv
 ne, fraction, Te, Ti, Z = 1e18, 1e-5, 100., 100., 1               # m^-3, seed fraction, eV, eV, ion charge
 B0, E_acc, logarithm = 2., .005, 15.                              # T, V/m, leading-log value
-gamma_seed = float(os.environ.get("BASELINE_GAMMA", "40"))
-pitch = float(os.environ.get("BASELINE_PITCH", ".1"))
-count = int(os.environ.get("BASELINE_N", "128" if quick else "512"))
-steps = int(os.environ.get("BASELINE_STEPS", "32" if quick else "256"))
-duration = float(os.environ.get("BASELINE_TIME", "1e-4"))
-repeats = int(os.environ.get("BASELINE_REPEATS", "1"))
+gamma_seed = 40.
+pitch = .1
+count = 128   # research: 512
+steps = 32   # research: 256; dt = 0.2 us gave a few-percent exchange error
+duration = 1e-4   # s; tau_e = 23 us
+repeats = 1
 mi = 3.3435837768e-27                                             # deuteron mass, kg
 seed_count = max(8, count // 8)
 tau_c = 4 * np.pi * epsilon_0 ** 2 * me ** 2 * c ** 3 / (ne * e ** 4 * logarithm)
@@ -202,7 +198,7 @@ def run(restore):
 
 
 history = run(True)
-raw = run(False) if os.environ.get("BASELINE_RAW", "1") == "1" else None
+raw = run(False)
 K, work = history["kinetic"], history["work"]          # (repeats, steps + 1, species[, ...])
 seed_gamma = 1 + K[:, :, 1] / (density[1] * me * c**2)
 t = np.arange(steps + 1) * duration / steps

@@ -113,10 +113,8 @@ jobs:
 
   examples:
     # The tests exercise the package; this checks that the scripts people copy from
-    # still run against it, four at a time. The sheath, Weibel and model-comparison scripts
-    # run in the smaller preset their `--quick` flag selects; the rest (bump-on-tail,
-    # two-stream, the full presets) take minutes each and are left to the documentation
-    # build of the figures.
+    # still run against it, four at a time. Every script takes no arguments and is sized
+    # to finish in about a minute; the longer settings are comments in the scripts.
     runs-on: ${{ fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') }}
     timeout-minutes: 30
     name: Examples
@@ -141,18 +139,8 @@ jobs:
         } >> "$GITHUB_ENV"
     - name: Install jaxincell
       run: uv pip install -e . scipy     # scipy: the kinetic roots of jaxincell.theory
-    - name: Run the fastest examples
+    - name: Run the examples
       run: |
-        # the slowest first, so that the last to start is not the last to finish
-        scripts=(
-          "3_advanced/sheath_optimization.py --quick" 2_intermediate/wall_reflection.py
-          "3_advanced/electron_field.py --quick" "2_intermediate/sheath_magnetized.py --quick"
-          1_basic/langmuir_wave.py 3_advanced/conservation.py "2_intermediate/compare_models.py --quick"
-          "2_intermediate/weibel.py --quick" 2_intermediate/relativistic_two_stream.py
-          "1_basic/sheath_unmagnetized.py --quick" "3_advanced/invariants.py --quick"
-          1_basic/parameters_and_sampling.py 2_intermediate/output_and_restart.py
-          2_intermediate/collisions.py "2_intermediate/external_fields_3d.py --quick"
-        )
         # shellcheck disable=SC2016  # the single quotes are meant: the inner shell expands them
-        printf '%s\n' "${scripts[@]}" |
-        xargs -P 4 -I{} sh -c 'if log=$(python examples/{} 2>&1); then echo "ok   {}"; else echo "FAIL {}"; echo "$log"; exit 1; fi'
+        printf '%s\n' examples/*/*.py |
+        xargs -P 4 -I{} sh -c 't=$(date +%s); if log=$(python {} 2>&1); then echo "ok   $(($(date +%s) - t)) s  {}"; else echo "FAIL {}"; echo "$log"; exit 1; fi'

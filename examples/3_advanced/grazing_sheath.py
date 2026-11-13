@@ -31,29 +31,24 @@ measured from the entrance plane, `rho_s = c_s/Omega_i` with `c_s = sqrt((ZT_e+T
 floating wall rather than a prescribed potential, and the ion temperature as the width
 parameter of the distribution above rather than a Maxwellian temperature.
 
-Three presets, because the matched case is expensive:
-
-* `--quick`: a smoke run, a few minutes. The angle is not grazing and the scales are not
-  separated, so it checks that the script runs and holds its pools, and nothing else.
-* the default: `m_i/m_e = 400` at 5 degrees, a few hours, which is where GYRAZE still
-  converges at the smallest cost. Five degrees is the edge of the range its own README
-  calls inaccurate, so it is a rehearsal.
-* `--matched`: `m_i/m_e = 900` at 4 degrees, inside that range, and an overnight run.
-
-`--markers=N` and `--transits=T` scale the cost of any of them: the first is the markers a
-cell holds, the second how many entrance-speed crossings of the box the run lasts, and the
-run says what it used. `--markers=40 --transits=2` is about a quarter of the default, which
-is a noisier first look at the same physics rather than a different problem.
+The defaults are a smoke run, a few minutes: the angle is not grazing and the scales are not
+separated, so it checks that the script runs and holds its pools, and nothing else. The values
+marked `research` give the rehearsal, `m_i/m_e = 400` at 5 degrees and a few hours, which is
+where GYRAZE still converges at the smallest cost (five degrees is the edge of the range its own
+README calls inaccurate); `m_i/m_e = 900` at 4 degrees is inside that range, an overnight run.
+`markers_per_cell` and `transits` scale the cost of any of them: the markers a cell holds, and
+how many entrance-speed crossings of the box the run lasts. Setting `reference` to a GYRAZE
+output directory compares the run with it.
 
 **The ions are emitted once every `k` steps, not every step** (`Source(every=k)`). An ion
 stays in the box for hundreds of thousands of steps, and a source that emits at least one
 marker a step would hold that many whatever the markers per cell asked for: 465 000 in the
-default preset and 1.2 million in `--matched`. Emitting every `k = residence/markers` steps
+rehearsal and 1.2 million in the matched case. Emitting every `k = residence/markers` steps
 makes the ion pool the markers asked for, each marker carrying `k` steps of flux and placed
 where its orbit has taken it since it crossed, so the stream moves `dx/markers_per_cell` in a
 window -- the marker spacing -- and turns through under a hundredth of a radian. The
-electrons, whose gyro-angle is already a quarter radian a step, stay at `k = 1`. `--every=K`
-sets the ions' `k` by hand; `--every=1` is the control that the result does not depend on it.
+electrons, whose gyro-angle is already a quarter radian a step, stay at `k = 1`. Setting `ion_every`
+sets the ions' `k` by hand; 1 is the control that the result does not depend on it.
 
 The cell is half a Debye length in all three, which resolves the sheath and the presheath
 but **not** the electron gyroradius, `rho_e = 0.2 lambda_D`. The finite-`rho_e` electron
@@ -67,12 +62,12 @@ resolving the electron gyro-phase caps the step at `omega_pe dt = 0.075`, which 
 steps a transit. That is the asymptotic limit doing its job, and it is worth stating
 rather than approximating quietly.
 
-With `--reference=DIR`, the run is compared against the GYRAZE output directory at DIR and
+With `reference` set, the run is compared against the GYRAZE output directory at DIR and
 the manifest beside it: the potential and both densities through the presheath, the
 Debye-sheath drop, the wall potential, the mean ion impact energy and the ion flux, each
 against a tolerance declared below, with the reference dashed on the figure. GYRAZE fixes
 `gamma` at the Debye-sheath entrance rather than at the entrance plane, so a matched run
-passes the entrance value its manifest names, `--gamma=G`; a run that does not match is said
+passes the entrance value its manifest names as `gyro_over_debye`; a run that does not match is said
 to be a different problem. Nothing from that code is kept here: it is unlicensed, so it is
 run separately and read, not vendored.
 """
@@ -94,32 +89,22 @@ from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, eps
                        potential, provenance, elementary_charge as e_charge)
 
 # --- what to change ---------------------------------------------------------------------
-quick = "--quick" in sys.argv
-matched = "--matched" in sys.argv
-reference = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--reference=")), None)
+reference = None                            # path of a GYRAZE output directory, to compare with
 electron_temperature = 1.0                  # eV
 density = 1e16                              # m^-3, at the entrance plane
 temperature_ratio = 1.0                     # tau = Z T_i / T_e, the width parameter of F above
-mass_ratio = 100.0 if quick else (900.0 if matched else 400.0)
-angle_degrees = 15.0 if quick else (4.0 if matched else 5.0)
-gyro_over_debye = 0.2                       # gamma = rho_e/lambda_D at the entrance plane
-buffer_gyro = 2.0 if quick else 3.0         # rho_s of run-up before the presheath proper
-presheath_gyro = 6.0 if quick else 15.0     # rho_s of magnetic presheath resolved
-sheath_debye = 30.0 if quick else 60.0      # lambda_D of Debye sheath resolved
+mass_ratio = 100.0                         # research: 400, or 900 for the matched case
+angle_degrees = 15.0                       # research: 5.0, or 4.0 for the matched case
+gyro_over_debye = 0.2                       # gamma = rho_e/lambda_D at the entrance plane; a GYRAZE
+#                                             manifest names the value that matches its own
+buffer_gyro = 2.0                           # rho_s of run-up before the presheath proper; research: 3.0
+presheath_gyro = 6.0                        # rho_s of magnetic presheath resolved; research: 15.0
+sheath_debye = 30.0                         # lambda_D of Debye sheath resolved; research: 60.0
 cells_per_debye = 2.0                       # dx = 0.5 lambda_D, which does not resolve rho_e
-markers_per_cell = 60 if quick else 100
-transits = 2.0 if quick else 3.0            # entrance-speed crossings of the box
-# the two knobs that trade noise and settling against the run's cost, so that a first look
-# need not be a whole night: --markers=40 --transits=2 is about a quarter of the default. The
-# third, --gamma=G, is rho_e/lambda_D at the entrance plane: a GYRAZE reference fixes it at the
-# Debye-sheath entrance instead, and its manifest names the entrance value that matches it
-for flag, name in (("--markers=", "markers_per_cell"), ("--transits=", "transits"),
-                   ("--gamma=", "gyro_over_debye")):
-    given = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(flag)), None)
-    if given is not None:
-        globals()[name] = type(globals()[name])(given)
-# the steps between ion emissions, worked out below unless given: --every=1 is the control
-ion_every = next((int(a.split("=", 1)[1]) for a in sys.argv if a.startswith("--every=")), None)
+markers_per_cell = 60                       # research: 100
+transits = 2.0                              # entrance-speed crossings of the box; research: 3.0
+# the steps between ion emissions, worked out below unless set: 1 is the control
+ion_every = None
 reservoir_samples = 200000                  # velocities drawn once to stand for each reservoir
 
 # --- the scales, and the manifest they make ----------------------------------------------
@@ -155,11 +140,6 @@ print(f"  omega_pe dt {omega_pe * time_step:.3f}   Omega_e dt {omega_ce * time_s
       f"Omega_i dt {omega_ci * time_step:.1e}   {steps} steps = {transits:.0f} entrance crossings")
 print("  velocities are normalised to sqrt(T/m), not sqrt(2T/m); the wall floats, and its potential "
       "is measured, not prescribed")
-if quick:
-    print("\n--quick is a smoke preset: the angle is not grazing and the scales are not separated, so\n"
-          "nothing below is a measurement of the grazing-incidence problem. It checks that the script\n"
-          "runs and that the pools hold.\n")
-
 # --- the reference, read before the run so that a bad one fails now and not after hours ----
 # GYRAZE is unlicensed, so it is run outside this repository (plan.md 8.1): only its output
 # directory is read, with the manifest.json that has to sit beside it.
@@ -477,8 +457,7 @@ if reference is not None:                       # the reference, dashed, on the 
     axes[1].plot((length - d_plot) / gyro_radius, ref_ne, "--", color="C1")
 plt.tight_layout()
 
-folder = Path.cwd() / ("grazing_sheath_quick" if quick else
-                       ("grazing_sheath_matched" if matched else "grazing_sheath"))
+folder = Path.cwd() / "grazing_sheath"
 folder.mkdir(exist_ok=True)
 settings = dict(electron_temperature=electron_temperature, density=density, mass_ratio=mass_ratio,
                 temperature_ratio=temperature_ratio, angle_degrees=angle_degrees,
@@ -488,7 +467,7 @@ settings = dict(electron_temperature=electron_temperature, density=density, mass
                 emit_ions=emit_ions, emit_electrons=emit_electrons, every_ions=every_ions,
                 every_electrons=every_electrons, capacity_ions=capacity_ions,
                 capacity_electrons=capacity_electrons, chodura_drift=float(drift),
-                transits=transits, quick=quick, matched=matched)
+                transits=transits)
 results = dict(wall_potential=wall_potential, flow_at_the_wall=float(flow[-1]),
                ion_fluence=fluence, mean_impact_energy=mean_energy, mean_incidence=incidence,
                net_current_percent=net_current,

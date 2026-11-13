@@ -9,11 +9,11 @@ is far too slow here to establish sustained runaway suppression: collisions, the
 bulk reservoir, accelerating current, avalanche, and a source-power closure would
 be needed for that claim. No quasilinear diffusion is added to the resolved wave.
 
-Requires scipy (the development extra). Run with --quick for fewer particles and
-steps; it is a smoke run. No files are written. All controls and scales are below.
+Requires scipy (the development extra).
+Runs in about RUNTIME s; the settings marked `research` in the script give the
+converged version.
 """
 import os
-import sys
 from functools import lru_cache
 
 os.environ.setdefault("JAX_ENABLE_X64", "1")
@@ -27,12 +27,11 @@ from scipy.optimize import minimize
 from jaxincell import (Domain, Radiation, Simulation, Solver, Species, elementary_charge as e,
                        epsilon_0, figure, mass_electron as m, speed_of_light as c)
 
-quick = "--quick" in sys.argv
 B0, gamma0, pitch0 = 2., 40., .02                # T, Lorentz factor, radians
 frequency, k = 476e6, -20.                      # Hz, rad/m; one fixed periodic mode
 E_scale, pulse_time, hold_time = 3e5, 8e-9, 2e-9  # V/m, s, s; short orbit-response benchmark
-sites, phases, cells = 8, (4 if quick else 8), 8
-density, steps = 1e3, (2048 if quick else 4096)   # deliberately dilute; no thermal background
+sites, phases, cells = 8, 4, 8   # research: 8 phases
+density, steps = 1e3, 2048   # deliberately dilute; no thermal background; research: 4096
 pitch_target, coefficient_max = .06, 2.5         # target rms sin(pitch), coefficient bound
 design_target = 1.005 * pitch_target             # fixed 0.5% margin for independent refinement
 omega, length, duration = 2 * np.pi * frequency, 2 * np.pi / abs(k), pulse_time + hold_time

@@ -16,11 +16,10 @@ against another run:
   at every step. The explicit electrostatic leapfrog on the same two-stream run is shown for
   scale.
 
-Run with `--quick` for two step sizes and fewer Picard counts.
+Runs in about RUNTIME s; the settings marked `research` in the script give the converged version.
 """
 
 import os
-import sys
 from pathlib import Path
 
 # Double precision: the implicit energy error goes down to 1e-16.
@@ -33,9 +32,8 @@ from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnost
                        save_run, elementary_charge as e_charge, speed_of_light as c)
 
 # --- what to change ---------------------------------------------------------------------
-quick = "--quick" in sys.argv
-steps_per_period = (0.4, 0.2) if quick else (0.4, 0.2, 0.1)   # omega dt of the well
-picard = (2, 4, 8) if quick else (2, 3, 4, 6, 8, 12)           # Picard iterations per implicit step
+steps_per_period = (0.4, 0.2)   # omega dt of the well; research: (0.4, 0.2, 0.1)
+picard = (2, 4, 8)   # Picard iterations per implicit step; research: (2, 3, 4, 6, 8, 12)
 heavy = 25.0                                                    # mass of the second species / m_e
 
 
@@ -110,8 +108,8 @@ axes[2].set(xlabel="step", ylabel="relative error", title="electrostatic two-str
 axes[2].legend(frameon=False, loc="center right")
 plt.tight_layout()
 
-save_run(Path.cwd() / ("invariants_quick" if quick else "invariants"), "invariants",
-         dict(omega_dt=list(steps_per_period), picard=list(picard), heavy=heavy, quick=quick),
+save_run(Path.cwd() / "invariants", "invariants",
+         dict(omega_dt=list(steps_per_period), picard=list(picard), heavy=heavy),
          dict(collisionless=collisionless, collisional=collisional, picard_energy_error=picard_error,
               implicit_energy_error=float(implicit_energy.max()), implicit_gauss=float(implicit_gauss.max()),
               explicit_energy_error=float(explicit_energy.max()), explicit_gauss=float(explicit_gauss.max())),

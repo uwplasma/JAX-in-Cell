@@ -11,7 +11,7 @@ and below it every mode grows at the rate of the kinetic root that
 the particle noise of random velocities on equally spaced positions. Two boxes:
 
 * four marginal wavelengths, the threshold test: modes below k_c grow, those above do not;
-* twelve marginal wavelengths and a long run (the full preset), where the growth of
+* six marginal wavelengths (twelve in the research setting) and a long run, where the growth of
   each mode is fitted over the linear phase and compared mode by mode with the kinetic
   root, and the run goes on to saturation.
 
@@ -22,12 +22,10 @@ the wide box the long wavelengths do before the ones near the cutoff have grown.
 whose fit leaves R^2 < 0.8 are drawn open and not compared: near the cutoff the growth is
 too slow to leave the noise in the window.
 
-Run with `--quick` for a smoke preset (fewer particles, a six-wavelength box, a shorter
-run): same physics, more noise, not a measurement.
+Runs in about RUNTIME s; the settings marked `research` in the script give the converged version.
 """
 
 import os
-import sys
 from pathlib import Path
 
 # Double precision, like the rest of the examples and the documentation figure, which runs this
@@ -43,13 +41,12 @@ from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, figure, m
 from jaxincell.theory import weibel_rate
 
 # --- what to change ------------------------------------------------------------------
-quick = "--quick" in sys.argv
 ratio = 25.0                          # anisotropy T_z / T_x
 density = 1e15                        # m^-3
 vth_x = 0.02 * c                      # thermal speed along x, v_th = sqrt(2 T / m)
-narrow = dict(wavelengths=4, particles=12000 if quick else 40000, cells=128, steps=4000)
-wide = dict(wavelengths=6 if quick else 12, particles=24000 if quick else 120000,
-            cells=142 if quick else 284, steps=3000 if quick else 12000)
+narrow = dict(wavelengths=4, particles=12000, cells=128, steps=4000)   # research: 40000
+wide = dict(wavelengths=6, particles=24000,   # research: 12, 120000
+            cells=142, steps=3000)   # research: 284, 12000
 store_every = 20                      # field samples; the particle history is not kept (memory)
 fit_start, fit_energy = 20.0, 0.05    # the linear window: t omega_pe > 20, until |B|^2 = 5 % of its max
 good_fit = 0.8                        # R^2 below which a mode is not compared
@@ -58,9 +55,6 @@ good_fit = 0.8                        # R^2 below which a mode is not compared
 omega_pe = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
 k_c = np.sqrt(ratio - 1) * omega_pe / c
 vth = (vth_x, 0.0, vth_x * np.sqrt(ratio))
-if quick:
-    print("--quick is a smoke preset: fewer particles and a shorter, six-wavelength wide box;\n"
-          "the rates it prints are noisier and are not the documented measurement.")
 
 
 def run(wavelengths, particles, cells, steps):
@@ -138,12 +132,12 @@ fig.tight_layout()
 
 # --- the record --------------------------------------------------------------------------------
 settings = dict(ratio=ratio, density=density, vth_x=vth_x, narrow=narrow, wide=wide, store_every=store_every,
-                fit_start=fit_start, fit_energy=fit_energy, good_fit=good_fit, quick=quick)
+                fit_start=fit_start, fit_energy=fit_energy, good_fit=good_fit)
 summary = dict(gain_min_below_cutoff=float(gain[below].min()), gain_max_above_cutoff=float(gain[~below].max()),
                window=[float(t_b[window][0]), float(t_b[window][-1])],
                k_over_kc=kk.tolist(), measured=measured.tolist(), kinetic=theory.tolist(), r2=r2.tolist(),
                modes_compared=int(compared.sum()), mean_deviation_percent=float(deviation.mean()),
                max_deviation_percent=float(deviation.max()))
-save_run(Path.cwd() / ("weibel_quick" if quick else "weibel"), "weibel", settings, summary, figure=fig,
+save_run(Path.cwd() / "weibel", "weibel", settings, summary, figure=fig,
          t_narrow=t_a, B_narrow=B_a, t_wide=t_b, B_wide=B_b)
 plt.show()

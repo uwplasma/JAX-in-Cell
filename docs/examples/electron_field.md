@@ -81,7 +81,7 @@ speed is $v_{Te} = \sqrt{T_e/m_e}$, and {func}`jaxincell.theory.field_epsilon` k
 masses; the uniform background is no ion species at all, which the periodic field solve
 neutralises exactly.
 
-`python examples/3_advanced/electron_field.py` runs the full preset (about three and a half
-hours on one A4000); `--quick` runs a 100 $\lambda_{De}$ box with 16 particles per cell in
-about a minute, which shows the same separation and is not a measurement. The figure and
+`python examples/3_advanced/electron_field.py` runs a 100 $\lambda_{De}$ box with 16 particles
+per cell in about a minute, which shows the same separation and is not a measurement. The
+`research` values in the script give the full preset (about three and a half hours on one A4000). The figure and
 numbers here come from `docs/scripts/fig_electron_field.py`, which runs the example.
