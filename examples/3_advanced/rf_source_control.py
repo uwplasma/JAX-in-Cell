@@ -323,7 +323,7 @@ for name, index in [('nonrecovering_source', 0), ('field_exposure', 2), ('cycle_
                       bounds=[(0., coefficient_max)] * 4,
                       constraints={'type': 'ineq', 'fun': lambda controls: constraint(controls)[0],
                                    'jac': lambda controls: constraint(controls)[1]},
-                      options={'maxiter': 60, 'ftol': 1e-10})
+                      options={'maxiter': 200, 'ftol': 1e-10})
     controls_by_name[name] = result.x
     report['optimization'][name] = {'success': bool(result.success), 'message': result.message,
                                     'iterations': result.nit, 'controls': result.x.tolist()}
