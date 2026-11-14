@@ -4,7 +4,7 @@ import sys
 from ._config import (Collisions, Domain, Impacts, Radiation, Solver, Source, Species, boltzmann_constant,
                       elementary_charge, epsilon_0, mass_electron, mass_proton, mu_0, speed_of_light)
 from ._diagnostics import (bohm_edge, charge_balance, diagnostics, dominant_frequency, energies, energy_balance,
-                           gauss_residual, magnetic_moment, moment_profiles, potential, temperatures)
+                           gauss_residual, lcfa_parameter, magnetic_moment, moment_profiles, potential, temperatures)
 from ._archive import load_state, provenance, save_run, save_state
 from ._simulation import Output, Simulation, Work, load_toml, quiet_start
 
@@ -17,8 +17,8 @@ __all__ = ["Simulation", "Output", "Work", "Domain", "Species", "Solver", "Sourc
            "Impacts",
            "load_toml", "save_state", "load_state", "provenance", "save_run",
            "quiet_start",
-           "diagnostics", "energies", "energy_balance", "gauss_residual", "charge_balance", "magnetic_moment",
-           "moment_profiles",
+           "diagnostics", "energies", "energy_balance", "gauss_residual", "lcfa_parameter", "charge_balance",
+           "magnetic_moment", "moment_profiles",
            "potential", "temperatures",
            "bohm_edge",
            "dominant_frequency", "plot", "figure", "style",
