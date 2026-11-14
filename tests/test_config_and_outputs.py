@@ -730,3 +730,8 @@ def test_picard_residual_rejects_invalid_traced_tolerances():
         return Simulation(domain, [neutral], solver.replace(picard_tolerance=tolerance)).run(1).state.E
     result = np.asarray(jax.jit(jax.vmap(field))(jnp.array([0., -1., jnp.inf, jnp.nan, 1e-6])))
     assert np.isnan(result[:4]).all() and np.isfinite(result[4]).all()
+
+
+def test_checkpoint_is_on_by_default():
+    import inspect
+    assert inspect.signature(Simulation.run).parameters["checkpoint"].default is True
