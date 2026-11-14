@@ -13,7 +13,7 @@ python examples/1_basic/two_stream.py
 Where an input file is listed the run needs no Python: `jaxincell inputs/<file>.toml`.
 Scripts including `sheath_unmagnetized.py`, `sheath_magnetized.py`, `sheath_optimization.py`,
 `grazing_sheath.py`, `weibel.py`, `compare_models.py`, `electron_field.py`, `external_fields_3d.py` and
-`invariants.py`, `electron_cooling.py` and `runaway_rf.py` take `--quick`, a smoke run with
+`invariants.py`, `electron_cooling.py`, `runaway_baseline.py` and `runaway_rf.py` take `--quick`, a smoke run with
 far fewer particles. It reproduces the structure with more noise, and each says so when it
 starts, so that a smoke run is not quoted as a measurement.
 
@@ -55,6 +55,7 @@ starts, so that a smoke run is not quoted as a measurement.
 | {doc}`../numerics/radiation` | electron and dilute-beam magnetic cooling, including analytic derivatives | `2_intermediate/electron_cooling.py` | — |
 | prescribed RF control | a finite-time pitch target with a field-exposure cost, AD and refinement | `3_advanced/runaway_rf.py` | — |
 | laser–beam cooling | finite energy/pitch spread, exact reduced-LL endpoint and amplitude sensitivity | `3_advanced/beam_laser.py` | — |
+| no-RF runaway baseline | homogeneous 0D3V seed, bulk and ions in a DC field, against the reduced test-particle ODE | `3_advanced/runaway_baseline.py` | — |
 | RF source control | supplied energy and cross-field accounting in a cold-plasma benchmark | `3_advanced/rf_source_control.py` | — |
 
 ## Where the numbers come from
