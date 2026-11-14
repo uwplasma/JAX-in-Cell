@@ -433,13 +433,15 @@ def boris_relativistic(u, E, B, qm, dt):
     return u + qm * E * (dt / 2)
 
 
-def landau_lifshitz(u, E, B, charge, mass):
+def landau_lifshitz(u, E, B, charge, mass, derivative=None):
     """Field-quadratic Landau--Lifshitz ``du/dt`` and emitted power per particle.
 
     All inputs are SI: ``u = gamma*v`` and vector fields have shape ``(..., 3)``;
     physical ``charge`` and ``mass`` are scalars or have the batch shape ``(...)``.
     Macroparticle weights enter the caller's energy sum, never this force law.
-    The field-derivative term of full Landau--Lifshitz is omitted.
+    The field-derivative term of full Landau--Lifshitz is omitted unless ``derivative``,
+    the partial derivatives ``(..., 4, 6)`` of ``(E, B)`` with respect to ``t, x, y, z``, is
+    given; it adds ``tau (q/m) gamma (D_t E + v x D_t B)`` with ``D_t = d_t + v.grad``.
 
     With ``f = E/c + beta x B``, the rest-frame electric invariant is the positive
     sum ``f² + |(u/c) x f|²``. This avoids subtracting nearly equal squares at high
@@ -461,6 +463,9 @@ def landau_lifshitz(u, E, B, charge, mass):
         jnp.cross(f, B) - jnp.sum(beta * f, axis=-1, keepdims=True) * magnetic
         + jnp.cross(jnp.cross(beta, f), f) - h2 * beta)
     power = rate * mass * c**2 * (jnp.sum(f * f, axis=-1) + h2[..., 0])
+    if derivative is not None:
+        total = derivative[..., 0, :] + jnp.sum(c * beta[..., None] * derivative[..., 1:, :], axis=-2)
+        acceleration += (tau * qm)[..., None] * gamma * (total[..., :3] + jnp.cross(c * beta, total[..., 3:]))
     return acceleration, power
 
 

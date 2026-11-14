@@ -866,6 +866,25 @@ def test_landau_lifshitz_matches_independent_force_and_radiated_power():
     assert np.all(np.asarray(power) > 0)
 
 
+def test_landau_lifshitz_derivative_term_is_the_convective_field_derivative():
+    """The Schott term is tau (q/m) gamma [D_t E + v x D_t B], with D_t = d_t + v.grad."""
+    rng = np.random.default_rng(92)
+    eta, E, B = rng.normal(size=(3, 5, 3))
+    u, E, B = eta * 2 * c, E * 1e7, B
+    units = np.array([1e18] * 3 + [1e10] * 3) * np.array([1, 1e-9, 1e-9, 1e-9])[:, None]
+    derivative = rng.normal(size=(5, 4, 6)) * units
+    q, m = -elementary_charge, mass_electron
+    gamma = np.sqrt(1 + np.sum(u**2, axis=-1, keepdims=True) / c**2)
+    v = u / gamma
+    total = derivative[:, 0] + np.einsum("nj,njk->nk", v, derivative[:, 1:])
+    tau = q**2 / (6 * np.pi * epsilon_0 * m * c**3)
+    extra = tau * q / m * gamma * (total[:, :3] + np.cross(v, total[:, 3:]))
+    base, power = landau_lifshitz(u, E, B, q, m)
+    full, full_power = landau_lifshitz(u, E, B, q, m, derivative)
+    np.testing.assert_allclose(full - base, extra, rtol=1e-10, atol=0)
+    np.testing.assert_array_equal(full_power, power)
+
+
 @pytest.mark.parametrize('dtype', [jnp.float32, jnp.float64])
 def test_landau_lifshitz_force_free_parallel_and_zero_controls(dtype):
     """These cancellations must survive high gamma and float32, without clipping S."""

@@ -1125,3 +1125,56 @@ def test_explicit_radiation_wall_emission_uses_the_event_time_and_returned_weigh
                     assert float(output.state.u[0, 0]) == pytest.approx(side*final_u, rel=2e-11), case
                     expected_x = side*(length/2+(final_energy-hit_energy)/(e_charge*field))
                     assert float(output.state.x[0, 0]) == pytest.approx(expected_x, rel=2e-11), case
+
+
+def test_full_landau_lifshitz_follows_the_exact_plane_wave_solution_through_the_pulse():
+    """Di Piazza's solution: eta_y = [eta_y0 + rho s0 g - rho s0 J]/h + a, with h = 1 + rho s0 I,
+    I = int g^2, J = int a g^2, rho = tau omega; ``ll_reduced`` lacks the term rho s0 g / h."""
+    integrate = pytest.importorskip("scipy.integrate")
+    from jaxincell import Radiation
+    a0, cycles, gamma0, pitch = 1., 4, 3e4, 2e-4
+    omega = 2 * np.pi * c / 0.8e-6
+    scale = mass_electron * c * omega / e_charge
+    rho = e_charge**2 / (6 * np.pi * epsilon_0 * mass_electron * c**3) * omega
+    eta0 = np.sqrt(gamma0**2 - 1) * np.array([-np.cos(pitch), np.sin(pitch), 0.])
+    s0, length, x0 = gamma0 - eta0[0], 24 * 0.8e-6, 6 * 0.8e-6
+
+    def window(p):
+        return np.cos(p / (2 * cycles))**2
+
+    def a(p):
+        return a0 * window(p) * np.sin(p)
+
+    def g(p):
+        return a0 * (window(p) * np.cos(p) - np.sin(p / cycles) * np.sin(p) / (2 * cycles))
+
+    def fields(x, t, amplitude):
+        phi = omega * (t - (x[:, 0] - x0) / c) - np.pi * cycles
+        inside = jnp.abs(phi) < np.pi * cycles
+        gp = amplitude * jnp.where(inside, jnp.cos(phi / (2 * cycles))**2 * jnp.cos(phi)
+                                   - jnp.sin(phi / cycles) * jnp.sin(phi) / (2 * cycles), 0.)
+        zero = jnp.zeros_like(phi)
+        return (jnp.stack((zero, -scale * gp, zero), 1), jnp.stack((zero, zero, -scale * gp / c), 1))
+
+    def run(model, steps):
+        beam = Species.electrons(1, 1e3, x=jnp.array([[x0, 0., 0.]]), u=jnp.asarray(c * eta0)[None], name="beam")
+        sim = Simulation(Domain(length=length, cells=32, time_step=np.pi * (cycles + 2) / omega / steps), (beam,),
+                         Solver(relativistic=True), prescribed_fields=fields, field_parameters=a0,
+                         radiation=Radiation(species="beam", model=model))
+        return sim.run(steps, store_every=steps // 64, store_particles=True, moments=False).validate()
+
+    def exact(phi, full):
+        edge = np.pi * cycles
+        energy = integrate.quad(lambda p: g(p)**2, -edge, phi, epsabs=1e-12, epsrel=1e-10)[0]
+        J = integrate.quad(lambda p: a(p) * g(p)**2, -edge, phi, epsabs=1e-12, epsrel=1e-10)[0]
+        return (eta0[1] + full * rho * s0 * g(phi) - rho * s0 * J) / (1 + rho * s0 * energy) + a(phi)
+
+    errors = {}
+    for model in ("ll_reduced", "ll_full"):
+        out = run(model, 1024)
+        phi = omega * (np.asarray(out.t) - (np.asarray(out.x)[:, 0, 0] - x0) / c) - np.pi * cycles
+        inside = np.abs(phi) < np.pi * cycles - 1e-3
+        measured = np.asarray(out.u)[inside, 0, 1] / c
+        errors[model] = [np.max(abs(measured - [exact(p, full) for p in phi[inside]])) / a0 for full in (0, 1)]
+    assert errors["ll_full"][1] < 2e-4 and errors["ll_reduced"][0] < 2e-4
+    assert errors["ll_full"][0] > 4 * errors["ll_full"][1] and errors["ll_reduced"][1] > 4 * errors["ll_reduced"][0]

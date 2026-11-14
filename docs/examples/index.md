@@ -52,9 +52,9 @@ starts, so that a smoke run is not quoted as a measurement.
 | {doc}`collisions` | the Takizuka-Abe operator against the Fokker-Planck rates | `2_intermediate/collisions.py` | `collisions.toml` |
 | {doc}`sheath_optimization` | a wall's reflectivity recovered from the sheath it holds | `3_advanced/sheath_optimization.py` | — |
 | {doc}`external_fields_3d` | a field on an $(x, y, z)$ grid: the grad-$B$ drift and a mirror | `2_intermediate/external_fields_3d.py` | — |
-| {doc}`../numerics/radiation` | electron and dilute-beam magnetic cooling, including analytic derivatives | `2_intermediate/electron_cooling.py` | — |
+| {doc}`../numerics/radiation` | electron and dilute-beam magnetic cooling with analytic derivatives, and collective ring formation | `2_intermediate/electron_cooling.py` | — |
 | prescribed RF control | a finite-time pitch target with a field-exposure cost, AD and refinement | `3_advanced/runaway_rf.py` | — |
-| laser–beam cooling | finite energy/pitch spread, exact reduced-LL endpoint and amplitude sensitivity | `3_advanced/beam_laser.py` | — |
+| laser–beam cooling | finite energy/pitch spread, exact reduced-LL endpoint, amplitude sensitivity, full-vs-reduced LL through the pulse | `3_advanced/beam_laser.py` | — |
 | no-RF runaway baseline | homogeneous 0D3V seed, bulk and ions in a DC field, against the reduced test-particle ODE | `3_advanced/runaway_baseline.py` | — |
 | minimum RF resource | a quasilinear RF response validated on resolved windows, with an explicit-current source ledger and a constrained matched-cost search | `3_advanced/runaway_rf_minimum.py` | — |
 | RF source control | supplied energy and cross-field accounting in a cold-plasma benchmark | `3_advanced/rf_source_control.py` | — |
