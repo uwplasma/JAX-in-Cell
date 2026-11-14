@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from ._config import epsilon_0, mu_0, speed_of_light as c, elementary_charge
 
-__all__ = ["bohm_edge", "charge_balance", "diagnostics", "dominant_frequency", "energies",
+__all__ = ["bohm_edge", "charge_balance", "diagnostics", "dominant_frequency", "energies", "energy_balance",
            "gauss_residual", "magnetic_moment", "moment_profiles", "potential", "temperatures"]
 
 
@@ -28,20 +28,22 @@ def energies(out):
     field_E = 0.5 * epsilon_0 * jnp.sum(out.E ** 2, axis=(1, 2)) * out.dx
     field_B = 0.5 / mu_0 * jnp.sum(out.B ** 2, axis=(1, 2)) * out.dx
     result = {"electric": field_E, "magnetic": field_B}
-    if out.v is not None:
-        v2 = jnp.sum(out.v ** 2, axis=-1)
+    if out.u is not None or out.v is not None:
         mass = out.mass[None, :] * out.weight          # of each pseudo-particle, at each stored step
-        if out.relativistic:                       # the quantity the relativistic pusher conserves,
-            root = jnp.sqrt(1 - v2 / c ** 2)       # (gamma - 1) m c^2, written to keep its digits at low speed
-            gamma, kinetic_p = 1 / root, v2 / (root * (1 + root)) * mass
-        else:                                      # and the one the Boris pusher conserves
-            gamma = jnp.ones_like(v2)
-            kinetic_p = 0.5 * mass * v2
+        if out.u is not None:
+            u2 = jnp.sum(out.u ** 2, axis=-1)
+            gamma = jnp.sqrt(1 + u2 / c ** 2) if out.relativistic else 1.0
+            kinetic_p = mass * u2 / (gamma + 1)
+            p = mass[..., None] * out.u
+        else:                                      # compatibility with velocity-only outputs
+            v2 = jnp.sum(out.v ** 2, axis=-1)
+            root = jnp.sqrt(1 - v2 / c ** 2) if out.relativistic else jnp.ones_like(v2)
+            kinetic_p = mass * v2 / (root * (1 + root))
+            p = (mass / root)[..., None] * out.v
         result["kinetic"] = jnp.sum(kinetic_p, axis=1)
         for name, block in _blocks(out):
             result[f"kinetic_{name}"] = jnp.sum(kinetic_p[:, block], axis=1)
         result["total"] = field_E + field_B + result["kinetic"]
-        p = (gamma * mass)[..., None] * out.v              # the momentum the pusher conserves, gamma m v
         result["momentum"] = jnp.sum(p, axis=1)
         result["energy_error"] = jnp.abs(result["total"] - result["total"][0]) / _nonzero(result["total"][0])
         result["momentum_error"] = (jnp.linalg.norm(result["momentum"] - result["momentum"][0], axis=1)
@@ -53,6 +55,36 @@ def _nonzero(scale):
     return jnp.maximum(scale, jnp.finfo(scale.dtype).tiny)
 
 
+def energy_balance(out):
+    """Change of the recorded mechanical energy account, in J/m^2.
+
+    Uses streamed ``Work.kinetic`` even without particle histories. It adds
+    self-field energy and wall absorption, subtracts supplied particle energy
+    and volume-birth Gauss-projection work, then subtracts prescribed, RR and
+    collision work. ``radiated_energy`` stays separate: in an electric field
+    it need not equal minus mechanical RR work.
+
+    ``collision_work`` is the *realized* kinetic change in that numerical
+    stage. Subtracting it checks bookkeeping; it does not establish physical
+    collision energy conservation. Inspect that diagnostic separately.
+    Poynting flux through an open field boundary is not recorded here, so this
+    is a conservation residual only for closed fields or after adding that
+    boundary flux separately. The first stored step is the reference.
+    The legacy implicit wall scheme also contributes finite event-time and
+    particle/current coupling errors; its account needs timestep convergence.
+    """
+    if out.work is None:
+        raise ValueError("energy_balance needs the streamed Work ledger")
+    field = 0.5 * out.dx * jnp.sum(epsilon_0 * out.E ** 2 + out.B ** 2 / mu_0, axis=(1, 2))
+    particles = jnp.sum(out.work.kinetic, axis=-1)
+    supplied = jnp.sum(out.work.prescribed_work + out.work.rr_work + out.work.collision_work, axis=-1)
+    walls = jnp.sum(out.wall.energy_in - out.wall.energy_out - out.wall.energy_injected, axis=(1, 2))
+    account = field + particles + walls - supplied
+    if out.wall.birth_budget is not None:
+        account = account - jnp.sum(out.wall.birth_budget[..., 1] + out.wall.birth_budget[..., 5], axis=-1)
+    return account - account[0] if account.shape[0] else account
+
+
 def magnetic_moment(out, simulation):
     """Magnetic moment of every stored particle relative to the external field,
     :math:`\\mu = p_\\perp^2/(2 m |\\mathbf B|)` with :math:`\\mathbf p = \\gamma m \\mathbf v`
@@ -62,13 +94,16 @@ def magnetic_moment(out, simulation):
     invariant of motion in that field alone: it is conserved when the field changes little
     over a gyro-radius and a gyro-period, which is what it is for checking. Zero where the
     field vanishes. Needs ``run(store_particles=True)``."""
-    B = jax.vmap(simulation.external_fields_at)(out.x)[..., 3:]
+    B = jax.vmap(simulation.external_fields_at)(out.x, out.t)[..., 3:]
     strength = jnp.linalg.norm(B, axis=-1)
     field = strength > 0
     b = B / jnp.where(field, strength, 1.0)[..., None]
-    v_perp = out.v - jnp.sum(out.v * b, axis=-1, keepdims=True) * b
-    gamma2 = 1 / (1 - jnp.sum(out.v ** 2, axis=-1) / c ** 2) if out.relativistic else 1.0
-    mu = 0.5 * out.mass * gamma2 * jnp.sum(v_perp ** 2, axis=-1) / jnp.where(field, strength, 1.0)
+    u = out.u
+    if u is None:
+        gamma = 1 / jnp.sqrt(1 - jnp.sum(out.v ** 2, axis=-1, keepdims=True) / c ** 2) if out.relativistic else 1.0
+        u = gamma * out.v
+    perpendicular = u - jnp.sum(u * b, axis=-1, keepdims=True) * b
+    mu = 0.5 * out.mass * jnp.sum(perpendicular ** 2, axis=-1) / jnp.where(field, strength, 1.0)
     return jnp.where(field, mu, 0.0)
 
 
@@ -306,6 +341,9 @@ def diagnostics(out):
     result["charge_balance"] = charge_balance(out)
     result["potential"] = potential(out)
     result["dominant_frequency"] = dominant_frequency(out)
+    if out.work is not None:
+        result["energy_balance"] = energy_balance(out)
+        result["collision_work"] = out.work.collision_work
     if out.v is not None:
         result["temperatures"] = temperatures(out)
     return result

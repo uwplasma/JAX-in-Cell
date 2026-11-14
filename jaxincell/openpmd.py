@@ -92,7 +92,9 @@ def _write_meshes(io, it, out, s, keep, external):
 
 
 def _momentum(out, s):
-    """Momentum of one physical particle, as the pusher defines it."""
+    """Momentum of one physical particle, using carried u when available."""
+    if out.u is not None:
+        return np.asarray(out.mass)[:, None] * np.asarray(out.u[s])
     v, m = np.asarray(out.v[s], dtype=np.float64), np.asarray(out.mass, dtype=np.float64)
     gamma = 1.0 / np.sqrt(1.0 - np.sum(v ** 2, axis=1) / speed_of_light ** 2) if out.relativistic else 1.0
     return (m * gamma)[:, None] * v
@@ -163,6 +165,7 @@ def write_openpmd(out, path, every=1, meshes=True, particles=True, area=1.0, *, 
             fields as separate ``external_E``/``external_B`` meshes. Flat E/B keep their face/centre
             staggering; 3D tensors are centred with the domain's x/y/z periods. No field histories
             are added to ``out``. Omitted fields are not written, and ``meshes=False`` skips them.
+            Time-dependent callback functions and their parameters are not serialized.
         overwrite: Allow replacing an existing file. By default it is protected.
         sidecar: Write a ``.pmd`` discovery file containing the relative series filename or template.
 

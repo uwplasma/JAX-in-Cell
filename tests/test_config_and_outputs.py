@@ -8,7 +8,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from jaxincell import Collisions, Domain, Impacts, Simulation, Solver, Source, Species, diagnostics, load_toml
+from jaxincell import (Collisions, Domain, Impacts, Radiation, Simulation, Solver, Source, Species,
+                       diagnostics, load_toml)
 from jaxincell import mass_electron, mass_proton, speed_of_light as c
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -78,6 +79,80 @@ def test_thermal_speed_and_drift_accept_arrays():
             Species.electrons(n=4, density=1.0, vth=bad)
 
 
+def test_direct_momentum_is_a_differentiable_leaf_and_stacks_without_conversion():
+    momentum = jnp.asarray([[0.0, 1e6 * c, -2e6 * c]])
+    species = Species.electrons(n=1, density=1.0, u=momentum)
+    assert species.v is None and np.array_equal(species.u, momentum)
+    objective = jax.jit(lambda u: jnp.sum(Species.electrons(1, 1.0, u=u).u / c))
+    assert np.allclose(jax.grad(objective)(momentum) * c, 1.0, rtol=1e-15, atol=0)
+    stacked = jax.tree.map(lambda a, b: jnp.stack((a, b)), species, species.replace(u=2 * momentum))
+    assert stacked.u.shape == (2, 1, 3)
+    assert stacked.replace(u=stacked.u).u.shape == (2, 1, 3)
+    axes = jax.tree.map(lambda _: None, species).replace(u=0)
+    assert axes.u == 0 and type(axes.u) is int
+    assert np.array_equal(jax.vmap(lambda s: s.u)(stacked), stacked.u)
+
+
+def test_radiation_configuration_is_static_and_normalizes_species():
+    assert Radiation().species is None
+    single = Radiation(species="electrons", substeps=np.int64(2))
+    assert single.species == ("electrons",) and type(single.substeps) is int
+    assert jax.tree_util.tree_leaves(single) == []
+    assert jax.tree.map(lambda x: x, single) == single
+    assert single == Radiation(species=["electrons"], substeps=2)
+    assert single.replace(species=()).species == ()
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_checkpoint_preserves_the_discrete_objective_gradient_and_restart(algorithm):
+    electrons = Species.electrons(16, 1e14, vth=.01 * c, drift=.2 * c, plus_minus=True,
+                                  perturbation_amplitude=1e-5, perturbation_mode=1, sampling="low_noise")
+    ions = Species.ions(8, 1e14, vth=0., mass_ratio=1e6)
+    sim = Simulation(Domain(length=.01, cells=8, dt_over_dx_c=.4), (electrons, ions),
+                     Solver(algorithm=algorithm, relativistic=True))
+
+    def objective(beta, checkpoint):
+        varied = sim.replace(species=(electrons.replace(drift=beta * c), ions))
+        return jnp.mean(varied.run(4, snapshot_steps=[], store_particles=False,
+                                   checkpoint=checkpoint).state.E**2)
+
+    original = jax.jit(jax.value_and_grad(lambda beta: objective(beta, False)))(.2)
+    recomputed = jax.jit(jax.value_and_grad(lambda beta: objective(beta, True)))(.2)
+    forward = jax.jvp(lambda beta: objective(beta, True), (.2,), (1.,))
+    assert np.isfinite(np.asarray(recomputed)).all() and abs(float(recomputed[1])) > 0
+    np.testing.assert_allclose(recomputed, original, rtol=2e-11, atol=0)
+    np.testing.assert_allclose(recomputed, forward, rtol=2e-11, atol=0)
+    h = 1e-4
+    fd = (objective(.2 + h, True) - objective(.2 - h, True)) / (2 * h)
+    assert float(fd) == pytest.approx(float(recomputed[1]), rel=1e-5, abs=0)
+    first = sim.run(2, checkpoint=True)
+    resumed = sim.run(2, state=first.state, checkpoint=True, snapshot_steps=[1])
+    whole = sim.run(4, store_every=2, checkpoint=False)
+    for a, b in zip(jax.tree.leaves(resumed.state), jax.tree.leaves(whole.state)):
+        np.testing.assert_allclose(a, b, rtol=2e-12, atol=0)
+    np.testing.assert_allclose(resumed.E, whole.E[-1:], rtol=2e-12, atol=0)
+
+
+def test_command_line_arrays_preserve_high_gamma_momentum_and_work(tmp_path):
+    from jaxincell import _write
+
+    gamma = 1e6
+    u = jnp.broadcast_to(jnp.array([0., c * np.sqrt(gamma**2 - 1), 0.]), (2, 3))
+    out = Simulation(Domain(cells=4), (Species.electrons(2, 1e-3, u=u),),
+                     Solver(relativistic=True)).run(1)
+    path = tmp_path / "input.toml"
+    path.write_text("# setup supplied through the Python API\n")
+    _write(tmp_path / "momentum", path, {}, {}, out)
+    with np.load(tmp_path / "momentum" / "fields.npz") as data:
+        energy = out.mass * c**2 * (np.sqrt(1 + np.sum((data["u"] / c)**2, axis=-1)) - 1)
+        represented = np.sum(data["weight"] * energy, axis=-1)
+        np.testing.assert_allclose(represented, np.sum(data["work.kinetic"], axis=-1), rtol=1e-14, atol=0)
+        assert np.sqrt(1 + np.sum((data["u"][0, 0] / c)**2)) == pytest.approx(gamma, rel=1e-12)
+    _write(tmp_path / "legacy", path, {}, {}, out.replace(u=None, work=None))
+    with np.load(tmp_path / "legacy" / "fields.npz") as data:
+        assert "v" in data and "u" not in data and not any(name.startswith("work.") for name in data.files)
+
+
 def test_ions_derived_from_electrons_are_differentiable_in_the_electron_thermal_speed():
     def ion_vth(u):
         electrons = Species.electrons(n=4, density=1.0, vth=(u, 0.0, 0.0))
@@ -100,6 +175,30 @@ def _sourced(emit=2, capacity=64, active=None):
     (lambda: Species.electrons(n=0, density=1.0), "at least one particle"),
     (lambda: Species.electrons(n=4, density=1.0, x=np.zeros((3, 3))), "x must have shape"),
     (lambda: Species.electrons(n=4, density=1.0, v=np.zeros(4)), "v must have shape"),
+    (lambda: Species.electrons(n=4, density=1.0, u=np.zeros(4)), "u must have shape"),
+    (lambda: Species.electrons(n=1, density=1.0, u=np.zeros((1, 3)), v=np.zeros((1, 3))), "either v or u"),
+    (lambda: Species.electrons(n=1, density=1.0, u=np.full((1, 3), np.inf)), "finite momentum"),
+    (lambda: Radiation(model="quantum"), "model must be"),
+    (lambda: Radiation(species=("electrons", "electrons")), "distinct, nonempty"),
+    (lambda: Radiation(species=("",)), "distinct, nonempty"),
+    (lambda: Radiation(species=(1,)), "distinct, nonempty"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)]).run(0, checkpoint=1), "static boolean"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1., u=np.zeros((4, 3)))]), "Species.u requires"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], radiation=Radiation()), "Radiation requires"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], Solver(relativistic=True),
+                        radiation=Radiation(species="absent")), "not in this simulation"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], prescribed_fields=1), "pure callable"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)], field_parameters=1.), "needs prescribed_fields"),
+    (lambda: Simulation(Domain(particle_bc="absorbing"), [Species.electrons(4, 1.)],
+                        Solver(algorithm="implicit", relativistic=True), radiation=Radiation()),
+     "require periodic particle boundaries"),
+    (lambda: Simulation(Domain(particle_bc="reflective"), [Species.electrons(4, 1.)],
+                        Solver(algorithm="implicit"), prescribed_fields=lambda x, t, p: (0., 0.)),
+     "require periodic particle boundaries"),
+    (lambda: Simulation(Domain(), [Species.electrons(4, 1.)],
+                        prescribed_fields=lambda x, t, p: (jnp.zeros((4, 4)), 0)).run(1), "broadcastable"),
+    *[(lambda value=value: Radiation(substeps=value), "positive whole number")
+      for value in (0, -1, 1.5, True, np.bool_(True))],
     (lambda: Species.electrons(n=4, density=1.0, reflection=(0.1, 0.2, 0.3)), "reflection takes"),
     (lambda: Domain(restitution=-0.5), "restitution takes a number in"),
     (lambda: Domain(particle_bc="sticky"), "particle_bc takes one of"),
@@ -130,7 +229,7 @@ def _sourced(emit=2, capacity=64, active=None):
     (lambda: Impacts(energy_max=1e-18, angle_bins=0), "at least one bin of each"),
     (lambda: _sourced(emit=8, capacity=4), "into 4 slots"),
     (lambda: Simulation(Domain(), [Species.electrons(n=4, density=1.0)],
-                        Solver(relativistic=True), Collisions(coulomb_log=10.0)), "not implemented"),
+                        Solver(relativistic=True), Collisions()), "explicit Collisions"),
 ])
 def test_invalid_input_raises_a_value_error_that_python_O_keeps(build, message):
     with pytest.raises(ValueError, match=message):
@@ -313,7 +412,7 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     import numpy as np
 
     from jaxincell import load_state, save_state
-    from jaxincell._archive import VOLUME_FORMAT
+    from jaxincell._archive import WORK_FORMAT
 
     domain = Domain(length=1e-2, cells=16, particle_bc="absorbing", field_bc=("open", "absorbing"))
     species = Species("electrons", 2000, -1.0, mass_electron, 0.0,
@@ -348,8 +447,8 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
     # an archive of another format is refused rather than half read, and so is one that is not
     # a state at all
     stored = dict(np.load(path))
-    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(VOLUME_FORMAT + 1)})
-    with pytest.raises(ValueError, match=f"format {VOLUME_FORMAT + 1}"):
+    np.savez(tmp_path / "future.npz", **{**stored, "format": np.asarray(WORK_FORMAT + 1)})
+    with pytest.raises(ValueError, match=f"format {WORK_FORMAT + 1}"):
         load_state(tmp_path / "future.npz")
     np.savez(tmp_path / "partial.npz", **{k: v for k, v in stored.items() if k != "rho"})
     with pytest.raises(ValueError, match="not a state archive"):
@@ -360,7 +459,7 @@ def test_a_state_written_to_disk_restarts_the_run_it_came_from(tmp_path):
                                                 ("explicit", "thermal")])
 def test_restart_position_conventions_and_legacy_wall_rejection(tmp_path, algorithm, boundary):
     from jaxincell import load_state, save_state
-    from jaxincell._archive import WALL_FORMAT
+    from jaxincell._archive import WALL_FORMAT, WORK_FORMAT
     domain = Domain(length=1., cells=8, time_step=1., particle_bc=boundary,
                     field_bc="periodic" if boundary == "periodic" else "reflective")
     species = Species("neutral", 1, 0., 1., 1., vth=(.05, .02, .02),
@@ -376,7 +475,8 @@ def test_restart_position_conventions_and_legacy_wall_rejection(tmp_path, algori
         np.testing.assert_array_equal(a, b)
     with np.load(path) as data:
         stored = dict(data)
-    assert int(stored["format"]) == (WALL_FORMAT if boundary == "thermal" else 1)
+    assert int(stored["format"]) == WORK_FORMAT
+    assert int(stored["physics_format"]) == (WALL_FORMAT if boundary == "thermal" else 1)
     old = {k: v for k, v in stored.items() if k != "x_phase"}
     np.savez(tmp_path / "legacy.npz", **{**old, "format": np.asarray(1)})
     legacy = load_state(tmp_path / "legacy.npz")

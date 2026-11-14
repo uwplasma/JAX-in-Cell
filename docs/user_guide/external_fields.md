@@ -63,8 +63,10 @@ is exactly the field the code cannot generate itself, and therefore the one wort
 * A uniform $B_x$ magnetises the plasma and gives the particles a gyration in the $y$-$z$
   plane at $\Omega_c = qB_x/m$, opening up upper-hybrid oscillations, Bernstein modes and
   cyclotron damping.
-* Resolve that gyration: the Boris rotation needs $\Omega_c\Delta t \lesssim 0.3$ for a few
-  per cent accuracy, and $\Omega_c\Delta t < 2$ to stay stable at all.
+* Resolve that gyration: in a uniform magnetic field the Boris angle is
+  $2\arctan(\Omega_c\Delta t/2)$, so it stays bounded at large steps while its phase
+  becomes inaccurate. Use the relativistic frequency $|q|B/(m\gamma)$ where needed
+  and check the orbit phase under timestep refinement.
 * {doc}`../examples/sheath_magnetized` is a worked case with the field oblique to a wall.
 
 ```python
@@ -74,7 +76,41 @@ print(elementary_charge * 0.05 / mass_electron * domain.dt)   # Omega_c dt
 
 ## Time-dependent fields
 
-There is no hook for one. A field that has to vary in time is a physical field, and the
-honest way to put it in is as a current or a charge — a driven antenna as a species, an
-imposed wave as an initial condition on $\mathbf E$ and $\mathbf B$ through the
-restart state ({doc}`running`).
+`prescribed_fields(x, t, parameters)` returns electric and magnetic arrays broadcastable
+to `(N, 3)` in SI units at the supplied particle positions. It is a pure JAX function;
+`field_parameters` is a dynamic pytree of its amplitudes, phases or coefficients.
+The returned fields add to the static arrays and the self-consistent fields.
+Evaluate each position independently of the other particles in the input batch:
+source and boundary events may evaluate the callback on a single particle.
+
+```python
+import jax.numpy as jnp
+from jaxincell import speed_of_light as c
+
+def wave(x, t, parameters):
+    amplitude, omega, phase = parameters
+    Ey = amplitude * jnp.sin(omega * (t - x[:, 0] / c) + phase)
+    E = jnp.zeros_like(x).at[:, 1].set(Ey)
+    B = jnp.zeros_like(x).at[:, 2].set(Ey / c)
+    return E, B
+
+simulation = Simulation(domain, [electrons, ions], solver,
+                        prescribed_fields=wave, field_parameters=(1e4, 1e10, 0.))
+```
+
+This example is a vacuum plane wave traveling along $+x$. An imposed plasma RF
+mode needs the appropriate dispersion and polarization; the callback does not
+enforce Maxwell's equations or solve the antenna or the background dielectric response. For a periodic domain,
+use a compatible spatial period. Time is absolute simulation time in seconds,
+carried in `State.time`, and the integrators evaluate it at their force stages.
+For identical continuation, reconstruct the same simulation, including its
+timestep, fields and radiation settings: archives preserve time and state but
+do not serialize or validate those settings. Changing the timestep also changes
+the periodic explicit half-position convention and requires a phase conversion.
+
+Define the callable once; changing numeric parameters then does not create a new
+program. Differentiating the parameters differentiates the imposed waveform and
+its effect on particles. The work supplied by all imposed electric fields is
+recorded per species in `output.work.prescribed_work`. That measures work delivered
+to the simulated particles; it is not wall-plug RF power or incident antenna power.
+See {doc}`../numerics/radiation` for the radiation and mechanical-work budgets.

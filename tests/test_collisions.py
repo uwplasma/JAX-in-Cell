@@ -10,6 +10,7 @@ from jax import random
 from jaxincell import Collisions, Domain, Simulation, Solver, Species, _collisions, epsilon_0
 from jaxincell._collisions import collide, coulomb_logarithm
 from jaxincell import elementary_charge as e_charge, mass_electron
+from jaxincell import speed_of_light as c_light
 
 
 def _cells(per_cell, rng):
@@ -396,3 +397,285 @@ def test_maxwellian_temperature_difference_has_coupled_relaxation_rate(gamma_dt)
 def test_fixed_coulomb_log_rejects_invalid_values(value):
     with pytest.raises(ValueError, match="finite nonnegative scalar"):
         Collisions(coulomb_log=value)
+
+
+def test_nanbu_distribution_has_the_prescribed_angular_moments():
+    """Integrate the inverse CDF independently of its random-number sampling.
+    The first moment fixes the physical rate, and the second tests the shape;
+    very small scattering and the isotropic limit must both remain resolved."""
+    from scipy.optimize import brentq
+    from scipy.special import roots_legendre
+
+    nodes, weights = roots_legendre(512)
+    s = np.array([1e-10, 1e-6, .001, .049, .05, .2, 1., 3., 10., 40.])
+    sine, loss = _collisions._nanbu_angle(jnp.asarray(s[:, None]), jnp.asarray((nodes + 1) / 2))
+    first = np.asarray(loss) @ (weights / 2)
+    second = np.asarray(sine ** 2) @ (weights / 2)
+    expected_second = []
+    for value in s:
+        target = np.exp(-value)
+
+        def langevin(a):
+            return a / 3 - a ** 3 / 45 + 2 * a ** 5 / 945 if a < 1e-3 else 1 / np.tanh(a) - 1 / a
+
+        a = (1 / -np.expm1(-value) if value < .05 else
+             brentq(lambda a: langevin(a) - target, 0., 2 / -np.expm1(-value), xtol=1e-30))
+        expected_second.append(2 * target / a)
+    np.testing.assert_allclose(first / -np.expm1(-s), 1., rtol=3e-6, atol=0.)
+    np.testing.assert_allclose(second / expected_second, 1., rtol=3e-6, atol=0.)
+    assert np.isfinite(sine).all() and (np.asarray(loss) >= 0).all() and (np.asarray(loss) <= 2).all()
+
+
+def _kinetic_relativistic(u, mass):
+    gamma = np.sqrt(1 + np.sum(u * u, axis=-1) / c_light ** 2)
+    return mass * np.sum(u * u, axis=-1) / (gamma + 1)
+
+
+@pytest.mark.parametrize("dtype,tolerance", [(jnp.float64, 2e-12), (jnp.float32, 2e-5)])
+@pytest.mark.parametrize("mass_ratio", [1., 1836.15267343])
+def test_relativistic_cells_conserve_kinetic_energy_and_momentum(dtype, tolerance, mass_ratio):
+    """Exercise self/triplet/cross-species pairs, sparse cells and removed slots.
+    Compare kinetic energy, so ion rest mass cannot hide an electron-energy error.
+    Large angles stress kinematics; this is not a large-timestep accuracy claim."""
+    rng = np.random.default_rng(39)
+    ca, xa = _cells([2, 3, 1, 5, 0], rng)
+    cb, xb = _cells([1, 2, 5, 3, 1], rng)
+    na, nb = len(ca), len(cb)
+    cell, x = np.r_[ca, cb], jnp.concatenate([xa, xb]).astype(dtype)
+    u = jnp.asarray(c_light * rng.normal(size=(na + nb, 3)) * 10 ** rng.uniform(-3, 2, (na + nb, 1)), dtype)
+    # Co-propagating relativistic pairs must not subtract two gamma^2 values.
+    first, second = np.flatnonzero(ca == 0)  # this cell's two electrons necessarily pair
+    u = u.at[first].set(jnp.array([1000., 0., 0.], dtype) * c_light)
+    u = u.at[second].set(jnp.array([1001., .01, 0.], dtype) * c_light)
+    mass = jnp.asarray(np.r_[np.full(na, mass_electron), np.full(nb, mass_ratio * mass_electron)], dtype)
+    weight = jnp.full(na + nb, 1e20, dtype).at[-1].set(0.)
+    new = np.asarray(jax.jit(lambda u: collide(
+        random.PRNGKey(39), x, u, weight, mass, jnp.full(na + nb, -e_charge, dtype),
+        ((0, na), (na, nb)), ((0, 0), (0, 1), (1, 1)), 15., 1e-3, .2, 1., 5,
+        relativistic=True))(u))
+    old, mass, weight = np.asarray(u, dtype=float), np.asarray(mass, dtype=float), np.asarray(weight, dtype=float)
+    assert new.dtype == dtype and np.isfinite(new).all()
+    assert np.array_equal(new[-1], old[-1])
+    momenta = [_per_cell(cell, 5, weight[:, None] * mass[:, None] * p) for p in (old, new.astype(float))]
+    energies = [_per_cell(cell, 5, weight * _kinetic_relativistic(p, mass)) for p in (old, new.astype(float))]
+    momentum_scale = _per_cell(cell, 5, weight * mass * np.linalg.norm(old, axis=1))
+    assert np.max(np.linalg.norm(momenta[1] - momenta[0], axis=1) / np.maximum(momentum_scale, 1e-100)) < tolerance
+    occupied = energies[0] > 0
+    assert np.max(np.abs(energies[1][occupied] / energies[0][occupied] - 1)) < tolerance
+
+
+def _cold_relativistic_rate(gamma, mass_ratio, density, logarithm=15.):
+    """Independent invariant form of Perez Eq. 9 for an electron beam and a
+    stationary target. nu is s/dt, the first angular-moment relaxation rate."""
+    invariant_mass2 = 1 + mass_ratio ** 2 + 2 * mass_ratio * gamma
+    return ((e_charge ** 2 / epsilon_0 / mass_electron) ** 2 * density * logarithm
+            / (4 * np.pi * c_light ** 3) * invariant_mass2 * gamma
+            / (mass_ratio ** 2 * (gamma ** 2 - 1) ** 1.5))
+
+
+@pytest.mark.parametrize("gamma,mass_ratio", [(1.00001, 1.), (5., 1.), (5., 1836.15267343)])
+def test_relativistic_weighted_beam_rates_see_each_physical_partner_density(gamma, mass_ratio):
+    """Check stopping and transverse diffusion against the independent invariant
+    rate, with unequal counts and both directions of the weight inequality.
+    The low-energy case also checks the nonrelativistic limit."""
+    na, nb, density = 4096, 3 * 4096, 1e20
+    u0 = c_light * np.sqrt(gamma ** 2 - 1)
+    u = jnp.zeros((na + nb, 3)).at[:na, 0].set(u0)
+    mass = jnp.repeat(jnp.array([mass_electron, mass_ratio * mass_electron]), jnp.array([na, nb]))
+    rate = _cold_relativistic_rate(gamma, mass_ratio, density)
+    if gamma < 1.001:
+        reduced_mass = mass_electron * mass_ratio / (1 + mass_ratio)
+        classical_rate = ((e_charge ** 2 / epsilon_0 / reduced_mass) ** 2 * density * 15.
+                          / (4 * np.pi * (u0 / gamma) ** 3))
+        np.testing.assert_allclose(rate, classical_rate, rtol=3e-5, atol=0.)
+        rate = classical_rate  # independently check the measured nonrelativistic limit
+    invariant_mass2 = 1 + mass_ratio ** 2 + 2 * mass_ratio * gamma
+    slowing = mass_ratio * (gamma + mass_ratio) / invariant_mass2
+    diffusion = 2 * mass_ratio ** 2 / invariant_mass2
+    run = jax.jit(lambda w, dt: collide(
+        random.PRNGKey(40), jnp.zeros_like(u), u, w, mass, jnp.full(na + nb, -e_charge),
+        ((0, na), (na, nb)), ((0, 1),), 15., dt, 1., 1., 1, relativistic=True))
+    for ratio in (.25, 1., 4.):
+        weight = jnp.repeat(jnp.array([ratio, 1.]) * density / nb, jnp.array([na, nb]))
+        dt = 1e-3 / (rate * max(ratio, 1.))  # keep the sampled pair's s small
+        new = np.asarray(run(weight, dt))
+        observables = [(u0 - new[:na, 0]) / (slowing * rate * dt * u0),
+                       np.sum(new[:na, 1:] ** 2, axis=1) / (diffusion * rate * dt * u0 ** 2)]
+        other_density = na * ratio / nb
+        observables += [new[na:, 0] / (slowing / mass_ratio * rate * other_density * dt * u0),
+                        np.sum(new[na:, 1:] ** 2, axis=1)
+                        / (diffusion / mass_ratio ** 2 * rate * other_density * dt * u0 ** 2)]
+        for samples in observables:
+            assert abs(samples.mean() - 1) < 5 * samples.std(ddof=1) / np.sqrt(samples.size) + .003
+
+
+@pytest.mark.parametrize("mass_ratio", [1., 1836.15267343])
+def test_relativistic_unequal_weights_conserve_moments_in_expectation(mass_ratio):
+    u = c_light * jnp.array([[3., .1, -.2], [-.1, .4, .05]])
+    weight, mass = jnp.array([1e18, 7e18]), jnp.array([mass_electron, mass_ratio * mass_electron])
+    keys = random.split(random.PRNGKey(41), 8192)
+    new = np.asarray(jax.jit(jax.vmap(lambda key: collide(
+        key, jnp.zeros_like(u), u, weight, mass, jnp.array([-e_charge, e_charge]),
+        ((0, 1), (1, 1)), ((0, 1),), 15., .02, 1., 1., 1, relativistic=True)))(keys))
+    momentum = np.sum(np.asarray(weight * mass)[None, :, None] * (new - np.asarray(u)), axis=1)
+    change = _kinetic_relativistic(new, np.asarray(mass)) - _kinetic_relativistic(np.asarray(u), np.asarray(mass))
+    energy = np.sum(np.asarray(weight)[None, :] * change, axis=1)
+    for delta in (momentum, energy):
+        assert np.all(np.abs(delta.mean(axis=0)) < 5 * delta.std(axis=0, ddof=1) / np.sqrt(len(delta)))
+
+
+def test_relativistic_velocity_correlated_weights_keep_the_pair_local_rate():
+    """A single species contains heavy fast markers and light resting markers.
+    Self-pairing must use each pair's weight, not a global average. Comoving
+    beam-beam and background-background draws give exactly zero deflection."""
+    na, nb, density, gamma = 256, 3840, 1e20, 5.
+    n = na + nb
+    u0 = c_light * np.sqrt(gamma ** 2 - 1)
+    u = jnp.zeros((n, 3)).at[:na, 0].set(u0)
+    weight = jnp.repeat(jnp.array([9., 1.]) * density / nb, jnp.array([na, nb]))
+    rate = _cold_relativistic_rate(gamma, 1., density)
+    dt = 1e-3 / (rate * (n - 1) * 9 / nb)
+    keys = random.split(random.PRNGKey(47), 32)
+    new = np.asarray(jax.jit(jax.vmap(lambda key: collide(
+        key, jnp.zeros_like(u), u, weight, jnp.full(n, mass_electron), jnp.full(n, -e_charge),
+        ((0, n),), ((0, 0),), 15., dt, 1., 1., 1, relativistic=True)))(keys))
+    stopping = (u0 - new[:, :na, 0].mean(axis=1)) / (.5 * rate * dt * u0)
+    diffusion = np.sum(new[:, :na, 1:] ** 2, axis=2).mean(axis=1) / (rate * dt * u0 ** 2 / (1 + gamma))
+    for ratios in (stopping, diffusion):
+        assert abs(ratios.mean() - 1) < 5 * ratios.std(ddof=1) / np.sqrt(len(keys)) + .003
+
+
+@pytest.mark.parametrize("dt,logarithm,charge", [(0., 15., -e_charge), (1., 0., -e_charge), (1., 15., 0.)])
+def test_relativistic_zero_rates_are_identity_with_finite_gradients(dt, logarithm, charge):
+    u = c_light * jnp.array([[3., .1, .2], [0., 0., 0.]])
+
+    def run(u, weight):
+        return collide(random.PRNGKey(42), jnp.zeros_like(u), u, weight, jnp.full(2, mass_electron),
+                       jnp.full(2, charge), ((0, 2),), ((0, 0),), logarithm, dt, 1., 1., 1, relativistic=True)
+
+    assert np.array_equal(run(u, jnp.ones(2)), u)
+    gradients = jax.grad(lambda u, w: jnp.sum(run(u, w) / c_light), argnums=(0, 1))(u, jnp.ones(2))
+    assert all(np.isfinite(g).all() for g in gradients)
+
+
+def test_relativistic_comoving_and_axial_pairs_have_finite_state_gradients():
+    initial = c_light * jnp.array([[0., 0., 0.], [0., 0., 0.], [0., 0., 10.], [0., 0., 11.]])
+
+    def run(u):
+        return collide(random.PRNGKey(43), jnp.zeros_like(u), u, jnp.ones(4), jnp.full(4, mass_electron),
+                       jnp.full(4, -e_charge), ((0, 2), (2, 2)), ((0, 0), (1, 1)), 15., 1., 1., 1., 1,
+                       relativistic=True)
+    assert np.array_equal(run(initial)[:2], initial[:2])
+    assert np.isfinite(jax.jacrev(run)(initial)).all()
+
+
+def test_relativistic_azimuth_frame_has_correct_derivatives_at_the_axes():
+    """A separate constant frame at exactly p || z gives a finite but wrong
+    derivative: the scattering plane must tilt with the incident momentum."""
+    vectors = jnp.asarray([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.],
+                           [-1., 0., 0.], [0., -1., 0.], [0., 0., -1.]])
+    direction = jnp.asarray(np.random.default_rng(49).normal(size=vectors.shape))
+
+    def observable(p):
+        change = _collisions._rotate(random.PRNGKey(49), p, jnp.ones(6), jnp.full(6, .3), relativistic=True)
+        return jnp.sum((p + change) ** 2 * jnp.array([1., 2., 3.]))
+
+    derivative = jnp.sum(jax.grad(observable)(vectors) * direction)
+    h = 1e-5
+    finite = (observable(vectors + h * direction) - observable(vectors - h * direction)) / (2 * h)
+    assert np.isclose(derivative, finite, rtol=1e-7, atol=0.)
+
+
+def test_relativistic_angular_underflow_does_not_create_nan_gradients():
+    """A positive rate can fall below float32 range. It must not pass 0*inf
+    from the derivative of sqrt(s) into an otherwise unchanged trajectory."""
+    u = jnp.array([[3., .2, -.1], [0., 0., 0.]], jnp.float32) * c_light
+
+    def run(u, dt):
+        return collide(random.PRNGKey(48), jnp.zeros_like(u), u, jnp.ones(2, jnp.float32),
+                       jnp.full(2, mass_electron, jnp.float32), jnp.full(2, -e_charge, jnp.float32),
+                       ((0, 2),), ((0, 0),), 15., dt, 1., 1., 1, relativistic=True)
+
+    dt = jnp.asarray(1e-30, jnp.float32)
+    assert np.array_equal(run(u, dt), u)
+    gradients = jax.grad(lambda u, dt: jnp.sum(run(u, dt) / c_light), argnums=(0, 1))(u, dt)
+    assert all(np.isfinite(g).all() for g in gradients)
+
+
+def test_relativistic_density_gradient_matches_ensemble_mean_and_common_seed_difference():
+    """An ensemble gradient is checked against an analytic angular moment, not
+    just against differentiating the same fixed random realization twice."""
+    n, gamma, density, s = 128, 5., 1e20, .2
+    eta = np.sqrt(gamma ** 2 - 1)
+    u = jnp.zeros((2 * n, 3)).at[:n, 0].set(c_light * eta)
+    dt = s / _cold_relativistic_rate(gamma, 1., density)
+
+    def objective(scale, key):
+        new = collide(key, jnp.zeros_like(u), u, jnp.full(2 * n, scale * density / n),
+                      jnp.full(2 * n, mass_electron), jnp.full(2 * n, -e_charge),
+                      ((0, n), (n, n)), ((0, 1),), 15., dt, 1., 1., 1, relativistic=True)
+        return jnp.mean(new[:n, 0] / c_light)
+
+    keys = random.split(random.PRNGKey(44), 64)
+    gradients = np.asarray(jax.jit(jax.vmap(jax.grad(objective), in_axes=(None, 0)))(1., keys))
+    mean = jax.jit(lambda scale: jnp.mean(jax.vmap(objective, in_axes=(None, 0))(scale, keys)))
+    finite = float((mean(1.0001) - mean(.9999)) / .0002)
+    assert np.isclose(gradients.mean(), finite, rtol=2e-6, atol=0.)
+    expected = -.5 * eta * s * np.exp(-s)
+    assert abs(gradients.mean() - expected) < 5 * gradients.std(ddof=1) / np.sqrt(len(keys))
+
+
+@jax.jit
+def _relax_relativistic_box(u, weight, dt):
+    n = u.shape[0]
+
+    def step(state, _):
+        u, key = state
+        key, draw = random.split(key)
+        u = collide(draw, jnp.zeros_like(u), u, jnp.full(n, weight), jnp.full(n, mass_electron),
+                    jnp.full(n, -e_charge), ((0, n),), ((0, 0),), 15., dt, 1., 1., 1, relativistic=True)
+        return (u, key), None
+    return jax.lax.scan(step, (u, random.PRNGKey(45)), None, length=128)[0][0]
+
+
+@pytest.mark.parametrize("temperature,drift", [(.1, 0.), (1., 0.), (1., .6)])
+def test_maxwell_juttner_is_stationary_under_relativistic_self_collisions(temperature, drift):
+    """Use the d^3p measure, including p^2 in the radial CDF. Check quantiles and
+    inverse gamma, which pair-energy conservation alone cannot preserve."""
+    n, density = 4096, 1e20
+    radial = np.linspace(0., max(20 * np.sqrt(temperature), 40 * temperature), 20001)
+    pdf = radial ** 2 * np.exp(-(np.sqrt(1 + radial ** 2) - 1) / temperature)
+    cdf = np.r_[0., np.cumsum((pdf[:-1] + pdf[1:]) / 2)]
+    cdf /= cdf[-1]
+    rng = np.random.default_rng(46)
+    size = 3 * n if drift else n
+    uniform = rng.random(size) if drift else rng.permutation((np.arange(n) + .5) / n)
+    magnitude = np.interp(uniform, cdf, radial)
+    direction = rng.normal(size=(size, 3))
+    eta = magnitude[:, None] * direction / np.linalg.norm(direction, axis=1)[:, None]
+    boost = 1 / np.sqrt(1 - drift ** 2)
+    if drift:
+        # A laboratory time slice has d^3p_lab=(gamma_lab/gamma_rest)d^3p_rest.
+        # Bias the rest-frame samples by 1+beta*v_x/c before boosting; a blind
+        # boost of uniformly sampled rest-frame momenta is a different measure.
+        gamma_rest = np.sqrt(1 + np.sum(eta * eta, axis=1))
+        accepted = rng.random(size) < (1 + drift * eta[:, 0] / gamma_rest) / (1 + drift)
+        eta, gamma_rest, magnitude = eta[accepted][:n], gamma_rest[accepted][:n], magnitude[accepted][:n]
+        assert len(eta) == n
+        eta[:, 0] = boost * (eta[:, 0] + drift * gamma_rest)
+    u = c_light * eta
+    dt = .01 / _cold_relativistic_rate(1 + 3 * temperature, 1., density)
+    new = np.asarray(_relax_relativistic_box(jnp.asarray(u), density / n, dt))
+    rest = new / c_light
+    gamma_lab = np.sqrt(1 + np.sum(rest * rest, axis=1))
+    rest[:, 0] = boost * (rest[:, 0] - drift * gamma_lab)
+    radius = np.linalg.norm(rest, axis=1)
+    for probability in (.25, .5, .9):
+        measured = np.mean(radius < np.interp(probability, cdf, radial))
+        assert abs(measured - probability) < 5 * np.sqrt(probability * (1 - probability) / n) + .003
+    initial_inverse = 1 / np.sqrt(1 + magnitude ** 2)
+    final_inverse = 1 / np.sqrt(1 + radius ** 2)
+    assert abs(final_inverse.mean() - initial_inverse.mean()) < 5 * final_inverse.std() / np.sqrt(n) + .001
+    assert np.linalg.norm(new - u) / np.linalg.norm(u) > .1
+    before, after = (_kinetic_relativistic(p, mass_electron).sum() for p in (u, new))
+    assert abs(after / before - 1) < 1e-12

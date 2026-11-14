@@ -9,6 +9,7 @@ and a pytree. Histories have the stored step as their first axis.
 |---|---|---|
 | `t` | `(S,)` | time of each stored state, s |
 | `x`, `v` | `(S, N, 3)` | particle positions and velocities, or `None` |
+| `u` | `(S, N, 3)` | $p/m=\gamma v$ in m/s for relativistic particle histories, otherwise `None` |
 | `E`, `B`, `J` | `(S, cells, 3)` | endpoint fields; `J` averages the preceding step |
 | `rho` | `(S, cells)` | charge density at the cell centres |
 | `grid` | `(cells,)` | cell centres |
@@ -19,6 +20,7 @@ and a pytree. Histories have the stored step as their first axis.
 | `names`, `counts` | tuples | species names and particle counts |
 | `field_bc` | tuple | wall codes the fields were solved with, which the Gauss diagnostic needs |
 | `state` | pytree | the final loop state, for a restart |
+| `work` | pytree of `(S, species)` arrays | streamed kinetic energy and cumulative work, J/m² |
 
 `E` and `J` are at the cell faces, `B` and `rho` at the centres
 ({doc}`../numerics/discretization`).
@@ -56,6 +58,22 @@ d["temperatures"]     # per species, per component, in eV
 * {func}`~jaxincell.energies`, {func}`~jaxincell.gauss_residual`,
   {func}`~jaxincell.temperatures` and {func}`~jaxincell.dominant_frequency` are exported
   too, so only what is needed has to be computed.
+
+`output.work` retains `kinetic`, `prescribed_work`, `rr_work`, `radiated_energy`
+and `collision_work`, even with `store_particles=False`. Its cumulative quantities
+continue across restarts. All are per species and per unit transverse area.
+`rr_work` is signed mechanical work; `radiated_energy` is the separately integrated
+emitted energy. They need not be opposites in general electric fields. The realized
+collision-stage kinetic change is useful for measuring finite-marker conservation
+errors; it is not an assumed thermal reservoir.
+
+`energy_balance(output)` subtracts applied and dissipative mechanical work from
+particle plus self-field energy, including the existing wall/source bookkeeping.
+It does not include Poynting flux through an open electromagnetic boundary, and a
+small residual does not establish the accuracy of the orbit or the radiation model.
+See {doc}`../numerics/radiation` for the physical limits. The `temperatures` helper
+reports nonrelativistic velocity moments; it does not infer a relativistic
+thermodynamic temperature.
 
 ## Saving
 
@@ -107,6 +125,9 @@ Flat E and B retain their face and centre staggering; 3D tensors use the domain'
 periods and cell centres. The exporter checks the simulation's x geometry against the output.
 These fields are read from `sim` at export time, so pass the simulation used for the run.
 They add no histories to `Output`, and `meshes=False` skips all mesh records.
+The time-dependent callable and its parameter pytree are not serialized as an
+openPMD field mesh. Keep their defining Python setup with the run; the state archive
+preserves the accumulated work budgets.
 
 openPMD's `weighting` counts physical particles, while `Output.weight` counts them per unit
 area of the $y$-$z$ plane ({doc}`units`). The export multiplies by the transverse area the

@@ -18,7 +18,7 @@ from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mu_0,
                        elementary_charge, load_state, mass_electron, quiet_start, save_state)
 from jaxincell import speed_of_light as c
 from jaxincell._core import (E_x_from_rho, apply_particle_bc, boris, boris_relativistic,
-                             current_from_continuity, deposit, gather, gather_xyz, half_step_fields,
+                             current_from_continuity, deposit, gather, gather_xyz, half_step_fields, landau_lifshitz,
                              orbit_field_average, s2_weights, shape_weights, smooth, with_ghosts, wrap_positions)
 from jaxincell._simulation import _implicit_fields
 
@@ -385,7 +385,8 @@ def test_integral_force_all_components_work_charge_wrap_and_complete_restart(ord
         np.testing.assert_array_equal(actual, expected)
     with np.load(path) as data:
         stored = dict(data)
-    assert int(stored['format']) == 3 and str(stored['orbit_force']) == 'integral'
+    assert int(stored['format']) == 6 and int(stored['physics_format']) == 3
+    assert str(stored['orbit_force']) == 'integral'
     with pytest.raises(ValueError, match='orbit_force'):
         load_state(path, sim.replace(solver=sim.solver.replace(orbit_force='secant')))
     malformed = [{k: v for k, v in stored.items() if k != key} for key in ('orbit_force', 'shape_order', 'algorithm')]
@@ -645,14 +646,14 @@ def test_quintic_rejects_unsupported_solver_and_walls_and_checks_restart_shape(t
     path = save_state(tmp_path / 'quadratic', state, sim)
     quintic = sim.replace(solver=Solver(shape_order=5))
     archive = dict(np.load(path))
-    assert int(archive['format']) == 1 and 'shape_order' not in archive
+    assert int(archive['format']) == 6 and int(archive['physics_format']) == 1 and 'shape_order' not in archive
     np.testing.assert_array_equal(load_state(path, sim).rho, state.rho)
     with pytest.raises(ValueError, match='shape_order'):
         load_state(path, quintic)
     state5, _ = quintic.initial_state(jax.random.PRNGKey(0))
     save_state(path, state5, quintic)
     archive = dict(np.load(path))
-    assert int(archive['format']) == 2 and int(archive['shape_order']) == 5
+    assert int(archive['format']) == 6 and int(archive['physics_format']) == 2 and int(archive['shape_order']) == 5
     with pytest.raises(ValueError, match='shape_order'):
         load_state(path, sim)
     np.testing.assert_array_equal(load_state(path, quintic).rho, state5.rho)
@@ -780,6 +781,131 @@ def test_relativistic_pusher_conserves_energy_in_a_magnetic_field():
     p_expected = np.asarray(m * u[0] + q * E[0] * 1e-12)
     p_new = np.asarray(m * u_new[0])
     assert np.all(np.abs(p_new - p_expected) <= 1e-12 * np.abs(p_expected).max())
+
+
+def test_landau_lifshitz_matches_independent_force_and_radiated_power():
+    """Compare the stable form with the usual field-quadratic LL expression."""
+    rng = np.random.default_rng(91)
+    eta, E, B = rng.normal(size=(3, 12, 3))
+    u, E, B = eta * 3 * c, E * 1e8, B * 2
+    charge = elementary_charge * np.resize([-1., 1., 2.], 12)
+    mass = mass_electron * np.linspace(1, 4, 12)
+    gamma = np.sqrt(1 + np.sum(u**2, axis=-1, keepdims=True) / c**2)
+    v = u / gamma
+    force = E + np.cross(v, B)
+    ve = np.sum(v * E, axis=-1, keepdims=True)
+    invariant = np.sum(force**2, axis=-1, keepdims=True) - ve**2 / c**2
+    rate = charge**4 / (6 * np.pi * epsilon_0 * mass**3 * c**3)
+    expected = rate[:, None] * (np.cross(force, B) + ve * E / c**2 - gamma**2 * invariant * v / c**2)
+    emitted = (rate[:, None] * mass[:, None] * gamma**2 * invariant)[:, 0]
+    acceleration, power = jax.jit(landau_lifshitz)(u, E, B, charge, mass)
+    np.testing.assert_allclose(acceleration, expected, rtol=3e-14, atol=0)
+    np.testing.assert_allclose(power, emitted, rtol=3e-14, atol=0)
+    assert np.all(np.asarray(power) > 0)
+
+
+@pytest.mark.parametrize('dtype', [jnp.float32, jnp.float64])
+def test_landau_lifshitz_force_free_parallel_and_zero_controls(dtype):
+    """These cancellations must survive high gamma and float32, without clipping S."""
+    q, m = jnp.asarray(-elementary_charge, dtype), jnp.asarray(mass_electron, dtype)
+    eta = jnp.asarray([[0., 0., 0.], [1., 0., 0.], [1e3, 0., 0.], [1e6, 0., 0.]], dtype)
+    u, zero = eta * c, jnp.zeros_like(eta)
+    acceleration, power = landau_lifshitz(u, zero, zero, q, m)
+    np.testing.assert_array_equal(acceleration, 0)
+    np.testing.assert_array_equal(power, 0)
+    E = jnp.broadcast_to(jnp.asarray([1e8, 0., 0.], dtype), u.shape)
+    acceleration, power = landau_lifshitz(u, E, zero, q, m)
+    np.testing.assert_array_equal(acceleration, 0)
+    tau = elementary_charge**2 / (6 * np.pi * epsilon_0 * mass_electron * c**3)
+    expected = tau * elementary_charge**2 / mass_electron * 1e16
+    np.testing.assert_allclose(power, expected, rtol=5e-7 if dtype == jnp.float32 else 2e-15, atol=0)
+    assert power.dtype == dtype
+    # beta=(3/5,0,0), E=-v x B: allow only SI-conversion roundoff.
+    u = jnp.asarray([.75 * c, 0., 0.], dtype)
+    B = jnp.asarray([0., 0., 5.], dtype)
+    E = jnp.asarray([0., 3. * c, 0.], dtype)
+    acceleration, power = landau_lifshitz(u, E, B, q, m)
+    eps = np.finfo(dtype).eps
+    force_scale = tau * (elementary_charge / mass_electron)**2 * c * 25
+    np.testing.assert_allclose(acceleration, 0, rtol=0, atol=8 * eps * force_scale)
+    assert float(power) <= 8 * eps**2 * force_scale * mass_electron * c
+    _, small_power = landau_lifshitz(u, E * (1 + 1e-4), B, q, m)
+    assert 0 < float(small_power) < expected
+
+
+def test_landau_lifshitz_magnetic_pitch_work_and_marker_weights():
+    """Uniform B has known parallel/perpendicular damping and exactly P=-m v.a."""
+    eta = jnp.array([[0., 0., 4.], [3., 4., 2.], [1e6, 2e6, 3e6], [1e-6, 0., 0.]])
+    u = eta * c
+    gamma = jnp.sqrt(1 + jnp.sum(eta**2, axis=1))
+    B = jnp.array([0., 0., 2.])
+    acceleration, power = landau_lifshitz(u, jnp.zeros_like(u), B, -elementary_charge, mass_electron)
+    tau = elementary_charge**2 / (6 * np.pi * epsilon_0 * mass_electron * c**3)
+    a = tau * (2 * elementary_charge / mass_electron)**2
+    perpendicular2 = np.asarray(eta[:, :2]**2).sum(axis=1)
+    expected = -a * np.asarray(u) / np.asarray(gamma[:, None])
+    expected[:, :2] *= (1 + perpendicular2[:, None])
+    expected[:, 2] *= perpendicular2
+    np.testing.assert_allclose(acceleration, expected, rtol=8e-15, atol=0)
+    np.testing.assert_allclose(power, a * mass_electron * c**2 * perpendicular2, rtol=8e-15, atol=0)
+    work = mass_electron * jnp.sum(u / gamma[:, None] * acceleration, axis=1)
+    np.testing.assert_allclose(-work, power, rtol=8e-15, atol=0)
+    # Splitting a marker changes represented radiation only through its weights.
+    split_u = jnp.stack([u[1], u[1]])
+    split_acceleration, split_power = landau_lifshitz(
+        split_u, jnp.zeros_like(split_u), B, -elementary_charge, mass_electron)
+    np.testing.assert_allclose(split_acceleration, jnp.stack([acceleration[1], acceleration[1]]), rtol=0, atol=0)
+    assert float(jnp.dot(jnp.array([2., 4.]), split_power)) == pytest.approx(6 * float(power[1]), rel=2e-15, abs=0)
+
+
+def test_landau_lifshitz_derivatives_are_finite_at_zero_momentum():
+    """No norm division or branch may poison an outer derivative at a stopped marker."""
+    B = jnp.array([0., 0., 2.])
+    zero = jnp.zeros(3)
+
+    def acceleration(u):
+        return landau_lifshitz(u, zero, B, -elementary_charge, mass_electron)[0]
+
+    def power(u):
+        return landau_lifshitz(u, zero, B, -elementary_charge, mass_electron)[1]
+
+    tau = elementary_charge**2 / (6 * np.pi * epsilon_0 * mass_electron * c**3)
+    a = tau * (2 * elementary_charge / mass_electron)**2
+    np.testing.assert_allclose(jax.jacfwd(acceleration)(zero), -a * np.diag([1., 1., 0.]), rtol=2e-15, atol=0)
+    np.testing.assert_array_equal(jax.grad(power)(zero), 0)
+    np.testing.assert_allclose(jax.hessian(power)(zero), 2 * a * mass_electron * np.diag([1., 1., 0.]),
+                               rtol=2e-15, atol=0)
+
+
+def test_landau_lifshitz_cooling_and_gradient_match_exact_magnetic_solution():
+    """The pure reaction substep has an exact energy solution and a known dgamma/dB."""
+    q, m, gamma0, duration, strength = -elementary_charge, mass_electron, 40., .01, 2.
+    tau = q**2 / (6 * np.pi * epsilon_0 * m * c**3)
+
+    def cooling(b, steps):
+        field = jnp.array([0., 0., b])
+        start = jnp.array([c * jnp.sqrt(gamma0**2 - 1), 0., 0.])
+        dt = duration / steps
+
+        def step(u, _):
+            a, _ = landau_lifshitz(u, jnp.zeros(3), field, q, m)
+            midpoint = u + dt * a / 2
+            a_mid, _ = landau_lifshitz(midpoint, jnp.zeros(3), field, q, m)
+            return u + dt * a_mid, None
+
+        final = lax.scan(step, start, None, length=steps)[0]
+        return jnp.sqrt(1 + jnp.sum((final / c)**2))
+
+    a = tau * (q * strength / m)**2
+    exact = 1 / np.tanh(np.arctanh(1 / gamma0) + a * duration)
+    coarse = jax.jit(lambda b: cooling(b, 64))(strength)
+    value, gradient = jax.jit(jax.value_and_grad(lambda b: cooling(b, 128)))(strength)
+    assert 3.8 < float(abs(coarse - exact) / abs(value - exact)) < 4.2
+    assert float(value) == pytest.approx(exact, rel=2e-6, abs=0)
+    expected_gradient = -2 * a * duration / strength * (exact**2 - 1)
+    assert float(gradient) == pytest.approx(expected_gradient, rel=1e-5, abs=0)
+    _, forward_gradient = jax.jvp(lambda b: cooling(b, 128), (strength,), (1.,))
+    assert float(forward_gradient) == pytest.approx(float(gradient), rel=1e-13, abs=0)
 
 
 def test_filter_transfer_function():

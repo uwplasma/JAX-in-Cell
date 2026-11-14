@@ -153,3 +153,148 @@ def test_an_electric_field_on_a_grid_accelerates_as_a_flat_one_does():
         out = Simulation(domain, [particle], solver, external_E=E).run(10)
         v_y = np.asarray(out.v)[:, 0, 1]
         assert np.allclose(np.diff(v_y), -e_charge * 100.0 / mass_electron * 1e-11, rtol=1e-9)
+
+
+def _rf_drive(x, time, parameters):
+    electric = jnp.zeros_like(x).at[:, 1].set(
+        parameters["amplitude"] * jnp.sin(parameters["omega"] * time + parameters["phase"]))
+    return electric, jnp.zeros_like(x)
+
+
+@pytest.mark.parametrize("algorithm", ["explicit", "implicit"])
+def test_prescribed_rf_uses_absolute_midpoint_time_and_has_control_derivatives(algorithm, tmp_path):
+    from jaxincell import load_state, save_state
+    from jaxincell._diagnostics import energy_balance
+
+    duration, omega, amplitude, phase = 1e-10, 1e10, 1e6, .3
+    particle = Species.electrons(1, 1e-20, u=jnp.zeros((1, 3)))
+    parameters = dict(amplitude=amplitude, omega=omega, phase=phase)
+    unit = e_charge * amplitude / (mass_electron * omega)
+    exact = -(np.cos(phase) - np.cos(omega*duration + phase))
+    errors = []
+    for steps in (8, 16):
+        simulation = Simulation(Domain(length=.01, cells=4, time_step=duration/steps), [particle],
+                                Solver(algorithm=algorithm, model="electrostatic", relativistic=True,
+                                       picard_iterations=3), prescribed_fields=_rf_drive, field_parameters=parameters)
+        output = simulation.run(steps, store_particles=False).validate()
+        errors.append(abs(float(output.state.u[0, 1] / unit) - exact))
+        scale = float(output.state.work.kinetic.sum())
+        assert np.max(np.abs(np.asarray(energy_balance(output)))) / scale < 2e-11
+    assert errors[0] / errors[1] == pytest.approx(4, rel=.01)
+
+    def control(phi):
+        experiment = simulation.replace(field_parameters={**parameters, "phase": phi})
+        return experiment.run(16, store_particles=False).state.u[0, 1] / unit
+
+    function = jax.jit(control)
+    reverse = jax.jit(jax.grad(control))(phase)
+    forward = jax.jvp(control, (phase,), (1.,))[1]
+    finite = (function(phase + 1e-5) - function(phase - 1e-5)) / 2e-5
+    assert float(reverse) == pytest.approx(float(forward), rel=2e-13)
+    assert float(reverse) == pytest.approx(float(finite), rel=2e-9)
+    interval = simulation.domain.dt / (simulation.solver.substeps if algorithm == "implicit" else 1)
+    quadrature = (omega*interval/2) / np.sin(omega*interval/2)
+    analytic = (np.sin(phase) - np.sin(omega*duration + phase)) * quadrature
+    assert float(reverse) == pytest.approx(analytic, rel=2e-13)
+    np.testing.assert_allclose(jax.vmap(function)(jnp.array([phase, phase+.2])),
+                               [function(phase), function(phase+.2)], rtol=2e-14, atol=0)
+
+    first = simulation.run(5, store_particles=False)
+    restored = load_state(save_state(tmp_path / "rf", first.state, simulation), simulation)
+    continued = simulation.run(11, state=restored, store_particles=False)
+    for actual, expected in zip(jax.tree.leaves(continued.state), jax.tree.leaves(output.state)):
+        np.testing.assert_array_equal(actual, expected)
+    if algorithm == "implicit":
+        replay = simulation.replace(solver=simulation.solver.replace(picard_iterations=7)).run(
+            16, store_particles=False)
+        np.testing.assert_allclose(replay.work.prescribed_work, output.work.prescribed_work, rtol=2e-14, atol=0)
+
+
+def test_prescribed_fields_add_to_static_arrays_at_particle_event_times():
+    def drive(x, time, parameters):
+        electric = jnp.zeros_like(x).at[:, 0].set(x[:, 0] + parameters["slope"]*time)
+        return electric, jnp.array([0., 0., parameters["magnetic"]])
+
+    simulation = Simulation(Domain(length=1., cells=4), [Species.electrons(2, 1.)],
+                            external_E=jnp.broadcast_to(jnp.array([1., 2., 3.]), (4, 3)),
+                            external_B=jnp.broadcast_to(jnp.array([0., 0., 4.]), (4, 3)),
+                            prescribed_fields=drive, field_parameters={"slope": 2., "magnetic": 5.})
+    position, time = jnp.array([[-.2, 0., 0.], [.1, 0., 0.]]), jnp.array([.5, 1.])
+    fields = jax.jit(simulation.external_fields_at)(position, time)
+    np.testing.assert_allclose(fields, [[1.8, 2., 3., 0., 0., 9.], [3.1, 2., 3., 0., 0., 9.]], atol=1e-14)
+    derivative = jax.jvp(lambda t: simulation.external_fields_at(position, t), (time,), (jnp.ones(2),))[1]
+    np.testing.assert_allclose(derivative, [[2., 0., 0., 0., 0., 0.]]*2, atol=1e-14)
+
+
+def test_time_dependent_wall_impact_energy_and_gradient_converge():
+    """An independently integrated polynomial acceleration gives the event and its derivative."""
+    initial_x, initial_v, constant, slope, duration = .4, .2, .3, .4, .6
+    roots = np.roots([slope/6, constant/2, initial_v, initial_x-.5])
+    impact_time = min(float(root.real) for root in roots if abs(root.imag) < 1e-14 and root.real > 0)
+    impact_v = initial_v + constant*impact_time + .5*slope*impact_time**2
+    reference = .5*impact_v**2
+    dtime = -.5*impact_time**2 / impact_v
+    derivative = impact_v * (impact_time + (constant+slope*impact_time)*dtime)
+
+    def drive(x, time, acceleration):
+        return jnp.zeros_like(x).at[:, 0].set(acceleration + slope*time), jnp.zeros_like(x)
+
+    particle = Species("marker", 1, 1/e_charge, 1., 1e-30,
+                       x=jnp.array([[initial_x, 0., 0.]]), v=jnp.array([[initial_v, 0., 0.]]))
+    errors, gradient_errors = [], []
+    for steps in (8, 16):
+        simulation = Simulation(Domain(length=1., cells=4, time_step=duration/steps,
+                                       particle_bc="absorbing", field_bc="reflective"),
+                                [particle], Solver(model="electrostatic"),
+                                prescribed_fields=drive, field_parameters=constant)
+
+        def energy(acceleration):
+            output = simulation.replace(field_parameters=acceleration).run(steps, store_every=steps)
+            return output.state.wall.energy_in[0, 1] / 1e-30
+
+        value, gradient = jax.jit(jax.value_and_grad(energy))(constant)
+        errors.append(abs(float(value)/reference - 1))
+        gradient_errors.append(abs(float(gradient)/derivative - 1))
+    assert errors[1] < errors[0] / 2 and errors[1] < 2e-3
+    assert gradient_errors[1] < gradient_errors[0] / 2 and gradient_errors[1] < 2e-3
+
+
+def test_prescribed_source_partial_kick_uses_birth_and_absolute_restart_times():
+    from jaxincell import Source
+
+    def drive(x, time, parameters):
+        return jnp.zeros_like(x).at[:, 0].set(parameters[0] + parameters[1]*time), jnp.zeros_like(x)
+
+    source = Source(density=1e-30, drift=(1., 0., 0.), vth=0., emit=1, every=2)
+    particle = Species("marker", 8, 1/e_charge, 1., 0., active=0, source=source)
+    simulation = Simulation(Domain(length=10., cells=4, time_step=.01,
+                                   particle_bc="absorbing", field_bc="reflective"), [particle],
+                            Solver(model="electrostatic"), prescribed_fields=drive,
+                            field_parameters=jnp.array([.2, .1]))
+    whole = simulation.run(4, store_particles=False).validate()
+    first = simulation.run(1, store_particles=False)
+    rest = simulation.run(3, state=first.state, store_particles=False).validate()
+    np.testing.assert_array_equal(rest.state.u, whole.state.u)
+    np.testing.assert_array_equal(rest.state.w, whole.state.w)
+    values = np.sort(np.asarray(whole.state.u)[np.asarray(whole.state.w) > 0, 0])
+    birth = np.array([.025, .005])
+    expected = 1 + .2*(.04-birth) + .05*(.04**2-birth**2)
+    np.testing.assert_allclose(values, np.sort(expected), rtol=2e-13, atol=0)
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_prescribed_source_window_cannot_preload_a_particle_past_a_wall(side):
+    from jaxincell import Source
+
+    inward = 1 if side == "left" else -1
+
+    def drive(x, time, parameters):
+        return jnp.broadcast_to(jnp.array([inward*.1, 0., 0.]), x.shape), jnp.zeros_like(x)
+
+    source = Source(side=side, density=1e-30, drift=(inward*1., 0., 0.), emit=4, every=4)
+    particle = Species("marker", 8, 1/e_charge, 1., 0., source=source)
+    simulation = Simulation(Domain(length=1., cells=4, time_step=1.,
+                                   particle_bc="absorbing", field_bc="reflective"), [particle],
+                            Solver(model="electrostatic"), prescribed_fields=drive)
+    with pytest.raises(RuntimeError, match="shorten source entry windows"):
+        simulation.run(4, store_particles=False).validate()

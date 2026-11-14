@@ -20,7 +20,7 @@ from ._config import epsilon_0, speed_of_light as c
 
 __all__ = ["s2_weights", "s5_weights", "shape_weights", "map_indices", "deposit", "PARITY", "PARK", "to_centres",
            "with_ghosts", "gather", "gather_xyz", "current_from_continuity", "to_faces", "wall_faces_E", "curl_E",
-           "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic",
+           "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic", "landau_lifshitz",
            "apply_particle_bc", "wrap_positions", "smooth"]
 
 
@@ -395,6 +395,37 @@ def boris_relativistic(u, E, B, qm, dt):
     u_prime = u + jnp.cross(u, t)
     u = u + 2 * jnp.cross(u_prime, t) / (1 + jnp.sum(t * t, axis=1, keepdims=True))
     return u + qm * E * (dt / 2)
+
+
+def landau_lifshitz(u, E, B, charge, mass):
+    """Field-quadratic Landau--Lifshitz ``du/dt`` and emitted power per particle.
+
+    All inputs are SI: ``u = gamma*v`` and vector fields have shape ``(..., 3)``;
+    physical ``charge`` and ``mass`` are scalars or have the batch shape ``(...)``.
+    Macroparticle weights enter the caller's energy sum, never this force law.
+    The field-derivative term of full Landau--Lifshitz is omitted.
+
+    With ``f = E/c + beta x B``, the rest-frame electric invariant is the positive
+    sum ``f² + |(u/c) x f|²``. This avoids subtracting nearly equal squares at high
+    energy. Cross products also cancel the longitudinal electric force exactly.
+    Emission is nevertheless positive there: mechanical RR work and radiation
+    differ by near-field energy, so the caller must accumulate them separately.
+    """
+    eta = u / c
+    gamma = jnp.sqrt(1 + jnp.sum(eta * eta, axis=-1, keepdims=True))
+    beta = eta / gamma
+    magnetic = jnp.cross(beta, B)
+    f = E / c + magnetic
+    h = jnp.cross(eta, f)
+    h2 = jnp.sum(h * h, axis=-1, keepdims=True)
+    qm = jnp.asarray(charge) / jnp.asarray(mass)
+    tau = qm * charge / (6 * jnp.pi * epsilon_0 * c**3)  # q² alone underflows in float32.
+    rate = tau * qm**2
+    acceleration = rate[..., None] * c * (
+        jnp.cross(f, B) - jnp.sum(beta * f, axis=-1, keepdims=True) * magnetic
+        + jnp.cross(jnp.cross(beta, f), f) - h2 * beta)
+    power = rate * mass * c**2 * (jnp.sum(f * f, axis=-1) + h2[..., 0])
+    return acceleration, power
 
 
 PARK = 1.5      # cells beyond a wall where an absorbed particle is parked; see apply_particle_bc

@@ -50,12 +50,19 @@ position reconstructed from the state.
    ```
 3. **Gather and push.** $\mathbf E$ is averaged from the faces to the cell centres,
    where $\mathbf B$ and the charge live, and the fields, plus `external_E` and
-   `external_B` if given, are interpolated to $x^{n+1/2}$ with the $S_2$ of the deposit,
+   `external_B` if given, are interpolated to $x^{n+1/2}$ with the shape of the deposit,
    with image values beyond the walls ({doc}`boundaries`); the Boris
-   rotation advances $\mathbf v^n\to\mathbf v^{n+1}$.
-4. **Collisions**, if a {class}`~jaxincell.Collisions` model is set ({doc}`collisions`).
-5. **Move.** $x^{n+3/2} = x^{n+1/2} + \Delta t\,\mathbf v^{n+1}$, then the boundary
-   conditions of {doc}`boundaries` are applied.
+   rotation advances the momentum. The prescribed callable is evaluated at the
+   midpoint time. With radiation, two RR half-kicks surround the Lorentz kick
+   ({doc}`radiation`). Call the resulting velocity $\mathbf v_*$.
+4. **Reach the integer position and collide.** First set
+   $x^{n+1}=x^{n+1/2}+\tfrac12\Delta t\,\mathbf v_*$, with periodic wrapping.
+   A {class}`~jaxincell.Collisions` model acts there at fixed position and produces
+   $\mathbf v^{n+1}$ ({doc}`collisions`).
+5. **Prepare the next half-position.**
+   $x^{n+3/2}=x^{n+1}+\tfrac12\Delta t\,\mathbf v^{n+1}$.
+   Without collisions these two half drifts are one full drift. The wall path
+   instead carries the physical integer position and resolves its events as above.
 6. **Sources over the second half step**, from $x^{n+1/2}$ to $x^{n+1}$, starting from
    the density step 1 already computed at $x^{n+1/2}$ rather than depositing it again.
    That matters at an absorbing wall: step 5 has just zeroed the charge of the
@@ -115,10 +122,17 @@ in its state instead of the velocity, so that $\gamma = \sqrt{1 + u^2/c^2}$ stay
 at any energy: converting to $\mathbf v$ and back every step loses a fraction
 $\gamma^2\epsilon$ of $\gamma$ each time, which in single precision took a particle started
 at $\gamma = 1000$ to 1423 in a thousand steps with no field. The velocity is formed from
-$\mathbf u$ only where it is needed, for the position update, the output, the collisions
-and the walls. The initial $\mathbf u$ comes from the sampled velocities, of which only
+$\mathbf u$ only where it is needed, for the position update, the velocity output
+and the walls. Relativistic collisions act on $\mathbf u$ directly, with no velocity
+roundtrip. The initial $\mathbf u$ is supplied as `Species.u` or comes from the sampled velocities, of which only
 one with $v^2/c^2 > 1 - 10^{-5}$ is changed, brought back to that speed along its own
 direction ({doc}`initialization`).
+
+Pairwise collision conservation does not imply exact conservation of the coupled
+electromagnetic PIC step. Its second transverse-current deposit uses the
+post-collision velocity, while the preceding half drift used $\mathbf v_*$.
+Measure field/particle energy exchange under timestep refinement, separately from
+the collision-stage `collision_work` and the exact discrete charge continuity.
 
 ## Accuracy
 
