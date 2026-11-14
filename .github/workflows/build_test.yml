@@ -8,6 +8,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_call:
 
 permissions:
@@ -26,6 +27,7 @@ env:
 jobs:
   build:
     # Whole suite, branch coverage at 100 % (fail_under is in pyproject.toml), flake8.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ${{ fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') }}
     timeout-minutes: 30
     name: Python 3.12 Test
@@ -79,6 +81,7 @@ jobs:
     # The other Pythons, and the JAX each of them resolves to, run the files that exercise
     # the public interface, the configuration and the closed-form checks; a release runs
     # everything.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ${{ fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') }}
     timeout-minutes: 30
     strategy:
@@ -117,6 +120,7 @@ jobs:
     # run in the smaller preset their `--quick` flag selects; the rest (bump-on-tail,
     # two-stream, the full presets) take minutes each and are left to the documentation
     # build of the figures.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ${{ fromJSON('["self-hosted", "macOS", "uwplasma-cpu"]') }}
     timeout-minutes: 30
     name: Examples
