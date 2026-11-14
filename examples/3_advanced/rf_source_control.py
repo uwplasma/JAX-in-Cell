@@ -5,14 +5,15 @@ source work uses the total electric field and includes field cross-energy.
 The ideal actuator supplies positive instantaneous work and dumps all returned
 energy. This is not a runaway-suppression or wall-plug-power result.
 
-Run with the JAX-in-Cell development environment. Optional JIC_RF_OUTPUT names
-an output directory outside the checkout; otherwise only the figure is shown.
-All physical and numerical settings are below. No production code is changed.
+Requires scipy (the development extra). Results go to ./rf_source_control. Runs in about
+37 s.
+
+Runs in about 51 s.
 """
 import gc
+import os
 import hashlib
 import json
-import os
 from functools import lru_cache
 from pathlib import Path
 import time
@@ -34,7 +35,7 @@ jax.config.update("jax_enable_x64", True)
 # Fixed target, actuator convention and coefficient bounds precede optimization.
 design_steps, reference_steps, verification_steps = 512, (128, 256, 512, 1024), (512, 1024, 2048)
 coefficient_max, target_margin = 2.5, 1.002
-output_directory = Path(os.environ["JIC_RF_OUTPUT"]) if os.environ.get("JIC_RF_OUTPUT") else None
+output_directory = Path.cwd() / "rf_source_control"
 frequency, cycles, length, field_scale = 500e6, 4, 1., 1e3
 omega, duration = 2 * np.pi * frequency, cycles / frequency
 plasma_frequency = .8 * omega
@@ -168,8 +169,7 @@ assert jax.config.read('jax_enable_x64'), 'The reference gates require float64.'
 start_time = time.perf_counter()
 source_file = Path(__file__).resolve()
 source_hashes = {source_file.name: hashlib.sha256(source_file.read_bytes()).hexdigest()}
-if output_directory is not None:
-    output_directory.mkdir(parents=True, exist_ok=True)
+output_directory.mkdir(exist_ok=True)
 report = {'scope': 'Uniform cold-plasma source-accounting/control benchmark; not runaway cooling.',
           'source_hashes': source_hashes, 'jax': jax.__version__, 'devices': [str(x) for x in jax.devices()],
           'density_m-3': float(density), 'frequency_Hz': frequency, 'pulse_s': duration,
@@ -181,8 +181,7 @@ report = {'scope': 'Uniform cold-plasma source-accounting/control benchmark; not
 
 def save():
     report['elapsed_s'] = time.perf_counter() - start_time
-    if output_directory is not None:
-        (output_directory / 'rf_source_results.json').write_text(json.dumps(report, indent=2) + '\n')
+    (output_directory / 'rf_source_results.json').write_text(json.dumps(report, indent=2) + '\n')
 
 
 def curl(gradient):
@@ -326,7 +325,7 @@ for name, index in [('nonrecovering_source', 0), ('field_exposure', 2), ('cycle_
                       bounds=[(0., coefficient_max)] * 4,
                       constraints={'type': 'ineq', 'fun': lambda controls: constraint(controls)[0],
                                    'jac': lambda controls: constraint(controls)[1]},
-                      options={'maxiter': 60, 'ftol': 1e-10})
+                      options={'maxiter': 200, 'ftol': 1e-10})
     controls_by_name[name] = result.x
     report['optimization'][name] = {'success': bool(result.success), 'message': result.message,
                                     'iterations': result.nit, 'controls': result.x.tolist()}
@@ -392,6 +391,5 @@ axes[1].set(xticks=centers, xticklabels=['Flat', 'Source cost', 'Exposure'],
             ylabel='Energy (microjoule/m²)', title='Same terminal-energy constraint')
 axes[1].legend(fontsize=8)
 fig.tight_layout()
-if output_directory is not None:
-    fig.savefig(output_directory / 'rf_source_control.png', dpi=150, pil_kwargs={'optimize': True})
+fig.savefig(output_directory / 'rf_source_control.png', dpi=150, pil_kwargs={'optimize': True})
 plt.show()

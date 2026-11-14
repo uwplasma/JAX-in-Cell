@@ -11,6 +11,8 @@ Rev. Plasma Phys. 1, 105, 1965; NRL Plasma Formulary):
 
 which is what this measures. The operator carries no free parameter: the
 variance of the scattering angle is fixed by matching nu_perp.
+
+Runs in about 5 s.
 """
 
 import os

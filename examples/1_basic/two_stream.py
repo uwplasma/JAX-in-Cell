@@ -5,6 +5,8 @@ mode grows exponentially until the beams trap each other and the phase space
 rolls up into the vortex that closes the growth. Run it and watch the animation:
 
     python two_stream.py
+
+Runs in about 11 s.
 """
 
 import os

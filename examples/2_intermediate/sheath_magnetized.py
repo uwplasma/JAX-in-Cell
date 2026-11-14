@@ -41,12 +41,11 @@ be, and checked rather than asserted:
 * **the ion impact energies and angles**, which are what a wall actually feels, binned at
   the crossing rather than read off a snapshot of who is nearby.
 
-Run with `--quick` for a smaller, faster version.
+Runs in about 34 s; the settings marked `research` in the script give the converged version.
 """
 
 import json
 import os
-import sys
 from pathlib import Path
 
 # Double precision is the default, and what the conservation checks rely on. Run with
@@ -61,30 +60,24 @@ from jaxincell import (Domain, Impacts, Simulation, Solver, Source, Species, eps
                        potential, provenance, elementary_charge as e_charge)
 
 # --- what to change ---------------------------------------------------------------------
-quick = "--quick" in sys.argv
 electron_temperature = 1.0              # eV
 temperature_ratio = 1.0                 # T_i / T_e
 density = 1e16                          # m^-3
 mass_ratio = 400.0                      # m_i/m_e, reduced so that the ion transit fits in a laptop run
-angles = (90.0, 30.0) if quick else (90.0, 30.0, 15.0)   # to the wall plane; 90 is normal incidence
+angles = (90.0, 30.0)   # to the wall plane; 90 is normal incidence; research: (90.0, 30.0, 15.0)
 gyro_over_debye = 8.0                   # rho_s / lambda_D, which sets B_0
 box_debye_lengths = 60.0
-cells = 48 if quick else 240
+cells = 48   # research: 240
 steps_per_plasma_period = 10.0
-transits = 0.03 if quick else 4.0
+transits = 0.03   # research: 4.0
 # `Species.n` is a capacity and has to hold every particle alive at once, which is `emit`
 # times the residence time in steps. An ion entering at c_s takes a whole sound transit to
 # cross, 12000 steps here; an electron takes about a tenth of that, so the two want
 # different emission rates to end up with comparable numbers of markers in comparable pools.
 # The pool sizes below are measured, and the run refuses to report anything if one overflows.
-# For the record, PR #43 raised the quick preset to 128 cells, 1.6 sound transits, 30000 slots and
-# 30 emitted a step. That is 19200 steps in which an ion lives 12000, so it asks the pool to hold
-# about 360000 ions in the 30000 slots it was given: the run overflowed by an order of magnitude
-# and printed numbers anyway. Those settings are history rather than a target; what a pool can
-# hold is what sets the preset here.
-capacity = 6000 if quick else 80000
-emit_ions = 10 if quick else 5
-emit_electrons = 10 if quick else 40
+capacity = 6000   # research: 80000
+emit_ions = 10   # research: 5
+emit_electrons = 10   # research: 40
 
 # --- the setup ----------------------------------------------------------------------------
 spread = np.sqrt(electron_temperature * e_charge / mass_electron)
@@ -110,10 +103,6 @@ print("ions enter along B at c_s, so their normal entrance speed is c_s sin(alph
       + ", ".join(f"{np.sin(np.radians(a)):.2f} c_s at {a:.0f} deg" for a in angles))
 print(f"pools of {capacity} slots per species, {emit_electrons} electrons and {emit_ions} ions "
       f"emitted a step\n")
-if quick:
-    print("--quick is a smoke preset: a fraction of a sound transit, so the sheath has not settled\n"
-          "and none of the numbers below is a measurement. It checks that every step of this script\n"
-          "runs and that the pools hold. The documentation quotes the full preset.\n")
 if omega_ce * dt > 0.3:
     print(f"WARNING: Omega_e dt = {omega_ce * dt:.2f}; the electron gyro-phase is under-resolved.\n")
 
@@ -247,14 +236,14 @@ plt.tight_layout()
 # A figure is a picture of an answer; this is what the answer came from. Written beside wherever
 # the script was run, so that a number quoted anywhere can be traced to the run that produced it
 # and to the versions, the precision and the commit that produced that.
-folder = Path.cwd() / ("sheath_magnetized_quick" if quick else "sheath_magnetized")
+folder = Path.cwd() / "sheath_magnetized"
 folder.mkdir(exist_ok=True)
 settings = dict(electron_temperature=electron_temperature, temperature_ratio=temperature_ratio,
                 density=density, mass_ratio=mass_ratio, angles=list(angles),
                 gyro_over_debye=gyro_over_debye, box_debye_lengths=box_debye_lengths, cells=cells,
                 steps_per_plasma_period=steps_per_plasma_period, transits=transits, steps=steps,
                 capacity=capacity, emit_electrons=emit_electrons, emit_ions=emit_ions,
-                entrance="c_s along B", quick=quick)
+                entrance="c_s along B")
 summary = {f"{angle:.0f}": dict(wall_potential=float(results[angle]["phi"][-1]),
                                 fluence=float(results[angle]["fluence"]),
                                 above_energy_range=float(results[angle]["above_range"]),

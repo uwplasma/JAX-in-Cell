@@ -28,6 +28,8 @@ the omitted term is resolved; the default beam is far below that regime.
 Requires scipy (the development extra). No files are written; edit the settings
 below or save the displayed figure. Refine the physical timestep, not only RR
 substeps, to resolve the counterpropagating optical phase.
+
+Runs in about 24 s.
 """
 import os
 

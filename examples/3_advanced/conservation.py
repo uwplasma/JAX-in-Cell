@@ -14,7 +14,10 @@ e n/eps0, the density of one sign of charge, because a neutral plasma has no net
 Round-off sets the floor: about 1e-16 in double precision, and about 1e-7 in single.
 
 This is the setup of docs/scripts/fig_conservation.py, whose numbers the documentation
-quotes: a quiet two-stream run of 400 steps.
+quotes: a quiet two-stream run of 200 steps and 2000 particles per species (400 and 4000 in the
+documentation).
+
+Runs in about 19 s.
 """
 
 import os
@@ -35,13 +38,13 @@ ERRORS = {"energy_error": "energy", "momentum_error": "momentum", "gauss_residua
 
 
 def run(algorithm, walls):
-    electrons = Species.electrons(n=4000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(5e7, 0, 0),
+    electrons = Species.electrons(n=2000, density=4.37e17, vth=(0.05 * c, 0, 0), drift=(5e7, 0, 0),
                                   plus_minus=True, sampling="low_noise", perturbation_amplitude=5e-7,
                                   perturbation_mode=1)
-    ions = Species.ions(n=4000, density=4.37e17, electrons=electrons, sampling="low_noise")
+    ions = Species.ions(n=2000, density=4.37e17, electrons=electrons, sampling="low_noise")
     domain = Domain(length=0.01, cells=64, dt_over_dx_c=4.5, particle_bc=walls, field_bc=walls)
     start = time.perf_counter()
-    output = Simulation(domain, [electrons, ions], Solver(algorithm=algorithm)).run(400, seed=3)
+    output = Simulation(domain, [electrons, ions], Solver(algorithm=algorithm)).run(200, seed=3)
     d = diagnostics(output)
     checked = ERRORS if walls == "periodic" else {"gauss_residual": "charge"}
     largest = "".join(f"   {name} {float(np.max(d[key])):.1e}" for key, name in checked.items())
@@ -62,6 +65,6 @@ for algorithm, color in (("explicit", "tab:blue"), ("implicit", "tab:red")):
             ax.set(xlabel="t (ns)", title=f"{name} error")
 axes[2].legend()
 fig.tight_layout()
-save_run(Path.cwd() / "conservation", "conservation", dict(particles=4000, steps=400, dt_over_dx_c=4.5),
+save_run(Path.cwd() / "conservation", "conservation", dict(particles=2000, steps=200, dt_over_dx_c=4.5),
          results, figure=fig)
 plt.show()

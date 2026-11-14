@@ -88,7 +88,6 @@ against that theory.
 ## How to run
 
 ```bash
-python examples/2_intermediate/sheath_magnetized.py            # about an hour
-python examples/2_intermediate/sheath_magnetized.py --quick    # about a minute
+python examples/2_intermediate/sheath_magnetized.py    # about a minute; the `research` values take an hour
 jaxincell inputs/sheath_magnetized.toml
 ```

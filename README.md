@@ -124,7 +124,8 @@ print(gradient.species[0].drift, gradient.domain.length)
 `examples/2_intermediate/output_and_restart.py` on saving, restarting and openPMD.
 Examples that save results include settings and provenance. The radiation and RF
 examples print validation results and display figures; the source-control example
-can optionally save its report and figure outside the checkout.
+saves its report and figure to `./rf_source_control`. No example takes arguments; each runs in
+under two minutes, and the values marked `research` in the scripts give the longer versions.
 
 ## Benchmarks
 

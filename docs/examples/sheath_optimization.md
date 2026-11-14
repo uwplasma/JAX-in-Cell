@@ -137,7 +137,7 @@ land inside it, which is the most that four short held-out realisations support.
 
 ## The same experiment in a magnetic field
 
-`--oblique` adds a uniform field 30 degrees to the wall at $\rho_s/\lambda_D = 6$. One array
+Setting `oblique = True` adds a uniform field 30 degrees to the wall at $\rho_s/\lambda_D = 6$. One array
 is passed to the same `Simulation` and nothing else changes; the run writes its own
 `sheath_optimization_oblique/` folder, so the two experiments are two records rather than
 one overwriting the other.
@@ -176,16 +176,14 @@ response calibration rather than the derivative of an asymptotic floating state.
 ## How to run
 
 ```bash
-python examples/3_advanced/sheath_optimization.py            # about ten minutes
-python examples/3_advanced/sheath_optimization.py --quick    # about a minute
-python examples/3_advanced/sheath_optimization.py --oblique  # the magnetised experiment
+python examples/3_advanced/sheath_optimization.py    # about a minute; the `research` values take ten
 ```
 
-`--quick` is a smoke run: a twelfth of the particles, an eighth of the preparation and two
+The default is a smoke run: a twelfth of the particles, an eighth of the preparation and two
 realisations instead of four. It checks that the script executes and that the gradient is
 still the derivative of the calculation. Both descents run out of their eight iterations
 rather than converging, the inference lands at $r = 0.20$, and with two noisy
 realisations and three scan points the error bar is $\pm 0.10$ against the full preset's
-$\pm 0.02$. That is the check doing its job; the numbers above are the full preset's.
+$\pm 0.02$. That is the check doing its job; the numbers above are the `research` values'.
 
 Panel (c) of the first figure comes from `docs/scripts/fig_sheath_source.py`.

@@ -50,8 +50,7 @@ uniform one linearly in the amplitude of the variation.
 ## Running it
 
 ```bash
-python examples/2_intermediate/external_fields_3d.py            # ~40 s on one CPU core
-python examples/2_intermediate/external_fields_3d.py --quick    # one length, one angle
+python examples/2_intermediate/external_fields_3d.py    # one length, one angle; `research` has three of each
 ```
 
 The self-consistent fields still depend on $x$ alone; the grid in $y$ and $z$ is for what

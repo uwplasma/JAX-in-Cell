@@ -12,6 +12,8 @@ For analysis in other tools, `jaxincell.openpmd.write_openpmd` writes the fields
 particles as an openPMD series (optional dependency `openpmd-api`). The field is read
 back here with openpmd-api itself, placed on the coordinates the standard's attributes
 give, and compared with the array in memory.
+
+Runs in about 8 s.
 """
 
 import os

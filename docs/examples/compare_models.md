@@ -59,8 +59,7 @@ damped roots the seed also excites are still decaying.
 ## How to run
 
 ```bash
-python examples/2_intermediate/compare_models.py
-python examples/2_intermediate/compare_models.py --quick    # fewer particles, noisier
+python examples/2_intermediate/compare_models.py    # 6000 particles; 20000 under `research`
 ```
 
 It writes `compare_models/run.json` (settings, every rate, energy error and timing,

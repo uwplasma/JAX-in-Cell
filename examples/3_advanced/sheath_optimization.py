@@ -39,14 +39,14 @@ So the gradient here is the exact derivative of the discrete map, and over this 
 it is also a useful estimate of the physical response. Over a much longer one it would
 be neither useless nor wrong, but no longer the thing the optimiser wants.
 
-Run with `--quick` for a smaller, faster version, and with `--oblique` for the same
-experiment in a magnetic field 30 degrees to the wall: one array added to the same
-`Simulation`, and nothing else in the script changes.
+Set `oblique = True` for the same experiment in a magnetic field 30 degrees to the wall: one
+array added to the same `Simulation`, and nothing else in the script changes.
+Runs in about 58 s; the settings marked `research` in the script give the
+converged version.
 """
 
 import json
 import os
-import sys
 from pathlib import Path
 
 # Double precision is the default. The finite-difference checks below are chosen for it.
@@ -63,8 +63,7 @@ from jaxincell import (Domain, Simulation, Solver, Source, Species, epsilon_0, f
 from jaxincell.sheath import floating_potential, source_density
 
 # --- what to change ------------------------------------------------------------------------
-quick = "--quick" in sys.argv
-oblique = "--oblique" in sys.argv         # the same experiment in a field 30 degrees to the wall
+oblique = False                       # True: the same experiment in a field 30 degrees to the wall
 electron_temperature = 1.0                 # eV
 density = 1e16                             # m^-3
 mass_ratio = 400.0                         # m_i/m_e, reduced so the ion transit fits in a laptop run
@@ -72,23 +71,23 @@ beam_speed = 0.25                          # ion drift at the source plane, in e
 box_debye_lengths = 12.0
 cells = 48
 steps_per_plasma_period = 1 / 0.15         # omega_pe dt = 0.15
-capacity = 4000 if quick else 48000        # slots per species
-emit = 4 if quick else 48                  # emitted per step per species
-preparation = 150 if quick else 1200       # steps of preparation, at r_prepared, not differentiated
+capacity = 4000   # slots per species; research: 48000
+emit = 4   # emitted per step per species; research: 48
+preparation = 150   # steps of preparation, at r_prepared, not differentiated; research: 1200
 window = 25                                # steps of the differentiated response experiment
 r_prepared = 0.25                          # the reflectivity the baseline plasma is prepared at
 r_reference = 0.35                         # the answer the optimiser has to find
 r_start = 0.08                             # where it starts, well away from it
 bounds = (0.02, 0.50)                      # admissible interval, away from the limiting branches
-training_seeds = (0, 1) if quick else (0, 1, 2, 3)       # fixed across every call and line search
-held_out_seeds = (10, 11) if quick else (10, 11, 12, 13)   # never used to choose a step
+training_seeds = (0, 1)   # fixed across every call and line search; research: (0, 1, 2, 3)
+held_out_seeds = (10, 11)   # never used to choose a step; research: (10, 11, 12, 13)
 # A third set, used for neither. The target built on the training realisations is exactly zero at
 # the reference by construction, which makes the recovery below a test of the differentiated chain
 # and not an inference; a target measured on realisations the optimiser never touches is an
 # inference, and its residual at the optimum is not zero because it should not be.
-target_seeds = (20, 21) if quick else (20, 21, 22, 23, 24, 25)
-field_angle = 30.0                         # degrees to the wall plane, with --oblique
-gyro_over_debye = 6.0                      # rho_s/lambda_D, which sets B_0, with --oblique
+target_seeds = (20, 21)   # research: (20, 21, 22, 23, 24, 25)
+field_angle = 30.0                         # degrees to the wall plane, if oblique
+gyro_over_debye = 6.0                      # rho_s/lambda_D, which sets B_0, if oblique
 
 # --- the setup ---------------------------------------------------------------------------------
 spread = np.sqrt(electron_temperature * e_charge / mass_electron)
@@ -149,13 +148,6 @@ def measure(r, state):
     return sensors @ potential(out)[-1] / electron_temperature * domain.dx
 
 
-if quick:
-    print("--quick is a smoke run: a twelfth of the particles, an eighth of the preparation and two\n"
-          "realisations instead of four. It checks that every step of this script executes and that\n"
-          "the gradient is still the derivative of the calculation. It usually recovers the control\n"
-          "too, but with two noisy realisations and three scan points the error bar below is far\n"
-          "wider than the full preset's 0.02, which is that check doing its job.\n"
-          "The documentation quotes the full preset.\n")
 # The pool has to hold every particle alive at once, and an electron lives longest at the
 # largest reflectivity the optimiser may try. Checking the worst case here, once, on the
 # host, covers every trial inside the interval: the differentiated measurement below is
@@ -241,7 +233,7 @@ forward = float(jax.jit(lambda r: jax.jvp(one, (r,), (1.0,))[1])(r_prepared))
 one_jit = jax.jit(one)
 print(" reverse %+.10e   forward %+.10e   relative difference %.1e"
       % (reverse, forward, abs(forward / reverse - 1)))
-steps_of_h = [1e-1, 1e-3, 1e-5] if quick else [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
+steps_of_h = [1e-1, 1e-3]   # research: [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
 differences = [float((one_jit(r_prepared + h) - one_jit(r_prepared - h)) / (2 * h)) for h in steps_of_h]
 for h, d in zip(steps_of_h, differences):
     print("   h %7.0e   central difference %+.8e   relative mismatch %.1e" % (h, d, abs(d / reverse - 1)))
@@ -249,7 +241,7 @@ best = min(range(len(steps_of_h)), key=lambda i: abs(differences[i] / reverse - 
 print(" best agreement %.1e at h = %.0e\n" % (abs(differences[best] / reverse - 1), steps_of_h[best]))
 
 # --- 2. is the response identifiable above the scatter between realisations? ----------------------
-scan_points = np.linspace(bounds[0], bounds[1], 3 if quick else 9)
+scan_points = np.linspace(bounds[0], bounds[1], 3)   # research: 9
 scan = np.array([np.asarray(readings(float(r), training_seeds)) for r in scan_points])
 spread_of_seeds = np.std([np.asarray(measure_jit(r_reference, prepared[s])) for s in held_out_seeds], axis=0)
 signal = np.ptp(scan, axis=0)
@@ -314,7 +306,7 @@ def descend(objective_and_gradient, iterations):
     return history, outcome
 
 
-iterations = 8 if quick else 20
+iterations = 5   # research: 20
 print("against the paired target, which is exactly zero at the reference by construction:")
 history, outcome = descend(value_and_grad, iterations)
 r_final = history[min(range(len(history)), key=lambda i: history[i][1])][0]
@@ -358,7 +350,7 @@ for name, value in (("start", r_start), ("recovered", r_final), ("inferred", r_i
 # The grid is anchored on the reference, so that a scan that does not contain the answer cannot
 # report the distance to its nearest node as an error bar -- the earlier one had spacing 0.02
 # and no node at 0.35, so its "uncertainty 0.01" was the grid, every time it ran.
-spacing = (bounds[1] - bounds[0]) / (4 if quick else 24)
+spacing = (bounds[1] - bounds[0]) / 4   # research: 24
 fine = np.unique(np.clip(r_reference + spacing * np.arange(-24, 25), *bounds))
 
 
@@ -424,10 +416,9 @@ axes[2].legend(frameon=False)
 plt.tight_layout()
 
 # --- the record --------------------------------------------------------------------------------
-# One name per variant: --oblique is a different experiment and would otherwise overwrite
+# One name per variant: the oblique run is a different experiment and would otherwise overwrite
 # the record of the run it is meant to be compared with.
-folder = Path.cwd() / ("sheath_optimization" + ("_oblique" if oblique else "")
-                       + ("_quick" if quick else ""))
+folder = Path.cwd() / ("sheath_optimization_oblique" if oblique else "sheath_optimization")
 folder.mkdir(exist_ok=True)
 settings = dict(electron_temperature=electron_temperature, density=density, mass_ratio=mass_ratio,
                 beam_speed=beam_speed, box_debye_lengths=box_debye_lengths, cells=cells,
@@ -435,7 +426,7 @@ settings = dict(electron_temperature=electron_temperature, density=density, mass
                 window_over_omega_pe=window * omega_pe * dt, r_prepared=r_prepared,
                 r_reference=r_reference, r_start=r_start, bounds=list(bounds),
                 training_seeds=list(training_seeds), held_out_seeds=list(held_out_seeds),
-                target_seeds=list(target_seeds), oblique=oblique, quick=quick)
+                target_seeds=list(target_seeds), oblique=oblique)
 summary = dict(self_test_recovered=r_final, self_test_outcome=outcome,
                inferred=r_inferred, inference_outcome=independent_outcome,
                inference_residual=float(min(h[1] for h in independent_history)),

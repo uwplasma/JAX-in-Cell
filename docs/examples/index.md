@@ -11,11 +11,10 @@ python examples/1_basic/two_stream.py
 ```
 
 Where an input file is listed the run needs no Python: `jaxincell inputs/<file>.toml`.
-Scripts including `sheath_unmagnetized.py`, `sheath_magnetized.py`, `sheath_optimization.py`,
-`grazing_sheath.py`, `weibel.py`, `compare_models.py`, `electron_field.py`, `external_fields_3d.py` and
-`invariants.py`, `electron_cooling.py`, `runaway_baseline.py`, `runaway_rf_minimum.py` and `runaway_rf.py` take `--quick`, a smoke run with
-far fewer particles. It reproduces the structure with more noise, and each says so when it
-starts, so that a smoke run is not quoted as a measurement.
+The scripts take no arguments. Their defaults are sized to finish in about a minute and show the
+structure with more noise. Where a longer run is more informative, the setting is followed by a
+`research` comment giving the value the documentation's numbers were made with; edit the line to
+use it.
 
 ## 1D1V: electrostatic, one velocity component
 

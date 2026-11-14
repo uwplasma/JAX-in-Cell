@@ -72,8 +72,7 @@ Two things this example needs:
 ## How to run
 
 ```bash
-python examples/2_intermediate/weibel.py            # both boxes, a few minutes on a GPU
-python examples/2_intermediate/weibel.py --quick    # smoke preset: six wavelengths, fewer particles
+python examples/2_intermediate/weibel.py    # both boxes, the wide one with six wavelengths; `research` has twelve
 jaxincell inputs/weibel.toml
 ```
 

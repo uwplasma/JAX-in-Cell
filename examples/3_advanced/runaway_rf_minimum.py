@@ -1,10 +1,10 @@
 """Minimum supplied RF resource to keep a runaway tail below 10 MeV: validated slow response.
 
-Stages (command line): scenario, validate, source by default (minutes); then the long search stages
-opt_single, opt_random, opt_es (240 slow-model evaluations each, about 40 min each on a loaded node), verify
-(frozen controls, JIC_VERIFY=<strategy> and JIC_CANDIDATES limit it) and margin (continue the verified controls
-past the hold). JIC_HOLD_EXTRA adds seconds to the hold. `--quick` shrinks sizes, a smoke run.
-Optional JIC_RF_OUTPUT names a directory outside the checkout for the JSON results; nothing is written otherwise.
+Stages, set in `stages` below: scenario, validate and source by default; then the long search
+stages opt_single, opt_random and opt_es (240 slow-model evaluations each in the research setting),
+verify (frozen controls) and margin (continue the verified controls past the hold). The search
+stages need `out_dir`, where the JSON results go. Runs in about 17 s; the settings marked
+`research` in the script give the converged version, which takes hours on a loaded 36-core node.
 
 Model, in the order it is used.
 1. Scenario. The reduced test-particle ODE of runaway_baseline.py (collisional drag, pitch scattering,
@@ -30,10 +30,8 @@ box and mode conversion, bulk heating by the wave. The tail carries 1e-5 of the 
 """
 import json
 import os
-import sys
 import time
 from functools import partial
-from pathlib import Path
 
 os.environ.setdefault("JAX_ENABLE_X64", "1")
 
@@ -47,9 +45,8 @@ from scipy.stats import beta as beta_dist
 from jaxincell import elementary_charge as e, epsilon_0 as eps, mass_electron as me, speed_of_light as c
 
 assert jax.config.read("jax_enable_x64"), "The gates require float64."
-quick = "--quick" in sys.argv
-stages = [a for a in sys.argv[1:] if not a.startswith("--")] or ["scenario", "validate", "source"]
-out_dir = Path(os.environ["JIC_RF_OUTPUT"]) if os.environ.get("JIC_RF_OUTPUT") else None
+stages = ["scenario", "validate", "source"]
+out_dir = None                  # a directory for the JSON results; nothing is written if None
 mi = 3.3435837768e-27                                          # deuteron mass, kg
 mu0 = 1 / (eps * c**2)
 ne, Z, B0, Te, logarithm = 1e18, 1, 2., 100., 15.                # m^-3, charge, T, eV, lnL
@@ -61,7 +58,7 @@ a_B = tau_rad * (e * B0 / me)**2
 Om, Oi = e * B0 / me, e * B0 / mi
 wpe2, wpi2 = ne * e**2 / (eps * me), ne * e**2 / (eps * mi)
 tail_fraction = 1e-5
-report = {"stages": stages, "quick": quick, "jax": jax.__version__, "gamma_threshold": gamma_thr}
+report = {"stages": stages, "jax": jax.__version__, "gamma_threshold": gamma_thr}
 t_start = time.perf_counter()
 
 
@@ -333,7 +330,7 @@ def run_case(name, g0, a0, b, M, zeta, offset=0., spread=False, T=6e-7, seed=0, 
     res = {key: (hist[4, i] - (gam, alp)[i], hist[-1, i] - (gam, alp)[i]) for key, i in (("gamma", 0), ("alpha", 1))}
     # QL: the same initial ensemble through the slow operator only
     nd = band_nodes([centre], [width], [b], nodes=48)
-    Nq = 4000 if quick else 16000
+    Nq = 4000   # research: 16000
     idx = rng.integers(0, N, Nq)
     X0 = jnp.stack([jnp.sqrt(gam[idx]**2 - 1), jnp.asarray(alp[idx])], axis=1)
     half = 200
@@ -361,7 +358,7 @@ def run_case(name, g0, a0, b, M, zeta, offset=0., spread=False, T=6e-7, seed=0, 
 
 if "validate" in stages:
     say("== validate ==")
-    M = 16 if quick else 32
+    M = 16   # research: 32
     cases = [("calibration", dict(g0=16., a0=.2, b=4e-5, M=M, zeta=3.)),
              ("amp_x0.5", dict(g0=16., a0=.2, b=2e-5, M=M, zeta=3.)),
              ("amp_x2", dict(g0=16., a0=.2, b=8e-5, M=M, zeta=3.)),
@@ -376,12 +373,11 @@ if "validate" in stages:
              ("dense_zeta6", dict(g0=16., a0=.2, b=4e-5, M=M, zeta=6.)),
              ("coherent_single_line", dict(g0=16., a0=.2, b=1e-4, M=1, zeta=3.)),
              ("coherent_three_lines", dict(g0=16., a0=.2, b=1e-4, M=3, zeta=3.))]
-    if quick:
-        cases = cases[:2] + cases[-1:]
+    cases = cases[:2] + cases[-1:]   # research: all cases
     rows = []
     for name, kw in cases:
         t0 = time.perf_counter()
-        row = run_case(name, **kw, T=1.5e-7 if quick else 6e-7, N=32 if quick else 160)
+        row = run_case(name, **kw, T=1.5e-7, N=32)   # research: 6e-7, 160
         row["wall_s"] = time.perf_counter() - t0
         rows.append(row)
         say(f"{name:24s} alpha growth ratio {row['alpha']['growth_ratio']:.3f} (z {row['alpha']['growth_z']:+.1f})  "
@@ -509,7 +505,7 @@ dt_slow = 5e-5
 step_limit = .01                                                  # D_max dt: validity of the Euler-Maruyama step
 eps_c, confidence = .02, .95                                      # hard constraint: tail fraction above 10 MeV
 w_grid = np.geomspace(2e9, 3.4e10, 40)
-hold_extra = float(os.environ.get("JIC_HOLD_EXTRA", 0.))           # robust variant: a margin added to the hold
+hold_extra = 0.                                                     # s, a margin added to the hold: the robust variant
 T_hold = round(crossing_time(E_study, 5., .9, gamma_thr), 3) + hold_extra   # no-RF regrowth gamma 5 -> 10 MeV
 horizon = T_on + T_hold
 NODES = 24
@@ -658,7 +654,7 @@ for stage, tag in optimize_tags.items():
     if stage in stages:
         say("==", stage, "==")
         coef_grid = source_coefficients(w_grid)
-        budget, n_search = (12, 256) if quick else (240, 512)
+        budget, n_search = 12, 256   # research: 240, 512
         hist = run_strategy(tag, budget, n_search)
         best = best_of(hist)
         say(tag, "evaluations", len(hist), "feasible", sum(h["feasible"] for h in hist),
@@ -691,15 +687,15 @@ def check_control(xb, n_v, first_only=False):
 if "verify" in stages:
     say("== verify ==")
     coef_grid = source_coefficients(w_grid)
-    n_v = 4096 if quick else 8192
+    n_v = 4096   # research: 8192
     verification = {}
-    chosen = os.environ.get("JIC_VERIFY", "").split(",")           # optional: verify only these strategies
+    chosen = [""]                                                      # or a list of the strategies to verify
     for tag in [t for t in optimize_tags.values() if t in chosen or chosen == [""]]:
         path = fragment(tag)
         history = json.loads(path.read_text())["history"] if path and path.exists() else []
         feasible = [h for h in history if h["feasible"]]
         verification[tag] = {"feasible_in_search": len(feasible), "rejected": [], "accepted": None}
-        for cand in sorted(feasible, key=lambda h: h["Q_plus"])[:int(os.environ.get("JIC_CANDIDATES", 30))]:
+        for cand in sorted(feasible, key=lambda h: h["Q_plus"])[:30]:
             say(tag, "candidate Q+", cand["Q_plus"])                     # best first; selection used the search seeds
             runs = check_control(cand["x"], n_v, first_only=True)
             if runs[0]["passes"]:
@@ -729,7 +725,7 @@ if "margin" in stages:
         accepted = json.loads(path.read_text())["accepted"] if path and path.exists() else None
         if accepted is None:
             continue
-        n_m = 2048 if quick else 4096
+        n_m = 2048   # research: 4096
         X = seed_tail(n_m, jax.random.key(4242))
         nd = band_nodes(*decode(accepted["controls"]), NODES)
         X, _ = ql_advance(X, jax.random.key(4343), nd, a_study, dt_slow, int(round(T_on / dt_slow)), True)
