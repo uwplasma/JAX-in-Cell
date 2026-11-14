@@ -422,6 +422,9 @@ class Domain:
         for bc in (self.particle_bc, self.field_bc):
             _require((0 in bc) == (bc == (0, 0)), "a periodic wall needs a periodic partner")
         _require(3 not in self.field_bc, "a thermal wall re-emits particles; give the fields a reflective one")
+        _require((3, 2) not in zip(self.particle_bc, self.field_bc),
+                 "a thermal particle wall with an absorbing field wall at the same side runs into NaN: give "
+                 "the fields a reflective wall there")
         _require(4 not in self.field_bc or self.field_bc == (4, 2),
                  "field_bc='open' is the source plane of a box closed by a collector opposite: "
                  "use field_bc=('open', 'absorbing')")
