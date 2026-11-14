@@ -6,6 +6,7 @@ angle carrying the physical scattering rate. Equal-weight pairs conserve momentu
 and kinetic energy; unequal weights conserve these moments in expectation. The
 shared pairing, Higginson density correction and the two rate/angle models are
 derived on the Collisions page of the numerical methods."""
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax, random
@@ -36,13 +37,21 @@ def _shuffle_by_cell(key, cell, n_cells):
     """Sort particles by cell, in random order inside each cell, with one sort.
 
     ``cell`` runs from 0 to ``n_cells``, the last value marking removed particles.
-    Returns the order, the sorted cells, the first sorted index of every cell and
-    the population of every cell, with the removed ones counted as none."""
-    bits = random.bits(key, cell.shape)
-    sorted_cell, _, order = lax.sort((cell, bits, jnp.arange(cell.shape[0])), num_keys=2)
+    One packed integer key (cell above 32 random bits, or below the bits left of 32 without
+    x64) replaces a two-key sort. Returns the order, the sorted cells, the first sorted index of every cell and
+    the population of every cell, with the removed ones counted as none, and ``cell``."""
+    shift = int(n_cells).bit_length()                    # bits holding a cell number, 0..n_cells
+    if jax.config.jax_enable_x64:
+        packed = (cell.astype(jnp.uint64) << 32) | random.bits(key, cell.shape, jnp.uint32)
+    else:
+        if shift > 24:
+            raise ValueError("more than 2**24 - 1 cells need x64 for the collision sort")
+        packed = (cell.astype(jnp.uint32) << (32 - shift)) | (random.bits(key, cell.shape, jnp.uint32) >> shift)
+    order = jnp.argsort(packed)
+    sorted_cell = cell[order]
     first = jnp.searchsorted(sorted_cell, jnp.arange(n_cells + 1, dtype=cell.dtype))
     count = jnp.diff(first, append=cell.shape[0]).at[n_cells].set(0)
-    return order, sorted_cell, first, count
+    return order, sorted_cell, first, count, cell
 
 
 def _nanbu_angle(s, uniform):
@@ -210,11 +219,11 @@ def _scatter(key, v, i, j, active, density, fraction, weight, mass, charge, coul
     return v.at[j].add(jnp.where(take_j[:, None], du_j, 0.0))
 
 
-def _within(key, v, start, n, cell, n_cells, dx, *args):
+def _within(key, v, start, n, shuffled, n_cells, dx, *args):
     """Takizuka-Abe collisions of one species with itself."""
-    k_sort, k_pairs, k_second, k_third = random.split(key, 4)
+    k_pairs, k_second, k_third = random.split(key, 3)
     weight = args[0]
-    order, sorted_cell, first, count = _shuffle_by_cell(k_sort, cell, n_cells)
+    order, _, first, count, _ = shuffled
     s = start + order
     half = count // 2
     triplet = (count % 2 == 1) & (count > 1)
@@ -293,16 +302,15 @@ def _restore(v, new, index, cell, n_cells, weight, mass, relativistic):
     return new.at[index].set(jnp.where(heavy[:, None], mean[cell] + lam[cell][:, None] * spread, now))
 
 
-def _between(key, v, block_a, block_b, cell_a, cell_b, n_cells, dx, *args, restore=False):
+def _between(key, v, block_a, block_b, shuffled_a, shuffled_b, n_cells, dx, *args, restore=False):
     """Disjoint random pairs between two species, with the sampled pair density. With ``restore``
     the weighted momentum and energy of every cell are returned to their values before the stage."""
     if block_a[1] > block_b[1]:
-        block_a, block_b, cell_a, cell_b = block_b, block_a, cell_b, cell_a
+        block_a, block_b, shuffled_a, shuffled_b = block_b, block_a, shuffled_b, shuffled_a
     (start_a, n_a), (start_b, n_b) = block_a, block_b
     weight = args[0]
-    k_a, k_b, k_scatter = random.split(key, 3)
-    order_a, sorted_a, first_a, count_a = _shuffle_by_cell(k_a, cell_a, n_cells)
-    order_b, sorted_b, first_b, count_b = _shuffle_by_cell(k_b, cell_b, n_cells)
+    order_a, sorted_a, first_a, count_a, _ = shuffled_a
+    order_b, _, first_b, count_b, _ = shuffled_b
     ia, ib = start_a + order_a, start_b + order_b
     rank_a = jnp.arange(n_a) - first_a[sorted_a]
     # Match each rank once. Random ordering samples the longer list without replacement;
@@ -311,10 +319,11 @@ def _between(key, v, block_a, block_b, cell_a, cell_b, n_cells, dx, *args, resto
     i, j = ia, ib[jnp.minimum(first_b[sorted_a] + rank_a, n_b - 1)]
     active = rank_a < on_b
     density = jnp.maximum(count_a, count_b)[sorted_a] * jnp.maximum(weight[i], weight[j]) / dx
-    new = _scatter(k_scatter, v, i, j, active, density, 1.0, *args)
+    new = _scatter(key, v, i, j, active, density, 1.0, *args)
     if restore:
         index = np.concatenate((np.arange(start_a, start_a + n_a), np.arange(start_b, start_b + n_b)))
-        new = _restore(v, new, index, jnp.concatenate((cell_a, cell_b)), n_cells, weight, args[1], args[5])
+        cell = jnp.concatenate((shuffled_a[4], shuffled_b[4]))
+        new = _restore(v, new, index, cell, n_cells, weight, args[1], args[5])
     return new
 
 
@@ -346,13 +355,21 @@ def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx,
     inside = jnp.clip(((x[:, 0] + length / 2) / dx).astype(jnp.int32), 0, n_cells - 1)
     cell = jnp.where(weight > 0, inside, n_cells)
     args = (weight, mass, charge, coulomb_log, dt, relativistic)
-    for a, b in pairs:
-        key, sub = random.split(key)
-        (start_a, n_a), (start_b, n_b) = blocks[a], blocks[b]
+    # every species is sorted once; its order serves all of its pairings in the step
+    keys = random.split(key, len(pairs) + len(blocks))
+    shuffled = {}
+
+    def shuffle(s):
+        if s not in shuffled:
+            start, n = blocks[s]
+            shuffled[s] = _shuffle_by_cell(keys[len(pairs) + s], cell[start:start + n], n_cells)
+        return shuffled[s]
+
+    for k, (a, b) in enumerate(pairs):
         if a == b:
-            if n_a > 1:
-                v = _within(sub, v, start_a, n_a, cell[start_a:start_a + n_a], n_cells, dx, *args)
+            if blocks[a][1] > 1:
+                v = _within(keys[k], v, *blocks[a], shuffle(a), n_cells, dx, *args)
         else:
-            v = _between(sub, v, blocks[a], blocks[b], cell[start_a:start_a + n_a],
-                         cell[start_b:start_b + n_b], n_cells, dx, *args, restore=restore)
+            v = _between(keys[k], v, blocks[a], blocks[b], shuffle(a), shuffle(b), n_cells, dx, *args,
+                         restore=restore)
     return v
