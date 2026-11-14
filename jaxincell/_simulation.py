@@ -1317,15 +1317,26 @@ class Simulation:
         return jnp.stack([along(1.0, zero)] + [along(0.0, jnp.broadcast_to(e, x.shape)) for e in eye], axis=1)
 
     def _radiation_force(self, u, fields, qm, m, selected=None, derivative=None):
-        charge = qm * m
-        if self.radiation.species is not None:
-            if selected is None:
-                selected = jnp.concatenate([jnp.full((s.n,), s.name in self.radiation.species)
-                                            for s in self.species])
-            charge = jnp.where(selected, charge, 0.0)
-        force, power, chi = landau_lifshitz(u, fields[:, :3], fields[:, 3:], charge, m,
-                                            self.radiation.model == "ll_quantum", True, derivative)
-        return force, jnp.stack([power, power * chi], axis=1)
+        """Force and ``[power, power*chi]`` per particle. With ``Radiation.species`` the law is
+        evaluated only on the selected species blocks, ``selected`` being a static flag for a
+        batch of one species or ``None`` for all particles; the others get zeros."""
+        quantum = self.radiation.model == "ll_quantum"
+
+        def law(sl):
+            part = (lambda a: a if a is None or jnp.ndim(a) == 0 else a[sl])
+            d = None if derivative is None else derivative[sl]
+            force, power, chi = landau_lifshitz(u[sl], fields[sl, :3], fields[sl, 3:], part(qm * m), part(m),
+                                                quantum, True, d)
+            return force, jnp.stack([power, power * chi], axis=1)
+
+        if self.radiation.species is None or selected is True:
+            return law(slice(None))
+        if selected is False:
+            return jnp.zeros_like(u), jnp.zeros((u.shape[0], 2), u.dtype)
+        parts = [law(slice(start, start + n)) if s.name in self.radiation.species
+                 else (jnp.zeros((n, 3), u.dtype), jnp.zeros((n, 2), u.dtype))
+                 for s, (start, n) in zip(self.species, self.blocks)]
+        return tuple(jnp.concatenate(p) for p in zip(*parts))
 
     def _prescribed_work(self, velocity, external, qm, m, dt):
         if self.external_E is None and self.prescribed_fields is None:
