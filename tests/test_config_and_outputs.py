@@ -173,6 +173,11 @@ def _sourced(emit=2, capacity=64, active=None):
 
 
 @pytest.mark.parametrize("build, message", [
+    (lambda: Domain(particle_bc="thermal", field_bc="absorbing"), "thermal particle wall"),
+    (lambda: Simulation(Domain(length=1e-3, cells=16, time_step=1e-9), [Species.electrons(4, 1e20)],
+                        Solver(algorithm="implicit")), "omega_pe dt"),
+    (lambda: Simulation(Domain(length=1e-3, cells=16), [Species.electrons(4, 1e20)], Solver(relativistic=True),
+                        radiation=Radiation(), external_B=np.full((16, 3), 1e8)), "damps"),
     (lambda: Species.electrons(n=0, density=1.0), "at least one particle"),
     (lambda: Species.electrons(n=4, density=1.0, x=np.zeros((3, 3))), "x must have shape"),
     (lambda: Species.electrons(n=4, density=1.0, v=np.zeros(4)), "v must have shape"),
