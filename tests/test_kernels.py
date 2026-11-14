@@ -556,6 +556,68 @@ def test_quintic_simulation_sources_moments_and_external_gathers_use_the_selecte
                                expected, rtol=0, atol=5e-15)
 
 
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_a_large_deposit_of_several_columns_is_the_numpy_scatter_whatever_the_copy_count(backend, monkeypatch):
+    """Above 8192 particles on an accelerator the deposit spreads its scatter over private grid copies and sums them;
+    the copy count is chosen from the backend name, which is patched here so that both paths run on any host;
+    each cell must still receive exactly the weights of the particles whose cloud covers it, for
+    every column of a multi-column amount, with and without a wall that drops the part outside."""
+    monkeypatch.setattr(jax, "default_backend", lambda: backend)
+    rng = np.random.default_rng(7)
+    count = 20000
+    x = rng.uniform(-.5, .5, count)
+    amounts = rng.normal(size=(count, 3))
+    index, weights = (np.asarray(a) for a in s2_weights(jnp.asarray(x), x0, dx))
+    for bc, wrap in (((0, 0), True), ((2, 2), False)):
+        expected = np.zeros((G, 3))
+        inside = np.ones_like(index, bool) if wrap else (index >= 0) & (index < G)
+        np.add.at(expected, index[inside] % G if wrap else index[inside],
+                  (weights[inside][:, None] * (amounts / dx)[:, None, :].repeat(3, axis=1)[inside]))
+        np.testing.assert_allclose(deposit(jnp.asarray(x), jnp.asarray(amounts), x0, dx, G, bc), expected,
+                                   rtol=0, atol=1e-10 * np.abs(expected).max())
+        np.testing.assert_allclose(deposit(jnp.asarray(x), jnp.asarray(amounts[:, 0]), x0, dx, G, bc),
+                                   expected[:, 0], rtol=0, atol=1e-10 * np.abs(expected).max())
+
+
+@pytest.mark.parametrize("backend", ["cpu", "gpu"])
+def test_a_large_gather_is_the_numpy_interpolation_and_its_transpose_is_the_deposit(backend, monkeypatch):
+    """Above 8192 particles on an accelerator the gather reads from private copies of the field so that its transpose
+    scatters into private copies; the values must still be the weighted sum of the three centres a
+    particle covers, and the transpose must still be the deposit, column by column."""
+    monkeypatch.setattr(jax, "default_backend", lambda: backend)
+    rng = np.random.default_rng(11)
+    count = 20000
+    x = jnp.asarray(rng.uniform(-.5, .5, count))
+    field = rng.normal(size=(G + 2, 6))
+    index, weights = (np.asarray(a) for a in s2_weights(x, x0 - dx, dx))
+    expected = np.einsum("nk,nkc->nc", weights, field[np.clip(index, 0, G + 1)])
+    np.testing.assert_allclose(gather(jnp.asarray(field), x, x0, dx), expected, rtol=0, atol=1e-13)
+    cotangent = jnp.asarray(rng.normal(size=(count, 6)))
+    transpose = jax.linear_transpose(lambda f: gather(f, x, x0, dx), jnp.asarray(field))(cotangent)[0]
+    reference = np.zeros_like(field)
+    np.add.at(reference, np.clip(index, 0, G + 1), weights[:, :, None] * np.asarray(cotangent)[:, None, :])
+    np.testing.assert_allclose(transpose, reference, rtol=0, atol=1e-10)
+
+
+def test_the_accelerator_deposit_path_is_the_same_physics_as_the_cpu_one(monkeypatch):
+    """On an accelerator the three deposits of a half step are one scatter and the large ones use private
+    copies; the run they produce must be the CPU run to round-off. The backend name is patched, and the
+    compilation caches cleared, so that both paths are traced on any host."""
+    def run(backend):
+        monkeypatch.setattr(jax, "default_backend", lambda: backend)
+        jax.clear_caches()
+        electrons = Species.electrons(6000, 1e17, vth=(.05 * c, .03 * c, .02 * c), drift=(.1 * c, 0, 0),
+                                      sampling="low_noise", perturbation_amplitude=1e-3, perturbation_mode=1)
+        ions = Species.ions(3000, 1e17, vth=0., sampling="low_noise")
+        return Simulation(Domain(length=.01, cells=16, dt_over_dx_c=.8), (electrons, ions)).run(
+            6, seed=1, store_every=6, store_particles=False)
+
+    cpu, gpu = run("cpu"), run("gpu")
+    for a, b in ((cpu.state.E, gpu.state.E), (cpu.state.B, gpu.state.B), (cpu.state.u, gpu.state.u)):
+        np.testing.assert_allclose(b, a, rtol=0, atol=1e-9 * float(np.abs(a).max()))
+    jax.clear_caches()
+
+
 def test_default_shape_keeps_the_quadratic_kernel_arithmetic():
     x, q = jnp.asarray([-.5, -.499, .003, .498, .5]), jnp.asarray([1., -2., 3., -4., 5.])
     index, weights = s2_weights(x, x0, dx)

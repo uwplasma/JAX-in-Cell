@@ -14,13 +14,14 @@ open wall is the electrical condition of a plane a ``Source`` supplies through:
 nothing beyond it, as at a conductor, but no condition on the field either, whose
 constant then comes from the charge on the electrode opposite.
 """
+import jax
 import jax.numpy as jnp
 
 from ._config import epsilon_0, speed_of_light as c
 
-__all__ = ["s2_weights", "s5_weights", "shape_weights", "map_indices", "deposit", "PARITY", "PARK", "to_centres",
-           "with_ghosts", "gather", "gather_xyz", "current_from_continuity", "to_faces", "wall_faces_E", "curl_E",
-           "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic", "landau_lifshitz",
+__all__ = ["accelerated", "s2_weights", "s5_weights", "shape_weights", "map_indices", "deposit", "PARITY", "PARK",
+           "to_centres", "with_ghosts", "gather", "gather_xyz", "current_from_continuity", "to_faces", "wall_faces_E",
+           "curl_E", "curl_B", "half_step_fields", "E_x_from_rho", "boris", "boris_relativistic", "landau_lifshitz",
            "apply_particle_bc", "wrap_positions", "smooth"]
 
 
@@ -136,12 +137,41 @@ def map_indices(idx, n, bc):
     return jnp.clip(idx, 0, n - 1), keep
 
 
+# A scatter-add of 3N weights into n cells serialises on the few addresses that many particles share.
+# Giving each particle one of LANES private copies of the grid, which are summed afterwards, cuts that
+# contention; on a GPU it is what the deposit costs (docs/user_guide/performance.md). A CPU has no such
+# contention and pays for the copies (6 to 29 % on the profiled x86 core), as it does below LANES_FROM
+# particles on any device, so there is one copy there.
+LANES, LANES_FROM = 32, 8192
+
+
+def accelerated():
+    """Whether the program is traced for an accelerator, where the scatters below are the cost."""
+    return jax.default_backend() != "cpu"
+
+
+def _copies(count):
+    return LANES if count >= LANES_FROM and accelerated() else 1
+
+
 def deposit(x, q, x0, dx, n, bc, shape_order=2):
     """Density on the grid from particle positions ``x`` and amounts ``q``
-    (charge, or charge times a velocity component), with the selected spline degree."""
+    (charge, or charge times a velocity component), with the selected spline degree.
+    ``q`` of shape ``(N, C)`` deposits its ``C`` columns with one shared stencil, ``(n, C)``."""
     idx, w = shape_weights(x, x0, dx, shape_order)
     idx, keep = map_indices(idx, n, bc)
-    return jnp.zeros(n).at[idx].add(jnp.where(keep, w, 0.0) * (q / dx)[:, None])
+    w = jnp.where(keep, w, 0.0)
+    copies = _copies(x.shape[0])
+    if q.ndim == 1 and copies == 1:
+        return jnp.zeros(n).at[idx].add(w * (q / dx)[:, None])
+    columns = q[:, None] if q.ndim == 1 else q
+    amounts = w[:, :, None] * (columns / dx)[:, None, :]
+    if copies == 1:
+        out = jnp.zeros((n, columns.shape[1])).at[idx].add(amounts)
+    else:
+        lane = (jnp.arange(x.shape[0]) % copies)[:, None]
+        out = jnp.zeros((copies, n, columns.shape[1])).at[lane, idx].add(amounts).sum(axis=0)
+    return out[:, 0] if q.ndim == 1 else out
 
 
 # Sign of (E_x, E_y, E_z, B_x, B_y, B_z) under the reflection x -> -x: E is a vector, B a pseudovector.
@@ -193,7 +223,13 @@ def gather(F, x, x0, dx, shape_order=2):
     particles parked beyond a wall, whose force is zero anyway. Quintic fields have
     three ghost centres per wall, provided by ``with_ghosts(..., shape_order=5)``."""
     idx, w = shape_weights(x, x0 - (3 if shape_order == 5 else 1) * dx, dx, shape_order)
-    return jnp.einsum("nk,nkc->nc", w, F[jnp.clip(idx, 0, F.shape[0] - 1)])
+    clipped, copies = jnp.clip(idx, 0, F.shape[0] - 1), _copies(x.shape[0])
+    if copies == 1:
+        return jnp.einsum("nk,nkc->nc", w, F[clipped])
+    # Reading from one of several copies of the field costs nothing, and its transpose, which is what
+    # differentiating a gather means, is then the lane-split scatter of the deposit.
+    lane = (jnp.arange(x.shape[0]) % copies)[:, None]
+    return jnp.einsum("nk,nkc->nc", w, jnp.broadcast_to(F, (copies,) + F.shape)[lane, clipped])
 
 
 def gather_xyz(G, x, x0, dx, periods, shape_order=2):
