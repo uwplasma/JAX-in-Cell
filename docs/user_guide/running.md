@@ -17,7 +17,7 @@ output = simulation.run(steps, seed=0, store_every=1, store_particles=True,
 | `steps` | time steps; must be a multiple of `store_every` | — |
 | `seed` | seed of the random numbers; traced, so `jax.vmap` over it gives an ensemble from one compilation | `0` |
 | `store_every` | keep every n-th state | `1` |
-| `snapshot_steps` | keep an explicit sequence of zero-based post-step indices instead; requires `store_every=1` | `None` |
+| `snapshot_steps` | keep an explicit sequence of zero-based post-step indices instead, or an integer `n` for every `n`-th completed step; requires `store_every=1` | `None` |
 | `store_particles` | keep the particle histories, the bulk of the memory | `True` |
 | `moments` | running velocity-moment sums ({doc}`sources`) | `False` |
 | `state` | a previous `Output.state` to continue from | `None` |
@@ -99,9 +99,11 @@ Two ways out:
 output = simulation.run(20000, store_every=20)        # 1/20 of the samples
 output = simulation.run(20000, store_particles=False) # fields only
 output = simulation.run(20000, snapshot_steps=[0, 99, 19999]) # irregular samples
+output = simulation.run(20000, snapshot_steps=500)            # steps 499, 999, ..., 19999
 ```
 
-`snapshot_steps` accepts Python or NumPy integers, sorts and removes duplicates, and rejects
+An integer `n` for `snapshot_steps` keeps every `n`-th completed step, the indices
+`n-1, 2n-1, ...`; a sequence of Python or NumPy integers is taken as given. It sorts and removes duplicates, and rejects
 indices outside `[0, steps)`. Index 0 is the state after the first step, at `dt`; on a restart
 the indices refer to the new run and timestamps remain absolute. An empty sequence stores
 no histories. The simulation always advances every requested step, and `Output.state` holds

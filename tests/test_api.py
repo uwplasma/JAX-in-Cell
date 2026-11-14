@@ -171,7 +171,7 @@ def test_irregular_snapshots_support_grad_vmap_progress_and_toml(tmp_path):
     assert loaded.run(**{k: v for k, v in run.items() if k != "plot"}).E.shape[0] == 3
 
 
-@pytest.mark.parametrize("schedule", [1, [True], [1.0], [[1]], [-1], [6]])
+@pytest.mark.parametrize("schedule", [0, True, [True], [1.0], [[1]], [-1], [6]])
 def test_irregular_snapshots_reject_invalid_indices(schedule):
     with pytest.raises(ValueError, match="snapshot_steps"):
         small_simulation(n=8).run(6, snapshot_steps=schedule)
@@ -1086,3 +1086,22 @@ def test_openpmd_with_no_prescribed_fields_exports_only_internal_meshes(tmp_path
     assert iteration.time == pytest.approx(float(output.t[0]), rel=1e-15, abs=0)
     assert set(iteration.meshes) == {"E", "B", "J", "rho"}
     series.close()
+
+
+def test_an_integer_snapshot_stride_is_the_sequence_of_every_nth_step():
+    """``snapshot_steps=n`` stores the same history as the explicit indices n-1, 2n-1, ...;
+    zero, negative and boolean strides are refused."""
+    electrons = Species.electrons(n=64, density=1e18, vth=(1e6, 0.0, 0.0), perturbation_amplitude=1e-3)
+    sim = Simulation(Domain(length=1e-3, cells=16, dt_over_dx_c=0.5), [electrons])
+    stride = sim.run(10, seed=1, snapshot_steps=4)
+    explicit = sim.run(10, seed=1, snapshot_steps=(3, 7))
+    np.testing.assert_array_equal(stride.t, explicit.t)
+    np.testing.assert_array_equal(stride.E, explicit.E)
+    for a, b in zip(jax.tree.leaves(stride.state), jax.tree.leaves(explicit.state)):
+        np.testing.assert_array_equal(a, b)
+    assert sim.run(3, snapshot_steps=np.int64(5)).t.shape[0] == 0
+    for bad in (0, -1):
+        with pytest.raises(ValueError, match="snapshot_steps"):
+            sim.run(4, snapshot_steps=bad)
+    with pytest.raises(ValueError, match="sequence"):
+        sim.run(4, snapshot_steps=True)
