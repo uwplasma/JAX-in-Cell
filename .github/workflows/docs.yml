@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -15,6 +16,7 @@ concurrency:
 jobs:
   build:
     timeout-minutes: 15
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "uwplasma-cpu"]') || 'ubuntu-22.04' }}
     steps:
       - uses: actions/checkout@v4
