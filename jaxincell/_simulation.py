@@ -1853,7 +1853,7 @@ class Simulation:
 
     # -- the run ---------------------------------------------------------------------------------
     def run(self, steps, seed=0, store_every=1, store_particles=True, moments=False, state=None,
-            verbose=False, snapshot_steps=None, checkpoint=False):
+            verbose=False, snapshot_steps=None, checkpoint=True):
         """Advance ``steps`` time steps and return an :class:`Output`.
 
         Args:
