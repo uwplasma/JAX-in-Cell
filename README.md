@@ -136,6 +136,8 @@ checks finite-spread beam cooling in a laser pulse against an exact reduced-LL
 final state, an independent phase ODE and an analytic pulse-strength derivative.
 [`runaway_baseline.py`](examples/3_advanced/runaway_baseline.py) evolves a homogeneous no-RF seed, bulk and
 ion population in a held DC field and compares it with the reduced test-particle ODE.
+[`runaway_rf_minimum.py`](examples/3_advanced/runaway_rf_minimum.py) bounds the RF energy needed to keep a
+runaway tail below 10 MeV, with a quasilinear response checked against resolved wave windows.
 [`runaway_rf.py`](examples/3_advanced/runaway_rf.py)
 optimizes four prescribed RF envelope coefficients through the simulation and
 rechecks the result at finer resolution. Its finite-time objective is field exposure

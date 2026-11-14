@@ -49,6 +49,7 @@ gates in `beam_laser.py` and `rf_source_control.py` require float64.
 | `sheath_optimization.py` | a wall's reflectivity recovered from the sheath it holds | the value the target was made at | ~11 min |
 | `runaway_rf.py` | optimize a prescribed RF envelope for a finite-time pitch target | directional derivatives and refined trajectories | `--quick` smoke preset |
 | `runaway_baseline.py` | homogeneous no-RF baseline: evolved bulk, seed and ions in a held total DC field, with moment-restored collisions | reduced test-particle ODE (drag, pitch scattering, synchrotron) and the restored energy ledger | `--quick` smoke preset; 20 s default |
+| `runaway_rf_minimum.py` | minimum supplied RF energy to hold a runaway tail below 10 MeV: scenario analysis, quasilinear response against resolved Boris windows, explicit-current source ledger, matched-cost search | resolved wave windows, closed-form dissipation, frozen-control checks on independent seeds, dt/2 and 2x nodes | stages and `--quick`; hours on a loaded 36-core node |
 | `beam_laser.py` | finite-spread electron-beam cooling in a laser pulse | exact reduced-LL endpoint, phase ODE, invariants and analytic AD | ~35 s on one CPU core |
 | `rf_source_control.py` | supplied RF energy for a declared cold-plasma deposition target | Maxwell source/cross-energy budget, analytic response and frozen-control refinement | ~95 s on one CPU core |
 
