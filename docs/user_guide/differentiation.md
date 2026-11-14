@@ -52,8 +52,8 @@ better tool. On the run in the figure, a forward pass takes
 against {{ autodiff_run_time_warm_s }} s for the run alone, and the two derivatives agree
 to {{ autodiff_forward_reverse_agreement }}.
 
-For larger reverse-mode runs, `simulation.run(..., checkpoint=True)` recomputes each
-physics step during the backward pass. It preserves the same discrete map and
+In reverse mode `simulation.run` recomputes each physics step (`checkpoint=True`, the default;
+`checkpoint=False` keeps them) during the backward pass. It preserves the same discrete map and
 reduces saved intermediates, particularly those inside implicit Picard iterations.
 It still retains step-boundary states: it does not make arbitrarily long gradients
 constant-memory. Turning off particle output alone does not remove autodiff's

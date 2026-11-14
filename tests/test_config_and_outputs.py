@@ -173,6 +173,11 @@ def _sourced(emit=2, capacity=64, active=None):
 
 
 @pytest.mark.parametrize("build, message", [
+    (lambda: Domain(particle_bc="thermal", field_bc="absorbing"), "thermal particle wall"),
+    (lambda: Simulation(Domain(length=1e-3, cells=16, time_step=1e-9), [Species.electrons(4, 1e20)],
+                        Solver(algorithm="implicit")), "omega_pe dt"),
+    (lambda: Simulation(Domain(length=1e-3, cells=16), [Species.electrons(4, 1e20)], Solver(relativistic=True),
+                        radiation=Radiation(), external_B=np.full((16, 3), 1e8)), "damps"),
     (lambda: Species.electrons(n=0, density=1.0), "at least one particle"),
     (lambda: Species.electrons(n=4, density=1.0, x=np.zeros((3, 3))), "x must have shape"),
     (lambda: Species.electrons(n=4, density=1.0, v=np.zeros(4)), "v must have shape"),
@@ -730,3 +735,8 @@ def test_picard_residual_rejects_invalid_traced_tolerances():
         return Simulation(domain, [neutral], solver.replace(picard_tolerance=tolerance)).run(1).state.E
     result = np.asarray(jax.jit(jax.vmap(field))(jnp.array([0., -1., jnp.inf, jnp.nan, 1e-6])))
     assert np.isnan(result[:4]).all() and np.isfinite(result[4]).all()
+
+
+def test_checkpoint_is_on_by_default():
+    import inspect
+    assert inspect.signature(Simulation.run).parameters["checkpoint"].default is True

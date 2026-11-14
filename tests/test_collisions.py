@@ -924,3 +924,19 @@ def test_ultrarelativistic_drag_on_cold_electrons_is_the_connor_hastie_critical_
     speed = c_light * np.sqrt(1 - 1 / gamma ** 2)
     expected = e_charge * critical * speed
     assert abs(power.mean() / expected - 1) < 5 * power.std(ddof=1) / np.sqrt(power.size) / expected + 2e-3
+
+
+@pytest.mark.parametrize("double", [True, False])
+def test_packed_sort_orders_by_cell_in_both_precisions(double):
+    """The packed key (cell above the random bits) sorts by cell in x64 and in float32, where the
+    cell takes the top bits of 32; too many cells for that are refused."""
+    from jax import enable_x64
+    cell = np.random.default_rng(1).integers(0, 6, 500).astype(np.int32)
+    with enable_x64(double):
+        cell = jnp.asarray(cell)
+        order, sorted_cell, first, count, _ = _collisions._shuffle_by_cell(random.key(0), cell, 5)
+        assert (np.diff(sorted_cell) >= 0).all() and sorted(np.asarray(order)) == list(range(500))
+        np.testing.assert_array_equal(count, np.bincount(np.asarray(cell), minlength=6) * np.array([1] * 5 + [0]))
+        if not double:
+            with pytest.raises(ValueError, match="x64"):
+                _collisions._shuffle_by_cell(random.key(0), cell, 2 ** 24)

@@ -148,7 +148,7 @@ energy for a declared nonrecovering actuator in a cold-plasma deposition benchma
 The [radiation model and limits](docs/numerics/radiation.md)
 describe the additional physics required for that problem.
 
-`run(..., checkpoint=True)` reduces saved intermediates in reverse differentiation.
+`run` recomputes physics steps in reverse differentiation by default (`checkpoint=True`), which reduces saved intermediates.
 [`profile_pic.py`](docs/scripts/profile_pic.py) reproduces local timing, compiler-memory
 and ensemble-sharding checks. Generated reports and traces stay outside the repository.
 
