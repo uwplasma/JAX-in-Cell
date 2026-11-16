@@ -36,7 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 openpmd = ["openpmd-api"]
-dev = ["pytest", "pytest-cov", "flake8", "openpmd-api", "scipy"]
+dev = ["pytest", "pytest-cov", "pytest-xdist", "flake8", "openpmd-api", "scipy"]
 docs = [
     "sphinx",
     "myst-parser",
