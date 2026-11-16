@@ -1,4 +1,0 @@
-jax
-jaxlib
-jax_tqdm
-matplotlib

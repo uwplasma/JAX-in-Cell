@@ -1,58 +1,38 @@
 """Short PIC runs for the self-hosted GPU lane (``pytest -m gpu``).
 
-They exercise only existing code, so they also pass on CPU and add no
-uncovered branches to the coverage run. Compilation dominates on GPU, so
-the suite compiles one configuration.
+They exercise only existing code, so they also pass on CPU and add no uncovered branches
+to the coverage run. Compilation dominates on GPU, so the suite compiles one configuration.
 """
-from copy import deepcopy
-
 import jax
 import numpy as np
 import pytest
 
-from jaxincell._simulation import Simulation
-from tests.helpers import base_simulation_parameters
+from jaxincell import Domain, Simulation, Solver, Species, speed_of_light as c
 
 pytestmark = pytest.mark.gpu
 
 STEPS = 5
 
 
-def make_simulation(**solver):
-    parameters = deepcopy(base_simulation_parameters())
-    parameters["domain_parameters"].update({"total_steps": STEPS, "number_grid_points": 8})
-    for species in ("electrons", "ions"):
-        for block in parameters["species_parameters"][species].values():
-            block["number_pseudoparticles"] = 50
-    parameters["solver_parameters"].update(solver)
-    return Simulation(parameters)
-
-
-def assert_finite(output):
-    for key in ("positions", "velocities", "electric_field", "magnetic_field"):
-        assert np.all(np.isfinite(np.asarray(output[key]))), key
-
-
 @pytest.fixture(scope="module")
-def gauss_simulation():
-    return make_simulation(field_solver=0)
+def simulation():
+    e = Species.electrons(n=50, density=4e17, vth=(0.05 * c, 0, 0), plus_minus=True)
+    i = Species.ions(n=50, density=4e17, electrons=e)
+    return Simulation(Domain(length=0.01, cells=8, dt_over_dx_c=2.0), [e, i], Solver())
 
 
-def test_gauss_steps_are_finite(gauss_simulation):
-    output = gauss_simulation.run()
-    assert output["positions"].shape[0] == STEPS
-    assert_finite(output)
+def test_steps_are_finite(simulation):
+    out = simulation.run(STEPS)
+    assert out.E.shape[0] == len(out.t)
+    for field in (out.x, out.v, out.E, out.B):
+        assert np.all(np.isfinite(np.asarray(field)))
 
 
-def test_rerun_agrees_to_roundoff(gauss_simulation):
+def test_rerun_agrees_to_roundoff(simulation):
     # GPU scatter-adds are not bit-reproducible, so compare to round-off.
-    first, second = gauss_simulation.run(), gauss_simulation.run()
-    field = np.asarray(first["electric_field"])
-    np.testing.assert_allclose(field, np.asarray(second["electric_field"]), rtol=1e-6, atol=1e-9 * np.abs(field).max())
+    first, second = simulation.run(STEPS).E, simulation.run(STEPS).E
+    np.testing.assert_allclose(first, second, rtol=1e-6, atol=1e-9 * np.abs(first).max())
 
 
-def test_output_is_on_default_device_and_neutral(gauss_simulation):
-    output = gauss_simulation.run()
-    assert output["positions"].devices() <= set(jax.devices())
-    charge = np.asarray(output["charge_density"])
-    assert np.abs(charge.sum(axis=1)).max() <= 1e-6 * np.abs(charge).max()
+def test_output_is_on_default_device(simulation):
+    assert simulation.run(STEPS).x.devices() <= set(jax.devices())

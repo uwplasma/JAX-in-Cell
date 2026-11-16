@@ -1,0 +1,9 @@
+[flake8]
+# flake8 does not read pyproject.toml, so its configuration lives here, where both a
+# local `flake8` and the CI step pick it up.
+max-line-length = 120
+max-complexity = 10
+exclude = .git,__pycache__,build,dist,docs/_build,jaxincell/version.py,.venv
+per-file-ignores =
+    # every example sets JAX_ENABLE_X64 before anything imports JAX, which is the point
+    examples/*.py: E402

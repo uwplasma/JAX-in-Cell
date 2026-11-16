@@ -1,131 +1,127 @@
-# Output and diagnostics
+# The output
 
-`Simulation.run` returns a plain dictionary. It contains the time histories, the
-particle bookkeeping, the derived quantities and a copy of every parameter section.
-The tables below use `S` for `total_steps`, `N` for the total number of pseudo-particles
-of all populations and `G` for `number_grid_points`.
+{meth}`~jaxincell.Simulation.run` returns an {class}`~jaxincell.Output`, a frozen dataclass
+and a pytree. Histories have the stored step as their first axis.
 
-## Time histories
+## Fields
 
-| key | shape | unit | location |
-|---|---|---|---|
-| `positions` | `(S, N, 3)` | m | particle positions at integer times $t^n$ |
-| `velocities` | `(S, N, 3)` | m/s | particle velocities at $t^n$ |
-| `electric_field` | `(S, G, 3)` | V/m | cell faces $x_{i+1/2}$, all three components |
-| `magnetic_field` | `(S, G, 3)` | T | cell centres $x_i$ |
-| `current_density` | `(S, G, 3)` | A/m² | $J_x$ at cell faces, $J_y$, $J_z$ at cell centres |
-| `charge_density` | `(S, G)` | C/m³ | cell centres |
-| `time_array` | `(S,)` | s | `linspace(0, S dt, S)` |
-
-Entry `n` of each history is the state after step `n + 1`; the initial state is
-available as `initial_positions`, `initial_velocities` and `fields`
-(a tuple `(E, B)` of the initial fields). Note that `time_array` starts at zero, so it
-is offset from the stored states by one step. The velocities of the explicit scheme are
-defined at integer times and the stored positions are the integer-time positions
-reconstructed from the half-step ones, so the two are synchronous. The particle axis is
-ordered by population in input order; `species_integer_index` tells which population
-each particle belongs to.
-
-## Particle bookkeeping
-
-| key | shape | meaning |
+| field | shape | meaning |
 |---|---|---|
-| `charges` | `(N, 1)` | charge of each pseudo-particle, $q_s w_s$ (zero after absorption) |
-| `masses` | `(N, 1)` | mass of each pseudo-particle, $m_s w_s$ |
-| `charge_to_mass_ratios` | `(N, 1)` | $q_s/m_s$ (zero after absorption) |
-| `weights` | `(N, 1)` | $w_s$ |
-| `species_integer_index` | `(N,)` | population index in input order |
-| `charge_integer_lookup`, `mass_integer_lookup`, `charge_mass_integer_lookup` | `(P,)` | per-population $q_s$, $m_s$, $q_s/m_s$ for the `P` populations |
-| `number_pseudoelectrons` | int | pseudo-particles in the first electron population |
+| `t` | `(S,)` | time of each stored state, s |
+| `x`, `v` | `(S, N, 3)` | particle positions and velocities, or `None` |
+| `E`, `B`, `J` | `(S, cells, 3)` | endpoint fields; `J` averages the preceding step |
+| `rho` | `(S, cells)` | charge density at the cell centres |
+| `grid` | `(cells,)` | cell centres |
+| `dx`, `dt`, `length` | scalars | grid spacing, time step, box length |
+| `charge`, `mass` | `(N,)` | of one physical particle, for each pseudo-particle |
+| `weight` | `(S, N)` | physical particles per pseudo-particle and unit area; zero once a wall has collected it; `None` with `x` |
+| `species` | `(N,)` | index of the species each particle belongs to |
+| `names`, `counts` | tuples | species names and particle counts |
+| `field_bc` | tuple | wall codes the fields were solved with, which the Gauss diagnostic needs |
+| `state` | pytree | the final loop state, for a restart |
 
-## Grid, time step and derived quantities
+`E` and `J` are at the cell faces, `B` and `rho` at the centres
+({doc}`../numerics/discretization`).
 
-| key | meaning |
-|---|---|
-| `grid` | cell centres, shape `(G,)` |
-| `dx`, `dt`, `length`, `box_size` | cell size, time step, $L$, $(L, L_y, L_z)$ |
-| `plasma_frequency` | $\omega_{pe} = \sqrt{n_e e^2/(\epsilon_0 m_e)}$ of the first electron population, rad/s |
-| `max_initial_vth_electrons`, `vth_electrons_over_c` | largest thermal speed of the first electron population, in m/s and in units of $c$ |
-| `charge_electrons` | charge of one physical electron of the first population, C |
-| `external_electric_field`, `external_magnetic_field` | the arrays that were added to the fields, `(G, 3)` |
-| `number_grid_points`, `total_steps` | copies of the inputs |
+## Per species
 
-Every key of every parameter section is also copied to the top level (for example
-`output["filter_passes"]`), and the sections themselves are available under
-`domain_parameters`, `species_parameters`, `solver_parameters`,
-`external_field_parameters`, `source_parameters` and `parameter_sections`.
+```python
+x_e, v_e = output.particles("electrons")     # (S, n_e, 3) each
+```
 
-## What `diagnostics` adds
-
-{func}`jaxincell.diagnostics` post-processes the dictionary in place. It is not part of
-the compiled run, so it can use NumPy and Python control flow.
-
-Species split
-: `position_electrons`, `velocity_electrons`, `mass_electrons`, `charge_electrons`
-  (all particles with negative charge) and the same four keys with `_ions` (non-negative
-  charge, which includes absorbed particles whose charge was set to zero). `species` is
-  a list of dictionaries, one per configured population, using `species_integer_index`
-  and the input labels even when populations have identical charge and mass. Its `name`
-  is `electrons.<label>` or `ions.<label>`; `charge` and `mass` are physical particle
-  values. It also carries `positions`, `velocities`, `weights`, `kinetic_energy`,
-  `temperature_components` (shape `(S, 3)`, K) and their mean `temperature` (shape
-  `(S,)`, K). These Newtonian velocity-variance moments subtract the weight-averaged
-  bulk velocity; they do not define a relativistic thermodynamic temperature. Dictionaries
-  without population IDs retain the legacy exact (charge, mass) grouping.
-  The original arrays remain available, and `diagnostics` can be called repeatedly.
-
-Energies, all as functions of time with shape `(S,)`
-: `electric_field_energy` $= \tfrac{\epsilon_0}{2}\sum_i |\mathbf E_i|^2 \Delta x$,
-  `magnetic_field_energy` $= \tfrac{1}{2\mu_0}\sum_i |\mathbf B_i|^2 \Delta x$,
-  the corresponding `external_*_energy` for the external arrays,
-  `kinetic_energy_electrons`, `kinetic_energy_ions` and their sum `kinetic_energy`,
-  computed as $\sum_p \tfrac12 m_p |\mathbf v_p|^2$ or
-  $\sum_p(\gamma_p-1)m_pc^2$ with the relativistic pusher, and
-  `total_energy`, the sum of all of the above. The energy densities
-  `electric_field_energy_density` and `magnetic_field_energy_density` have shape
-  `(S, G)`. All energies are per unit area (J/m²) because the box is one-dimensional.
-
-Dominant frequency
-: `dominant_frequency` is the angular frequency of the largest peak in the power
-  spectrum of $E_x$ at the centre cell, computed from the whole time series. Its
-  resolution is $2\pi/(S\,\Delta t)$, which is coarse for short runs; for accurate
-  frequencies fit the signal directly, as in the {doc}`../numerics/verification` page.
-
-Charge and momentum conservation
-: `gauss_error_Linf` is $\max_i|(E_{x,i} - E_{x,i-1})/\Delta x - \rho_i/\epsilon_0|$ at every
-  step, and `gauss_error_Linf_rel` the same divided by $\max_i|\rho_i/\epsilon_0|$ (added
-  when the output holds `charge_density`). `total_momentum`, shape `(S, 3)`, is
-  $\sum_p m_p\mathbf v_p$ or $\sum_p\gamma_p m_p\mathbf v_p$ for the relativistic
-  pusher. `momentum_error_rel` compares with the first stored row and divides by
-  that row's sum of particle momentum magnitudes. {func}`jaxincell.plot` draws both relative errors on
-  the energy panel, next to the relative energy error.
-
-Charges, masses and weights are supplied once rather than as time histories.
-They cannot recover past absorption or partial collection at walls; accurate
-historical wall energy and momentum balances need time-dependent weights and a ledger.
-
-The relative energy error $|\mathcal E(t) - \mathcal E(0)|/\mathcal E(0)$ built from
-`total_energy` is the standard check of a run. The explicit scheme is expected to
-drift by $10^{-3}$ to $10^{-2}$ over hundreds of plasma periods, the implicit scheme
-to stay at round-off. For the charge error it is the other way round: the explicit
-scheme keeps Gauss's law at round-off (with periodic boundaries), the implicit one
-does not, see {doc}`../numerics/implicit`.
-
-## Memory
-
-Every step is stored. The phase-space histories take $2 \times 3 \times 8$ bytes per
-particle per step in double precision, so $10^5$ particles over $10^4$ steps need
-48 GB. Reduce `total_steps`, the particle count, or run in chunks by building the
-initial phase space of the next run from the last stored state through
-`initial_positions` and `initial_velocities`.
-
-## Saving
+Or by hand, using the `species` index:
 
 ```python
 import numpy as np
-np.savez("run.npz", **output)
-loaded = dict(np.load("run.npz", allow_pickle=True))
+electrons = np.asarray(output.species) == 0
 ```
 
-The nested parameter dictionaries become zero-dimensional object arrays; access them
-with `loaded["domain_parameters"].item()`.
+## Diagnostics
+
+```python
+from jaxincell import diagnostics
+
+d = diagnostics(output)
+d["total"]            # total energy at every stored step
+d["energy_error"]     # |W(t) - W(0)| / W(0)
+d["momentum_error"]   # |P(t) - P(0)| / sum_p |p_p(0)|
+d["gauss_residual"]   # violation of the discrete Gauss law, relative to e n / eps0
+d["potential"]        # electrostatic potential at the faces, zero at the left wall
+d["temperatures"]     # per species, per component, in eV
+```
+
+* `d["dominant_frequency"]` needs at least two stored steps and is NaN for a run that
+  stored one.
+* The full list is in {doc}`../numerics/diagnostics`.
+* {func}`~jaxincell.energies`, {func}`~jaxincell.gauss_residual`,
+  {func}`~jaxincell.temperatures` and {func}`~jaxincell.dominant_frequency` are exported
+  too, so only what is needed has to be computed.
+
+## Saving
+
+The arrays are ordinary JAX arrays, so anything that takes NumPy works:
+
+```python
+import numpy as np
+np.savez_compressed("run.npz", t=output.t, E=output.E, rho=output.rho)
+```
+
+For interchange the package writes openPMD {cite}`openpmd`, the community standard for
+particle-in-cell output, which the visualisation tools of the field read directly:
+
+```python
+from jaxincell.openpmd import write_openpmd
+
+write_openpmd(output, "run.h5")       # needs `pip install jaxincell[openpmd]`
+```
+
+Existing paths are protected; pass `overwrite=True` to replace one deliberately. Export
+requires at least one stored step, a positive integer `every`, and finite positive `area`.
+Sparse snapshots retain their actual timestamps; `every` counts stored snapshots.
+A `%T` or `%06T` filename selects file-based output; existing expanded files are protected too.
+`sidecar=True` writes a `.pmd` discovery file with the relative filename or template. Existing
+sidecars are protected by the same overwrite option.
+Separate particle and mesh series use the same writer:
+
+```python
+write_openpmd(output, "meshes.json", particles=False)
+write_openpmd(output, "particles.json", meshes=False)
+```
+
+* One iteration per stored step.
+* Meshes for `E`, `B`, `J` and `rho`, with their spatial staggering recorded. The
+  step-averaged `J` has `timeOffset=-dt/2` in seconds; endpoint records have zero offset.
+* One particle species per `Output.names`, carrying position, momentum and weighting per
+  particle, and charge, mass and a zero `positionOffset` as constant records.
+* The momentum is the one the pusher advances: $\gamma m\mathbf v$ for a relativistic run,
+  $m\mathbf v$ otherwise.
+
+For magnetic moments or other diagnostics that need prescribed fields, pass the simulation:
+
+```python
+write_openpmd(output, "run.h5", simulation=sim)
+```
+
+Its static fields are separate `external_E`/`external_B` meshes alongside the self-fields.
+Flat E and B retain their face and centre staggering; 3D tensors use the domain's x/y/z
+periods and cell centres. The exporter checks the simulation's x geometry against the output.
+These fields are read from `sim` at export time, so pass the simulation used for the run.
+They add no histories to `Output`, and `meshes=False` skips all mesh records.
+
+openPMD's `weighting` counts physical particles, while `Output.weight` counts them per unit
+area of the $y$-$z$ plane ({doc}`units`). The export multiplies by the transverse area the
+run stands for, `area` in m², recorded on the `weighting` record as `transverseArea`:
+
+```python
+write_openpmd(output, "run.h5", area=domain.length_y * domain.length_z)
+```
+
+The default, 1 m², writes the per-unit-area weights unchanged. The meshes are volume
+densities and do not depend on it.
+
+## Reading a run back
+
+An `Output` is a pytree, so `jax.tree_util` flattens and rebuilds it, and the diagnostics
+work on a reconstructed one as long as the fields they need are present. The simplest
+durable choice is to save the arrays and recompute the diagnostics on load: they are cheap
+next to the run that produced them.
