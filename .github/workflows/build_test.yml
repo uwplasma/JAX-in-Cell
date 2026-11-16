@@ -9,6 +9,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [ main ]
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,14 +32,32 @@ jobs:
       matrix:
         python-version: [ '3.9', '3.10', '3.11', '3.12']
     name: Python ${{ matrix.python-version }} Test
+    env:
+      # Pull requests run the full suite on 3.12, a smoke subset on the oldest
+      # version and nothing else; main, nightly and manual runs run everything.
+      LANE: ${{ (github.event_name != 'pull_request' || matrix.python-version == '3.12') && 'full' || (matrix.python-version == '3.9' && 'smoke') || 'skip' }}
+      JAX_COMPILATION_CACHE_DIR: ${{ github.workspace }}/.jax_cache
+      JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
+      JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES: "0"
     steps:
     - uses: actions/checkout@v4
+    - name: Restore JAX compilation cache
+      if: env.LANE != 'skip'
+      uses: actions/cache@v4
+      with:
+        path: .jax_cache
+        key: jax-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'requirements.txt') }}-${{ github.run_id }}
+        restore-keys: |
+          jax-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'requirements.txt') }}-
+          jax-${{ runner.os }}-py${{ matrix.python-version }}-
     - name: Set up Python
+      if: env.LANE != 'skip'
       uses: astral-sh/setup-uv@v6
       with:
         python-version: ${{ matrix.python-version }}
         enable-cache: false
     - name: Install jaxincell
+      if: env.LANE != 'skip'
       run: |
         # venv outside the checkout so flake8 does not lint it
         uv venv --seed --clear "$RUNNER_TEMP/venv"
@@ -48,17 +69,25 @@ jobs:
         uv pip install . flake8 pytest coverage pytest-cov pytest-xdist
         if [ -f requirements.txt ]; then uv pip install -r requirements.txt; fi
     - name: Check installed package import outside source tree
+      if: env.LANE != 'skip'
       run: |
         cd "$RUNNER_TEMP"
         python -c "import jaxincell; import jaxincell._parameters; from jaxincell import Simulation"
     - name: Lint with flake8
+      if: env.LANE != 'skip'
       run: |
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
+    - name: Run smoke tests
+      if: env.LANE == 'smoke'
+      run: |
+        pytest -n 3 tests/test_package_exports.py tests/test_constants.py tests/test_routing.py tests/test_parameter_utils.py tests/test_parameter_sections.py
+
     - name: Run tests with coverage
+      if: env.LANE == 'full'
       run: |
         pytest -n 3 --cov-branch --cov-report=xml --cov=jaxincell
 
