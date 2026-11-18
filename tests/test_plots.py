@@ -486,6 +486,31 @@ def test_pdf_over_frames_numpy_normalization_and_empty_bins():
     np.testing.assert_allclose(empty_pdf, np.zeros((3, 2), dtype=np.float32))
 
 
+def test_weighted_pdf_ignores_reserved_and_absorbed_slots():
+    samples = np.array([[0., 0.25, 0.75], [0., 0., 0.]])
+    weights = np.array([[0., 1., 3.], [0., 0., 0.]], dtype=np.float32)
+    pdf = plot_mod._pdf_over_frames_numpy(samples, np.array([0., 0.5, 1.]), weights)
+    np.testing.assert_allclose(pdf, [[0.5, 1.5], [0., 0.]])
+
+
+def test_weighted_phase_space_has_no_cold_slot_count_or_unit_background(monkeypatch):
+    output = _synthetic_output(T=3, X=4, Ne=3, Ni=3, include_B=False)
+    weights = np.array([[0., 1., 3.], [0., 0., 0.], [0., 2., 0.]])
+    for species in output["species"]:
+        species["weights"] = weights
+        species["velocities"] = jnp.zeros((3, 3, 3)).at[0, 2, 0].set(10.)
+    figures = []
+    monkeypatch.setattr(plot_mod, "FuncAnimation", _FakeAnimation)
+    monkeypatch.setattr(plot_mod.plt, "close", lambda fig=None: figures.append(fig))
+    plot_mod.plot(output, show=False)
+    for axes in figures[-1].axes:
+        if "phase space" in axes.get_title():
+            image = axes.images[0]
+            np.testing.assert_array_equal(image.get_array(), 0)
+            assert image.get_extent()[-1] > 10
+            assert image.norm.vmin == 0 and image.norm.vmax > 0
+
+
 def test_plot_energy_panel_shows_charge_and_momentum_errors(monkeypatch):
     out = _synthetic_output(use_species=True, include_energy=True)
     T = out["electric_field"].shape[0]

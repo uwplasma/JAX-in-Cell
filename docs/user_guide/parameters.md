@@ -11,7 +11,7 @@ optional; a missing section or key takes the default value.
 | `species_parameters` | one entry per electron or ion population | {doc}`species` |
 | `solver_parameters` | integrator, field solver, filter, implicit-solver settings, seed | {doc}`solver` |
 | `external_field_parameters` | static external electric and magnetic fields | {doc}`external_fields` |
-| `source_parameters` | particle sources (accepted but not active on `main`) | {doc}`external_fields` |
+| `source_parameters` | optional volumetric particle sources | {doc}`external_fields` |
 
 In TOML the sections are tables; species are nested tables named
 `species_parameters.<type>.<label>`:

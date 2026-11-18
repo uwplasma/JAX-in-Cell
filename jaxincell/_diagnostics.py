@@ -19,7 +19,8 @@ def diagnostics(output):
         "charge_ions":        output["charges"]   [   isel],
     }
     output.update(**segregated)
-    mass, velocity = output["masses"].reshape(-1), output["velocities"]
+    initial_mass, velocity = output["masses"].reshape(-1), output["velocities"]
+    mass = jnp.asarray(output["masses_over_time"])[..., 0] if "masses_over_time" in output else initial_mass
     v2 = jnp.sum(velocity ** 2, axis=-1)
     if output.get("solver_parameters", {}).get("relativistic", output.get("relativistic", False)):
         root = jnp.sqrt(1 - v2 / speed_of_light ** 2)
@@ -41,19 +42,28 @@ def diagnostics(output):
              for kind in ("electrons", "ions")
              for label, sp in output.get("species_parameters", {}).get(kind, {}).items()]
     weights = jnp.asarray(output.get("weights", jnp.ones_like(output["masses"]))).reshape(-1)
+    initial_weights = weights
+    if "weights_over_time" in output:
+        weights = jnp.asarray(output["weights_over_time"])
+    elif "masses_over_time" in output:
+        weights = weights * mass / jnp.where(initial_mass > 0, initial_mass, 1.)
+    if "masses_over_time" in output:
+        output.update(weights_electrons=weights[..., esel], weights_ions=weights[..., isel])
 
     species_list = []
     for si in np.unique(labels):
         mask = (labels == si)
         pos_s = output["positions"][:, mask, :]
         vel_s = output["velocities"][:, mask, :]
-        w_s, m_s = weights[mask], jnp.asarray(m[mask])
-        norm = jnp.sum(w_s)
-        norm = jnp.where(norm > 0, norm, 1.0)
-        qv = float(output["charge_integer_lookup"][si]) if "charge_integer_lookup" in output else float(jnp.sum(q[mask]) / norm)
-        mv = float(output["mass_integer_lookup"][si]) if "mass_integer_lookup" in output else float(jnp.sum(m_s) / norm)
-        mean = jnp.sum(w_s[None, :, None] * vel_s, axis=1) / norm
-        temperature = jnp.sum(m_s[None, :, None] * (vel_s - mean[:, None, :]) ** 2, axis=1) / (boltzmann_constant * norm)
+        w_s, m_s = weights[..., mask], mass[..., mask]
+        norm = jnp.sum(jnp.broadcast_to(w_s, vel_s.shape[:-1]), axis=-1)
+        norm = jnp.where(norm > 0, norm, 1.)
+        initial_norm = jnp.sum(initial_weights[mask])
+        initial_norm = jnp.where(initial_norm > 0, initial_norm, 1.)
+        qv = float(output["charge_integer_lookup"][si]) if "charge_integer_lookup" in output else float(jnp.sum(q[mask]) / initial_norm)
+        mv = float(output["mass_integer_lookup"][si]) if "mass_integer_lookup" in output else float(jnp.sum(m[mask]) / initial_norm)
+        mean = jnp.sum(w_s[..., None] * vel_s, axis=1) / norm[:, None]
+        temperature = jnp.sum(m_s[..., None] * (vel_s - mean[:, None, :]) ** 2, axis=1) / (boltzmann_constant * norm[:, None])
 
         # Legacy names for dictionaries without configured population labels.
         if "species_integer_index" in output and si < len(names):
@@ -76,6 +86,8 @@ def diagnostics(output):
             "temperature": jnp.mean(temperature, axis=-1),
             "kinetic_energy": jnp.sum(kinetic_p[:, mask], axis=-1),
         })
+        if "weights_over_time" in output:
+            species_list[-1]["weights"] = output["weights_over_time"][:, mask]
 
     output["species"] = species_list
 

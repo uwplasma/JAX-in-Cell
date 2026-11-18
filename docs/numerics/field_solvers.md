@@ -41,9 +41,12 @@ discontinuity at the box ends.
 
 The direct finite-difference solution $E_{i+1/2} = E_{i-1/2} + \Delta x\,\rho_i/\epsilon_0$
 with $E_{-1/2} = 0$, implemented in {func}`jaxincell.E_from_Gauss_1D_Cartesian` as a
-bidiagonal solve, is used once to compute the initial electric field from the initial
-charge density. It does not assume periodicity: the field vanishes at the left wall
-and, for a neutral box, returns to zero at the right wall.
+bidiagonal solve, computes the initial electric field and is available each explicit
+step with `field_solver = 2`. With wall fields it fixes the left-face field to zero
+and, for a neutral box, returns to zero at the right wall. With periodic fields it
+first removes the mean charge (a uniform compensating background) and then fixes
+the mean electric field to zero. This satisfies the periodic backward-difference
+divergence, including at the grid seam.
 
 ## Which mode to use
 
