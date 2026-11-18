@@ -4,57 +4,94 @@ from ._constants import speed_of_light
 
 __all__ = ['set_BC_single_particle', 'set_BC_particles', 'set_BC_single_particle_positions', 'set_BC_positions']
 
-def _particle_boundary_map(x, dx, grid, lengths, BC_left, BC_right):
-    """Map a free-flight endpoint and return reflection and collection flags."""
+def _particle_boundary_map(x, vx, dx, grid, lengths, BC_left, BC_right,
+                           mixed_BC_weight=1., COR_left=1., COR_right=1., max_vx=1., collected=False):
+    """Common position map and impact factors; only two elastic walls permit repeated impacts."""
     length = lengths[0]
-    # Select the crossed wall's code; endpoints exactly on a wall stay inside.
-    left, right = x[0] < -length/2, x[0] > length/2
+    # Select the crossed wall; an exact wall contact counts only when outgoing.
+    left = (x[0] < -length/2) | ((x[0] == -length/2) & (vx < 0))
+    right = (x[0] > length/2) | ((x[0] == length/2) & (vx > 0))
     hit = left | right
     code = jnp.where(left, BC_left, BC_right)
+    face = jnp.where(left, -length/2, length/2)
+    restitution = jnp.where(left, COR_left, COR_right)
+    fraction = jnp.where(code == 2, 0., jnp.where(code == 3, mixed_BC_weight,
+                        jnp.where(code == 4, jnp.clip(1-jnp.abs(vx)/jnp.where(max_vx > 0, max_vx, 1.), 0., 1.), 1.)))
+    fraction = jnp.where(hit & (code != 0), fraction, 1.)
+    lost = hit & (code >= 2) & (fraction <= 0)
+    parked = collected & hit & (code != 0)
     # Transverse coordinates always wrap; x wraps only for a periodic wall.
     periods = jnp.asarray(lengths, dtype=x.dtype)
     wrapped = (x + periods/2) % periods - periods/2
-    normal = jnp.where(code == 0, wrapped[0], jnp.where(left, -length-x[0], length-x[0]))
+    normal = jnp.where(code == 0, wrapped[0], face-restitution*(x[0]-face))
+    normal = jnp.where(hit | (code == 0), normal, x[0])
+    # Two unit-restitution elastic walls fold arbitrarily long flights.
+    elastic = (BC_left == 1) & (BC_right == 1) & (COR_left == 1) & (COR_right == 1)
+    phase = (x[0] + length/2) % (2*length)
+    normal = jnp.where(elastic & hit, length/2-jnp.abs(phase-length), normal)
     # Park collected particles beyond the deposition stencil.
-    normal = jnp.where(code == 2, jnp.where(left, grid[0]-1.5*dx, grid[-1]+3*dx), normal)
-    # Two elastic walls fold arbitrarily long flights back into the domain.
-    elastic = (BC_left == 1) & (BC_right == 1) & hit
-    phase = (x[0]+length/2) % (2*length)
-    normal = jnp.where(elastic, length/2-jnp.abs(phase-length), normal)
-    normal = jnp.where(hit, normal, x[0])
+    normal = jnp.where(lost, jnp.where(left, grid[0]-1.5*dx, grid[-1]+3*dx), normal)
+    normal = jnp.where(parked, x[0], normal)
+    normal = jnp.where((code != 0) & ~(lost | parked) & (jnp.abs(normal) > length/2), jnp.nan, normal)
     # Each wall crossing reverses the normal velocity; even counts cancel.
-    reflections = jnp.ceil((jnp.abs(x[0])-length/2)/length)
-    factor = jnp.where(hit & (code == 1), -1., 1.)
-    factor = jnp.where(elastic, jnp.where(reflections % 2 == 0, 1., -1.), factor)
-    return jnp.array([normal, wrapped[1], wrapped[2]]), factor, hit & (code == 2)
+    reflections = jnp.floor((jnp.abs(x[0])-length/2)/length)+1
+    speed_factor = jnp.where(hit & (code != 0), -restitution, 1.)
+    speed_factor = jnp.where(elastic & hit, jnp.where(reflections % 2 == 0, 1., -1.), speed_factor)
+    # This scalar choice lets XLA discard all impact logic for paired periodic walls.
+    periodic = (BC_left == 0) & (BC_right == 0)
+    position = jnp.where(periodic, wrapped, jnp.array([normal, wrapped[1], wrapped[2]]))
+    return position, jnp.where(periodic, 1., speed_factor), jnp.where(periodic, 1., fraction), (lost | parked) & jnp.logical_not(periodic)
 
+def set_BC_single_particle(x_n, v_n, q, q_m, m, dx, grid, box_size_x, box_size_y, box_size_z,
+                           BC_left, BC_right, mixed_BC_weight=1., COR_left=1., COR_right=1., max_vx=1.):
+    """One resolved wall impact; q and m carry the same returned fraction.
 
-def set_BC_single_particle(x_n, v_n, q, q_m, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
-    """Map position, normal velocity and live charge for boundary codes 0, 1, 2."""
-    position, factor, lost = _particle_boundary_map(
-        x_n, dx, grid, (box_size_x, box_size_y, box_size_z), BC_left, BC_right)
-    velocity = jnp.array([factor*v_n[0], v_n[1], v_n[2]])
-    return position, jnp.where(lost, 0., velocity), jnp.where(lost, 0., q), jnp.where(lost, 0., q_m)
+    BC3 returns ``mixed_BC_weight``; BC4 returns ``max(1-abs(vx)/max_vx,0)``,
+    where max_vx is a prescribed wall speed, independent of other markers.
+    Restitution reduces both the normal speed and the remaining drift distance.
+    """
+    position, speed_factor, fraction, lost = _particle_boundary_map(
+        x_n, v_n[0], dx, grid, (box_size_x, box_size_y, box_size_z), BC_left, BC_right,
+        mixed_BC_weight, COR_left, COR_right, max_vx, jnp.all((q == 0) & (m == 0)))
+    velocity = jnp.array([speed_factor*v_n[0], v_n[1], v_n[2]])
+    return position, jnp.where(lost, 0., velocity), q*fraction, jnp.where(lost, 0., q_m), m*fraction
 
 
 @jit
-def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
-    """Map particles in parallel; absorption retains the legacy mass array."""
-    xs_n, vs_n, qs, q_ms = vmap(lambda x, v, q, qm: set_BC_single_particle(
-        x, v, q, qm, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right))(xs_n, vs_n, qs, q_ms)
-    return xs_n, vs_n, qs, ms, q_ms
+def set_BC_particles(xs_n, vs_n, qs, ms, q_ms, dx, grid, box_size_x, box_size_y, box_size_z,
+                     BC_left, BC_right, mixed_BC_weight=1., COR_left=1., COR_right=1.,
+                     mixed_BC_velocity_scale=speed_of_light):
+    """Apply the prescribed wall law to each marker independently."""
+    x, v, q, qm, m = vmap(lambda x, v, q, qm, m: set_BC_single_particle(
+        x, v, q, qm, m, dx, grid, box_size_x, box_size_y, box_size_z,
+        BC_left, BC_right, mixed_BC_weight, COR_left, COR_right, mixed_BC_velocity_scale))(
+        xs_n, vs_n, qs, q_ms, ms)
+    return x, v, q, m, qm
 
 
 def set_BC_single_particle_positions(x_n, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
-    """Apply the same endpoint map without changing velocity or particle weight."""
-    return _particle_boundary_map(x_n, dx, grid, (box_size_x, box_size_y, box_size_z), BC_left, BC_right)[0]
+    """Map positions with unit restitution/return and no directional wall impact.
 
+    Positions alone cannot determine restitution, returned weight or collection
+    history. Use the full-state mapper for those laws and exact outgoing impacts.
+    """
+    return _particle_boundary_map(x_n, 0., dx, grid, (box_size_x, box_size_y, box_size_z), BC_left, BC_right)[0]
 
 @jit
 def set_BC_positions(xs_n, qs, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right):
-    """Map positions in parallel, independently of particle charge."""
-    return vmap(lambda x: set_BC_single_particle_positions(
-        x, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right))(xs_n)
+    """
+    Applies boundary conditions to particle positions for all particles during a half-step update.
+
+    Args:
+        xs_n (jnp.ndarray): Positions of all particles, shape (N, 3).
+        qs (jnp.ndarray): Charges of all particles, shape (N,).
+        Other parameters: Same as set_BCs.
+
+    Returns:
+        jnp.ndarray: Updated positions of all particles, shape (N, 3).
+    """
+    return vmap(lambda x_n: set_BC_single_particle_positions(
+        x_n, dx, grid, box_size_x, box_size_y, box_size_z, BC_left, BC_right))(xs_n)
 
 
 @jit
