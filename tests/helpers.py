@@ -33,8 +33,8 @@ def base_simulation_parameters():
         "domain_parameters": {
             "total_steps": 1,
             "number_grid_points": 4,
-            "number_grid_points_y": 3,
-            "number_grid_points_z": 3,
+            "number_grid_points_y": 0,
+            "number_grid_points_z": 0,
             "length": 0.01,
             "length_y": 0.01,
             "length_z": 0.01,
