@@ -310,7 +310,7 @@ class Simulation:
             "number_grid_points":     domain_parameters["number_grid_points"],
             "number_pseudoelectrons": next(iter(species_parameters["electrons"].values()))["number_pseudoparticles"],
             "total_steps": total_steps,
-            "time_array":  (jnp.arange(total_steps) + 1) * dt,
+            "time_array":  jnp.arange(1, total_steps + 1) * dt,
             "grid": grid,
             "grid_xyz": grid_xyz,
             "dt": dt,
@@ -584,7 +584,7 @@ class Simulation:
     @solver_parameters.setter
     def solver_parameters(self, new_solver_parameters):
         self.set_parameter_section("solver_parameters", new_solver_parameters)
-    
+
     @property
     def input_parameters(self):
         return deepcopy(self._input_parameters)

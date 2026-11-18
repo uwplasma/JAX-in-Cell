@@ -66,7 +66,7 @@ jobs:
         echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
         export VIRTUAL_ENV="$RUNNER_TEMP/venv"
         export PATH="$VIRTUAL_ENV/bin:$PATH"
-        uv pip install . flake8 pytest coverage pytest-cov pytest-xdist
+        uv pip install '.[openpmd]' flake8 pytest coverage pytest-cov pytest-xdist
         if [ -f requirements.txt ]; then uv pip install -r requirements.txt; fi
     - name: Check installed package import outside source tree
       if: env.LANE != 'skip'
