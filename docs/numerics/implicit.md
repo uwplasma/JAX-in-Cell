@@ -100,10 +100,11 @@ Energy conservation
   see {doc}`verification`.
 
 Time step
-: There is no light-wave Courant condition; the fields are unconditionally stable for
-  the source-free Maxwell equations. The step is still limited by the accuracy of the
-  particle orbits, which the sub-stepping helps with, and by the convergence of the
-  fixed-point iteration.
+: Exact Crank-Nicolson is unconditionally stable for source-free Maxwell equations,
+  but the current curl Picard solve converges only when
+  $(c\Delta t/\Delta x)^2\sin^2(k\Delta x/2)<1$ for every represented mode.
+  Use a strict Courant margin and check timestep and iteration convergence; particle
+  sub-stepping does not remove this field-solve condition.
 
 Cost
 : Each Picard iteration performs $N_{sub}$ Boris pushes and current deposits over all
@@ -113,10 +114,9 @@ Cost
 
 ## Limitations of the current implementation
 
-* Deposit and gather use periodic index wrapping regardless of the field boundary
-  codes; the particle boundary codes are still honoured. Use periodic boundaries.
+* Only periodic particle and field boundaries are supported; other combinations reject.
 * The digital filter is not applied; `filter_passes` is ignored.
-* The particle push is the non-relativistic Boris rotation; `relativistic` is ignored.
+* The particle push is Newtonian; relativistic particles and nonzero prescribed fields reject.
 * The charge density stored in the output is deposited from $x^{n+1}$ without
   filtering.
 * The current is deposited as $q v S_2$ at the sub-step mid-points, which does not

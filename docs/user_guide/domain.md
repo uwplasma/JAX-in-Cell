@@ -29,11 +29,11 @@ output arrays have one value per cell for every quantity and the
 
 ## Choosing the resolution
 
-The grid spacing should resolve the electron Debye length. With the quadratic spline
-shape function and the digital filter switched on, $\Delta x \lesssim 2\lambda_D$ is
-safe; the finite-grid instability appears for coarser grids. The spacing is not set
-directly: `dx_over_Debye_length` in the species section fixes
-$\lambda_D/\Delta x$, and the density follows from it (see {doc}`species`).
+The grid spacing should resolve the electron Debye length; start with
+$\Delta x/\lambda_D \lesssim 0.5$ and check grid and particle-number convergence.
+Filtering does not guarantee accuracy on a coarse grid. `dx_over_Debye_length`
+in the species section fixes $\Delta x/\lambda_D$, and the density follows from
+it (see {doc}`species`).
 
 The time step has three constraints, discussed in {doc}`../numerics/stability`:
 
@@ -42,12 +42,12 @@ The time step has three constraints, discussed in {doc}`../numerics/stability`:
 * particle motion: a pseudo-particle should not cross more than one cell per half step,
   $v_{\max}\Delta t < 2\Delta x$, because the charge-conserving current deposit sweeps a
   window of six cells around each particle;
-* light waves, explicit scheme only: $c\,\Delta t/\Delta x \le 1$ whenever a transverse
+* light waves, explicit scheme: $c\,\Delta t/\Delta x < 1$ whenever a transverse
   field component can be excited. Purely electrostatic runs with velocities only along
   $x$ do not excite transverse fields and may use a larger value, as the examples do.
 
-The implicit Crank-Nicolson scheme removes the light-wave constraint but not the other
-two.
+The current Crank-Nicolson iteration also has a light-wave convergence limit;
+see {doc}`../numerics/implicit`. Check timestep and iteration convergence.
 
 ## Boundary conditions
 

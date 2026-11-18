@@ -23,12 +23,13 @@ Cell crossing
   drifts of this size are the particles to watch.
 
 Light waves
-: The explicit field update is stable for $c\,\Delta t/\Delta x \le 1$. The constraint
+: Use $c\,\Delta t/\Delta x < 1$ with a margin for the explicit field update. The constraint
   applies as soon as any transverse field can be excited: transverse thermal spread or
   drift, an external magnetic field, or the Weibel instability. Purely electrostatic
   problems (all velocities along $x$, no $\mathbf B$) never excite the transverse
   equations and can run with larger values, which the two-stream examples exploit.
-  The implicit scheme removes this constraint.
+  At equality the Nyquist mode can grow. The current implicit Picard iteration has
+  its own light-wave convergence limit, described in {doc}`implicit`.
 
 Gyration
 : With an external magnetic field $B$, resolve the cyclotron motion,
@@ -40,10 +41,9 @@ Gyration
 Debye length
 : Explicit electrostatic schemes suffer from the finite-grid instability when
   $\Delta x \gtrsim 3\lambda_D$ with linear weighting {cite}`langdon1970`. The
-  quadratic spline and the filter push the limit to larger cells, and the
-  implicit scheme is not subject to it, but a resolved Debye length,
-  `dx_over_Debye_length` $\gtrsim 0.5$, is the safe choice. Coarser grids
-  heat the plasma until $\lambda_D$ grows to the cell size.
+  weighting and filter change this limit; neither establishes accuracy on a coarse
+  grid. Start with `dx_over_Debye_length` $\lesssim 0.5$ and refine the grid and
+  particle count. Implicit energy conservation alone does not establish accuracy.
 
 Wavelength
 : A mode of wavenumber $k$ needs $k\Delta x \ll 1$ for the spline and the
