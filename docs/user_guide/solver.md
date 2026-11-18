@@ -8,6 +8,8 @@ sets the digital filter, the implicit-solver controls and the random seed.
 | `time_evolution_algorithm` | `0` | no | `0` explicit leapfrog with the Boris pusher; `1` implicit Crank-Nicolson with Picard iteration. |
 | `field_solver` | `0` | no | `0` electromagnetic: $E_x$ follows Ampere's law; `1` electrostatic: $E_x$ is recomputed from Gauss's law by FFT every step. Only `0` and `1` are accepted. |
 | `relativistic` | `false` | no | Use the relativistic Boris pusher (explicit scheme only). |
+| `collisions` | `false` | no | Optional Coulomb scattering for Newtonian periodic Boris; see {doc}`../examples/collisions`. |
+| `coulomb_logarithm` | `None` | no | Fixed finite nonnegative Coulomb logarithm, or the initial electron-ion NRL estimate when omitted. |
 | `filter_passes` | `5` | no | Number of passes of the compensated binomial filter applied to $\rho$ and $\mathbf J$ (explicit scheme only). `0` disables it; `1` is a no-op, see below. |
 | `filter_alpha` | `0.5` | yes | Weight of the centre point in each binomial pass, $0 < \alpha < 1$. |
 | `filter_strides` | `(1, 2, 4)` | no | Cell offsets of the three-point stencil; the filter is applied once per stride. |
