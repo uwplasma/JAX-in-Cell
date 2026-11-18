@@ -1,5 +1,4 @@
-import warnings
-
+from math import isfinite
 from ._utils import build_parameter_hash, overlay_parameter_defaults
 
 __all__ = [
@@ -11,7 +10,7 @@ __all__ = [
 
 DEFAULT_SOURCE_PARAMETERS = {
         "source_term_active": 0,                  # Whether the source term is active or not
-        # 0 for electrons, 1 for ions, 2+ for extra species (sequential)
+        # Canonical population order: all named electrons, then all named ions.
         "source_species": 1,                 # Which species should have sources (all species must be defined and named in the input file previously)
         "how_often_source_should_produce_quasiparticles": 20, # How many timesteps between each new quasiparticle produced by the source
         "source_particles_per_second": 1e16,       # (tuple for multiple sources)
@@ -81,24 +80,14 @@ def clean_and_initialize_source_parameters(source_parameters, input_parameters=N
     for key in SOURCE_FLOAT_TUPLE_PARAMETERS:
         source_parameters[key] = make_tuple_values_floats(source_parameters[key])
 
-    assert all(spps > 0 for spps in source_parameters["source_particles_per_second"]), f"All values in 'source_particles_per_second' must be positive. Got {source_parameters['source_particles_per_second']}."
+    assert all(isfinite(spps) and spps > 0 for spps in source_parameters["source_particles_per_second"]), f"All values in 'source_particles_per_second' must be positive and finite. Got {source_parameters['source_particles_per_second']}."
 
     assert all(los in [0, 1, 2, 3] for los in source_parameters["location_of_source"]), f"All values in 'location_of_source' must be 0 (center), 1 (left), 2 (right), or 3 (whole domain). Got {source_parameters['location_of_source']}."
 
     assert all(isinstance(wos, int) and wos > 0 for wos in source_parameters["width_of_source"]), f"All values in 'width_of_source' must be positive integers. Got {source_parameters['width_of_source']}."
 
     for key in SOURCE_INJECTION_SPEED_PARAMETERS:
-        assert all(isinstance(value, float) for value in source_parameters[key]), f"All values in '{key}' must be floats. Got {source_parameters[key]}."
-
-    if source_parameters["source_term_active"]:
-        warnings.warn(
-            "source_term_active is set but particle sources are not implemented in "
-            "this release: the source parameters are validated and carried into the "
-            "output, but no particles are injected and the run is identical to one "
-            "with source_term_active = 0.",
-            UserWarning,
-            stacklevel=3,
-        )
+        assert all(isinstance(value, float) and isfinite(value) for value in source_parameters[key]), f"All values in '{key}' must be finite floats. Got {source_parameters[key]}."
 
     return source_parameters
 

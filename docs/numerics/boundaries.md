@@ -3,18 +3,24 @@
 The box has two walls at $x = \pm L/2$. Each wall carries one code for particles and
 one for fields (`0` periodic, `1` reflective, `2` absorbing), set in the domain
 parameters. This page gives the formulas; {doc}`../user_guide/boundaries` discusses
-when to use which.
+when to use which, including particle codes `3` and `4` for fractional return.
 
 ## Particles
 
 For a particle that has left the box through the left wall ($x < -L/2$) or the right
 wall ($x > L/2$):
 
-| code | position | velocity | charge, $q/m$ |
+| code | position | velocity | charge, mass, $q/m$ |
 |---|---|---|---|
 | `0` periodic | $x \to x \pm L$ | unchanged | unchanged |
 | `1` reflective | $x \to -L - x$ (left), $x \to L - x$ (right) | $v_x \to -v_x$ | unchanged |
 | `2` absorbing | $x \to x_0 - 1.5\,\Delta x$ (left), $x \to x_{N_x-1} + 3\,\Delta x$ (right) | $\mathbf v \to 0$ | set to zero |
+
+For fractional return, the wall mapper multiplies marker charge and mass by the
+returned fraction, while retaining $q/m$ unless the fraction is zero. The normal
+velocity and remaining drift distance are multiplied by the normal restitution
+coefficient. Each physical half drift applies this map before the next particle
+push or output; the wall-law limits are described in {doc}`../user_guide/boundaries`.
 
 The $y$ and $z$ coordinates are always wrapped into $[-L_y/2, L_y/2]$ and
 $[-L_z/2, L_z/2]$. The same map, without the velocity and charge changes, is applied
@@ -32,6 +38,7 @@ the last cell centre. The part that falls beyond the wall is handled per wall co
 | `0` periodic | added to the first (respectively last) cell |
 | `1` reflective | added to the last (respectively first) cell, that is folded back onto the boundary cell |
 | `2` absorbing | dropped |
+| `3`, `4` fractional return | folded back for the remaining live marker, as for `1` |
 
 Only the fraction of the cloud within half a cell beyond the last centre is
 redistributed, which is the whole cloud for particles inside the box when the deposit

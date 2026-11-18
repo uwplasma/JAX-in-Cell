@@ -1,0 +1,42 @@
+# Equal-density electrons and positrons, initially hot and cold.
+# This deliberately retains the original dense PIC benchmark. Its Debye length is
+# unresolved; use --collision-only to test equilibration without particle-field heating.
+[domain_parameters]
+length = 0.01
+number_grid_points = 70
+total_steps = 500
+timestep_over_spatialstep_times_c = 0.5
+
+[solver_parameters]
+print_info = false
+field_solver = 0
+time_evolution_algorithm = 0
+relativistic = false
+collisions = true
+filter_alpha = 0.5
+seed = 1701
+
+[species_parameters.electrons.hot]
+number_pseudoparticles = 5000
+weight = 4370228600000
+charge_over_elementary_charge = -1
+vth_over_c_x = 0.001
+vth_over_c_y = 0.001
+vth_over_c_z = 0.001
+drift_speed_x = 0
+velocity_plus_minus_x = false
+perturbation_amplitude_x = 0
+perturbation_wavenumber_x = 0
+
+[species_parameters.ions.cold]
+number_pseudoparticles = 5000
+weight = 4370228600000
+charge_over_elementary_charge = 1
+mass_over_proton_mass = 0.000544617019938
+vth_over_c_x = "_electrons0"
+vth_over_c_y = "_electrons0"
+vth_over_c_z = "_electrons0"
+ion_temperature_over_electron_temperature_x = 0.01
+ion_temperature_over_electron_temperature_y = 0.01
+ion_temperature_over_electron_temperature_z = 0.01
+perturbation_amplitude_x = 0
