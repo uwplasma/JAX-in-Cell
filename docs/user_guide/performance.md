@@ -102,6 +102,15 @@ simulation runs on the GPU without any change to the script. To force the CPU, s
 `JAX_PLATFORMS=cpu`. Multi-device execution is not implemented: one simulation runs on
 one device.
 
+When to change the defaults:
+
+| Setting | Default | Change it when |
+| --- | --- | --- |
+| `JAX_PLATFORMS=cpu` | GPU when a CUDA `jaxlib` is installed | Small runs: compare both devices on your machine |
+| `XLA_PYTHON_CLIENT_PREALLOCATE=false` | JAX preallocates most GPU memory | Several processes share one GPU |
+| `jax_enable_x64=False` | float64 | See Precision above: faster, but worse energy error and noise floor |
+| `JAX_COMPILATION_CACHE_DIR` | no persistent cache | You rerun the same configuration in new processes |
+
 ## Progress bar
 
 `jax_tqdm` draws a progress bar from inside the compiled loop. It is useful in a
