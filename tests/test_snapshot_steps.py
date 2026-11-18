@@ -69,12 +69,8 @@ def test_snapshot_steps_matches_full_history_final_state(snapshot_steps, time_ev
     )
 
     for snap_index, step in enumerate(snapshot_steps):
-        assert jnp.allclose(snap_output["electric_field"][snap_index], full_output["electric_field"][step])
-        assert jnp.allclose(snap_output["magnetic_field"][snap_index], full_output["magnetic_field"][step])
-        assert jnp.allclose(snap_output["positions"][snap_index], full_output["positions"][step])
-        assert jnp.allclose(snap_output["velocities"][snap_index], full_output["velocities"][step])
-        assert jnp.allclose(snap_output["current_density"][snap_index], full_output["current_density"][step])
-        assert jnp.allclose(snap_output["charge_density"][snap_index], full_output["charge_density"][step])
+        for key in ("electric_field", "magnetic_field", "positions", "velocities", "current_density", "charge_density", "mus"):
+            np.testing.assert_allclose(snap_output[key][snap_index], full_output[key][step])
     for name, value in snap_output["final_state"].items():
         np.testing.assert_allclose(value, full_output["final_state"][name], rtol=1e-12, atol=1e-12)
     assert scalar(snap_output["final_state"]["time"]) == pytest.approx(total_steps * dt)
