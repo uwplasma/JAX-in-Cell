@@ -96,6 +96,9 @@ def diagnostics(output):
     magnitude = jnp.abs(fft_values)
     peak_index = jnp.argmax(magnitude)
     dominant_frequency = jnp.abs(freqs[peak_index])
+    if "time_array" in output and total_steps > 2 and not np.allclose(
+            np.diff(np.asarray(output["time_array"])), dt, rtol=1e-10, atol=0):
+        dominant_frequency = jnp.asarray(jnp.nan)
 
     def integrate(y, dx):
         return jnp.sum(y, axis=-1) * dx
