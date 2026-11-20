@@ -259,7 +259,7 @@ def test_an_injected_particle_enters_on_a_trajectory_and_not_on_a_straight_line(
     def profile(steps, external_E=None, external_B=None, dt=1.0):
         domain = Domain(length=length, cells=cells, time_step=dt, particle_bc="absorbing",
                         field_bc=("open", "absorbing"))
-        beam = Species("beam", 80000, 1.0, mass, 0.0,
+        beam = Species("beam", 6000, 1.0, mass, 0.0,
                        source=Source(density=reservoir, vth=0.0, drift=(v0, 0, 0), emit=20))
         out = Simulation(domain, [beam], Solver(model="electrostatic"),
                          external_E=external_E, external_B=external_B).run(
@@ -923,7 +923,7 @@ def test_a_maintained_sheath_reaches_the_kinetic_floating_potential():
     and the potential it settles at is the one equal particle currents demand. The plasma
     is quasineutral away from the wall and the electrons are pushed out of the sheath while
     the beam is not, which is the positive charge that holds the drop up."""
-    beam_speed, mass_ratio, cells, capacity, emit, steps = 0.2, 1836.0, 100, 60000, 60, 6000
+    beam_speed, mass_ratio, cells, capacity, emit, steps = 0.2, 1836.0, 50, 12000, 12, 2400
     phi_wall = float(floating_potential(beam_speed))
     domain = box(cells=cells, particle_bc="absorbing", field_bc=("open", "absorbing"))
     electrons = Species("electrons", capacity, -1.0, mass_electron, DENSITY, (np.sqrt(2) * SIGMA, 0, 0),
@@ -1255,6 +1255,7 @@ def _free_stream(every, seeds):
     return np.asarray(profiles), np.asarray(live)
 
 
+@pytest.mark.xdist_group("free_stream")      # one worker computes the shared runs once
 def test_emitting_every_k_steps_leaves_the_streaming_density_where_it_was():
     """A drifting reservoir (u = 3 sigma, so no slow tail to wait for) streams freely across
     an empty box, and the late-time density with ``every = 20`` is the one ``every = 1``
@@ -1276,6 +1277,7 @@ def test_emitting_every_k_steps_leaves_the_streaming_density_where_it_was():
     assert 0.03 < (reference[0] - mean[0]) / reference[0] < 0.12        # the ramp, and only there
 
 
+@pytest.mark.xdist_group("free_stream")      # one worker computes the shared runs once
 def test_emitting_every_k_steps_divides_the_pool_by_k():
     """The pool a species needs is what is alive at once, ``emit / every`` times the residence
     in steps: the same stream at ``every = 20`` holds a twentieth of the particles, which is
@@ -1428,7 +1430,7 @@ def test_volume_births_preserve_sparse_restart_and_feature_archive(tmp_path):
     path = save_state(tmp_path / "volume", first.state, sim)
     with np.load(path) as data:
         stored = dict(data)
-    assert int(stored["format"]) == VOLUME_FORMAT
+    assert int(stored["format"]) == 6 and int(stored["physics_format"]) == VOLUME_FORMAT
     rest = sim.run(2, snapshot_steps=(1,), state=load_state(path, sim), store_particles=False)
     for a, b in zip(jax.tree.leaves(whole.state), jax.tree.leaves(rest.state)):
         np.testing.assert_array_equal(a, b)

@@ -21,13 +21,52 @@ used.
 
 ## What it does
 
-Particles are paired at random inside each cell and each pair is scattered by rotating its
-relative velocity, which conserves the pair's momentum and energy exactly whatever the time
-step. The scattering angle carries the collision frequency. The scheme, the variance of the
+Particles are paired at random inside each cell. With equal weights, the pair's momentum
+and kinetic energy are conserved to roundoff. Unequal weights use a stochastic acceptance
+rule and conserve these quantities in expectation, with fluctuations in an individual run.
+The scattering angle carries the collision frequency. The scheme, the variance of the
 angle and the handling of unequal particle counts and weights are described in
 {doc}`../numerics/collisions`; verified against the Fokker-Planck relaxation rates, it is
 within {{ collisions_max_deviation_percent }} % of theory
-({doc}`../examples/collisions`).
+for the nonrelativistic beam benchmark ({doc}`../examples/collisions`).
+
+### Relativistic particles
+
+`Solver(relativistic=True)` selects relativistic center-of-momentum collisions with
+the Pérez rate and Nanbu cumulative angles. Give the Coulomb logarithm explicitly:
+
+```python
+from jaxincell import Collisions, Simulation, Solver
+
+simulation = Simulation(domain, [electrons, ions], Solver(relativistic=True),
+                        collisions=Collisions(coulomb_log=15.0))
+```
+
+The operator works directly on `State.u = gamma*v`, in m/s; it never converts a
+relativistic momentum through a velocity close to the speed of light. A pair is
+rotated in its center-of-momentum frame and transformed back. The existing cell
+pairing and weight correction are shared with the nonrelativistic operator.
+
+This is elastic Coulomb scattering in a fully ionized, weakly coupled,
+nondegenerate plasma. It covers thermal particles and relativistic tails, with
+timestep and particle-number convergence required. It does not include partial
+screening, hard Møller knock-on events, bremsstrahlung or a complete runaway
+avalanche model. The nonrelativistic NRL logarithm is not silently used as a
+relativistic screening prescription.
+
+Use float64 for reference calculations. The float32 kernel normalizes masses
+before forming products, so physical electron masses do not underflow. Its
+accuracy still needs checking for the chosen momentum range, nearly comoving
+pairs and observables. Tiny deflections that round to zero have zero numerical
+derivatives; derivatives at zero collision rate are not an ensemble-sensitivity
+guarantee.
+
+Fixed random keys allow replay and common-random-number derivative checks. They
+do not differentiate changes in cell membership, partner identities or
+weight-dependent acceptance probabilities. For an optimization, compare
+ensemble gradients and independent random realizations. Very different macro
+weights can require many samples to resolve the background response to a dilute
+tail; conservation in expectation does not imply a small energy error in one run.
 
 ## Two things to get right
 
@@ -45,7 +84,7 @@ within {{ collisions_max_deviation_percent }} % of theory
 
 ## Setting the Coulomb logarithm
 
-Left at `None`, $\ln\Lambda$ comes from the NRL electron-ion formula evaluated at the start
+For a nonrelativistic run, `None` takes $\ln\Lambda$ from the NRL electron-ion formula evaluated at the start
 of the run for the electrons, taken to be the lightest negatively charged species:
 
 * its `density`, and the temperature $T = m v_{th}^2/2$ of the largest of its three `vth`

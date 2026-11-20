@@ -12,6 +12,7 @@ field_solvers
 boundaries
 filtering
 collisions
+radiation
 initialization
 stability
 diagnostics

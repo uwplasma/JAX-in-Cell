@@ -31,6 +31,7 @@ QUINTIC_FORMAT = 2  # an S2-only reader must refuse a state whose charge used S5
 INTEGRAL_FORMAT = 3  # a secant-only reader must refuse an integral-force restart
 WALL_FORMAT = 4  # a half-position reader must refuse an integer-position explicit wall restart
 VOLUME_FORMAT = 5  # a reservoir-only reader must refuse a state with a volume birth budget
+WORK_FORMAT = 6    # earlier readers do not preserve the cumulative mechanical/radiation budgets
 
 
 def _fields(obj):
@@ -93,6 +94,25 @@ def save_run(folder, example, settings, results, figure=None, **arrays):
     return folder
 
 
+def _state_arrays(state):
+    """Flatten state arrays, preserving nested ledgers and typed random keys."""
+    arrays = {"format": np.asarray(FORMAT)}
+    for name in _fields(state):
+        value = getattr(state, name)
+        if name in ("wall", "work") and value is not None:
+            for inner in _fields(value):
+                if getattr(value, inner) is not None:
+                    arrays[f"{name}.{inner}"] = np.asarray(getattr(value, inner))
+        elif name == "key" and dtypes.issubdtype(value.dtype, dtypes.prng_key):
+            arrays[name] = np.asarray(random.key_data(value))
+            implementation = str(random.key_impl(value))
+            arrays["key_impl"] = np.asarray(
+                {"fry": "threefry2x32", "urbg": "unsafe_rbg"}.get(implementation, implementation))
+        elif value is not None:
+            arrays[name] = np.asarray(value)
+    return arrays
+
+
 def save_state(path, state, simulation=None):
     """Write ``state`` to ``path`` (``.npz`` appended if it has no suffix) and return the path.
 
@@ -106,25 +126,13 @@ def save_state(path, state, simulation=None):
     """
     path = str(path)
     path = path if path.endswith(".npz") else path + ".npz"
-    arrays = {"format": np.asarray(FORMAT)}
-    for name in _fields(state):
-        value = getattr(state, name)
-        if name == "wall":
-            for inner in _fields(value):
-                if getattr(value, inner) is not None:
-                    arrays[f"wall.{inner}"] = np.asarray(getattr(value, inner))
-        elif name == "key" and dtypes.issubdtype(value.dtype, dtypes.prng_key):
-            arrays[name] = np.asarray(random.key_data(value))
-            implementation = str(random.key_impl(value))
-            arrays["key_impl"] = np.asarray(
-                {"fry": "threefry2x32", "urbg": "unsafe_rbg"}.get(implementation, implementation))
-        elif value is not None:
-            arrays[name] = np.asarray(value)
+    arrays = _state_arrays(state)
     if simulation is not None:
         arrays["names"] = np.asarray([s.name for s in simulation.species])
         arrays["counts"] = np.asarray([s.n for s in simulation.species])
         arrays["cells"] = np.asarray(simulation.domain.cells)
         arrays["algorithm"] = np.asarray(simulation.solver.algorithm)
+        arrays["relativistic"] = np.asarray(simulation.solver.relativistic)
         if simulation.solver.shape_order == 5:
             arrays["format"] = np.asarray(QUINTIC_FORMAT)
             arrays["shape_order"] = np.asarray(5)
@@ -134,6 +142,9 @@ def save_state(path, state, simulation=None):
             arrays["orbit_force"] = np.asarray("integral")
     arrays["format"] = np.asarray(WALL_FORMAT if state.x_phase == "wall" else arrays["format"])
     arrays["format"] = np.asarray(VOLUME_FORMAT if state.wall.birth_budget is not None else arrays["format"])
+    if state.work is not None:
+        arrays["physics_format"] = arrays["format"]
+        arrays["format"] = np.asarray(WORK_FORMAT)
     np.savez(path, **arrays)
     return path
 
@@ -148,10 +159,12 @@ def _check_integral_format(version, stored):
                          "algorithm='implicit' and shape_order=2 or 5")
 
 
-def _state_field(name, stored, wall, path):
+def _state_field(name, stored, wall, work, path):
     """Decode one state field; strings and typed keys are not ordinary array leaves."""
     if name == "wall":
         return wall
+    if name == "work":
+        return work
     if name == "x_phase":
         return str(stored.get(name, "legacy"))
     if name == "key" and "key_impl" in stored:
@@ -161,6 +174,32 @@ def _state_field(name, stored, wall, path):
     if name == "moments":
         return None
     raise ValueError(f"{path} has no {name!r}, which a state needs; it is not a state archive")
+
+
+def _check_physics_layout(version, stored):
+    """Keep all legacy shape/phase guards inside the work-ledger envelope."""
+    from ._simulation import Work
+
+    physics = version
+    if version == WORK_FORMAT:
+        if not any(np.array_equal(stored.get("physics_format"), np.asarray(value))
+                   for value in (FORMAT, QUINTIC_FORMAT, INTEGRAL_FORMAT, WALL_FORMAT, VOLUME_FORMAT)):
+            raise ValueError("archive format 6 requires a physics_format from 1 through 5")
+        physics = int(stored["physics_format"])
+    if physics == QUINTIC_FORMAT and not np.array_equal(stored.get("shape_order"), np.asarray(5)):
+        raise ValueError("archive format 2 requires stored shape_order=5")
+    _check_integral_format(physics, stored)
+    phase = str(stored.get("x_phase", "legacy"))
+    if physics == WALL_FORMAT and phase != "wall":
+        raise ValueError("archive format 4 requires the explicit wall position convention x_phase='wall'")
+    if physics == VOLUME_FORMAT and ("wall.birth_budget" not in stored or phase not in ("half", "wall")
+                                     or np.shape(stored["wall.birth_budget"]) !=
+                                     np.shape(stored.get("wall.arrived"))[:1] + (6,)):
+        raise ValueError("archive format 5 requires a volume birth_budget and explicit position convention")
+    if version == WORK_FORMAT:
+        shape = np.shape(stored.get("wall.arrived"))[:1]
+        if any(f"work.{name}" not in stored or np.shape(stored[f"work.{name}"]) != shape for name in _fields(Work)):
+            raise ValueError("archive format 6 requires every per-species Work array")
 
 
 def load_state(path, simulation=None):
@@ -175,25 +214,18 @@ def load_state(path, simulation=None):
         ValueError: If the archive is of a format this version does not read, if a field the
             state needs is missing, or if it does not match ``simulation``.
     """
-    from ._simulation import State, Wall
+    from ._simulation import State, Wall, Work
 
     with np.load(str(path), allow_pickle=False) as data:
         stored = {key: data[key] for key in data.files}
     version = int(stored.pop("format", -1))
-    if version not in (FORMAT, QUINTIC_FORMAT, INTEGRAL_FORMAT, WALL_FORMAT, VOLUME_FORMAT):
+    if version not in (FORMAT, QUINTIC_FORMAT, INTEGRAL_FORMAT, WALL_FORMAT, VOLUME_FORMAT, WORK_FORMAT):
         raise ValueError(f"{path} is a format {version} archive; this jaxincell reads formats "
-                         f"{FORMAT}, {QUINTIC_FORMAT}, {INTEGRAL_FORMAT}, {WALL_FORMAT} and {VOLUME_FORMAT}; "
+                         f"{FORMAT}, {QUINTIC_FORMAT}, {INTEGRAL_FORMAT}, {WALL_FORMAT}, "
+                         f"{VOLUME_FORMAT}, {WORK_FORMAT}; "
                          "it was written by a different version")
-    if version == QUINTIC_FORMAT and not np.array_equal(stored.get("shape_order"), np.asarray(5)):
-        raise ValueError("archive format 2 requires stored shape_order=5")
-    _check_integral_format(version, stored)
+    _check_physics_layout(version, stored)
     phase = str(stored.get("x_phase", "legacy"))
-    if version == WALL_FORMAT and phase != "wall":
-        raise ValueError("archive format 4 requires the explicit wall position convention x_phase='wall'")
-    if version == VOLUME_FORMAT and ("wall.birth_budget" not in stored or phase not in ("half", "wall")
-                                     or np.shape(stored["wall.birth_budget"]) !=
-                                     np.shape(stored.get("wall.arrived"))[:1] + (6,)):
-        raise ValueError("archive format 5 requires a volume birth_budget and explicit position convention")
     if simulation is not None:
         if phase != simulation._x_phase() and not (phase == "legacy" and simulation._x_phase() != "wall"):
             raise ValueError("archive position convention does not match this simulation; old explicit wall "
@@ -204,6 +236,7 @@ def load_state(path, simulation=None):
                   "counts": np.asarray([s.n for s in simulation.species]),
                   "cells": np.asarray(simulation.domain.cells),
                   "algorithm": np.asarray(simulation.solver.algorithm),
+                  "relativistic": np.asarray(simulation.solver.relativistic),
                   "shape_order": np.asarray(simulation.solver.shape_order),
                   "orbit_force": np.asarray(simulation.solver.orbit_force)}
         for key, want in wanted.items():
@@ -213,4 +246,5 @@ def load_state(path, simulation=None):
                                  "differently shaped run is not the run it came from")
     wall = Wall(*[jnp.asarray(stored[f"wall.{name}"]) if f"wall.{name}" in stored else None
                   for name in _fields(Wall)])
-    return State(*[_state_field(name, stored, wall, path) for name in _fields(State)])
+    work = Work(*[jnp.asarray(stored[f"work.{name}"]) for name in _fields(Work)]) if version == WORK_FORMAT else None
+    return State(*[_state_field(name, stored, wall, work, path) for name in _fields(State)])

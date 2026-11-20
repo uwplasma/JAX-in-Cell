@@ -2,7 +2,7 @@
 
 ## Vlasov-Maxwell system
 
-Each species $s$ of a collisionless plasma is described by a distribution function
+In the nonrelativistic limit, each species $s$ of a collisionless plasma has a distribution function
 $f_s(\mathbf x, \mathbf v, t)$ that obeys the Vlasov equation,
 
 ```{math}
@@ -63,8 +63,9 @@ $(E_y, B_z)$ and $(E_z, B_y)$,
 Electrostatic problems (Langmuir waves, Landau damping, two-stream and bump-on-tail
 instabilities) live entirely in $E_x$. Electromagnetic problems (the Weibel
 instability, light waves, magnetised plasmas with an external $B_x$) involve the
-transverse pairs. Particles keep their $y$ and $z$ coordinates, which only serve to
-apply periodic wrapping and have no effect on the fields.
+transverse pairs. Particles keep their $y$ and $z$ coordinates. These do not affect
+the self-consistent 1D fields, but can enter prescribed spatial and time-dependent
+fields; see {doc}`../user_guide/external_fields`.
 
 ## Particle discretisation
 
@@ -86,8 +87,12 @@ characteristic,
 ```
 
 with the fields evaluated at the particle through the same shape function. In the
-relativistic version the momentum $\mathbf p = \gamma m\mathbf v$ replaces the velocity
-on the left-hand side, with $\gamma = (1 - v^2/c^2)^{-1/2}$.
+relativistic version the specific momentum $\mathbf u = \mathbf p/m = \gamma\mathbf v$
+replaces the velocity on the left-hand side, with
+$\gamma = \sqrt{1 + u^2/c^2}$ and $\mathbf v = \mathbf u/\gamma$.
+Optional {doc}`radiation` adds the reduced Landau-Lifshitz acceleration to
+$d\mathbf u/dt$. For a distribution in $\mathbf u$, this dissipative term is
+$\nabla_{\mathbf u}\cdot(\mathbf a_{\rm RR}f_s)$, including its momentum-space divergence.
 
 The sources on the grid follow from the same representation:
 
@@ -102,8 +107,8 @@ continuity equation, as described in {doc}`explicit`.
 ## Collisions
 
 The Vlasov equation above describes a collisionless plasma. Setting
-{class}`~jaxincell.Collisions` puts a Landau collision operator on its right-hand
-side,
+{class}`~jaxincell.Collisions` adds a collision operator. Its nonrelativistic
+Landau limit is
 
 ```{math}
 \left(\frac{\partial f_s}{\partial t}\right)_{c}
@@ -114,12 +119,15 @@ side,
 f_s(\mathbf v) f_{s'}(\mathbf v'),
 ```
 
-with $\mathbf u = \mathbf v - \mathbf v'$, represented by the binary Monte Carlo
-scheme of {doc}`collisions`.
+with $\mathbf u = \mathbf v - \mathbf v'$ in this collision formula. The
+relativistic solver instead uses elastic center-of-momentum scattering with a
+relativistic rate and Nanbu angles; {doc}`collisions` gives both models and limits.
 
 ## What is not included
 
-There is no ionisation or recombination, no radiation reaction, no particle source
-and no field ionisation. Fields are functions of $x$ only, so $B_x$ can only be
-imposed externally and is constant in time. Gravity and forces other than the
-Lorentz force are not available.
+There is no ionisation, recombination, hard-collision avalanche, quantum photon
+emission or gravity model. Particle injection is available through
+{class}`~jaxincell.Source`, and classical radiation reaction through
+{class}`~jaxincell.Radiation`. The self-consistent field solve remains 1D;
+prescribed fields can depend on all particle coordinates and time, but are not
+evolved by a 3D Maxwell solver.

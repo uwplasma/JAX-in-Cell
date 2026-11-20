@@ -1,22 +1,24 @@
 """JAX-in-Cell: a differentiable 1D3V particle-in-cell code."""
 import sys
 
-from ._config import (Collisions, Domain, Impacts, Solver, Source, Species, boltzmann_constant,
+from ._config import (Collisions, Domain, Impacts, Radiation, Solver, Source, Species, boltzmann_constant,
                       elementary_charge, epsilon_0, mass_electron, mass_proton, mu_0, speed_of_light)
-from ._diagnostics import (bohm_edge, charge_balance, diagnostics, dominant_frequency, energies,
+from ._diagnostics import (bohm_edge, charge_balance, diagnostics, dominant_frequency, energies, energy_balance,
                            gauss_residual, magnetic_moment, moment_profiles, potential, temperatures)
 from ._archive import load_state, provenance, save_run, save_state
-from ._simulation import Output, Simulation, load_toml, quiet_start
+from ._simulation import Output, Simulation, Work, load_toml, quiet_start
 
 try:
     from .version import __version__
 except ImportError:  # a source tree that was never installed: version.py is written at build time
     __version__ = "unknown"
 
-__all__ = ["Simulation", "Output", "Domain", "Species", "Solver", "Source", "Collisions", "Impacts",
+__all__ = ["Simulation", "Output", "Work", "Domain", "Species", "Solver", "Source", "Collisions", "Radiation",
+           "Impacts",
            "load_toml", "save_state", "load_state", "provenance", "save_run",
            "quiet_start",
-           "diagnostics", "energies", "gauss_residual", "charge_balance", "magnetic_moment", "moment_profiles",
+           "diagnostics", "energies", "energy_balance", "gauss_residual", "charge_balance", "magnetic_moment",
+           "moment_profiles",
            "potential", "temperatures",
            "bohm_edge",
            "dominant_frequency", "plot", "figure", "style",
@@ -118,9 +120,11 @@ def _write(folder, path, settings, summary, out):
     folder.mkdir(parents=True, exist_ok=True)
     arrays = {name: np.asarray(getattr(out, name)) for name in
               ("t", "grid", "faces", "E", "B", "rho", "steps") if getattr(out, name) is not None}
-    for name in ("x", "v", "weight", "moments"):
+    for name in ("x", "v", "u", "weight", "moments"):
         if getattr(out, name) is not None:
             arrays[name] = np.asarray(getattr(out, name))
+    if out.work is not None:
+        arrays.update({f"work.{name}": np.asarray(value) for name, value in vars(out.work).items()})
     np.savez(folder / "fields.npz", **arrays)
     (folder / Path(path).name).write_text(Path(path).read_text())    # the input, beside its output
     (folder / "run.json").write_text(json.dumps(provenance(

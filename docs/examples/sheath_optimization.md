@@ -177,15 +177,15 @@ response calibration rather than the derivative of an asymptotic floating state.
 
 ```bash
 python examples/3_advanced/sheath_optimization.py            # about ten minutes
-python examples/3_advanced/sheath_optimization.py --quick    # about forty seconds
+python examples/3_advanced/sheath_optimization.py --quick    # about a minute
 python examples/3_advanced/sheath_optimization.py --oblique  # the magnetised experiment
 ```
 
-`--quick` is a smoke run: a sixth of the particles, a quarter of the preparation and three
+`--quick` is a smoke run: a twelfth of the particles, an eighth of the preparation and two
 realisations instead of four. It checks that the script executes and that the gradient is
 still the derivative of the calculation. Both descents run out of their eight iterations
-rather than converging, the inference lands at $r = 0.44$, and with three noisy
-realisations and eight scan points the error bar is $\pm 0.09$ against the full preset's
+rather than converging, the inference lands at $r = 0.20$, and with two noisy
+realisations and three scan points the error bar is $\pm 0.10$ against the full preset's
 $\pm 0.02$. That is the check doing its job; the numbers above are the full preset's.
 
 Panel (c) of the first figure comes from `docs/scripts/fig_sheath_source.py`.

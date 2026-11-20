@@ -82,6 +82,6 @@ masses; the uniform background is no ion species at all, which the periodic fiel
 neutralises exactly.
 
 `python examples/3_advanced/electron_field.py` runs the full preset (about three and a half
-hours on one A4000); `--quick` runs a 240 $\lambda_{De}$ box with 40 particles per cell in
+hours on one A4000); `--quick` runs a 100 $\lambda_{De}$ box with 16 particles per cell in
 about a minute, which shows the same separation and is not a measurement. The figure and
 numbers here come from `docs/scripts/fig_electron_field.py`, which runs the example.

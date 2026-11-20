@@ -26,8 +26,9 @@ change of kinetic plus field energy. The time step keeps an electron at 40 v_Te 
 at t omega_pe = 200) within one cell per step, as the paper's did. Nothing asserts growth:
 the numbers are printed and saved, and the documentation says what they mean.
 
-Run with `--quick` for a smoke preset (a 240 lambda_De box, 40 particles per cell, one
-realisation, to t omega_pe = 100 at twice the step): same controls, not a measurement.
+Run with `--quick` for a smoke preset (a 100 lambda_De box of three cells per lambda_De,
+16 particles per cell, one realisation, to t omega_pe = 90 at three times the step): same
+controls, not a measurement.
 """
 
 import os
@@ -49,11 +50,11 @@ from jaxincell.theory import field_rate
 quick = "--quick" in sys.argv
 density, T_e, T_i, E_0 = 3e14, 3.0, 0.026, -800.0          # m^-3, eV, eV, V/m
 helium = 4.002602 * 1.66053907e-27 - mass_electron           # He+, kg
-debye_lengths = 240 if quick else 1200                       # box length / lambda_De
-cells_per_debye = 5
-per_cell = 40 if quick else 400                              # particles per cell per species
-t_end = 100.0 if quick else 200.0                            # in 1/omega_pe
-dt_wpe = 0.01 if quick else 0.005                            # omega_pe dt
+debye_lengths = 100 if quick else 1200                       # box length / lambda_De
+cells_per_debye = 3 if quick else 5
+per_cell = 16 if quick else 400                              # particles per cell per species
+t_end = 90.0 if quick else 200.0                            # in 1/omega_pe
+dt_wpe = 0.015 if quick else 0.005                            # omega_pe dt
 realisations = 1 if quick else 4
 store_every = 20
 fit = (35.0, 80.0 if quick else 170.0)                       # the paper's window, t omega_pe

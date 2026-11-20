@@ -1,15 +1,15 @@
-"""Binary Coulomb collisions, after Takizuka and Abe (J. Comput. Phys. 25, 205, 1977).
+"""Binary Coulomb collisions: Takizuka--Abe, or relativistic Perez--Nanbu.
 
-Inside every cell the particles are paired at random and the relative velocity of
-each pair is rotated through an angle whose variance carries the collision frequency,
-which conserves the pair's momentum and energy. The pairing within a species and
-between two, the unequal-weight acceptance, the pair-local density correction of
-Higginson et al. and the variance are derived on the Collisions page of the numerical
-methods."""
+Inside every cell the particles are paired at random. Their relative velocity,
+or their opposite COM momenta in the relativistic model, is rotated through an
+angle carrying the physical scattering rate. Equal-weight pairs conserve momentum
+and kinetic energy; unequal weights conserve these moments in expectation. The
+shared pairing, Higginson density correction and the two rate/angle models are
+derived on the Collisions page of the numerical methods."""
 import jax.numpy as jnp
 from jax import lax, random
 
-from ._config import epsilon_0
+from ._config import epsilon_0, speed_of_light as c
 
 __all__ = ["coulomb_logarithm", "collide"]
 
@@ -44,15 +44,75 @@ def _shuffle_by_cell(key, cell, n_cells):
     return order, sorted_cell, first, count
 
 
-def _rotate(key, u, u_mag, variance):
+def _nanbu_angle(s, uniform):
+    """Sine and 1-cosine of Nanbu's cumulative angle, with <cos(theta)> = exp(-s).
+
+    The inverse Langevin parameter solves coth(A)-1/A=exp(-s). Four Newton
+    steps refine a rational starting approximation; a series avoids cancellation
+    at A=0. Below s=.05, 1/A=-expm1(-s) to double precision. Keeping 1-cos(theta)
+    instead of subtracting a cosine from one retains very small deflections.
+    """
+    target = jnp.exp(-jnp.maximum(s, 0.05))
+    A = target * (3 - target ** 2) / (1 - target ** 2)
+
+    def refine(_, A):
+        small = A < 0.1
+        a = jnp.where(small, 1.0, A)
+        z = jnp.exp(-2 * a)
+        value = 1 + 2 * z / (1 - z) - 1 / a
+        derivative = 1 / a ** 2 - 4 * z / (1 - z) ** 2
+        a2 = A * A
+        series = A * (1 / 3 + a2 * (-1 / 45 + a2 * (2 / 945 - a2 / 4725)))
+        slope = 1 / 3 + a2 * (-1 / 15 + a2 * (2 / 189 - a2 / 675))
+        return A - (jnp.where(small, series, value) - target) / jnp.where(small, slope, derivative)
+
+    A = lax.fori_loop(0, 4, refine, A)
+    # log(1 + U*(exp(2*A)-1))/A has the isotropic limit 2*U at A=0.
+    # Use the equivalent negative-exponential form, factoring its two removable
+    # singularities. Neither inactive branch divides by zero in reverse mode.
+    z = (1 - uniform) * jnp.expm1(-2 * A)
+    a_safe = jnp.where(A < 1e-3, 1.0, A)
+    z_safe = jnp.where(jnp.abs(z) < 1e-3, 1.0, z)
+    exp_ratio = jnp.where(A < 1e-3, 1 + A * (-1 + A * (2 / 3 + A * (-1 / 3 + 2 * A / 15))),
+                          -jnp.expm1(-2 * A) / (2 * a_safe))
+    log_ratio = jnp.where(jnp.abs(z) < 1e-3, 1 + z * (-1 / 2 + z * (1 / 3 + z * (-1 / 4 + z / 5))),
+                          jnp.log1p(z) / z_safe)
+    one_minus_cos = jnp.where(s < 0.05, jnp.expm1(-s) * jnp.log(uniform),
+                              2 * (1 - uniform) * exp_ratio * log_ratio)
+    sine2 = one_minus_cos * (2 - one_minus_cos)
+    sine = jnp.sqrt(jnp.where(sine2 == 0, 1.0, sine2))
+    return jnp.where(sine2 == 0, 0.0, sine), one_minus_cos
+
+
+def _rotate(key, u, u_mag, variance, relativistic=False):
     """Change of the relative velocities ``u`` when rotated through the
-    Takizuka-Abe angle. ``u_mag`` is the floored magnitude used for the variance."""
+    Takizuka-Abe angle, or COM momenta through the Nanbu angle. ``u_mag`` supplies
+    the draw shape; the relativistic frame is smooth near the coordinate axes."""
     k_delta, k_phi = random.split(key)
-    delta = random.normal(k_delta, u_mag.shape, u.dtype) * jnp.sqrt(variance)
-    sin_t = 2 * delta / (1 + delta ** 2)
-    one_minus_cos = 2 * delta ** 2 / (1 + delta ** 2)
+    if relativistic:
+        uniform = random.uniform(k_delta, u_mag.shape, u.dtype, minval=jnp.finfo(u.dtype).eps)
+        sin_t, one_minus_cos = _nanbu_angle(variance, uniform)
+    else:
+        delta = random.normal(k_delta, u_mag.shape, u.dtype) * jnp.sqrt(variance)
+        sin_t = 2 * delta / (1 + delta ** 2)
+        one_minus_cos = 2 * delta ** 2 / (1 + delta ** 2)
     phi = random.uniform(k_phi, u_mag.shape, u.dtype, maxval=2 * jnp.pi)
     cos_p, sin_p = jnp.cos(phi), jnp.sin(phi)
+    if relativistic:
+        norm2 = jnp.sum(u * u, axis=1)
+        norm = jnp.sqrt(jnp.where(norm2 > 0, norm2, 1.0))
+        n = u / norm[:, None]
+        # Two bounded tangent frames, with their chart boundary away from the
+        # axes. Unlike an axial special case, their derivatives include the
+        # tilt of the transverse plane when a field-aligned beam is perturbed.
+        sign = jnp.where(n[:, 2] > -.5, 1.0, -1.0)
+        a = -1 / (sign + n[:, 2])
+        b = n[:, 0] * n[:, 1] * a
+        e1 = jnp.stack((1 + sign * n[:, 0] ** 2 * a, sign * b, -sign * n[:, 0]), axis=1)
+        e2 = jnp.stack((b, sign + n[:, 1] ** 2 * a, -n[:, 1]), axis=1)
+        transverse = cos_p[:, None] * e1 + sin_p[:, None] * e2
+        amplitude = jnp.where(norm2 > 0, norm, 0.0) * sin_t
+        return amplitude[:, None] * transverse - one_minus_cos[:, None] * u
     ux, uy, uz = u[:, 0], u[:, 1], u[:, 2]
     perp2 = ux ** 2 + uy ** 2
     # a relative velocity along z leaves the transverse frame undefined; rotate in x-z instead.
@@ -68,29 +128,85 @@ def _rotate(key, u, u_mag, variance):
     return jnp.stack([du_x, du_y, du_z], axis=1)
 
 
-def _scatter(key, v, i, j, active, density, fraction, weight, mass, charge, coulomb_log, dt):
+def _relativistic_pair(key, ui, uj, mi, mj, qi, qj, active, density, fraction, coulomb_log, dt):
+    """Elastic COM momentum changes and the Perez (2012), Eq. 9 scattering rate.
+
+    Inputs/outputs are u=gamma*v [m/s]. COM momenta below use m_ref*c; normalizing
+    masses before multiplying keeps SI electron masses out of float32 products.
+    The rate is sigma*n*dt*v_M*gamma_i_star*gamma_j_star/(gamma_i*gamma_j), with
+    sigma=pi*b0**2*lnLambda and b0=|qi*qj|/(2*pi*epsilon0*mu_R*v_M*v_invariant).
+    This is the corrected expression documented in WarpX's
+    UpdateMomentumPerezElastic.H, not a nonrelativistic relative-speed rate.
+    """
+    eta_i, eta_j = ui / c, uj / c
+    gi = jnp.sqrt(1 + jnp.sum(eta_i ** 2, axis=1))
+    gj = jnp.sqrt(1 + jnp.sum(eta_j ** 2, axis=1))
+    dot = jnp.sum(eta_i * eta_j, axis=1)
+    # Rationalize gamma_i*gamma_j-eta_i.eta_j for co-propagating particles.
+    numerator = 1 + jnp.sum(eta_i ** 2 + eta_j ** 2 + jnp.cross(eta_i, eta_j) ** 2, axis=1)
+    r = jnp.where(dot > 0, numerator / jnp.where(dot > 0, gi * gj + dot, 1.0), gi * gj - dot)
+    m_ref = jnp.maximum(mi, mj)
+    a, b = mi / m_ref, mj / m_ref
+    M = jnp.sqrt(a * a + b * b + 2 * a * b * r)
+    energy, P = a * gi + b * gj, a[:, None] * eta_i + b[:, None] * eta_j
+    gis, gjs = (a + b * r) / M, (b + a * r) / M
+    delta = eta_i - eta_j
+    delta_g = jnp.sum(delta * (eta_i + eta_j), axis=1) / (gi + gj)
+    delta_gs = (a - b) * (1 - r) / M
+    p_star = (a * b / (a + b))[:, None] * (delta - ((delta_g + delta_gs) / (energy + M))[:, None] * P)
+    p2 = jnp.sum(p_star ** 2, axis=1)
+    active = active & (p2 > 0) & jnp.any(ui != uj, axis=1) & (density > 0) & (fraction > 0)
+    active = active & (coulomb_log > 0) & (dt > 0) & (qi != 0) & (qj != 0)
+    p = jnp.sqrt(jnp.where(active, p2, 1.0))
+    mu = (a * gis) * (b * gjs) / (a * gis + b * gjs)
+    vm = p / mu
+    vinv = vm / (1 + p * p / ((a * gis) * (b * gjs)))
+    length = jnp.abs((qi / epsilon_0) * (qj / m_ref)) / (2 * jnp.pi * c ** 2)
+
+    def log_positive(value):
+        return jnp.log(jnp.where(active, value, 1.0))
+
+    log_s = (jnp.log(jnp.pi) + 2 * log_positive(length) + log_positive(density)
+             + log_positive(c * dt) + log_positive(fraction) + log_positive(coulomb_log)
+             - 2 * jnp.log(mu) - jnp.log(vm) - 2 * jnp.log(vinv)
+             + jnp.log(gis) + jnp.log(gjs) - jnp.log(gi) - jnp.log(gj))
+    # Only the angular distribution saturates: once exp(-s) is below roundoff it
+    # is isotropic. This is not a cap on the physical Coulomb cross section.
+    s = jnp.where(active, jnp.exp(jnp.minimum(log_s, jnp.log(2 - jnp.log(jnp.finfo(ui.dtype).eps)))), 1.0)
+    dp = _rotate(key, p_star, p, s, relativistic=True)
+    dp = dp + (jnp.sum(P * dp, axis=1) / (M * (energy + M)))[:, None] * P
+    return (c / a)[:, None] * dp, -(c / b)[:, None] * dp, active
+
+
+def _scatter(key, v, i, j, active, density, fraction, weight, mass, charge, coulomb_log, dt, relativistic=False):
     """Scatter particle ``i[k]`` against ``j[k]`` wherever ``active[k]``, with
     ``fraction[k]`` of the variance of a full collision at ``density[k]``."""
     m_i, m_j = mass[i], mass[j]
     q_i, q_j = charge[i], charge[j]
-    # Grouped so that no intermediate leaves the range of single precision: the product of
-    # two particle masses, or of the permittivity and a mass, is far below 1e-38.
-    m_r = m_i / (1 + m_i / m_j)
-    u = v[i] - v[j]
-    u_mag = jnp.sqrt(jnp.maximum(jnp.sum(u ** 2, axis=1), 1e-20))
-    variance = (q_i / epsilon_0 * (q_j / m_r)) ** 2 * fraction * density * coulomb_log * dt / (8 * jnp.pi * u_mag ** 3)
-    active = active & (variance > 0)
-    # Past 1e30 the angle is within 1e-15 of pi anyway; the cap keeps single precision finite. The
-    # floor keeps the derivative of the square root finite where the variance vanishes, as it does
-    # in the slots that hold no collision.
-    variance = jnp.clip(variance, jnp.finfo(u.dtype).tiny, 1e30)
     k_rotate, k_accept = random.split(key)
-    du = _rotate(k_rotate, u, u_mag, variance)
+    if relativistic:
+        du_i, du_j, active = _relativistic_pair(
+            k_rotate, v[i], v[j], m_i, m_j, q_i, q_j, active, density, fraction, coulomb_log, dt)
+    else:
+        # Grouped so that no intermediate leaves the range of single precision: the product of
+        # two particle masses, or of the permittivity and a mass, is far below 1e-38.
+        m_r = m_i / (1 + m_i / m_j)
+        u = v[i] - v[j]
+        u_mag = jnp.sqrt(jnp.maximum(jnp.sum(u ** 2, axis=1), 1e-20))
+        variance = ((q_i / epsilon_0 * (q_j / m_r)) ** 2 * fraction * density * coulomb_log * dt
+                    / (8 * jnp.pi * u_mag ** 3))
+        active = active & (variance > 0)
+        # Past 1e30 the angle is within 1e-15 of pi anyway; the cap keeps single precision finite. The
+        # floor keeps the derivative of the square root finite where the variance vanishes, as it does
+        # in the slots that hold no collision.
+        variance = jnp.clip(variance, jnp.finfo(u.dtype).tiny, 1e30)
+        du = _rotate(k_rotate, u, u_mag, variance)
+        du_i, du_j = (m_j / (m_i + m_j))[:, None] * du, -(m_i / (m_i + m_j))[:, None] * du
     w_i, w_j = weight[i], weight[j]
-    accept = random.uniform(k_accept, active.shape, u.dtype) * jnp.maximum(w_i, w_j)
+    accept = random.uniform(k_accept, active.shape, v.dtype) * jnp.maximum(w_i, w_j)
     take_i, take_j = active & (accept < w_j), active & (accept < w_i)
-    v = v.at[i].add(jnp.where(take_i[:, None], (m_j / (m_i + m_j))[:, None] * du, 0.0))
-    return v.at[j].add(jnp.where(take_j[:, None], -(m_i / (m_i + m_j))[:, None] * du, 0.0))
+    v = v.at[i].add(jnp.where(take_i[:, None], du_i, 0.0))
+    return v.at[j].add(jnp.where(take_j[:, None], du_j, 0.0))
 
 
 def _within(key, v, start, n, cell, n_cells, dx, *args):
@@ -141,24 +257,29 @@ def _between(key, v, block_a, block_b, cell_a, cell_b, n_cells, dx, *args):
     return _scatter(k_scatter, v, i, j, active, density, 1.0, *args)
 
 
-def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx, length, n_cells):
-    """Apply one collision step to the velocities.
+def collide(key, x, v, weight, mass, charge, blocks, pairs, coulomb_log, dt, dx, length, n_cells, relativistic=False):
+    """Apply one collision step to velocities, or to SI momentum per mass.
 
     Args:
         key: PRNG key.
-        x, v: Positions and velocities, ``(N, 3)``.
+        x, v: Positions and velocities, ``(N, 3)``. With ``relativistic=True``,
+            the second array instead carries ``u=gamma*v`` in m/s, also on return.
         weight, mass, charge: Per-particle pseudo-particle weight, physical mass
             and physical charge, ``(N,)``.
         blocks: ``((start, count), ...)`` of each species in the particle arrays; static.
         pairs: ``((a, b), ...)`` species indices to collide; static.
         coulomb_log: Coulomb logarithm (scalar).
         dt, dx, length, n_cells: Time step, cell size, box length, cell count.
+        relativistic: Static flag selecting elastic COM scattering with the
+            relativistic Perez rate and Nanbu angles. Requires an explicit
+            Coulomb logarithm; the nonrelativistic default is not a relativistic
+            screening model. Unequal weights conserve moments in expectation.
     """
     # A particle a wall has collected has no weight left. It goes to a cell of its own
     # past the last one, where it neither collides nor takes a partner from one that can.
     inside = jnp.clip(((x[:, 0] + length / 2) / dx).astype(jnp.int32), 0, n_cells - 1)
     cell = jnp.where(weight > 0, inside, n_cells)
-    args = (weight, mass, charge, coulomb_log, dt)
+    args = (weight, mass, charge, coulomb_log, dt, relativistic)
     for a, b in pairs:
         key, sub = random.split(key)
         (start_a, n_a), (start_b, n_b) = blocks[a], blocks[b]

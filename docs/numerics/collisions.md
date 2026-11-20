@@ -2,7 +2,9 @@
 
 Passing a {class}`~jaxincell.Collisions` object to a
 {class}`~jaxincell.Simulation` adds binary Coulomb collisions to the particle
-push ([where in the step](#where-in-the-step)), by the Monte Carlo scheme of Takizuka and Abe {cite}`takizuka1977`.
+push ([where in the step](#where-in-the-step)). Nonrelativistic runs use Takizuka and
+Abe {cite}`takizuka1977`; `Solver(relativistic=True)` uses elastic relativistic
+center-of-momentum scattering with the Pérez rate and Nanbu angles.
 
 ```python
 from jaxincell import Collisions, Simulation
@@ -13,11 +15,11 @@ simulation = Simulation(domain, [electrons, ions],
 ```
 
 `pairs` names the species combinations to collide, including a species with itself;
-`None` collides every combination. `coulomb_log` fixes $\ln\Lambda$; left at `None`
-it is taken from the NRL formulary {cite}`nrl2019` for the electrons (see
-[below](#the-coulomb-logarithm)).
+`None` collides every combination. `coulomb_log` fixes $\ln\Lambda$ and is required
+for relativistic collisions. In a nonrelativistic run, `None` takes the NRL
+formulary {cite}`nrl2019` value for the electrons (see [below](#the-coulomb-logarithm)).
 
-## The scheme
+## The nonrelativistic scheme
 
 Inside each cell the particles are paired at random. Each pair is scattered by
 rotating its *relative* velocity $\mathbf u = \mathbf v_a - \mathbf v_b$ through a
@@ -65,6 +67,97 @@ Equating the two rates with $u \simeq v$ and $n = n_b$ gives exactly
 particle does see one collision's worth of scattering off the whole density of its
 partner species.
 
+## Relativistic scattering
+
+The state carries $\mathbf u=\gamma\mathbf v$ in m/s. Write
+$\boldsymbol\eta=\mathbf u/c$ in the following formulas, with
+$\gamma_i=\sqrt{1+\eta_i^2}$ and
+$r=\gamma_i\gamma_j-\boldsymbol\eta_i\cdot\boldsymbol\eta_j$.
+The total invariant mass is
+
+```{math}
+M^2=m_i^2+m_j^2+2m_i m_j r.
+```
+
+Boost the physical momenta into the pair's center-of-momentum (COM) frame,
+where they are $\mathbf p^*$ and $-\mathbf p^*$. Rotate their common axis through
+the sampled angle, keep the magnitude fixed, and boost back. This preserves
+four-momentum and hence kinetic energy for equal weights. The code computes
+momentum *changes* under the inverse boost, avoiding a subtraction of almost
+equal post- and pre-collision lab momenta for small angles. Mass ratios are formed
+before mass products, so SI electron masses are not squared in float32.
+
+Let $\gamma_i^*,\gamma_j^*$ be the COM Lorentz factors and define
+
+```{math}
+\mu_R^*=\frac{m_i\gamma_i^*m_j\gamma_j^*}{m_i\gamma_i^*+m_j\gamma_j^*},\qquad
+v_M^*=\frac{p^*}{\mu_R^*},\qquad
+v_{\rm inv}=\frac{v_M^*}{1+p^{*2}/(m_i\gamma_i^*m_j\gamma_j^*c^2)},
+```
+
+```{math}
+:label: relativistic-scattering-strength
+b_0=\frac{|q_iq_j|}{2\pi\epsilon_0\mu_R^*v_M^*v_{\rm inv}},\qquad
+s=\pi b_0^2\ln\Lambda\,n_{ij}\Delta t\,v_M^*
+\frac{\gamma_i^*\gamma_j^*}{\gamma_i\gamma_j}.
+```
+
+Here $v_M^*$ is the COM speed difference, which can exceed $c$;
+$v_{\rm inv}$ is the invariant relative speed, which cannot. The symbol $b_0$
+is twice the nonrelativistic 90-degree impact parameter. This is the uncapped
+cross-section form of [Pérez et al. (2012), Eq. 9](https://doi.org/10.1063/1.4742167),
+also documented in the corrected
+[WarpX implementation](https://github.com/BLAST-WarpX/warpx/blob/705c2deccfec137380cc940d633eb4c4665b97ed/Source/Particles/Collision/BinaryCollision/Coulomb/UpdateMomentumPerezElastic.H).
+The density $n_{ij}$ is the pair-local value below; using a recycled-partner
+implementation's density with this code's disjoint pairing would give the wrong rate.
+
+The strength has the independent invariant form
+
+```{math}
+s=\frac{q_i^2q_j^2n_{ij}\Delta t\ln\Lambda}{4\pi\epsilon_0^2c^3}
+\frac{M^2r^2}{m_i^2m_j^2\gamma_i\gamma_j(r^2-1)^{3/2}},
+```
+
+which is useful for checking the rate away from $r=1$. In the nonrelativistic
+limit, $s=2\langle\delta^2\rangle$ for {eq}`ta-variance`. Neither $s/\Delta t$
+nor the effective angular-transport cross section counts individual hard events.
+
+### Cumulative angles and finite precision
+
+[Nanbu's distribution](https://doi.org/10.1103/PhysRevE.55.4642) uses
+
+```{math}
+\coth A-\frac1A=e^{-s},\qquad
+\cos\Theta=\frac1A\ln\!\left[e^{-A}+U(e^A-e^{-A})\right],\qquad U\in(0,1).
+```
+
+It has $\langle\cos\Theta\rangle=e^{-s}$ and
+$\langle\sin^2\Theta\rangle=2e^{-s}/A$. The inverse Langevin root uses four
+Newton updates from a rational approximation. Series handle the small-$A$
+isotropic limit; $1/A=-\mathrm{expm1}(-s)$ is the small-$s$ limit. Below
+$s=.05$ the discarded backward tail is below $2\times10^{-18}$. Computing
+$1-\cos\Theta$ directly retains small deflections that would disappear on
+subtracting a rounded cosine from one. This samples the chosen cumulative model;
+it is not an exact finite-step solution of the complete collision equation.
+
+The rate is evaluated logarithmically. Only its angular representation saturates,
+at $s=2-\ln(\epsilon_{\rm machine})$, where the first moment is already below
+roundoff. This is not a physical cross-section cap or a strong-coupling model.
+An exactly comoving pair is unchanged, without evaluating its singular rate;
+inactive particles and zero density, charge, logarithm or timestep are also safe.
+Underflowed angular increments are zero with finite numerical derivatives.
+
+The azimuth uses two bounded orthonormal tangent frames. Each frame includes
+the change in the scattering plane when the incident momentum tilts; it is smooth
+near all coordinate axes. Chart switching remains piecewise, as do cell and
+partner selection. The exactly comoving identity has a finite chosen numerical
+Jacobian, not a guarantee of a physical pathwise derivative at that degeneracy.
+
+Float64 is the numerical reference. Tests cover physical electron/proton mass
+ratios and single precision, but no finite-precision formula is accurate at
+arbitrarily large boosts or arbitrarily close relative momenta. A resolved
+collision interval and a supported weak-coupling logarithm are still required.
+
 ## Pairing
 
 Each step draws a fresh random order of the particles inside every cell, with one
@@ -80,6 +173,10 @@ collisions, so it too receives one collision's worth of scattering. The three ar
 done one after the other, each starting from the velocities the previous one left,
 so every collision conserves momentum and energy exactly. A particle alone in its
 cell does not collide.
+
+Relativistic scattering uses the same pairs and halves $s$ for these triplet
+edges. The normalization describes the small-step collision generator; the
+nonlinear finite-step cumulative angle still requires timestep convergence.
 
 ### Two species
 
@@ -195,13 +292,25 @@ it does not remove errors from the particle-field coupling or time discretisatio
 Unequal weights retain the statistical energy and momentum conservation of the
 acceptance rule [above](#unequal-weights-and-the-density-that-enters).
 
+The same weight rule applies to relativistic COM candidates: an accepted physical
+pair change conserves four-momentum, and
+$w_i\,w_j/\max(w_i,w_j)=w_j\,w_i/\max(w_i,w_j)$ makes its expected weighted
+momentum and energy changes cancel. It does not restore exact moments in an
+individual unequal-weight realization. In the planar code $w$ is number per area,
+so $w/\Delta x$ is a three-dimensional density; no additional transverse area
+belongs in the collision rate.
+
 The implicit scheme collides after its step, with $x^{n+1}$ and $\mathbf u^{n+1}$ both at
 $t^{n+1}$, so equal-weight scattering there too leaves the conserved energy unchanged.
-The splitting is of first order, as in the explicit scheme before this correction, but exact in energy.
+The collision splitting is of first order. An equal-weight collision at fixed
+integer-time positions preserves the particle kinetic energy, including
+$mc^2(\gamma-1)$ in a relativistic run. That fact alone is not a proof of the
+complete particle-field energy balance; the compatible implicit work/current
+pairing and its convergence tests remain necessary.
 
 ## The Coulomb logarithm
 
-Left at `None`, $\ln\Lambda$ is the NRL electron-ion expression {cite}`nrl2019`,
+For nonrelativistic runs, `None` takes the NRL electron-ion expression {cite}`nrl2019`,
 
 ```{math}
 \ln\Lambda = \begin{cases}
@@ -220,6 +329,13 @@ weak-coupling picture behind it fails; a negative logarithm would make the varia
 negative. The result is kept at or above 2, the floor of Lee and More
 {cite}`lee1984` that particle codes commonly adopt, and a zero temperature or density
 gives the floor rather than a division by zero.
+
+Relativistic runs require a specified logarithm. Automatic relativistic screening,
+bound-electron screening and strong-coupling corrections are not implemented.
+The kernel models elastic leading-logarithmic Coulomb scattering in a fully
+ionized, nondegenerate plasma. Large-angle Møller knock-on generation needs a
+separate operator with its overlap subtracted from the small-angle contribution;
+an accumulated large deflection is not an avalanche event.
 
 ## Verification
 
@@ -254,6 +370,18 @@ are conserved in expectation for equal and proton/electron masses; zero time ste
 charge or Coulomb logarithm leaves velocities exactly unchanged; gradients stay finite for identical velocities; and the
 oscillator of [where in the step](#where-in-the-step) keeps its collisionless energy error.
 
+Relativistic tests independently check the inverse-CDF angular moments; per-cell
+kinetic-energy and momentum conservation; the invariant cold-beam rate, including
+the nonrelativistic limit and electron/proton masses; unequal-count and
+velocity-correlated-weight rates; weighted moment conservation in expectation;
+and rest-frame and drifting Maxwell--Jüttner distributions with the correct
+laboratory $d^3p$ measure. A density
+gradient is compared with both common-seed finite differences and an analytic
+ensemble moment. Zero-rate and comoving cases test finite numerical derivatives.
+Fixed-key derivatives remain conditional on the selected frame chart, cells, partners and
+acceptance events; changing weight-dependent event probabilities is not covered
+by pathwise differentiation.
+
 ## Time step
 
 The scheme assumes $\langle\delta^2\rangle \ll 1$ for the pairs that matter. Because
@@ -264,6 +392,14 @@ the bulk of the distribution, where $\nu$ is the collision frequency at the ther
 speed, and check the answer against a smaller step. For round-off safety the
 variance is capped at $10^{30}$, an angle within $10^{-15}$ of $\pi$, and the relative
 speed is floored at $10^{-10}$ m/s.
+
+The relativistic branch uses {eq}`relativistic-scattering-strength` instead of the
+Takizuka--Abe variance. Keep $s$ small for the population whose relaxation is
+being resolved, and demonstrate timestep convergence. Its isotropic large-$s$
+limit preserves pair kinematics but cannot resolve the physical evolution over
+an arbitrarily long step. Very unequal macro weights enlarge the sampled pair's
+strength and increase statistical conservation noise; inspect both effects when
+representing a dilute relativistic population.
 
 Note that collisional and plasma timescales are far apart in a weakly coupled plasma:
 $\nu/\omega_{pe} \sim \ln\Lambda/(n\lambda_D^3)$, which is $10^{-5}$ or smaller for

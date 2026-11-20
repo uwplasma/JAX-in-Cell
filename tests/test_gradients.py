@@ -202,7 +202,7 @@ def test_impact_energy_and_event_derivatives_converge(side, algorithm):
 
     Unit mass and charge make the per-particle comparisons order one. A tiny
     density removes self-fields; normalising by its weight must not hide a missing
-    impact. The coarse/fine steps used to give dK/dv0 = 1.425/1.415625.
+    impact.
     """
     errors = []
     for dt, tolerance in ([(0.025, 4e-3), (0.00625, 6e-4)] if algorithm == "explicit"
@@ -316,8 +316,8 @@ def test_implicit_wall_ledger_uses_the_impact_time_on_both_sides(boundary, refle
 def test_a_mid_drift_impact_retains_its_event_time_derivative(side):
     """The chosen dyadic values put the crossing at exactly half the drift.
 
-    One half also denotes no impact. Selecting a side from that value used to
-    discard the left crossing's derivative while recording the correct energy.
+    One half also denotes no impact, so the side of the crossing cannot be read from
+    that value; the left crossing must keep its event-time derivative.
     """
     dt, speed, weight = .125, 1.875, 1e-30
     domain = Domain(length=1., cells=16, time_step=dt, particle_bc="absorbing", field_bc="absorbing")
@@ -452,7 +452,7 @@ def test_the_mean_over_realisations_has_the_derivative_of_the_mean():
                                       perturbation_amplitude=1e-3 * 10 * DEBYE)
         ions = Species.ions(n=4000, density=DENSITY, electrons=electrons, sampling="random")
         out = Simulation(box(cells=32), [electrons, ions], Solver(model="electrostatic")).run(
-            100, seed=seed, store_every=100, store_particles=False)
+            100, seed=seed, store_every=100, store_particles=False, checkpoint=True)
         return jnp.log(jnp.abs(jnp.fft.rfft(out.E[-1, :, 0])[1]) ** 2)
 
     mean = jax.jit(lambda d: jnp.mean(jax.vmap(lambda s: sensor(d, s))(seeds)))
