@@ -317,7 +317,7 @@ def _write_input(tmp_path, species):
 
 @pytest.mark.parametrize("mass, message", [("", "needs a mass"), ('mass = "muon"', "not 'muon'")])
 def test_an_input_file_species_states_its_mass(tmp_path, mass, message):
-    """A species without a mass used to become a proton without a word."""
+    """A species without a mass is an error, not a default proton."""
     with pytest.raises(ValueError, match=message):
         load_toml(_write_input(tmp_path, f'name = "electrons"\nn = 10\ncharge = -1\ndensity = 1e17\n{mass}'))
     helium = 'name = "alpha"\nn = 10\ncharge = 2\ndensity = 1e17\nmass = "proton"\nmass_ratio = 4'
