@@ -14,7 +14,7 @@ from jax.scipy.special import erfinv
 
 from ._collisions import _kinetic as kinetic_energy, collide, coulomb_logarithm
 from ._config import Collisions, Domain, Impacts, Radiation, Solver, Source, Species, pytree_dataclass
-from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
+from ._config import _plain, elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
 from ._progress import reporter
 from ._core import (PARITY, PARK, E_x_from_rho, accelerated, apply_particle_bc, boris, boris_relativistic, s2_weights,
                     current_from_continuity, curl_B, curl_E, deposit, gather, gather_xyz, half_step_fields, smooth,
@@ -461,6 +461,12 @@ class Simulation:
                 and (self.radiation is not None or self.prescribed_fields is not None)):
             raise ValueError("implicit Radiation and prescribed_fields require periodic particle boundaries; "
                              "wall events need coupled particle/current substeps. Use algorithm='explicit' for walls.")
+        omega_dt = [np.sqrt(sp.density * sp.charge_si / epsilon_0 * (sp.charge_si / sp.mass)) * self.domain.dt
+                    for sp in self.species
+                    if all(_plain(v) for v in (sp.density, sp.mass, sp.charge_si, self.domain.dt))]
+        if omega_dt and max(omega_dt) > 100:
+            raise ValueError(f"omega_pe dt = {max(omega_dt):.3g} exceeds 100, where the implicit solver returns NaN "
+                             "fields: shorten the time step or raise the cell count.")
         if s.filter_passes:
             raise ValueError("the implicit scheme has no filter: conserving energy needs the same filter on the "
                              "current and on the gathered field, which is not implemented. Use filter_passes=0, "
@@ -501,11 +507,28 @@ class Simulation:
             unknown = set(self.radiation.species) - {s.name for s in self.species}
             if unknown:
                 raise ValueError(f"Radiation species are not in this simulation: {sorted(unknown)}")
+        self._check_radiation_rate()
         if self.radiation.model == "ll_full" and (
                 self.prescribed_fields is None or self.solver.algorithm != "explicit" or self.sources
                 or self.domain.particle_bc != (0, 0)):
             raise ValueError("Radiation(model='ll_full') needs prescribed_fields, algorithm='explicit', "
                              "periodic particle boundaries and no sources")
+
+    def _check_radiation_rate(self):
+        """The explicit ``ll_reduced`` half kicks damp ``u`` at the rate ``tau (q/m)^2 B^2`` for
+        a particle at rest (more at high energy); once ``rate dt / substeps`` exceeds one the
+        update overshoots and the momentum runs to NaN. Only a given, concrete ``external_B`` is known here."""
+        r, B = self.radiation, self.external_B
+        if (r.model != "ll_reduced" or self.solver.algorithm != "explicit" or B is None
+                or isinstance(B, jax.core.Tracer) or not _plain(self.domain.dt)):
+            return
+        names = r.species or [s.name for s in self.species]
+        for s in (s for s in self.species if s.name in names and _plain(s.mass) and _plain(s.charge_si)):
+            qm = s.charge_si / s.mass
+            rate = qm ** 3 * s.charge_si / (6 * np.pi * epsilon_0 * c ** 3) * float(np.max(np.abs(B))) ** 2
+            if rate * self.domain.dt / r.substeps > 1:
+                raise ValueError(f"radiation reaction on {s.name!r} damps {rate * self.domain.dt / r.substeps:.3g} "
+                                 "times per half kick in this B: raise Radiation substeps or shorten the time step.")
 
     def _check_collisions(self):
         """The default Coulomb logarithm is taken from the lightest negatively charged species,
@@ -1317,15 +1340,26 @@ class Simulation:
         return jnp.stack([along(1.0, zero)] + [along(0.0, jnp.broadcast_to(e, x.shape)) for e in eye], axis=1)
 
     def _radiation_force(self, u, fields, qm, m, selected=None, derivative=None):
-        charge = qm * m
-        if self.radiation.species is not None:
-            if selected is None:
-                selected = jnp.concatenate([jnp.full((s.n,), s.name in self.radiation.species)
-                                            for s in self.species])
-            charge = jnp.where(selected, charge, 0.0)
-        force, power, chi = landau_lifshitz(u, fields[:, :3], fields[:, 3:], charge, m,
-                                            self.radiation.model == "ll_quantum", True, derivative)
-        return force, jnp.stack([power, power * chi], axis=1)
+        """Force and ``[power, power*chi]`` per particle. With ``Radiation.species`` the law is
+        evaluated only on the selected species blocks, ``selected`` being a static flag for a
+        batch of one species or ``None`` for all particles; the others get zeros."""
+        quantum = self.radiation.model == "ll_quantum"
+
+        def law(sl):
+            part = (lambda a: a if a is None or jnp.ndim(a) == 0 else a[sl])
+            d = None if derivative is None else derivative[sl]
+            force, power, chi = landau_lifshitz(u[sl], fields[sl, :3], fields[sl, 3:], part(qm * m), part(m),
+                                                quantum, True, d)
+            return force, jnp.stack([power, power * chi], axis=1)
+
+        if self.radiation.species is None or selected is True:
+            return law(slice(None))
+        if selected is False:
+            return jnp.zeros_like(u), jnp.zeros((u.shape[0], 2), u.dtype)
+        parts = [law(slice(start, start + n)) if s.name in self.radiation.species
+                 else (jnp.zeros((n, 3), u.dtype), jnp.zeros((n, 2), u.dtype))
+                 for s, (start, n) in zip(self.species, self.blocks)]
+        return tuple(jnp.concatenate(p) for p in zip(*parts))
 
     def _prescribed_work(self, velocity, external, qm, m, dt):
         if self.external_E is None and self.prescribed_fields is None:
@@ -1842,7 +1876,7 @@ class Simulation:
 
     # -- the run ---------------------------------------------------------------------------------
     def run(self, steps, seed=0, store_every=1, store_particles=True, moments=False, state=None,
-            verbose=False, snapshot_steps=None, checkpoint=False):
+            verbose=False, snapshot_steps=None, checkpoint=True):
         """Advance ``steps`` time steps and return an :class:`Output`.
 
         Args:

@@ -7,7 +7,7 @@ when the physical parameters change.
 
 ```python
 output = simulation.run(steps, seed=0, store_every=1, store_particles=True,
-                        moments=False, state=None, verbose=False, snapshot_steps=None, checkpoint=False)
+                        moments=False, state=None, verbose=False, snapshot_steps=None, checkpoint=True)
 ```
 
 ## Arguments
@@ -19,7 +19,7 @@ output = simulation.run(steps, seed=0, store_every=1, store_particles=True,
 | `store_every` | keep every n-th state | `1` |
 | `snapshot_steps` | keep an explicit sequence of zero-based post-step indices instead, or an integer `n` for every `n`-th completed step; requires `store_every=1` | `None` |
 | `store_particles` | keep the particle histories, the bulk of the memory | `True` |
-| `checkpoint` | recompute physics steps during reverse differentiation to reduce saved intermediates | `False` |
+| `checkpoint` | recompute physics steps during reverse differentiation to reduce saved intermediates | `True` |
 | `moments` | running velocity-moment sums ({doc}`sources`) | `False` |
 | `state` | a previous `Output.state` to continue from | `None` |
 | `verbose` | report progress: `True`, or anything to call with `(done, total)` | `False` |

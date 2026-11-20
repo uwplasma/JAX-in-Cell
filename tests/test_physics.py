@@ -1076,6 +1076,21 @@ def test_selected_radiating_source_subset_has_the_physical_parallel_electric_emi
     assert float(output.state.u[0, 1]) == 1000*c
 
 
+def test_an_unselected_source_species_does_not_radiate_in_a_parallel_electric_field():
+    """Radiation(species="resident") leaves the emitted species of the source out of the reaction force."""
+    from jaxincell import Radiation
+
+    resident = Species.electrons(1, 1e-18, name="resident", u=jnp.array([[0., 1000*c, 0.]]))
+    source = Source(density=1e5, vth=0., drift=(.05*c, 0., 0.), emit=1, every=2)
+    feed = Species.electrons(5, 0., name="feed", active=0, source=source)
+    simulation = Simulation(Domain(length=.01, cells=4, time_step=1e-15, particle_bc="absorbing",
+                                   field_bc="reflective"), [resident, feed],
+                            Solver(model="electrostatic", relativistic=True), radiation=Radiation(species="resident"),
+                            external_E=jnp.zeros((4, 3)).at[:, 0].set(-1e9))
+    work = simulation.run(2, store_particles=False).validate().state.work
+    assert float(work.radiated_energy[1]) == float(work.rr_work[1]) == 0.
+
+
 def test_explicit_radiation_wall_emission_uses_the_event_time_and_returned_weight():
     """Parallel E has constant Larmor power: integrate it only while each weight is present."""
     from jaxincell import Radiation
