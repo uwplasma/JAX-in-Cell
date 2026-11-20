@@ -122,9 +122,8 @@ print(gradient.species[0].drift, gradient.domain.length)
 
 `examples/1_basic/parameters_and_sampling.py` is the tutorial on the inputs and
 `examples/2_intermediate/output_and_restart.py` on saving, restarting and openPMD.
-Examples that save results include settings and provenance. The radiation and RF
-examples print validation results and display figures; the source-control example
-can optionally save its report and figure outside the checkout.
+Examples that save results include settings and provenance. The radiation
+examples print validation results and display figures.
 
 ## Benchmarks
 
