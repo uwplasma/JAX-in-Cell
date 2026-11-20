@@ -905,9 +905,8 @@ def test_collisions_validate_and_apply_the_restoration_option():
 
 def test_ultrarelativistic_drag_on_cold_electrons_is_the_connor_hastie_critical_force():
     """Connor and Hastie (1975): an electron with v -> c loses energy to cold background electrons at
-    e E_c c, E_c = n e^3 lnL/(4 pi eps0^2 m c^2). At n = 1e18, lnL = 15, E_c = 7.649e-4 V/m, the
-    field of the 5 mV/m runaway baseline being 6.5 E_c. The kernel's stopping of gamma = 100 electrons,
-    which sets the collisional drag that the baseline's reduced model assumes, must equal that force."""
+    e E_c c, E_c = n e^3 lnL/(4 pi eps0^2 m c^2). At n = 1e18, lnL = 15, E_c = 7.649e-4 V/m.
+    The kernel's stopping of gamma = 100 electrons must equal that force."""
     pairs, density, logarithm, gamma = 8192, 1e18, 15., 100.
     critical = density * e_charge ** 3 * logarithm / (4 * np.pi * epsilon_0 ** 2 * mass_electron * c_light ** 2)
     assert abs(critical / 7.6486e-4 - 1) < 1e-4

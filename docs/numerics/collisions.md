@@ -251,7 +251,7 @@ when the heavy markers cannot give up the energy, and a cell whose heavy markers
 keeps its energy defect. Equal weights are left alone. A species colliding with itself is not
 corrected. The correction is the expected update spread over the heavy population: the
 heavy species' mean momentum and energy are those the lumps would give on average, without their
-variance. In the 64-seed pilots of the dilute-seed example the unrestored defect has a standard
+variance. In 64-seed pilots with a dilute seed the unrestored defect has a standard
 error of $2\times10^{-4}$ J/m$^3$ and the restored one is $3\times10^{-13}$ J/m$^3$, while the
 energy the seed loses is unchanged within its sampling error.
 
