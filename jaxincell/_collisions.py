@@ -36,10 +36,11 @@ def coulomb_logarithm(density, temperature_ev, charge_number=1.0, floor=2.0):
 def _shuffle_by_cell(key, cell, n_cells):
     """Sort particles by cell, in random order inside each cell, with one sort.
 
-    ``cell`` runs from 0 to ``n_cells``, the last value marking removed particles.
-    One packed integer key (cell above 32 random bits, or below the bits left of 32 without
-    x64) replaces a two-key sort. Returns the order, the sorted cells, the first sorted index of every cell and
-    the population of every cell, with the removed ones counted as none, and ``cell``."""
+    ``cell`` runs from 0 to ``n_cells``, the last value marking removed particles. One packed
+    integer key replaces a two-key sort: the cell above 32 random bits with x64, or above
+    the bits left of 32 without it. Returns the order, the sorted cells, the first sorted
+    index of every cell, the population of every cell (removed particles count as none)
+    and ``cell`` itself."""
     shift = int(n_cells).bit_length()                    # bits holding a cell number, 0..n_cells
     if jax.config.jax_enable_x64:
         packed = (cell.astype(jnp.uint64) << 32) | random.bits(key, cell.shape, jnp.uint32)
