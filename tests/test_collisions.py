@@ -127,9 +127,9 @@ def test_species_too_small_to_pair_are_left_alone():
 
 @pytest.mark.parametrize("mass_ratio", [1.0, 10.0])
 def test_unequal_cell_counts_conserve_energy_and_momentum(mass_ratio):
-    """A particle reused by simultaneous pairs used to receive their summed kicks,
-    creating kinetic energy even with equal weights. Disjoint pairs must conserve
-    each cell through large angles, for either longer species and empty cells."""
+    """Pairs within a cell are disjoint, so a particle receives one kick and each
+    cell conserves energy and momentum through large angles, for either longer
+    species and for empty cells."""
     rng = np.random.default_rng(9)
     cell_a, x_a = _cells([1, 9, 2, 18, 0, 1], rng)
     cell_b, x_b = _cells([9, 1, 18, 2, 1, 0], rng)
