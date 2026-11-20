@@ -16,7 +16,7 @@ from ._collisions import collide, coulomb_logarithm
 from ._config import Collisions, Domain, Impacts, Radiation, Solver, Source, Species, pytree_dataclass
 from ._config import elementary_charge, epsilon_0, mass_electron, mass_proton, speed_of_light as c
 from ._progress import reporter
-from ._core import (PARITY, PARK, E_x_from_rho, apply_particle_bc, boris, boris_relativistic, s2_weights,
+from ._core import (PARITY, PARK, E_x_from_rho, accelerated, apply_particle_bc, boris, boris_relativistic, s2_weights,
                     current_from_continuity, curl_B, curl_E, deposit, gather, gather_xyz, half_step_fields, smooth,
                     landau_lifshitz, orbit_field_average, to_centres, to_faces, wall_faces_E, with_ghosts,
                     wrap_positions)
@@ -1209,15 +1209,20 @@ class Simulation:
         and does not deposit them, which is two passes over the particles saved per half step;
         the longitudinal current is kept, since it is a diagnostic in its own right."""
         d, order = self.domain, self.solver.shape_order
-        rho_new = self._smooth(deposit(x[:, 0], q, d.grid[0], d.dx, d.cells, d.particle_bc, order))
-        J_x = current_from_continuity(rho_old, rho_new, dt_half, d.dx, wall_current, d.field_bc)
         if self.solver.electrostatic:
+            rho_new = self._smooth(deposit(x[:, 0], q, d.grid[0], d.dx, d.cells, d.particle_bc, order))
+            J_x = current_from_continuity(rho_old, rho_new, dt_half, d.dx, wall_current, d.field_bc)
             return rho_new, jnp.stack([J_x, jnp.zeros_like(J_x), jnp.zeros_like(J_x)], axis=1)
-        J_y = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 1], d.grid[0], d.dx, d.cells,
-                                            d.particle_bc, order)), d.field_bc)
-        J_z = to_faces(self._smooth(deposit(x[:, 0], q * v[:, 2], d.grid[0], d.dx, d.cells,
-                                            d.particle_bc, order)), d.field_bc)
-        return rho_new, jnp.stack([J_x, J_y, J_z], axis=1)
+        if accelerated():
+            # rho, J_y and J_z share one stencil, so on an accelerator they are one scatter
+            rho_new, J_y, J_z = self._smooth(deposit(x[:, 0], q[:, None] * jnp.concatenate(
+                [jnp.ones_like(v[:, :1]), v[:, 1:]], axis=1), d.grid[0], d.dx, d.cells, d.particle_bc, order)).T
+        else:
+            rho_new, J_y, J_z = (self._smooth(deposit(x[:, 0], q * amount, d.grid[0], d.dx, d.cells,
+                                                      d.particle_bc, order))
+                                 for amount in (1.0, v[:, 1], v[:, 2]))
+        J_x = current_from_continuity(rho_old, rho_new, dt_half, d.dx, wall_current, d.field_bc)
+        return rho_new, jnp.stack([J_x, to_faces(J_y, d.field_bc), to_faces(J_z, d.field_bc)], axis=1)
 
     def _fields_at(self, x, E, B, rho, time=0.0):
         """E and B at the particles, as ``(N, 6)``.
