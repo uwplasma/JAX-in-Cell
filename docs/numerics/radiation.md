@@ -180,63 +180,6 @@ pitch damping, marker splitting, float32/high-$\gamma$ cancellation, and derivat
 at zero momentum. Refine a full orbit as well as the radiation substep: cooling can
 converge well before gyrophase does.
 
-## Prescribed RF and a finite-time control example
-
-Run `examples/3_advanced/runaway_rf.py` for a short control demonstration through the
-actual `Simulation` time loop. The chosen setup is a dilute electron seed at
-$\gamma_0=40$, $B_0=2$ T, with a counterpropagating mode at 476 MHz and
-$k_\parallel=-20$ rad/m. These are demonstration inputs, not a reproduction of a
-particular experiment. Resonant RF pitch scattering of relativistic electrons is
-established experimentally; see
-[Choudhury et al.](https://doi.org/10.1103/jz8f-ck22).
-
-The callback uses a fixed periodic wave number and the vector potential
-
-```{math}
-A_y=\frac{E_*}{\omega}g(t)\sin(kx-\omega t),\qquad
-A_z=\frac{E_*}{\omega}g(t)\cos(kx-\omega t).
-```
-
-It returns $\boldsymbol E_{\rm RF}=-\partial_t\boldsymbol A$ and
-$\boldsymbol B_{\rm RF}=\nabla\times\boldsymbol A$, including the envelope derivative.
-A time-dependent multiplier on the monochromatic relation
-$\boldsymbol B=\boldsymbol k\times\boldsymbol E/\omega$ would miss that term.
-The envelope and its first derivative vanish before the final RF-off interval.
-No quasilinear diffusion is applied on top of this resolved mode.
-
-Four bounded coefficients shape an 8 ns pulse, followed by 2 ns with RF off. The
-smooth finite-time response is
-$R(T)=\langle u_\perp^2/u^2\rangle$. SLSQP uses JAX derivatives to minimize
-
-```{math}
-J=\frac{1}{E_*^2 T_c}\int_0^{T_c}\langle E_{\rm RF}^2\rangle_x\,dt
-=\frac{1}{T_c}\int_0^{T_c}\left[g^2+(\dot g/\omega)^2\right]dt,
-```
-
-subject to a target rms $\sin\theta$ and a fixed 0.5% design margin. The script checks
-a directional derivative against central differences, then repeats the optimized
-control with half the time step and twice the gyro-phase samples. Assertions enforce
-the derivative check, the target in both runs, a declared refinement tolerance, and
-a reduction in field exposure. This verifies a best-found control in a fixed finite parameterization; it is not a global optimum
-or a long-time response derivative.
-
-The dimensional field exposure is $J E_*^2 T_c$, in V² s/m². **It is not input energy.**
-The script separately prints prescribed particle work, mechanical reaction work,
-physical emission, and kinetic-energy change, in J/m², together with the instantaneous
-magnetic cooling time after the RF pulse. The physical radiation loss during this
-short window is tiny. A vacuum intensity conversion is not a power calibration for a
-supplied plasma mode, and signed negative particle work would mean extraction, not a
-minimum positive input-power cost.
-
-A sustained runaway-control calculation additionally needs a specified accelerating
-field/current source, a thermal bulk or explicit reservoir, validated relativistic
-collisions, and primary/avalanche sources when they matter. A long-time reduced RF
-response must be checked against resolved trajectories, including coherent trapping
-and energy transfer; phase diffusion at fixed energy cannot simply be assumed.
-Minimum **source power** requires an explicit source/Poynting balance, bulk absorption,
-returned and retained wave energy, and suppression throughout a declared RF-off hold.
-Those are subsequent physics and validation gates, not results of this example.
-
 ## Laser–beam cooling
 
 `examples/3_advanced/beam_laser.py` follows a dilute beam with energy, pitch and
@@ -271,52 +214,6 @@ pulse, but its trajectory inside the pulse can differ. See
 [Di Piazza's plane-wave solution](https://doi.org/10.1007/s11005-008-0228-9).
 The incident fluence equals the initial pulse energy per area; it is distinct
 from particle work and from boundary energy crossing this box during the run.
-
-## A prescribed source-energy benchmark
-
-`examples/3_advanced/rf_source_control.py` uses a cold neutral electron–proton
-plasma with a four-cycle, 500 MHz drive. Its linear response has an independent
-five-frequency solution. The simulation is spatially uniform; finite-wave-number
-checks separately verify the analytic Maxwell identities. There is no radiation,
-collision or runaway suppression in this source-accounting example.
-
-For the prescribed vector potential, the external current and its supplied power
-per area are
-
-```{math}
-\boldsymbol J_{\rm ext}=\epsilon_0(c^2\nabla\times\boldsymbol B_p-
-\partial_t\boldsymbol E_p),\qquad
-P_s=-\int\boldsymbol J_{\rm ext}\cdot(\boldsymbol E_s+\boldsymbol E_p)\,dx.
-```
-
-The plasma current already drives the self fields; subtracting it again would
-double count it. The periodic energy balance includes
-$U_\times=\epsilon_0\int(\boldsymbol E_s\cdot\boldsymbol E_p+
-c^2\boldsymbol B_s\cdot\boldsymbol B_p)dx$:
-$\Delta(K+U_s+U_p+U_\times)=\int P_sdt$. The example checks convergence of this
-external diagnostic, including the large error from omitting cross energy.
-It is not a new exact discrete production conservation law.
-
-The declared ideal actuator supplies all positive instantaneous work and dumps
-returned energy: $Q_+=\int\max(P_s,0)dt$, $Q_-=\int\max(-P_s,0)dt$.
-Their difference equals signed source work. A physical port with reactive storage
-or recovery needs that model; arbitrary cycle-average bins change the cost and
-can change pulse rankings. This example does not estimate wall-plug power.
-
-Four bounded Bernstein coefficients minimize $Q_+$ for a fixed terminal
-plasma-energy target. Frozen controls are checked at 512, 1,024 and 2,048 steps.
-The best-found pulse lowers supplied energy by 2.18% relative to flat amplitude;
-minimizing field exposure instead raises supplied energy by about 0.98%.
-Peak field, current and power are reported but have no independent constraint.
-This is a finite control-family result, not a global minimum or a runaway result.
-
-Source-power zero crossings matter for derivatives. The script integrates the
-positive area of the linearly interpolated endpoint powers before rectification,
-and uses the same endpoint trapezoid for signed work. It checks triangle areas,
-isolated-zero sensitivity, AD/finite differences and quadratic homogeneity.
-AD agreement with the same discrete quadrature alone cannot establish a continuum
-gradient. The default displays a figure; `JIC_RF_OUTPUT` optionally names a results
-directory outside the checkout. Keep generated reports and plots out of Git.
 
 ## Classical validity
 

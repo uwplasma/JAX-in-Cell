@@ -72,8 +72,8 @@ For a GPU, install the matching JAX wheel first (for example `pip install -U "ja
 ### Precision
 
 Examples default to double precision. Most accept `JAX_ENABLE_X64=0` before JAX is
-imported; `beam_laser.py` and `rf_source_control.py` require float64 for their declared
-reference gates. Single precision reproduces the rates and sheaths but not
+imported; `beam_laser.py` requires float64 for its declared
+reference gate. Single precision reproduces the rates and sheaths but not
 conservation to round-off. It is not uniformly faster: on a loaded CPU host float32 took 14.7 s
 against 24.4 s in float64 (1.7 times faster), while on the GPU tested it was about a hundred
 times slower than float64 (not yet profiled); see the device and precision table in
@@ -134,15 +134,9 @@ single-electron and beam cooling against the exact uniform-magnetic-field soluti
 including its derivative. [`beam_laser.py`](examples/3_advanced/beam_laser.py)
 checks finite-spread beam cooling in a laser pulse against an exact reduced-LL
 final state, an independent phase ODE and an analytic pulse-strength derivative.
-[`runaway_rf.py`](examples/3_advanced/runaway_rf.py)
-optimizes four prescribed RF envelope coefficients through the simulation and
-rechecks the result at finer resolution. Its finite-time objective is field exposure
-subject to a pitch-angle target; it does not claim minimum antenna power or sustained
-runaway suppression. [`rf_source_control.py`](examples/3_advanced/rf_source_control.py)
-adds an explicit Maxwell-source and cross-field energy budget, and minimizes supplied
-energy for a declared nonrecovering actuator in a cold-plasma deposition benchmark.
-The [radiation model and limits](docs/numerics/radiation.md)
-describe the additional physics required for that problem.
+The [radiation model and limits](docs/numerics/radiation.md) describe the physics and its validity.
+Applications such as RF control of runaway electrons live in
+<https://github.com/rogeriojorge/runaway-rf-pic>.
 
 `run(..., checkpoint=True)` reduces saved intermediates in reverse differentiation.
 [`profile_pic.py`](docs/scripts/profile_pic.py) reproduces local timing, compiler-memory
