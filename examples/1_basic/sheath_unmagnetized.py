@@ -29,13 +29,12 @@ the field solver, so the comparison below is with mathematics and not with the c
 The parameters are those of the sheath benchmark of Konewko, Maestracci and Van Loo
 (kobra, arXiv:2609.11563): m_i/m_e = 1836, v_0 = 0.2, a box ten Debye lengths across.
 Their printed wall potential, +0.739, does not solve their printed equation; the root of
-that equation at v_0 = 0.2 is -0.79926, which is what is used here. Run with
-`--quick` for a smaller, faster version that shows the same structure with more noise.
+that equation at v_0 = 0.2 is -0.79926, which is what is used here.
+Runs in about 38 s; the settings marked `research` in the script give the converged version.
 """
 
 import json
 import os
-import sys
 from pathlib import Path
 
 # Double precision is the default, and what the conservation checks rely on. Run with
@@ -50,17 +49,16 @@ from jaxincell import (Domain, Simulation, Solver, Source, Species, bohm_edge, e
 from jaxincell.sheath import densities, floating_potential, source_density
 
 # --- what to change ------------------------------------------------------------------
-quick = "--quick" in sys.argv
 electron_temperature = 1.0            # eV
 density = 1e16                        # m^-3, the upstream plasma density
 mass_ratio = 1836.0                   # m_i / m_e; 1836 is hydrogen
 beam_speed = 0.2                      # ion drift at the source plane, in electron spreads
 box_debye_lengths = 10.0              # box length in Debye lengths
-cells = 48 if quick else 120          # dx = L / cells
+cells = 48   # dx = L / cells; research: 120
 steps_per_plasma_period = 10.0        # omega_pe dt = 0.1
-transits = 1.0 if quick else 6.0      # how many ion transits of the box to run for
-capacity = 12000 if quick else 120000  # particle slots per species: a pool, not a population
-emit = 12 if quick else 120           # particles each source emits per step
+transits = 1.0   # how many ion transits of the box to run for; research: 6.0
+capacity = 12000   # particle slots per species: a pool, not a population; research: 120000
+emit = 12   # particles each source emits per step; research: 120
 
 # --- the setup -------------------------------------------------------------------------
 spread = np.sqrt(electron_temperature * e_charge / mass_electron)          # sigma_e = sqrt(T_e/m_e)
@@ -89,11 +87,6 @@ print(f"m_i/m_e {mass_ratio:.0f}   v_0/sigma_e {beam_speed}   Mach {beam_speed *
       f"omega_pe dt {omega_pe * dt:.2f}")
 print(f"{steps} steps = {transits:.0f} ion transits; {capacity} slots and {emit} emitted a step per species")
 print(f"reference wall potential {phi_wall:.5f} T_e/e, source amplitude {amplitude:.4f} n_0\n")
-if quick:
-    print("--quick is a smoke preset: 48 cells and one ion transit instead of 120 and six, so the\n"
-          "averages are noisier and the densities disagree with the kinetic relation by about four\n"
-          "times as much. It checks that every step of this script runs and that the pools hold.\n"
-          "The documentation quotes the full preset.\n")
 
 out = simulation.run(steps, seed=0, store_every=steps // stored, store_particles=False,
                      moments="flux").validate()     # a pool that overflowed invalidates everything below
@@ -198,12 +191,12 @@ plt.tight_layout()
 
 # --- the record --------------------------------------------------------------------------------
 # A figure is a picture of an answer; this is what the answer came from, and what produced that.
-folder = Path.cwd() / ("sheath_unmagnetized_quick" if quick else "sheath_unmagnetized")
+folder = Path.cwd() / "sheath_unmagnetized"
 folder.mkdir(exist_ok=True)
 settings = dict(electron_temperature=electron_temperature, density=density, mass_ratio=mass_ratio,
                 beam_speed=beam_speed, box_debye_lengths=box_debye_lengths, cells=cells,
                 steps_per_plasma_period=steps_per_plasma_period, transits=transits, steps=steps,
-                capacity=capacity, emit=emit, source_amplitude=float(amplitude), quick=quick)
+                capacity=capacity, emit=emit, source_amplitude=float(amplitude))
 summary = dict(wall_potential=float(measured.mean()),
                wall_potential_standard_error=float(measured.std() / np.sqrt(len(measured))),
                reference_wall_potential=float(phi_wall),

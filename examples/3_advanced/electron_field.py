@@ -26,13 +26,10 @@ change of kinetic plus field energy. The time step keeps an electron at 40 v_Te 
 at t omega_pe = 200) within one cell per step, as the paper's did. Nothing asserts growth:
 the numbers are printed and saved, and the documentation says what they mean.
 
-Run with `--quick` for a smoke preset (a 100 lambda_De box of three cells per lambda_De,
-16 particles per cell, one realisation, to t omega_pe = 90 at three times the step): same
-controls, not a measurement.
+Runs in about 47 s; the settings marked `research` in the script give the converged version.
 """
 
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -47,25 +44,21 @@ from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, figure, m
 from jaxincell.theory import field_rate
 
 # --- what to change ------------------------------------------------------------------
-quick = "--quick" in sys.argv
 density, T_e, T_i, E_0 = 3e14, 3.0, 0.026, -800.0          # m^-3, eV, eV, V/m
 helium = 4.002602 * 1.66053907e-27 - mass_electron           # He+, kg
-debye_lengths = 100 if quick else 1200                       # box length / lambda_De
-cells_per_debye = 3 if quick else 5
-per_cell = 16 if quick else 400                              # particles per cell per species
-t_end = 90.0 if quick else 200.0                            # in 1/omega_pe
-dt_wpe = 0.015 if quick else 0.005                            # omega_pe dt
-realisations = 1 if quick else 4
+debye_lengths = 100   # box length / lambda_De; research: 1200
+cells_per_debye = 3   # research: 5
+per_cell = 16   # particles per cell per species; research: 400
+t_end = 90.0   # in 1/omega_pe; research: 200.0
+dt_wpe = 0.015   # omega_pe dt; research: 0.005
+realisations = 1   # research: 4
 store_every = 20
-fit = (35.0, 80.0 if quick else 170.0)                       # the paper's window, t omega_pe
+fit = (35.0, 80.0)   # the paper's window, t omega_pe; research: 170.0
 cases = {  # name: (ions, driven)
     "uniform": (None, True), "uniform, no field": (None, False),
     "frozen": ("frozen", True), "frozen, no field": ("frozen", False),
     "helium": ("helium", True),
 }
-if quick:
-    print("--quick is a smoke preset: a smaller box, fewer particles, one realisation;\n"
-          "the rates it prints are not the documented measurement.")
 
 # --- derived scales, in the paper's convention v_Te = sqrt(T_e/m_e) -------------------
 omega_pe = np.sqrt(density * e_charge ** 2 / (epsilon_0 * mass_electron))
@@ -218,14 +211,14 @@ fig.tight_layout()
 # --- the record --------------------------------------------------------------------------------
 settings = dict(density=density, T_e=T_e, T_i=T_i, E_0=E_0, ion_mass=helium, debye_lengths=debye_lengths,
                 cells_per_debye=cells_per_debye, per_cell=per_cell, t_end=t_end, dt_wpe=dt_wpe, steps=steps,
-                realisations=realisations, store_every=store_every, fit=fit, quick=quick)
+                realisations=realisations, store_every=store_every, fit=fit)
 results = dict(lambda_D=lambda_D, omega_pe=omega_pe, kappa_lambda_D=kappa, rates=rates, seconds=seconds,
                k_star=k_star, gamma_theory=gamma_theory, paper_fit=paper_fit,
                frame_difference_window=float(frame[window].max()),
                frame_difference_long=float(frame_long[window].max()),
                external_work=work, energy_gained=change, ledger_difference=ledger,
                peak_over_eq12={m: float(np.median(p[late] * kappa * t[late])) for m, p in peak.items()})
-save_run(Path.cwd() / ("electron_field_quick" if quick else "electron_field"), "electron_field", settings,
+save_run(Path.cwd() / "electron_field", "electron_field", settings,
          results, figure=fig, t=t, k=k_modes, frame=frame, frame_long=frame_long,
          **{f"energy_{m.replace(', ', '_').replace(' ', '_')}": energy[m] for m in cases},
          spectrum_helium=spectrum["helium"], spectrum_frozen=spectrum["frozen"])

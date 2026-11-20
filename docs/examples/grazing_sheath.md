@@ -17,7 +17,7 @@ angles a laptop can reach, and carries the figure.
 | sampled entrance distribution | 400 000 samples | GYRAZE's own $F(v_\parallel, v_\perp)$ | KS distance 0.0024, the sampling floor |
 | fraction below $0.1\sqrt{T_i/m_i}$ | under 0.1 % | a Maxwellian would put 8 % there | — |
 | mean parallel speed | — | $1.5958\sqrt{T_i/m_i} = 1.128\,c_s$ | — |
-| $\phi(x)$ with `--reference=DIR` | the run's profile | the matched composite of a GYRAZE output | reported by the script |
+| $\phi(x)$ with `reference` | the run's profile | the matched composite of a GYRAZE output | reported by the script |
 
 ## The entrance condition is the reference's own
 
@@ -84,27 +84,27 @@ being a quarter radian a step.
 | rehearsal, $m_i/m_e = 400$, $5°$ | 14 | $6.3\times10^4$ | $8.8\times10^{10}$ | 4 h | 1–2 h, estimated |
 | matched, $m_i/m_e = 900$, $4°$ | 27 | $9.1\times10^4$ | $3.1\times10^{11}$ | 15 h | 3.5–7 h, estimated |
 
-`--every=1` is the control that the result does not depend on $k$; with $k = 1$ the same two
+`ion_every = 1` is the control that the result does not depend on $k$; with $k = 1$ the same two
 cases cost 33 and 194 laptop hours.
 
 That is the asymptotic limit doing its job rather than a failure of the run, and it is why
-the example has three presets: a smoke run that says it is not grazing, a rehearsal at
+the example has three settings: a smoke run that is not grazing, a rehearsal at
 $m_i/m_e = 400$ and $5°$ — the cheapest case where GYRAZE still converges, at the edge of
-the $5$–$8°$ range its own README calls inaccurate — and `--matched` for a machine that can
+the $5$–$8°$ range its own README calls inaccurate — and the matched case for a machine that can
 afford it.
 
 ## Against GYRAZE
 
-With `--reference=DIR` the run is compared against a GYRAZE output directory and its
+With `reference` the run is compared against a GYRAZE output directory and its
 `manifest.json`, which GYRAZE's missing licence keeps outside this repository.
 
 | convention | GYRAZE | this code |
 |---|---|---|
 | presheath length | Bohm gyroradius $\rho_B = \rho_s/\sqrt{1+\tau}$ | metres, converted |
 | Debye-sheath length | $\rho_e$ | $\rho_e = \gamma\lambda_D$ |
-| $\gamma = \rho_e/\lambda_D$ | at the Debye-sheath entrance (`gammaflag = 0`) | at the entrance plane, `--gamma` |
+| $\gamma = \rho_e/\lambda_D$ | at the Debye-sheath entrance (`gammaflag = 0`) | at the entrance plane, `gyro_over_debye` |
 
-A matched run passes the entrance-plane value its manifest names with `--gamma`. Seven
+A matched run passes the entrance-plane value its manifest names as `gyro_over_debye`. Seven
 quantities are compared, each against a tolerance declared in the script: three standard errors
 of the run's block means, plus the first order in $\lambda_D/\rho_B$ and $\alpha$ that the
 asymptotic reference drops, plus the grid's second-order error. Every number and verdict goes
@@ -170,7 +170,7 @@ is replaced by the fresh crossings the source draws from the same distribution.
 ### The matched run: $m_i/m_e = 900$ at 4°
 
 Inside the reference's range of validity, $\epsilon$ and $\alpha$ both small, against
-`matched-M900-a4-gDS0.2` (`--matched --gamma=0.6009`, 8.4 million steps).
+`matched-M900-a4-gDS0.2` (`m_i/m_e = 900`, 4 degrees, `gyro_over_debye = 0.6009`, 8.4 million steps).
 
 | quantity | this code | GYRAZE | tolerance | verdict |
 |---|---|---|---|---|
@@ -182,16 +182,15 @@ figure and table here.
 ## How to run
 
 ```bash
-python examples/3_advanced/grazing_sheath.py --quick            # a smoke run, about two minutes
-python examples/3_advanced/grazing_sheath.py                    # the rehearsal
-python examples/3_advanced/grazing_sheath.py --matched          # inside the reference's range
-python examples/3_advanced/grazing_sheath.py --reference=DIR    # compare against a GYRAZE output
+python examples/3_advanced/grazing_sheath.py    # a smoke run, about two minutes
 ```
 
-`--markers=N` and `--transits=T` scale any of them for a first look.
+The `research` values in the script give the rehearsal and, with `m_i/m_e = 900` and 4 degrees,
+the matched case. `reference` takes the path of a GYRAZE output to compare against, and
+`markers_per_cell` and `transits` scale any of them for a first look.
 
 GYRAZE is at <https://github.com/alessandrogeraldini/GYRAZE> and has no licence file, so it
-is run separately and read, never vendored here. With `--reference=DIR` the example reads
+is run separately and read, never vendored here. With `reference` the example reads
 the `phi_n_MP.txt` and `phi_n_DS.txt` of a GYRAZE output directory and reports the
 difference; the profile to compare against is the matched composite
 $\phi(x) = \phi_{\rm MP}(x/\rho_s) + \phi_{\rm DS}(x/\lambda_D)$, which tends to $\phi_w$ at

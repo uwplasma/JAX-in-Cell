@@ -12,6 +12,8 @@ decay over three e-foldings with 150 000 particles. The wave then sinks into tha
 noise; `jaxincell.theory.damped_mode` measures the floor where the amplitude stops
 falling and fits only the maxima well above it, so running longer does not change
 the answer (at 800 and 1200 steps it is the same to four digits).
+
+Runs in about 40 s.
 """
 
 import os
@@ -28,7 +30,8 @@ from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, figure, m
                        elementary_charge as e_charge, speed_of_light as c)
 from jaxincell.theory import damped_mode, landau_root
 
-length, cells, k_lambda_d, particles, steps = 1.0, 64, 0.5, 150000, 800
+length, cells, k_lambda_d, steps = 1.0, 64, 0.5, 800
+particles = 100000   # research: 150000
 k = 2 * np.pi / length
 omega_pe = 0.05 * c * cells / length                 # gives omega_pe * dt = 0.05 at dt = dx / c
 density = omega_pe ** 2 * epsilon_0 * mass_electron / e_charge ** 2

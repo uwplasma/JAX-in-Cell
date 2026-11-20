@@ -22,6 +22,8 @@ lambda_D = v_th / (sqrt(2) omega_pe) = sqrt(eps0 T / (n e^2)).
   orders of magnitude quieter: the loading for following small, linear signals.
 
 Each line below prints the measured spread against the prediction.
+
+Runs in about 33 s.
 """
 
 import os

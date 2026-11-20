@@ -54,6 +54,5 @@ boundary are tabulated in {doc}`../numerics/verification`, "Discrete invariants,
 ## Running it
 
 ```bash
-python examples/3_advanced/invariants.py            # about a minute on a CPU
-python examples/3_advanced/invariants.py --quick    # two step sizes, three Picard counts
+python examples/3_advanced/invariants.py    # two step sizes, three Picard counts; `research` adds more
 ```

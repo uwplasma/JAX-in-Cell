@@ -22,12 +22,12 @@ explicit electromagnetic leapfrog with no filter:
   steps, and the Simulation warns when it is built).
 
 Each line prints the fitted rate against the kinetic root, the worst relative error of the
-total energy, and the wall time of the run. Run with `--quick` for fewer particles: the
-same comparison, noisier.
+total energy, and the wall time of the run.
+Runs in about 32 s; the settings marked `research` in the script give the
+converged version.
 """
 
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -42,11 +42,10 @@ from jaxincell import (Collisions, Domain, Simulation, Solver, Species, diagnost
 from jaxincell.theory import two_stream_rate
 
 # --- what to change ------------------------------------------------------------------
-quick = "--quick" in sys.argv
-particles = 6000 if quick else 20000  # electrons (both beams); half as many protons
+particles = 3000   # electrons (both beams); half as many protons; research: 20000
 length, cells, density = 0.01, 64, 4.37e17
 drift, vth = 5e7, 0.05 * c            # beam speed and thermal spread, m/s
-seed_ak = 1e-4                        # displacement of mode 1, times k
+seed_ak = 1e-3                        # displacement of mode 1, times k; research: 1e-4
 dt_over_dx_c = 4.5                    # omega_pe dt = 0.2; no transverse velocity, so no light-wave limit
 t_end = 40.0                          # in 1/omega_pe: through saturation
 variants = {                          # name: the one switch changed from the reference
@@ -83,8 +82,6 @@ cold = [np.sqrt(-(a ** 2 + bb - np.sqrt(bb ** 2 + 4 * a ** 2 * bb))) for bb in (
 references = {name: kinetic * (cold[1] / cold[0] if name == "relativistic" else 1.0) for name in variants}
 store_every = 2                       # the particle history is what the energy needs, and the bulk of the memory
 steps = store_every * int(round(t_end / (omega_pe * domain.dt) / store_every))
-if quick:
-    print("--quick is a smoke preset with 6000 particles: the same comparison, noisier; not a measurement.")
 
 
 def growth(t, amplitude):
@@ -169,8 +166,8 @@ fig.tight_layout()
 # --- the record ------------------------------------------------------------------------------------
 settings = dict(particles=particles, length=length, cells=cells, density=density, drift=drift, vth=vth,
                 seed_ak=seed_ak, dt_over_dx_c=dt_over_dx_c, t_end=t_end, steps=steps,
-                variants={n: repr(s) for n, s in variants.items()}, quick=quick)
-save_run(Path.cwd() / ("compare_models_quick" if quick else "compare_models"), "compare_models", settings,
+                variants={n: repr(s) for n, s in variants.items()})
+save_run(Path.cwd() / "compare_models", "compare_models", settings,
          dict(kinetic=kinetic, runs=results, filter_pair=filter_pair), figure=fig,
          **{f"{n}_{q}": v for n, arrays in curves.items() for q, v in zip(("t", "E1", "energy_error"), arrays)})
 plt.show()

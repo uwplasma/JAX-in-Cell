@@ -9,7 +9,7 @@
 # that comparison and the density one behind it.
 #
 # T_e = 1 eV, n = 1e16 m^-3, m_i/m_e = 1836, box 10 lambda_D, omega_pe dt = 0.1. This is the
-# script's --quick preset: one ion transit, so the averages are noisy.
+# script's default preset: one ion transit, so the averages are noisy.
 
 [domain]
 length = 7.433942e-4     # 10 lambda_D
