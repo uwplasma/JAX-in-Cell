@@ -52,8 +52,8 @@ starts, so that a smoke run is not quoted as a measurement.
 | {doc}`collisions` | the Takizuka-Abe operator against the Fokker-Planck rates | `2_intermediate/collisions.py` | `collisions.toml` |
 | {doc}`sheath_optimization` | a wall's reflectivity recovered from the sheath it holds | `3_advanced/sheath_optimization.py` | — |
 | {doc}`external_fields_3d` | a field on an $(x, y, z)$ grid: the grad-$B$ drift and a mirror | `2_intermediate/external_fields_3d.py` | — |
-| {doc}`../numerics/radiation` | electron and dilute-beam magnetic cooling, including analytic derivatives | `2_intermediate/electron_cooling.py` | — |
-| laser–beam cooling | finite energy/pitch spread, exact reduced-LL endpoint and amplitude sensitivity | `3_advanced/beam_laser.py` | — |
+| {doc}`../numerics/radiation` | electron and dilute-beam magnetic cooling with analytic derivatives, and collective ring formation | `2_intermediate/electron_cooling.py` | — |
+| laser–beam cooling | finite energy/pitch spread, exact reduced-LL endpoint, amplitude sensitivity, full-vs-reduced LL through the pulse | `3_advanced/beam_laser.py` | — |
 
 ## Where the numbers come from
 

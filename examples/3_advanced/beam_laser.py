@@ -4,8 +4,8 @@ The prescribed vacuum plane wave comes from a compact vector potential. A dilute
 ensemble suppresses collective fields; this is not a focused-laser or dense-beam
 calculation. Compare explicit PIC stepping with light-front reduced-LL equations,
 an exact post-pulse energy formula, Lorentz invariants, and a pulse-strength
-derivative. The full LL field-derivative term and quantum emission are absent.
-Small chi is a classical-regime diagnostic, not a bound at the numerical error
+derivative. Quantum emission is absent; the full LL field-derivative term is the subject of
+the last section. Small chi is a classical-regime diagnostic, not a bound at the numerical error
 level. The complete incident fluence equals the initial pulse energy per area;
 the prescribed vacuum pulse is not depleted in this test-particle comparison.
 
@@ -15,6 +15,15 @@ h=1+tau*omega*s0*integral(a'²), one obtains s=s0/h and
 eta_perp,f=eta_perp,0/h: the boundary term and integral a*a'² both vanish.
 Thus gamma_f=(h²+s0²+eta_perp,0²)/(2*h*s0). This final-state result does not
 identify the reduced-LL and full-LL trajectories inside the pulse.
+
+Through the pulse, Di Piazza's exact plane-wave LL solution is
+eta_y=[eta_y0+full*rho*s0*g-rho*s0*J]/h+a, J=integral(a*a'²)dphi, with full=0 for the reduced
+model. The last section compares each Radiation model (reduced, and the opt-in ll_full) with both
+exact solutions at three time steps: the error against a model's own solution is integration
+error and converges at second order; the offset between the two solutions is model difference
+and does not. The closed form is checked against an independent DOP853 integration of the full-LL
+phase equations. A second, formally strong-coupling beam (gamma0=3e4, a0=1, chi~0.2) shows where
+the omitted term is resolved; the default beam is far below that regime.
 
 Requires scipy (the development extra). No files are written; edit the settings
 below or save the displayed figure. Refine the physical timestep, not only RR
@@ -69,12 +78,12 @@ def fields(x, t, amplitude):
     return jnp.stack((zero, electric, zero), axis=1), jnp.stack((zero, zero, electric / c), axis=1)
 
 
-def simulate(amplitude, count=steps, radiation=True, history=False):
-    x = jnp.zeros((particles, 3)).at[:, 0].set(x0)
-    beam = Species.electrons(particles, density, x=x, u=jnp.asarray(c * eta0), name="beam")
+def simulate(amplitude, count=steps, radiation=True, history=False, model="ll_reduced", eta=eta0):
+    x = jnp.zeros((len(eta), 3)).at[:, 0].set(x0)
+    beam = Species.electrons(len(eta), density, x=x, u=jnp.asarray(c * eta), name="beam")
     sim = Simulation(Domain(length=length, cells=cells, time_step=duration / count), (beam,),
                      Solver(relativistic=True), prescribed_fields=fields, field_parameters=amplitude,
-                     radiation=Radiation(species="beam") if radiation else None)
+                     radiation=Radiation(species="beam", model=model) if radiation else None)
     return sim.run(count, store_every=count // frames if history else count,
                    store_particles=history, moments=False)
 
@@ -137,6 +146,92 @@ exact_derivative = np.mean(rho * fluence_shape * a0 * (1 - (s0**2 + np.sum(eta0[
 assert abs(float(derivative) / exact_derivative - 1) < 1e-5, "pulse-strength AD disagrees with the analytic derivative"
 assert abs(float(derivative) / fd - 1) < 2e-6, "pulse-strength AD disagrees with finite differences"
 
+# Through-pulse comparison of the two LL models with the exact plane-wave solutions.
+edge = np.pi * cycles
+
+
+def shape_a(phi):
+    return .5 * np.sin(phi) + .25 * np.sin((1 + 1 / cycles) * phi) + .25 * np.sin((1 - 1 / cycles) * phi)
+
+
+def shape_g(phi):
+    return (.5 * np.cos(phi) + .25 * (1 + 1 / cycles) * np.cos((1 + 1 / cycles) * phi)
+            + .25 * (1 - 1 / cycles) * np.cos((1 - 1 / cycles) * phi))
+
+
+def shape_dg(phi):
+    return -(.5 * np.sin(phi) + .25 * (1 + 1 / cycles)**2 * np.sin((1 + 1 / cycles) * phi)
+             + .25 * (1 - 1 / cycles)**2 * np.sin((1 - 1 / cycles) * phi))
+
+
+integrals = solve_ivp(lambda p, y: [shape_g(p)**2, shape_a(p) * shape_g(p)**2], (-edge, edge), [0, 0],
+                      method="DOP853", rtol=1e-13, atol=1e-15, dense_output=True).sol
+
+
+def exact_path(phi, eta, amplitude, full):
+    """Di Piazza's eta_y and eta_z at phase phi (per marker); full=0 drops the field-derivative term."""
+    start = np.sqrt(1 + np.sum(eta**2, axis=1)) - eta[:, 0]
+    inside = np.abs(phi) < edge
+    action, odd = integrals(np.clip(phi, -edge, edge))
+    h = 1 + rho * start * amplitude**2 * action
+    eta_y = (eta[:, 1] + full * rho * start * amplitude * shape_g(phi) * inside
+             - rho * start * amplitude**3 * odd) / h + amplitude * shape_a(phi) * inside
+    return eta_y, eta[:, 2] / h
+
+
+def full_ll_ode(eta, amplitude):
+    """Independent DOP853 integration of the full-LL phase equations: dr/dphi gains rho*g'."""
+    start = np.sqrt(1 + np.sum(eta**2, axis=1)) - eta[:, 0]
+    n = len(eta)
+
+    def rhs(phi, y):
+        s = y[:n]
+        g = amplitude * shape_g(phi)
+        return np.concatenate((-rho * g**2 * s**2, g / s + rho * amplitude * shape_dg(phi)))
+
+    return solve_ivp(rhs, (-edge, edge), np.concatenate((start, eta[:, 1] / start)), method="DOP853",
+                     rtol=1e-12, atol=1e-14, dense_output=True).sol
+
+
+def through_pulse(eta, amplitude):
+    """Max transverse-momentum errors (units of the amplitude) of each model against both solutions."""
+    n, grid = len(eta), np.linspace(-edge, edge, 301)
+    ode = full_ll_ode(eta, amplitude)
+    start = np.sqrt(1 + np.sum(eta**2, axis=1)) - eta[:, 0]
+    reference_error = max(np.max(abs(ode(p)[n:] * ode(p)[:n] - exact_path(np.full(n, p), eta, amplitude, 1)[0]))
+                          for p in grid) / amplitude
+    gap = max(np.max(abs(exact_path(np.full(n, p), eta, amplitude, 1)[0]
+                         - exact_path(np.full(n, p), eta, amplitude, 0)[0])) for p in grid) / amplitude
+    table = {}
+    for model in ("ll_reduced", "ll_full"):
+        rows = []
+        for count in (steps // 4, steps // 2, steps):
+            out = simulate(amplitude, count, history=True, model=model, eta=eta)
+            u = np.asarray(out.u) / c
+            phi = omega * (np.asarray(out.t)[:, None] - (np.asarray(out.x)[..., 0] - x0) / c) - edge
+            rows.append([max(np.max(abs(u[i, :, 1] - exact_path(phi[i], eta, amplitude, full)[0]))
+                             for i in range(len(phi))) / amplitude for full in (0, 1)])
+        table[model] = np.array(rows)
+    return reference_error, gap, table, start
+
+
+strong = np.sqrt(np.linspace(2.9e4, 3.05e4, 4)**2 - 1)[:, None] * np.array([[-np.cos(2e-4), np.sin(2e-4), 0.]])
+for label, eta, amplitude in (("default beam", eta0, a0), ("strong coupling", strong, 1.)):
+    reference_error, gap, table, start = through_pulse(eta, amplitude)
+    chi = hbar * omega / (m * c**2) * np.max(start) * amplitude * (1 + 1 / (2 * cycles))
+    print(f"{label}: chi <= {chi:.3e}, rho*s0 <= {rho * np.max(start):.3e}; closed form vs DOP853 full-LL ODE "
+          f"{reference_error:.2e}; model gap {gap:.3e} (units of a0)")
+    for model, rows in table.items():
+        print(f"  {model}: error vs reduced / full exact at {steps // 4}, {steps // 2}, {steps} steps: "
+              + "; ".join(f"{r[0]:.2e} / {r[1]:.2e}" for r in rows))
+    assert reference_error < 1e-8, "the closed form disagrees with the independent full-LL integration"
+    for column, model in enumerate(table):
+        own = table[model][:, column]
+        assert own[1] / own[2] > 3.5, f"{model}: refine the optical timestep"
+    if label == "strong coupling":
+        assert table["ll_reduced"][2, 1] > 10 * table["ll_full"][2, 1], "ll_full should remove the model offset"
+        assert gap > 10 * max(table["ll_full"][2, 1], table["ll_reduced"][2, 0]), "the model gap is not resolved"
+
 chi_bound = hbar * omega / (m * c**2) * np.max(s0) * abs(a0) * (1 + 1 / (2 * cycles))
 assert chi_bound < .01, "this example's classical benchmark requires a smaller quantum parameter"
 energy_scale = density * length * m * c**2
@@ -159,7 +254,7 @@ print(f"incident vacuum-wave fluence / initial pulse energy per area: {incident_
 print(f"Doppler phase step <= {2 * omega * duration / steps:.4g} rad; "
       f"LL gradient scale tau*omega*s0 <= {rho * max(s0):.4e}")
 
-fig, axes = figure(2)
+fig, axes = figure(3)
 for label, result in (("Lorentz force", lorentz), ("reduced LL", out)):
     gamma = np.sqrt(1 + np.sum((np.asarray(result.u) / c)**2, axis=2))
     axes[0].plot(np.asarray(result.t) * 1e15, gamma.mean(axis=1), label=label)
@@ -167,7 +262,12 @@ for label, result in (("Lorentz force", lorentz), ("reduced LL", out)):
 axes[1].plot(gamma0, analytic, "--", label="exact post-pulse reduced LL")
 axes[0].set(xlabel="time (fs)", ylabel="mean Lorentz factor", title="counterpropagating laser pulse")
 axes[1].set(xlabel="initial Lorentz factor", ylabel="final Lorentz factor", title="finite energy and pitch spread")
+counts = np.array([steps // 4, steps // 2, steps])
+for model, rows in table.items():
+    axes[2].loglog(counts, rows[:, 0], "o-", label=f"{model} vs reduced exact")
+    axes[2].loglog(counts, rows[:, 1], "s--", label=f"{model} vs full exact")
+axes[2].set(xlabel="steps", ylabel="max eta_y error / a0", title="strong-coupling beam, through the pulse")
 for ax in axes:
-    ax.legend()
+    ax.legend(fontsize="x-small")
 fig.tight_layout()
 plt.show()

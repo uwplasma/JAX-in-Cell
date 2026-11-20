@@ -666,10 +666,13 @@ class Radiation:
     ``ll_reduced`` retains the field-quadratic Landau--Lifshitz force and omits
     derivatives of the fields. It needs fields that vary slowly over the
     radiation-reaction time and a quantum parameter much less than one.
+    ``ll_full`` adds the derivative term for ``Simulation.prescribed_fields`` (differentiated
+    by forward mode); derivatives of plasma and gridded external fields stay omitted. It needs
+    the explicit solver, periodic particle boundaries and no sources.
     The emitted power and the mechanical work are distinct energy budgets.
 
     Args:
-        model: ``"ll_reduced"``; other models are not implemented.
+        model: ``"ll_reduced"`` or ``"ll_full"``.
         species: Species name or tuple of names; ``None`` selects all species.
         substeps: Positive number of radiation half-kick substeps in the explicit
             scheme, or a multiplier of particle orbit substeps in the implicit
@@ -681,7 +684,7 @@ class Radiation:
     substeps: int = 1
 
     def __post_init__(self):
-        _require(self.model == "ll_reduced", "Radiation model must be 'll_reduced'")
+        _require(self.model in ("ll_reduced", "ll_full"), "Radiation model must be 'll_reduced' or 'll_full'")
         if self.species is not None:
             names = (self.species,) if isinstance(self.species, str) else tuple(self.species)
             _require(all(isinstance(name, str) and name for name in names) and len(set(names)) == len(names),
