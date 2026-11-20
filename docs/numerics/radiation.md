@@ -371,8 +371,7 @@ Independent gates, all in `tests/test_kernels.py` and `tests/test_physics.py`:
 | gradient of cooled $\gamma$ with respect to $B$ | central finite differences | $10^{-6}$ |
 
 The fit is accurate in value but not in slope: a gradient of $g$ is biased by up to 9%,
-and the bias of $d(\chi^2g)/d\chi$ is smaller (1.8% in the audit of
-`handoff/continuation/quantum`). A control gradient through $\chi\sim0.1$ to 1 should
+and the bias of $d(\chi^2g)/d\chi$ is smaller (1.8%). A control gradient through $\chi\sim0.1$ to 1 should
 state that bias. The tests also confirm that the gradient of the product $Sg(\chi)$ is
 finite at zero field, where $g$ alone has an infinite slope in $S$.
 
