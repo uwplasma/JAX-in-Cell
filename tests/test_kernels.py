@@ -18,7 +18,8 @@ from jaxincell import (Domain, Simulation, Solver, Species, epsilon_0, mu_0,
                        elementary_charge, load_state, mass_electron, quiet_start, save_state)
 from jaxincell import speed_of_light as c
 from jaxincell._core import (E_x_from_rho, apply_particle_bc, boris, boris_relativistic,
-                             current_from_continuity, deposit, gather, gather_xyz, half_step_fields, landau_lifshitz,
+                             current_from_continuity, deposit, gather, gather_xyz, half_step_fields,
+                             landau_lifshitz, gaunt,
                              orbit_field_average, s2_weights, shape_weights, smooth, with_ghosts, wrap_positions)
 from jaxincell._simulation import _implicit_fields
 
@@ -880,7 +881,7 @@ def test_landau_lifshitz_derivative_term_is_the_convective_field_derivative():
     tau = q**2 / (6 * np.pi * epsilon_0 * m * c**3)
     extra = tau * q / m * gamma * (total[:, :3] + np.cross(v, total[:, 3:]))
     base, power = landau_lifshitz(u, E, B, q, m)
-    full, full_power = landau_lifshitz(u, E, B, q, m, derivative)
+    full, full_power = landau_lifshitz(u, E, B, q, m, derivative=derivative)
     np.testing.assert_allclose(full - base, extra, rtol=1e-10, atol=0)
     np.testing.assert_array_equal(full_power, power)
 
@@ -1230,3 +1231,94 @@ def test_particle_boundaries():
     # reconstructed positions: what still has weight was reflected and is mirrored
     xw = wrap_positions(x, jnp.array([1.0, 0.0, 1.0]), (L, L, L), (2, 2), dx)
     assert abs(float(xw[0, 0]) + 0.4) < 1e-15 and float(xw[1, 0]) > L / 2
+
+
+def _bessel_power_ratio(chi, derivative=False):
+    """Constant-crossed-field emitted-power ratio and its chi derivative by direct quadrature of the
+    nonlinear-Compton spectrum (Smilei radiation-loss Eq. 22; Blackburn 2020 Eq. 20), over log(u)."""
+    from scipy.integrate import quad
+    from scipy.special import kv
+
+    def integrand(logu):
+        u = np.exp(logu)
+        d = 2 + 3 * chi * u
+        k53, k23 = kv(5 / 3, u), kv(2 / 3, u)
+        if derivative:
+            value = -12 * u**3 * k53 / d**3 + 72 * chi * u**3 * k23 / d**4 - 432 * chi**2 * u**4 * k23 / d**5
+        else:
+            value = 2 * u**2 * k53 / d**2 + 36 * chi**2 * u**3 * k23 / d**4
+        return 9 * np.sqrt(3) / (8 * np.pi) * u * value
+    return quad(integrand, -35., 6., epsabs=1e-17, epsrel=2e-11, limit=250)[0]
+
+
+def test_gaunt_factor_matches_synchrotron_quadrature_and_asymptotes():
+    """The Niel fit tracks the spectrum integral to 2.5% in value; its slope is only good to 9%."""
+    from scipy.special import gamma as gamma_function
+
+    chi = np.r_[1e-6, np.geomspace(1e-4, 1e3, 29)]
+    exact = np.array([_bessel_power_ratio(x) for x in chi])
+    slope = np.array([_bessel_power_ratio(x, True) for x in chi])
+    fit, fit_slope = jax.vmap(jax.value_and_grad(gaunt))(jnp.asarray(chi))
+    assert np.abs(np.asarray(fit) / exact - 1).max() < 0.025
+    assert np.abs(np.asarray(fit_slope) / slope - 1).max() < 0.09     # measured 0.086, at chi -> 0
+    assert float(gaunt(0.)) == 1.
+    assert float(jax.grad(gaunt)(0.)) == pytest.approx(-2 / 3 * 4.8 * 1.7, rel=1e-12)   # fit slope at 0
+    assert -55 * np.sqrt(3) / 16 == pytest.approx(slope[0], rel=1e-4)                    # exact Bessel moment
+    coefficient = 16 * gamma_function(2 / 3) / (27 * 3**(1 / 3))
+    assert float(gaunt(1e5)) * 1e5**(4 / 3) == pytest.approx(coefficient, rel=0.01)
+
+
+def test_quantum_landau_lifshitz_limits_chi_and_power_against_published_ratio():
+    """chi = gamma B/B_S in a perpendicular field; g(chi) scales force and power, and ->1 as chi -> 0."""
+    from scipy import constants
+
+    q, m = -elementary_charge, mass_electron
+    schwinger = constants.m_e**2 * constants.c**2 / (constants.e * constants.hbar)
+    gamma0 = 100.
+    u = jnp.array([[c * np.sqrt(gamma0**2 - 1), 0., 0.]])
+    zero = jnp.zeros((1, 3))
+    for b in (1e5, 4.414e8, 4.414e10):
+        field = zero.at[:, 2].set(b)
+        a_c, p_c = landau_lifshitz(u, zero, field, q, m)
+        a_q, p_q, chi = landau_lifshitz(u, zero, field, q, m, True, True)
+        expected = gamma0 * b / schwinger
+        assert float(chi[0]) == pytest.approx(expected, rel=1e-4)       # beta = 1 - 5e-5
+        g = _bessel_power_ratio(expected)
+        assert float(p_q[0] / p_c[0]) == pytest.approx(g, rel=0.025)
+        np.testing.assert_allclose(a_q, a_c * (p_q / p_c)[:, None], rtol=1e-13)
+    # classical limit: the first-order departure is the exact -55 sqrt(3)/16 chi (fit slope within 9%)
+    _, p_c = landau_lifshitz(u, zero, zero.at[:, 2].set(1e3), q, m)
+    _, p_q, chi = landau_lifshitz(u, zero, zero.at[:, 2].set(1e3), q, m, True, True)
+    deficit = 1 - float(p_q[0] / p_c[0])
+    assert deficit == pytest.approx(55 * np.sqrt(3) / 16 * float(chi[0]), rel=0.09)
+    # zero field: no radiation, chi = 0, and no NaN in the derivative of the product S g(chi)
+    out = landau_lifshitz(zero, zero, zero, q, m, True, True)
+    assert all(float(jnp.abs(x).max()) == 0 for x in out)
+    grad = jax.grad(lambda b: landau_lifshitz(u, zero, jnp.array([[0., 0., 1.]]) * b, q, m, True)[1][0])(0.)
+    assert float(grad) == 0.
+    # an uncharged species: chi = 0
+    assert float(landau_lifshitz(u, zero, field, 0., m, True, True)[2][0]) == 0.
+
+
+def test_quantum_cooling_expectation_gradient_matches_finite_differences():
+    """d gamma(T)/dB through the g(chi) force agrees with central differences (chi ~ 0.1 to 1)."""
+    q, m, gamma0, duration, steps = -elementary_charge, mass_electron, 100., 2e-17, 40
+
+    def final_gamma(b):
+        field = jnp.array([0., 0., b])
+        start = jnp.array([c * jnp.sqrt(gamma0**2 - 1), 0., 0.])
+        dt = duration / steps
+
+        def step(u, _):
+            a, _ = landau_lifshitz(u, jnp.zeros(3), field, q, m, True)
+            a_mid, _ = landau_lifshitz(u + dt * a / 2, jnp.zeros(3), field, q, m, True)
+            return u + dt * a_mid, None
+
+        return jnp.sqrt(1 + jnp.sum((lax.scan(step, start, None, length=steps)[0] / c)**2))
+
+    b0, h = 2e9, 2e5
+    value, gradient = jax.value_and_grad(final_gamma)(b0)
+    central = (final_gamma(b0 + h) - final_gamma(b0 - h)) / (2 * h)
+    assert float(value) < gamma0 * (1 - 1e-3)           # it did cool
+    assert float(gradient) == pytest.approx(float(central), rel=1e-6)
+    assert float(gradient) < 0

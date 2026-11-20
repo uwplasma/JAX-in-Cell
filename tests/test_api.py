@@ -1221,7 +1221,7 @@ def test_legacy_diagnostics_preserve_existing_results_without_a_work_ledger():
     output = Simulation(Domain(cells=4), [particle], Solver(model="electrostatic")).run(3)
     current = diagnostics(output)
     legacy = diagnostics(output.replace(work=None))
-    assert set(current)-set(legacy) == {"energy_balance", "collision_work"}
+    assert set(current)-set(legacy) == {"energy_balance", "collision_work", "chi_mean"}
     for name, values in legacy.items():
         for old, new in zip(jax.tree.leaves(values), jax.tree.leaves(current[name])):
             np.testing.assert_array_equal(old, new)

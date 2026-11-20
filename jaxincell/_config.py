@@ -669,10 +669,13 @@ class Radiation:
     ``ll_full`` adds the derivative term for ``Simulation.prescribed_fields`` (differentiated
     by forward mode); derivatives of plasma and gridded external fields stay omitted. It needs
     the explicit solver, periodic particle boundaries and no sources.
+    ``ll_quantum`` multiplies the ``ll_reduced`` force and the emitted power by the Gaunt
+    factor :math:`g(\\chi)` (Niel et al. 2018): a mean-recoil correction in the
+    locally constant crossed-field limit, with no stochastic emission or diffusion.
     The emitted power and the mechanical work are distinct energy budgets.
 
     Args:
-        model: ``"ll_reduced"`` or ``"ll_full"``.
+        model: ``"ll_reduced"``, ``"ll_full"`` or ``"ll_quantum"``.
         species: Species name or tuple of names; ``None`` selects all species.
         substeps: Positive number of radiation half-kick substeps in the explicit
             scheme, or a multiplier of particle orbit substeps in the implicit
@@ -684,7 +687,8 @@ class Radiation:
     substeps: int = 1
 
     def __post_init__(self):
-        _require(self.model in ("ll_reduced", "ll_full"), "Radiation model must be 'll_reduced' or 'll_full'")
+        _require(self.model in ("ll_reduced", "ll_full", "ll_quantum"),
+                 "Radiation model must be 'll_reduced', 'll_full' or 'll_quantum'")
         if self.species is not None:
             names = (self.species,) if isinstance(self.species, str) else tuple(self.species)
             _require(all(isinstance(name, str) and name for name in names) and len(set(names)) == len(names),
