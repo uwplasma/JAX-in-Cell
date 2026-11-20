@@ -692,7 +692,7 @@ class Radiation:
         object.__setattr__(self, "substeps", int(self.substeps))
 
 
-@pytree_dataclass(static=("pairs",))
+@pytree_dataclass(static=("pairs", "restore"))
 class Collisions:
     """Elastic binary Coulomb collisions.
 
@@ -708,14 +708,21 @@ class Collisions:
             from the electron density and temperature at the start of the run.
             Relativistic collisions require an explicit value: that thermal
             estimate does not describe screening in a relativistic plasma.
+        restore: Return the momentum and energy of every cell to their values before
+            each cross-species stage, removing the defect of unequal weights from the
+            species of larger weight and leaving the rates of the lighter one untouched.
+            Collisions of a species with itself are not corrected.
     """
     pairs: object = None
     coulomb_log: object = None
+    restore: bool = False
 
     def __post_init__(self):
         if self.pairs is not None:
             object.__setattr__(self, "pairs", tuple(tuple(p) for p in self.pairs))
         object.__setattr__(self, "coulomb_log", _float(self.coulomb_log))
+        _require(isinstance(self.restore, (bool, np.bool_)), "Collisions restore must be a bool")
+        object.__setattr__(self, "restore", bool(self.restore))
         if self.coulomb_log is not None and not isinstance(self.coulomb_log, jax.core.Tracer):
             value = np.asarray(self.coulomb_log)
             _require(value.ndim == 0 and np.isfinite(value) and value >= 0,

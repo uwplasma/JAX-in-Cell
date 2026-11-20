@@ -15,6 +15,7 @@ simulation = Simulation(domain, [electrons, ions], solver,
 |---|---|---|
 | `pairs` | tuple of `(name_a, name_b)` species pairs to collide, including a species with itself; `None` collides every pair (static) | `None` |
 | `coulomb_log` | the Coulomb logarithm; `None` takes the NRL formulary value from the electrons, the lightest negatively charged species | `None` |
+| `restore` | return the weighted momentum and energy of every cell to their values before each cross-species stage, by correcting the species of larger weight; see {doc}`../numerics/collisions` (static) | `False` |
 
 Names refer to `Species.name`, so give the species meaningful names when collisions are
 used.
