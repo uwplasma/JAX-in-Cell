@@ -24,7 +24,7 @@ def test_magnetic_turning_before_contact_does_not_create_a_wall_impact(gap, vx, 
     """The held-field Boris flight stays on the pure-B circle.
 
     Each gap exceeds that circle's maximum excursion, including a near-grazing
-    case at small gyro angle. The endpoint quadratic used to fabricate all three.
+    case at small gyro angle. No contact may be reported.
     """
     species = Species("p", 1, 1 / elementary_charge, 1., 1e-30,
                       x=jnp.array([[.5 - gap, 0., 0.]]), v=jnp.array([[vx, vy, 0.]]))
@@ -252,8 +252,8 @@ def test_every_random_key_is_used_once(monkeypatch, algorithm):
 
 @pytest.mark.parametrize("switch", [{"filter_passes": 2}, {"field_solver": "gauss"}])
 def test_the_implicit_scheme_refuses_the_switches_it_would_ignore(switch):
-    """A filter and the Gauss solve both belong to the explicit scheme. The implicit one
-    used to accept and silently skip them; it now says so when it is built."""
+    """A filter and the Gauss solve both belong to the explicit scheme. Building the
+    implicit scheme with either raises instead of ignoring it."""
     electrons = Species.electrons(n=10, density=1e10)
     with pytest.raises(ValueError, match="implicit"):
         Simulation(Domain(), [electrons], Solver(algorithm="implicit", **switch))

@@ -36,8 +36,7 @@ be, and checked rather than asserted:
   1e-11 of the sheath drop. Over a whole run they are not: an external array takes a
   different path through the gather than `None` does, so `E_x` differs in its last bit,
   and a plasma with absorbing walls is chaotic. The comparison that means something is
-  therefore against the scatter between two seeds, which is what the script prints. This
-  used to be a sentence printed from the magnetised run itself, with no control at all.
+  therefore against the scatter between two seeds, which is what the script prints.
 * **the ion impact energies and angles**, which are what a wall actually feels, binned at
   the crossing rather than read off a snapshot of who is nearby.
 
