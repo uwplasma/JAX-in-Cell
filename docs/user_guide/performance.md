@@ -294,7 +294,7 @@ Differentiated, GPU, 64 cells, 32 steps, no checkpointing, milliseconds:
 | radiation-reverse-n16384-x64 | 67.7 (67.7-67.7) | 61.5 (61.5-61.5) | 0.91 |
 
 On the two x86 CPUs the forward medians do not move (after/before 1.00 to 1.01 on the pinned office core
-for all four cases at 2048 and 16384 electrons; and the three workload timings below, taken on the Apple core, are the same to within 1 %).
+for all four cases at 2048 and 16384 electrons; and the two workload timings below, taken on the Apple core, are the same to within 1 %).
 
 ### Checkpointing and memory
 
@@ -318,13 +318,11 @@ card varied by up to 2x between rounds, so no speed ratio between the two settin
 | workload | warm median | compile | where |
 |---|---|---|---|
 | `beam_laser.py` `final_mean_gamma(a0)`, 16 particles, 8192 steps | 32 ms | 0.4 s | Apple CPU |
-| `rf_source_control.py` `metrics(a)`, 512 steps | 1.8 ms | 0.3 s | Apple CPU |
-| the same, four-coefficient `jacfwd` | 9.8 ms | 0.8 s | Apple CPU |
 | maintained sheath, 6000 steps, 120 000 slots | 555 s (first call) | 3 s | office CPU core |
 | maintained sheath, 6000 steps, 120 000 slots | 32.8 s before, 29.8 s after | 5 s | GPU |
 
-The laser and RF objectives take milliseconds; the 33 s and 93 s of the examples are compilation of a
-program per refinement step count and the validation around them, not stepping. The sheath is the one
+The laser objective takes milliseconds; the 33 s of the example is compilation of a
+program per refinement step count and the validation around it, not stepping. The sheath is the one
 workload that is long: on the CPU a 300-step trace has no dominant kernel (the pool's `top_k` sort is
 11 %, the rest is spread over the dynamic-update-slice fusions and dots), and the GPU is 19 times faster.
 

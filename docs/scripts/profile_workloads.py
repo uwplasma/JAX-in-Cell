@@ -1,11 +1,11 @@
 """Time one real workload, warm, in a fresh process; the JSON line goes to standard output.
 
-Run from the checkout: WORKLOAD=beam_laser|rf_metrics|rf_jacfwd|sheath python docs/scripts/profile_workloads.py.
-The two RF/laser workloads execute the definitions at the top of their example, up to the validation
-that follows them, so they time the example's own ``final_mean_gamma(a0)``, ``metrics(a, steps)`` and
-four-coefficient ``jacfwd``. ``sheath`` is the maintained-sheath test of tests/test_sources.py
-(SHEATH_STEPS=6000 steps, SHEATH_CAPACITY=60000 slots per species). REPEATS sets the warm repetitions and
-TRACE=<directory> records one extra traced run. Set JAX_ENABLE_X64=1: the examples' reference gates need float64.
+Run from the checkout: WORKLOAD=beam_laser|sheath python docs/scripts/profile_workloads.py.
+``beam_laser`` executes the definitions at the top of its example, up to the validation
+that follows them, so it times the example's own ``final_mean_gamma(a0)``. ``sheath`` is the maintained-sheath test of
+tests/test_sources.py (SHEATH_STEPS=6000 steps, SHEATH_CAPACITY=60000 slots per species). REPEATS sets the warm
+repetitions and TRACE=<directory> records one extra traced run.
+Set JAX_ENABLE_X64=1: the example's reference gate needs float64.
 """
 import json
 import os
@@ -40,14 +40,6 @@ if workload == "beam_laser":
     def function(a):
         eta = ns["simulate"](a).state.u / ns["c"]
         return jnp.mean(jnp.sqrt(1 + jnp.sum(eta**2, axis=1)))
-elif workload.startswith("rf"):
-    ns = definitions("rf_source_control.py", "report['refinement'] = []")
-    steps, argument = ns["design_steps"], jnp.array([.8, 1.1, .9, 1.2])
-
-    def function(a):
-        return ns["metrics"](a, steps)
-    if workload == "rf_jacfwd":
-        function = jax.jacfwd(function)
 else:
     sys.path.insert(0, str(root / "tests"))
     import test_sources as T
