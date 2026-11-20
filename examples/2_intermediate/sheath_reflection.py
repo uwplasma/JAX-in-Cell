@@ -34,8 +34,8 @@ example built on it.
 
 Three things this run does not leave to assumption:
 
-* the model is named. It used to take the default, which is electromagnetic, at a
-  light-wave Courant number of 286 -- stable only because nothing here ever seeds a
+* the model is named. The default is electromagnetic, which here would run at a
+  light-wave Courant number of 286 and is stable only because nothing seeds a
   transverse field. Electrostatic gives the same sheath drop to the digit printed;
 * `R_eff` is **measured**, from the weight the collector took against the weight that
   reached it, and compared with the flux average the law is supposed to have;
